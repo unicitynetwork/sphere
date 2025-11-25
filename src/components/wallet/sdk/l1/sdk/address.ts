@@ -5,7 +5,7 @@ import { createBech32 } from "./bech32"; // переносим из index.html
 const ec = new elliptic.ec("secp256k1");
 
 // HMAC-SHA512 for derivation
-function deriveChildKey(masterPriv: string, chainCode: string, index: number) {
+export function deriveChildKey(masterPriv: string, chainCode: string, index: number) {
   const data = masterPriv + index.toString(16).padStart(8, "0");
 
   const I = CryptoJS.HmacSHA512(

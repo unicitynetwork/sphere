@@ -9,7 +9,7 @@ let isConnected = false;
 let isConnecting = false;
 let requestId = 0;
 
-const pending: Record<number, (result: any) => void> = {};
+const pending: Record<number, { resolve: (result: any) => void; reject: (err: any) => void }> = {};
 const blockSubscribers: ((header: any) => void)[] = [];
 
 // ----------------------------------------
@@ -59,7 +59,11 @@ function handleMessage(event: MessageEvent) {
   const data = JSON.parse(event.data);
 
   if (data.id && pending[data.id]) {
-    pending[data.id](data.result);
+    if (data.error) {
+      pending[data.id].reject(data.error);
+    } else {
+      pending[data.id].resolve(data.result);
+    }
     delete pending[data.id];
   }
 
@@ -79,7 +83,7 @@ export function rpc(method: string, params: any[] = []): Promise<any> {
     }
 
     const id = ++requestId;
-    pending[id] = resolve;
+    pending[id] = { resolve, reject };
 
     ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
   });
@@ -100,8 +104,8 @@ export async function getUtxo(address: string) {
   }
 
   return result.map((u) => ({
-    txid: u.tx_hash,
-    vout: u.tx_pos,
+    tx_hash: u.tx_hash,
+    tx_pos: u.tx_pos,
     value: u.value,
     height: u.height,
     address,
@@ -109,8 +113,18 @@ export async function getUtxo(address: string) {
 }
 
 export async function getBalance(address: string) {
-  const utxos = await getUtxo(address);
-  return utxos.reduce((s, u) => s + (u?.value ?? 0), 0);
+  const scriptHash = addressToScriptHash(address);
+  const result = await rpc("blockchain.scripthash.get_balance", [scriptHash]);
+
+  const confirmed = result.confirmed || 0;
+  const unconfirmed = result.unconfirmed || 0;
+
+  const totalSats = confirmed + unconfirmed;
+
+  // Convert sats → ALPHA
+  const alpha = totalSats / 100_000_000;
+
+  return alpha;
 }
 
 export async function broadcast(rawHex: string) {

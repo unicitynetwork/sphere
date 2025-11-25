@@ -15,10 +15,12 @@ import {
   loadWallet,
   deleteWallet,
   generateAddress,
-  sendAlpha,
   connect,
   getBalance,
   subscribeBlocks,
+  createTransactionPlan,
+  createAndSignTransaction,
+  broadcast,
 } from "../sdk/l1/sdk";
 
 export function L1WalletView({ showBalances }: { showBalances: boolean }) {
@@ -33,6 +35,10 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
   const [destination, setDestination] = useState("");
   const [amount, setAmount] = useState("");
+
+  const [txPlan, setTxPlan] = useState<any>(null);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [isSending, setIsSending] = useState(false);
 
   // -------------------------------
   // INIT: connect to RPC + load wallet
@@ -129,17 +135,63 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         return;
       }
 
-      const result = await sendAlpha(wallet, destination, amountAlpha);
+      const plan = await createTransactionPlan(wallet, destination, amountAlpha);
 
-      alert(
-        `Transaction sent!\n\nTXID:\n${result.txid}\n\nRaw TX:\n${result.raw}`
-      );
+      if (!plan.success) {
+        alert("Transaction failed: " + plan.error);
+        return;
+      }
 
-      // обновить баланс
+      setTxPlan(plan);
+      setShowConfirmation(true);
+    } catch (err: any) {
+      alert("Error creating transaction: " + err.message);
+      console.error(err);
+    }
+  }
+
+  async function handleConfirmSend() {
+    if (!txPlan || !wallet) return;
+
+    setIsSending(true);
+    try {
+      const results = [];
+      const errors = [];
+      for (const tx of txPlan.transactions) {
+        try {
+          const signed = createAndSignTransaction(wallet, tx);
+          const result = await broadcast(signed.raw);
+          results.push({ txid: signed.txid, raw: signed.raw, result });
+        } catch (e: any) {
+          console.error("Broadcast failed for tx", e);
+          errors.push(e.message || e);
+        }
+      }
+
+      if (errors.length > 0) {
+        alert(
+          `Some transactions failed to broadcast:\n${errors.join("\n")}\n\nSuccessful TXIDs:\n${results
+            .map((r) => r.txid)
+            .join("\n")}`
+        );
+      } else {
+        alert(
+          `Sent ${results.length} transaction(s)!\n\nTXIDs:\n${results
+            .map((r) => r.txid)
+            .join("\n")}`
+        );
+      }
+
+      setShowConfirmation(false);
+      setTxPlan(null);
+      setDestination("");
+      setAmount("");
       refreshBalance(selectedAddress);
     } catch (err: any) {
       alert("Transaction failed: " + err.message);
       console.error(err);
+    } finally {
+      setIsSending(false);
     }
   }
 
@@ -170,6 +222,56 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   // -------------------------------
   return (
     <div className="flex flex-col h-full relative">
+      {/* CONFIRMATION MODAL */}
+      {showConfirmation && txPlan && (
+        <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-30 p-4">
+          <div className="bg-neutral-900 border border-neutral-700 p-6 rounded-xl shadow-2xl max-w-md w-full">
+            <h3 className="text-xl text-white font-bold mb-4">
+              Confirm Transaction
+            </h3>
+
+            <div className="space-y-3 mb-6">
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-400">Recipient</span>
+                <span className="text-white font-mono truncate max-w-[200px]">
+                  {destination}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-400">Amount</span>
+                <span className="text-white">{amount} ALPHA</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-400">Transactions</span>
+                <span className="text-white">{txPlan.transactions.length}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-400">Total Fee</span>
+                <span className="text-white">
+                  {(txPlan.transactions.length * 10000) / 100000000} ALPHA
+                </span>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowConfirmation(false)}
+                className="flex-1 px-4 py-3 rounded-xl bg-neutral-800 text-white font-semibold hover:bg-neutral-700"
+                disabled={isSending}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmSend}
+                className="flex-1 px-4 py-3 rounded-xl bg-green-600 text-white font-semibold hover:bg-green-500 flex items-center justify-center gap-2"
+                disabled={isSending}
+              >
+                {isSending ? "Sending..." : "Confirm & Send"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* QR Modal */}
       {showQR && (
         <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-20">
