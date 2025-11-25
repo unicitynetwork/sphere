@@ -36,3 +36,16 @@ export const dmMessages: IMessage[] = [
   { id: '1', sender: 'Sarah Williams', avatar: 'SW', content: 'Hey! Thanks for connecting. I wanted to ask about your experience with the platform.', timestamp: '11:30 AM', isOwn: false },
   { id: '2', sender: 'You', avatar: 'ME', content: 'Hi! Sure, I\'d be happy to help. What would you like to know?', timestamp: '11:32 AM', isOwn: true },
 ];
+
+export const l1Assets: IAsset[] = [
+  { id: '1', name: 'Ethereum', ticker: 'ETH', amount: 0.85, value: 2150.50, change: 2.8, color: 'from-blue-400 to-blue-600' },
+  { id: '2', name: 'Bitcoin', ticker: 'BTC', amount: 0.041, value: 1650.20, change: -1.2, color: 'from-orange-400 to-orange-600' },
+  { id: '3', name: 'USDT', ticker: 'USDT', amount: 5000.00, value: 5000.00, change: 0.0, color: 'from-emerald-400 to-emerald-600' },
+];
+
+export const l2Assets: IAsset[] = [
+  { id: '4', name: 'Unicity', ticker: 'UCT', amount: 1510.23, value: 4520.45, change: 12.5, color: 'from-orange-500 to-red-500' },
+  { id: '5', name: 'Optimism', ticker: 'OP', amount: 450.00, value: 1250.00, change: 5.4, color: 'from-red-400 to-red-600' },
+  { id: '6', name: 'Arbitrum', ticker: 'ARB', amount: 800.00, value: 1600.00, change: 3.2, color: 'from-cyan-400 to-blue-500' },
+  { id: '7', name: 'Base', ticker: 'BASE', amount: 120.50, value: 340.20, change: 8.1, color: 'from-blue-500 to-indigo-600' },
+];
