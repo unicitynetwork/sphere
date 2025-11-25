@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "bip32": "^5.0.0-rc.0",
+    "bs58check": "^4.0.0",
+    "elliptic": "^6.6.1",
+    "sqlite3": "^5.1.7",
+    "tiny-secp256k1": "^2.2.4"
+  }
+}

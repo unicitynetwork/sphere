@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Encrypted Wallet Load</title>
+</head>
+<body>
+    <h2>Encrypted Wallet Load Test</h2>
+    <p>This page will help you test loading the encrypted wallet and see console output.</p>
+    
+    <ol>
+        <li>Open index.html in your browser</li>
+        <li>Open Developer Console (F12)</li>
+        <li>Click "Restore Wallet" button</li>
+        <li>Select the encrypted wallet file: <code>debug-service/examples/FIXED_ENC_alpha1qllh_axta7d_wif.txt</code></li>
+        <li>Enter password: <code>123456</code></li>
+        <li>Click "Load" button</li>
+    </ol>
+    
+    <h3>Expected Console Output:</h3>
+    <pre>
+Loading encrypted wallet...
+Found encrypted master key
+Attempting to decrypt with provided password...
+Successfully decrypted master key: 187e6965...
+Recovering standard wallet with parsed addresses: [{...}]
+Master private key available: true
+Is encrypted: true
+Attempting to derive child key for path: m/44'/0'/0'
+Master key (first 8 chars): 187e6965...
+Derived child private key (first 8 chars): b962cd42...
+✓ Address verification successful! Recovered childPrivateKey correctly.
+  Address: alpha1qllh2t42ytsgnx8fferxwms6npec7whvnaxta7d
+  Path: m/44'/0'/0'
+  Child Private Key (first 8 chars): b962cd42...
+    </pre>
+    
+    <h3>Expected Behavior:</h3>
+    <ul>
+        <li>✅ The restore modal should close immediately after loading</li>
+        <li>✅ The wallet address should be displayed in the main UI</li>
+        <li>✅ A success notification should appear: "Encrypted Wallet Loaded"</li>
+        <li>✅ The balance should start loading if connected to Fulcrum</li>
+        <li>✅ No "scanning" or waiting - immediate display</li>
+    </ul>
+    
+    <h3>Previous Issue:</h3>
+    <p>Before the fix, encrypted standard wallets would not close the modal or show the UI immediately. The wallet would appear to be "scanning" silently without any visible progress.</p>
+</body>
+</html>

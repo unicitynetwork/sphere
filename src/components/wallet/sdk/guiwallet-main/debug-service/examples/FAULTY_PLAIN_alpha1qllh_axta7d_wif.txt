@@ -1,0 +1,21 @@
+UNICITY WALLET DETAILS
+===========================
+
+MASTER PRIVATE KEY (keep secret!):
+187e6965162cc24af690ad1f6c375989b5a6189c165dbbfcaad58a34cd4a4429
+
+MASTER PRIVATE KEY IN WIF FORMAT (for importprivkey command):
+Kx3KiugiQr1vvfjDY5TqtrTQRK93bDFCeXZbatT43fzG9dsHaf5j
+
+WALLET TYPE: Standard wallet (HMAC-based)
+
+ENCRYPTION STATUS: Not encrypted
+This key is in plaintext and not protected. Anyone with this file can access your wallet.
+
+YOUR ADDRESSES:
+Address 1: alpha1qllh2t42ytsgnx8fferxwms6npec7whvnaxta7d (Path: undefined)
+
+Generated on: 9/14/2025, 8:11:47 PM
+
+WARNING: Keep your master private key safe and secure.
+Anyone with your master private key can access all your funds.
