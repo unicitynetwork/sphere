@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -21,6 +21,10 @@ import {
   createTransactionPlan,
   createAndSignTransaction,
   broadcast,
+  exportWallet,
+  importWallet,
+  downloadWalletFile,
+  generateHDAddress,
 } from "../sdk/l1/sdk";
 
 export function L1WalletView({ showBalances }: { showBalances: boolean }) {
@@ -38,6 +42,18 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
   const [txPlan, setTxPlan] = useState<any>(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
+
+  // Save/Load state
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveFilename, setSaveFilename] = useState("alpha_wallet_backup");
+  const [savePassword, setSavePassword] = useState("");
+  const [savePasswordConfirm, setSavePasswordConfirm] = useState("");
+  const [showLoadPasswordModal, setShowLoadPasswordModal] = useState(false);
+  const [loadPassword, setLoadPassword] = useState("");
+  const [pendingImportData, setPendingImportData] = useState<string | null>(
+    null
+  );
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSending, setIsSending] = useState(false);
 
   // -------------------------------
@@ -110,6 +126,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   async function handleNewAddress() {
     const addr = generateAddress(wallet);
     const updated = loadWallet();
+    if (!updated) return;
 
     const list = updated.addresses.map((a: any) => a.address);
     setAddresses(list);
@@ -135,7 +152,11 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         return;
       }
 
-      const plan = await createTransactionPlan(wallet, destination, amountAlpha);
+      const plan = await createTransactionPlan(
+        wallet,
+        destination,
+        amountAlpha
+      );
 
       if (!plan.success) {
         alert("Transaction failed: " + plan.error);
@@ -170,9 +191,9 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
       if (errors.length > 0) {
         alert(
-          `Some transactions failed to broadcast:\n${errors.join("\n")}\n\nSuccessful TXIDs:\n${results
-            .map((r) => r.txid)
-            .join("\n")}`
+          `Some transactions failed to broadcast:\n${errors.join(
+            "\n"
+          )}\n\nSuccessful TXIDs:\n${results.map((r) => r.txid).join("\n")}`
         );
       } else {
         alert(
@@ -192,6 +213,143 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       console.error(err);
     } finally {
       setIsSending(false);
+    }
+  }
+
+  // -------------------------------
+  // Save Wallet
+  // -------------------------------
+  function handleSaveWallet() {
+    if (!wallet) {
+      alert("No wallet to save");
+      return;
+    }
+
+    setShowSaveModal(true);
+  }
+
+  function handleConfirmSave() {
+    if (!wallet) return;
+
+    // Validate password if provided
+    if (savePassword) {
+      if (savePassword !== savePasswordConfirm) {
+        alert("Passwords do not match!");
+        return;
+      }
+      if (savePassword.length < 4) {
+        alert("Password must be at least 4 characters");
+        return;
+      }
+    }
+
+    try {
+      const content = exportWallet(wallet, {
+        password: savePassword || undefined,
+        filename: saveFilename,
+      });
+
+      downloadWalletFile(content, saveFilename);
+
+      setShowSaveModal(false);
+      setSavePassword("");
+      setSavePasswordConfirm("");
+      alert("Wallet saved successfully!");
+    } catch (err: any) {
+      alert("Error saving wallet: " + err.message);
+      console.error(err);
+    }
+  }
+
+  // -------------------------------
+  // Load Wallet
+  // -------------------------------
+  function handleLoadWallet() {
+    fileInputRef.current?.click();
+  }
+
+  async function handleFileSelect(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const content = await file.text();
+
+      // Check if encrypted
+      if (content.includes("ENCRYPTED MASTER KEY")) {
+        // Needs password
+        setPendingImportData(content);
+        setShowLoadPasswordModal(true);
+      } else {
+        // Unencrypted - import directly
+        const { wallet: importedWallet, addressCount } = importWallet(content);
+
+        // Regenerate addresses
+        const addresses = [];
+        for (let i = 0; i < (addressCount || 1); i++) {
+          const addr = generateHDAddress(
+            importedWallet.masterPrivateKey,
+            importedWallet.chainCode,
+            i
+          );
+          addresses.push(addr);
+        }
+        importedWallet.addresses = addresses;
+
+        setWallet(importedWallet);
+        const list = addresses.map((a) => a.address);
+        setAddresses(list);
+        setSelectedAddress(list[0]);
+        await refreshBalance(list[0]);
+
+        alert("Wallet loaded successfully!");
+      }
+    } catch (err: any) {
+      alert("Error loading wallet: " + err.message);
+      console.error(err);
+    }
+
+    // Reset file input
+    event.target.value = "";
+  }
+
+  async function handleConfirmLoadWithPassword() {
+    if (!pendingImportData || !loadPassword) {
+      alert("Please enter password");
+      return;
+    }
+
+    try {
+      const { wallet: importedWallet, addressCount } = importWallet(
+        pendingImportData,
+        loadPassword
+      );
+
+      // Regenerate addresses
+      const addresses = [];
+      for (let i = 0; i < (addressCount || 1); i++) {
+        const addr = generateHDAddress(
+          importedWallet.masterPrivateKey,
+          importedWallet.chainCode,
+          i
+        );
+        addresses.push(addr);
+      }
+      importedWallet.addresses = addresses;
+
+      setWallet(importedWallet);
+      const list = addresses.map((a) => a.address);
+      setAddresses(list);
+      setSelectedAddress(list[0]);
+      await refreshBalance(list[0]);
+
+      setShowLoadPasswordModal(false);
+      setPendingImportData(null);
+      setLoadPassword("");
+      alert("Wallet loaded successfully!");
+    } catch (err: any) {
+      alert("Error loading wallet: " + err.message);
+      console.error(err);
     }
   }
 
@@ -390,6 +548,31 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         </div>
       </div>
 
+      {/* SAVE & LOAD  */}
+      <div className="px-6 mt-4 flex gap-3">
+        <button
+          onClick={handleSaveWallet}
+          className="flex-1 px-4 py-3 bg-neutral-800 rounded-xl border border-neutral-700 text-neutral-300"
+        >
+          Save Wallet
+        </button>
+
+        <button
+          onClick={handleLoadWallet}
+          className="flex-1 px-4 py-3 bg-neutral-800 rounded-xl border border-neutral-700 text-neutral-300"
+        >
+          Load Wallet
+        </button>
+
+        <input
+          type="file"
+          ref={fileInputRef}
+          className="hidden"
+          accept=".json,.txt"
+          onChange={handleFileSelect}
+        />
+      </div>
+
       {/* DELETE WALLET */}
       <div className="mt-auto px-6 pb-6 pt-2">
         <button
@@ -400,6 +583,90 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           Delete Wallet
         </button>
       </div>
+      {showSaveModal && (
+        <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-40 p-6">
+          <div className="bg-neutral-900 p-6 rounded-xl w-full max-w-md border border-neutral-700">
+            <h3 className="text-white text-lg font-bold mb-4">Save Wallet</h3>
+
+            <input
+              placeholder="Filename"
+              value={saveFilename}
+              onChange={(e) => setSaveFilename(e.target.value)}
+              className="w-full mb-3 px-3 py-2 bg-neutral-800 rounded text-neutral-200"
+            />
+
+            <input
+              placeholder="Password (optional)"
+              type="password"
+              value={savePassword}
+              onChange={(e) => setSavePassword(e.target.value)}
+              className="w-full mb-3 px-3 py-2 bg-neutral-800 rounded text-neutral-200"
+            />
+
+            <input
+              placeholder="Confirm Password"
+              type="password"
+              value={savePasswordConfirm}
+              onChange={(e) => setSavePasswordConfirm(e.target.value)}
+              className="w-full mb-6 px-3 py-2 bg-neutral-800 rounded text-neutral-200"
+            />
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowSaveModal(false)}
+                className="flex-1 py-2 bg-neutral-700 rounded text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmSave}
+                className="flex-1 py-2 bg-blue-600 rounded text-white"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showLoadPasswordModal && (
+        <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-40 p-6">
+          <div className="bg-neutral-900 p-6 rounded-xl w-full max-w-md border border-neutral-700">
+            <h3 className="text-white text-lg font-bold mb-4">
+              Enter Password
+            </h3>
+            <p className="text-neutral-400 text-sm mb-4">
+              This wallet is encrypted. Please enter your password to unlock it.
+            </p>
+
+            <input
+              placeholder="Password"
+              type="password"
+              value={loadPassword}
+              onChange={(e) => setLoadPassword(e.target.value)}
+              className="w-full mb-6 px-3 py-2 bg-neutral-800 rounded text-neutral-200"
+            />
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowLoadPasswordModal(false);
+                  setPendingImportData(null);
+                  setLoadPassword("");
+                }}
+                className="flex-1 py-2 bg-neutral-700 rounded text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmLoadWithPassword}
+                className="flex-1 py-2 bg-blue-600 rounded text-white"
+              >
+                Unlock
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

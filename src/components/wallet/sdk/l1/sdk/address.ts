@@ -46,5 +46,6 @@ export function generateHDAddress(
     privateKey: child.privateKey,
     publicKey,
     index,
+    path: `m/44'/0'/0'/${index}`,
   };
 }
