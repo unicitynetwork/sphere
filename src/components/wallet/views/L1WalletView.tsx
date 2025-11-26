@@ -7,6 +7,9 @@ import {
   Trash2,
   Copy,
   ChevronDown,
+  Download,
+  AlertTriangle,
+  Upload,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -55,6 +58,9 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSending, setIsSending] = useState(false);
+
+  // Delete Modal State
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   // Use ref to avoid stale closure in subscribeBlocks callback
   const selectedAddressRef = useRef<string>("");
@@ -118,7 +124,11 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   // -------------------------------
   // Delete wallet
   // -------------------------------
-  function handleDeleteWallet() {
+  function handleDeleteRequest() {
+    setShowDeleteModal(true);
+  }
+
+  function handleConfirmDelete() {
     deleteWallet();
 
     setWallet(null);
@@ -128,6 +138,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     setDestination("");
     setAmount("");
     setShowDropdown(false);
+    setShowDeleteModal(false);
   }
 
   // -------------------------------
@@ -178,7 +189,10 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       setTxPlan(plan);
       setShowConfirmation(true);
     } catch (err: unknown) {
-      alert("Error creating transaction: " + (err instanceof Error ? err.message : String(err)));
+      alert(
+        "Error creating transaction: " +
+          (err instanceof Error ? err.message : String(err))
+      );
       console.error(err);
     }
   }
@@ -221,7 +235,10 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       setAmount("");
       refreshBalance(selectedAddress);
     } catch (err: unknown) {
-      alert("Transaction failed: " + (err instanceof Error ? err.message : String(err)));
+      alert(
+        "Transaction failed: " +
+          (err instanceof Error ? err.message : String(err))
+      );
       console.error(err);
     } finally {
       setIsSending(false);
@@ -236,7 +253,8 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       alert("No wallet to save");
       return;
     }
-
+    // If called from delete modal, close it temporarily (optional, but cleaner)
+    setShowDeleteModal(false);
     setShowSaveModal(true);
   }
 
@@ -268,7 +286,10 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       setSavePasswordConfirm("");
       alert("Wallet saved successfully!");
     } catch (err: unknown) {
-      alert("Error saving wallet: " + (err instanceof Error ? err.message : String(err)));
+      alert(
+        "Error saving wallet: " +
+          (err instanceof Error ? err.message : String(err))
+      );
       console.error(err);
     }
   }
@@ -323,7 +344,10 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         }
       }
     } catch (err: unknown) {
-      alert("Error loading wallet: " + (err instanceof Error ? err.message : String(err)));
+      alert(
+        "Error loading wallet: " +
+          (err instanceof Error ? err.message : String(err))
+      );
       console.error(err);
     }
 
@@ -370,7 +394,10 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         alert("Error loading wallet: " + result.error);
       }
     } catch (err: unknown) {
-      alert("Error loading wallet: " + (err instanceof Error ? err.message : String(err)));
+      alert(
+        "Error loading wallet: " +
+          (err instanceof Error ? err.message : String(err))
+      );
       console.error(err);
     }
   }
@@ -384,15 +411,79 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         <h2 className="text-xl text-white font-semibold mb-2">
           No wallet found
         </h2>
-        <p className="text-neutral-400 mb-6">Create a new wallet to continue</p>
+        <p className="text-neutral-400 mb-6">
+          Create a new wallet or import an existing one to continue
+        </p>
 
-        <motion.button
-          whileTap={{ scale: 0.97 }}
-          className="px-6 py-3 bg-blue-600 text-white rounded-xl text-sm font-semibold shadow-lg shadow-blue-500/20"
-          onClick={handleCreateWallet}
-        >
-          Create Wallet
-        </motion.button>
+        <div className="flex flex-col sm:flex-row gap-4 w-full max-w-xs">
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl text-sm font-semibold shadow-lg shadow-blue-500/20"
+            onClick={handleCreateWallet}
+          >
+            Create Wallet
+          </motion.button>
+
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            className="flex-1 px-6 py-3 bg-neutral-800 border border-neutral-700 text-white rounded-xl text-sm font-semibold hover:bg-neutral-700 flex items-center justify-center gap-2"
+            onClick={handleLoadWallet}
+          >
+            <Upload className="w-4 h-4" />
+            Import
+          </motion.button>
+        </div>
+
+        {/* Hidden File Input for Import */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          className="hidden"
+          accept=".json,.txt"
+          onChange={handleFileSelect}
+        />
+
+        {/* Load Password Modal (Can trigger during import) */}
+        {showLoadPasswordModal && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-40 p-6">
+            <div className="bg-neutral-900 p-6 rounded-xl w-full max-w-md border border-neutral-700 shadow-2xl">
+              <h3 className="text-white text-lg font-bold mb-4">
+                Enter Password
+              </h3>
+              <p className="text-neutral-400 text-sm mb-4">
+                This wallet is encrypted. Please enter your password to unlock
+                it.
+              </p>
+
+              <input
+                placeholder="Password"
+                type="password"
+                value={loadPassword}
+                onChange={(e) => setLoadPassword(e.target.value)}
+                className="w-full mb-6 px-3 py-2 bg-neutral-800 rounded text-neutral-200 border border-neutral-700 focus:border-blue-500 outline-none"
+              />
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowLoadPasswordModal(false);
+                    setPendingFile(null);
+                    setLoadPassword("");
+                  }}
+                  className="flex-1 py-2 bg-neutral-700 rounded text-white hover:bg-neutral-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmLoadWithPassword}
+                  className="flex-1 py-2 bg-blue-600 rounded text-white hover:bg-blue-500"
+                >
+                  Unlock
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -452,6 +543,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           </div>
         </div>
       )}
+
       {/* QR Modal */}
       {showQR && (
         <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-20">
@@ -548,14 +640,14 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         <div className="flex flex-col gap-3 bg-neutral-900 p-4 rounded-xl border border-neutral-800">
           <input
             placeholder="Destination"
-            className="px-3 py-2 bg-neutral-800 rounded text-neutral-200"
+            className="px-3 py-2 bg-neutral-800 rounded text-neutral-200 border border-neutral-700 focus:border-blue-500 outline-none"
             value={destination}
             onChange={(e) => setDestination(e.target.value)}
           />
 
           <input
             placeholder="Amount"
-            className="px-3 py-2 bg-neutral-800 rounded text-neutral-200"
+            className="px-3 py-2 bg-neutral-800 rounded text-neutral-200 border border-neutral-700 focus:border-blue-500 outline-none"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
           />
@@ -563,66 +655,62 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           <motion.button
             whileTap={{ scale: 0.98 }}
             onClick={handleSend}
-            className="px-4 py-3 bg-green-600 rounded-xl text-white font-semibold flex items-center justify-center gap-2"
+            className="px-4 py-3 bg-green-600 rounded-xl text-white font-semibold flex items-center justify-center gap-2 shadow-lg shadow-green-500/10"
           >
             <Send className="w-4 h-4" /> Send
           </motion.button>
         </div>
       </div>
 
-      {/* SAVE & LOAD  */}
-      <div className="px-6 mt-4 flex gap-3">
+      {/* FOOTER ACTIONS (DELETE & SAVE) */}
+      <div className="mt-auto px-6 pb-6 pt-4 flex items-center justify-between border-t border-neutral-800/50">
+        {/* Subtle Save Button */}
         <button
           onClick={handleSaveWallet}
-          className="flex-1 px-4 py-3 bg-neutral-800 rounded-xl border border-neutral-700 text-neutral-300"
+          className="flex items-center gap-2 text-xs text-neutral-500 hover:text-white transition-colors"
         >
-          Save Wallet
+          <Download className="w-3 h-3" />
+          Backup Wallet
         </button>
 
+        {/* Delete Button */}
         <button
-          onClick={handleLoadWallet}
-          className="flex-1 px-4 py-3 bg-neutral-800 rounded-xl border border-neutral-700 text-neutral-300"
-        >
-          Load Wallet
-        </button>
-
-        <input
-          type="file"
-          ref={fileInputRef}
-          className="hidden"
-          accept=".json,.txt"
-          onChange={handleFileSelect}
-        />
-      </div>
-
-      {/* DELETE WALLET */}
-      <div className="mt-auto px-6 pb-6 pt-2">
-        <button
-          onClick={handleDeleteWallet}
-          className="flex items-center gap-2 text-xs text-neutral-500 hover:text-red-400 transition-colors mx-auto"
+          onClick={handleDeleteRequest}
+          className="flex items-center gap-2 text-xs text-neutral-500 hover:text-red-400 transition-colors"
         >
           <Trash2 className="w-3 h-3" />
           Delete Wallet
         </button>
       </div>
+
+      {/* SAVE MODAL */}
       {showSaveModal && (
         <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-40 p-6">
-          <div className="bg-neutral-900 p-6 rounded-xl w-full max-w-md border border-neutral-700">
-            <h3 className="text-white text-lg font-bold mb-4">Save Wallet</h3>
+          <div className="bg-neutral-900 p-6 rounded-xl w-full max-w-md border border-neutral-700 shadow-2xl">
+            <h3 className="text-white text-lg font-bold mb-4">Backup Wallet</h3>
+            <p className="text-xs text-neutral-400 mb-4">
+              Export your wallet keys to a file. Keep this safe!
+            </p>
 
+            <label className="text-xs text-neutral-500 mb-1 block">
+              Filename
+            </label>
             <input
               placeholder="Filename"
               value={saveFilename}
               onChange={(e) => setSaveFilename(e.target.value)}
-              className="w-full mb-3 px-3 py-2 bg-neutral-800 rounded text-neutral-200"
+              className="w-full mb-3 px-3 py-2 bg-neutral-800 rounded text-neutral-200 border border-neutral-700"
             />
 
+            <label className="text-xs text-neutral-500 mb-1 block">
+              Encryption Password (Optional)
+            </label>
             <input
-              placeholder="Password (optional)"
+              placeholder="Password"
               type="password"
               value={savePassword}
               onChange={(e) => setSavePassword(e.target.value)}
-              className="w-full mb-3 px-3 py-2 bg-neutral-800 rounded text-neutral-200"
+              className="w-full mb-3 px-3 py-2 bg-neutral-800 rounded text-neutral-200 border border-neutral-700"
             />
 
             <input
@@ -630,19 +718,19 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
               type="password"
               value={savePasswordConfirm}
               onChange={(e) => setSavePasswordConfirm(e.target.value)}
-              className="w-full mb-6 px-3 py-2 bg-neutral-800 rounded text-neutral-200"
+              className="w-full mb-6 px-3 py-2 bg-neutral-800 rounded text-neutral-200 border border-neutral-700"
             />
 
             <div className="flex gap-3">
               <button
                 onClick={() => setShowSaveModal(false)}
-                className="flex-1 py-2 bg-neutral-700 rounded text-white"
+                className="flex-1 py-2 bg-neutral-700 rounded text-white hover:bg-neutral-600"
               >
                 Cancel
               </button>
               <button
                 onClick={handleConfirmSave}
-                className="flex-1 py-2 bg-blue-600 rounded text-white"
+                className="flex-1 py-2 bg-blue-600 rounded text-white hover:bg-blue-500"
               >
                 Save
               </button>
@@ -650,41 +738,53 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           </div>
         </div>
       )}
-      {showLoadPasswordModal && (
-        <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-40 p-6">
-          <div className="bg-neutral-900 p-6 rounded-xl w-full max-w-md border border-neutral-700">
-            <h3 className="text-white text-lg font-bold mb-4">
-              Enter Password
-            </h3>
-            <p className="text-neutral-400 text-sm mb-4">
-              This wallet is encrypted. Please enter your password to unlock it.
-            </p>
 
-            <input
-              placeholder="Password"
-              type="password"
-              value={loadPassword}
-              onChange={(e) => setLoadPassword(e.target.value)}
-              className="w-full mb-6 px-3 py-2 bg-neutral-800 rounded text-neutral-200"
-            />
+      {/* DELETE CONFIRMATION MODAL */}
+      {showDeleteModal && (
+        <div className="absolute inset-0 bg-black/90 flex items-center justify-center z-50 p-6">
+          <div className="bg-neutral-900 p-6 rounded-xl w-full max-w-md border border-red-900/50 shadow-2xl">
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center mb-4">
+                <AlertTriangle className="w-6 h-6 text-red-500" />
+              </div>
+              <h3 className="text-white text-xl font-bold mb-2">
+                Delete Wallet?
+              </h3>
+              <p className="text-neutral-400 text-sm">
+                Are you sure you want to delete this wallet? <br />
+                <span className="text-red-400 font-semibold">
+                  This action cannot be undone.
+                </span>
+              </p>
+              <p className="text-neutral-500 text-xs mt-2">
+                If you haven't saved your backup, your funds will be lost
+                forever.
+              </p>
+            </div>
 
-            <div className="flex gap-3">
+            <div className="flex flex-col gap-3">
               <button
-                onClick={() => {
-                  setShowLoadPasswordModal(false);
-                  setPendingFile(null);
-                  setLoadPassword("");
-                }}
-                className="flex-1 py-2 bg-neutral-700 rounded text-white"
+                onClick={handleSaveWallet}
+                className="w-full py-3 bg-neutral-800 rounded-xl text-white font-medium border border-neutral-700 hover:bg-neutral-700 flex items-center justify-center gap-2"
               >
-                Cancel
+                <Download className="w-4 h-4" />
+                Save Backup First
               </button>
-              <button
-                onClick={handleConfirmLoadWithPassword}
-                className="flex-1 py-2 bg-blue-600 rounded text-white"
-              >
-                Unlock
-              </button>
+
+              <div className="flex gap-3 mt-2">
+                <button
+                  onClick={() => setShowDeleteModal(false)}
+                  className="flex-1 py-3 bg-neutral-800 rounded-xl text-white font-medium hover:bg-neutral-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmDelete}
+                  className="flex-1 py-3 bg-red-600/20 text-red-500 border border-red-900/50 rounded-xl font-medium hover:bg-red-600 hover:text-white transition-all"
+                >
+                  Delete Anyway
+                </button>
+              </div>
             </div>
           </div>
         </div>
