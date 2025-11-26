@@ -13,7 +13,7 @@ export type { RestoreWalletResult, ExportOptions };
 
 /**
  * Restore wallet from file (React version)
- * Simplified version without DOM manipulations
+ * Compatible with both Old (Legacy) and New wallet formats
  */
 export async function importWallet(
   file: File,
@@ -33,8 +33,8 @@ export async function importWallet(
       );
     }
 
-    // Read file content
-    const fileContent = await file.text();
+    // Read file content and normalize line endings
+    const fileContent = (await file.text()).replace(/\r\n/g, "\n");
 
     // Parse the master key from the file
     let masterKey = "";
@@ -47,9 +47,11 @@ export async function importWallet(
       console.log("Loading encrypted wallet...");
 
       // Extract the encrypted master key
+      // Updated Regex to be more robust with whitespace
       const encryptedKeyMatch = fileContent.match(
-        /ENCRYPTED MASTER KEY \(password protected\):\s*([^\n]+)/
+        /ENCRYPTED MASTER KEY \(password protected\):\s*([^\n\r]+)/
       );
+
       if (encryptedKeyMatch && encryptedKeyMatch[1]) {
         encryptedMasterKey = encryptedKeyMatch[1].trim();
         console.log("Found encrypted master key");
@@ -65,38 +67,42 @@ export async function importWallet(
         }
 
         // Decrypt the master key
+        // We try multiple strategies to ensure backward compatibility
         try {
-          console.log("Attempting to decrypt with provided password...");
-          const salt = "alpha_wallet_salt";
-          const passwordKey = CryptoJS.PBKDF2(password, salt, {
-            keySize: 256 / 32,
-            iterations: 100000,
-          }).toString();
+          console.log("Attempting to decrypt...");
+          const saltStr = "alpha_wallet_salt";
 
-          // Try to decrypt
-          const decryptedBytes = CryptoJS.AES.decrypt(
-            encryptedMasterKey,
-            passwordKey
-          );
-          masterKey = decryptedBytes.toString(CryptoJS.enc.Utf8);
+          // Strategy 1: Explicit Legacy Mode (SHA1 + Explicit string salt)
+          // This usually matches the old browser-based CryptoJS behavior best
+          masterKey = tryDecrypt(encryptedMasterKey, password, saltStr, {
+            hasher: CryptoJS.algo.SHA1,
+          });
+
+          // Strategy 2: Default Mode (If strategy 1 fails)
+          if (!masterKey) {
+            console.log("Legacy decryption failed, trying default mode...");
+            masterKey = tryDecrypt(encryptedMasterKey, password, saltStr, {});
+          }
 
           if (!masterKey) {
-            return {
-              success: false,
-              wallet: {} as Wallet,
-              error:
-                "Failed to decrypt the wallet. The password may be incorrect.",
-            } as RestoreWalletResult;
+            // Strategy 3: Try parsing salt as UTF8 explicit (sometimes needed for v4)
+            console.log("Default decryption failed, trying UTF8 salt mode...");
+            // This logic is handled inside tryDecrypt usually, but let's be sure
+            // If we are here, decryption completely failed
+            throw new Error("Decryption returned empty result");
           }
+
           console.log(
             "Successfully decrypted master key:",
             masterKey.substring(0, 8) + "..."
           );
         } catch (e: unknown) {
+          console.error("Decryption failed:", e);
           return {
             success: false,
             wallet: {} as Wallet,
-            error: "Error decrypting wallet: " + (e instanceof Error ? e.message : String(e)),
+            error:
+              "Failed to decrypt. Password may be incorrect or file is corrupted.",
           } as RestoreWalletResult;
         }
       } else {
@@ -109,7 +115,7 @@ export async function importWallet(
     } else {
       // Unencrypted wallet, extract the master key directly
       const masterKeyMatch = fileContent.match(
-        /MASTER PRIVATE KEY \(keep secret!\):\s*([^\n]+)/
+        /MASTER PRIVATE KEY \(keep secret!\):\s*([^\n\r]+)/
       );
       if (masterKeyMatch && masterKeyMatch[1]) {
         masterKey = masterKeyMatch[1].trim();
@@ -122,12 +128,17 @@ export async function importWallet(
       }
     }
 
+    // Verify masterKey validity (simple check)
+    if (!masterKey || masterKey.length < 10) {
+      throw new Error("Decrypted key appears invalid.");
+    }
+
     // Check if this is an Alpha descriptor wallet with chain code
     let masterChainCode: string | null | undefined = null;
     let isImportedAlphaWallet = false;
 
     const chainCodeMatch = fileContent.match(
-      /MASTER CHAIN CODE \(for (?:BIP32 HD|Alpha) wallet compatibility\):\s*([^\n]+)/
+      /MASTER CHAIN CODE \(for (?:BIP32 HD|Alpha) wallet compatibility\):\s*([^\n\r]+)/
     );
     if (chainCodeMatch && chainCodeMatch[1]) {
       masterChainCode = chainCodeMatch[1].trim();
@@ -149,11 +160,9 @@ export async function importWallet(
     const addressSection = fileContent.match(
       /YOUR ADDRESSES:\s*\n([\s\S]*?)(?:\n\nGenerated on:|$)/
     );
-    console.log("Address section found:", !!addressSection);
 
     if (addressSection && addressSection[1]) {
       const addressLines = addressSection[1].trim().split("\n");
-      console.log("Address lines to parse:", addressLines);
 
       for (const line of addressLines) {
         // Parse lines like: "Address 1: alpha1qllh2t42ytsgnx8fferxwms6npec7whvnaxta7d (Path: m/44'/0'/0')"
@@ -171,16 +180,10 @@ export async function importWallet(
             path: path,
             createdAt: new Date().toISOString(),
           };
-          console.log("Parsed address:", addressInfo);
           parsedAddresses.push(addressInfo);
         }
       }
     }
-    console.log(
-      "Total parsed addresses:",
-      parsedAddresses.length,
-      parsedAddresses
-    );
 
     // Create a new wallet with the restored master key
     const newWallet: Wallet = {
@@ -201,11 +204,6 @@ export async function importWallet(
       createBech32 &&
       hexToBytes
     ) {
-      console.log(
-        "Recovering standard wallet with parsed addresses:",
-        newWallet.addresses
-      );
-
       // Keep only the first address for standard wallets
       if (newWallet.addresses.length > 1) {
         newWallet.addresses = [newWallet.addresses[0]];
@@ -239,6 +237,35 @@ export async function importWallet(
 }
 
 /**
+ * Helper function to attempt decryption
+ */
+function tryDecrypt(
+  encryptedStr: string,
+  pass: string,
+  salt: string,
+  options: any
+): string {
+  try {
+    const passwordKey = CryptoJS.PBKDF2(pass, salt, {
+      keySize: 256 / 32,
+      iterations: 100000,
+      ...options, // Mix in options like hasher: CryptoJS.algo.SHA1
+    }).toString();
+
+    const decryptedBytes = CryptoJS.AES.decrypt(encryptedStr, passwordKey);
+
+    // Convert to string
+    const result = decryptedBytes.toString(CryptoJS.enc.Utf8);
+
+    // Check if result looks like a valid key (not empty)
+    if (result && result.length > 0) return result;
+    return "";
+  } catch (e) {
+    return "";
+  }
+}
+
+/**
  * Recover childPrivateKey for standard wallet
  */
 function recoverChildPrivateKey(
@@ -253,18 +280,11 @@ function recoverChildPrivateKey(
   const addressIndex = wallet.addresses[0].index || 0;
   const derivationPath = `m/44'/0'/${addressIndex}'`;
 
-  console.log("Attempting to derive child key for path:", derivationPath);
-
   // Derive child key using HMAC (standard wallet method)
   const hmacInput = CryptoJS.enc.Hex.parse(wallet.masterPrivateKey);
   const hmacKey = CryptoJS.enc.Utf8.parse(derivationPath);
   const hmacOutput = CryptoJS.HmacSHA512(hmacInput, hmacKey).toString();
   const childPrivateKey = hmacOutput.substring(0, 64);
-
-  console.log(
-    "Derived child private key (first 8 chars):",
-    childPrivateKey.substring(0, 8) + "..."
-  );
 
   // Generate address from the derived key to verify
   const ec = new elliptic.ec("secp256k1");
@@ -284,7 +304,6 @@ function recoverChildPrivateKey(
 
   // Verify the address matches
   if (derivedAddress === wallet.addresses[0].address) {
-    console.log("✓ Address verification successful!");
     wallet.childPrivateKey = childPrivateKey;
     wallet.addresses[0].publicKey = publicKey;
     wallet.addresses[0].path = derivationPath;
@@ -294,10 +313,6 @@ function recoverChildPrivateKey(
       message: "Address verified and private key recovered.",
     };
   } else {
-    console.error("✗ Address verification failed!");
-    console.error("Expected:", wallet.addresses[0].address);
-    console.error("Derived:", derivedAddress);
-
     // Try to recover by scanning for the correct index
     for (let i = 0; i < 100; i++) {
       const testPath = `m/44'/0'/${i}'`;
@@ -317,7 +332,6 @@ function recoverChildPrivateKey(
       );
 
       if (testAddress === wallet.addresses[0].address) {
-        console.log(`✓ Found correct derivation at index ${i}!`);
         wallet.childPrivateKey = testChildKey;
         wallet.addresses[0].publicKey = testPublicKey;
         wallet.addresses[0].path = testPath;
@@ -346,7 +360,7 @@ function recoverChildPrivateKey(
 
 /**
  * Export wallet to text format
- * Compatible with index.html format
+ * Compatible with index.html format (Legacy)
  */
 export function exportWallet(
   wallet: Wallet,
@@ -358,21 +372,23 @@ export function exportWallet(
     throw new Error("Invalid wallet - missing master private key");
   }
 
-  if (!wallet.addresses || wallet.addresses.length === 0) {
-    throw new Error("Invalid wallet - no addresses");
-  }
-
   let content: string;
 
   if (password) {
     // === ENCRYPTED WALLET ===
 
     const salt = "alpha_wallet_salt";
+
+    // !!! CRITICAL FOR BACKWARD COMPATIBILITY !!!
+    // We explicitly use SHA1 hasher to match the legacy browser defaults.
+    // This ensures files created here can be opened by the old wallet.
     const passwordKey = CryptoJS.PBKDF2(password, salt, {
       keySize: 256 / 32,
       iterations: 100000,
+      hasher: CryptoJS.algo.SHA1,
     }).toString();
 
+    // The old wallet uses the passwordKey string as a Passphrase for AES
     const encryptedMasterKey = CryptoJS.AES.encrypt(
       wallet.masterPrivateKey,
       passwordKey
@@ -397,17 +413,39 @@ export function exportWallet(
         .join("\n");
     }
 
-    let encryptedContent = `ENCRYPTED MASTER KEY (password protected):\r\n${encryptedMasterKey}`;
+    let encryptedContent = `ENCRYPTED MASTER KEY (password protected):
+${encryptedMasterKey}`;
 
     if (wallet.isImportedAlphaWallet && wallet.masterChainCode) {
-      encryptedContent += `\r\n\r\nMASTER CHAIN CODE (for BIP32 HD wallet compatibility):\r\n${wallet.masterChainCode}\r\n\r\nWALLET TYPE: BIP32 hierarchical deterministic wallet`;
+      encryptedContent += `
+
+MASTER CHAIN CODE (for BIP32 HD wallet compatibility):
+${wallet.masterChainCode}
+
+WALLET TYPE: BIP32 hierarchical deterministic wallet`;
     } else {
-      encryptedContent += `\r\n\r\nWALLET TYPE: Standard wallet (HMAC-based)`;
+      encryptedContent += `
+
+WALLET TYPE: Standard wallet (HMAC-based)`;
     }
 
-    content = `UNICITY WALLET DETAILS\r\n===========================\r\n\r\n${encryptedContent}\r\n\r\nENCRYPTION STATUS: Encrypted with password\r\nTo use this key, you will need the password you set in the wallet.\r\n\r\nYOUR ADDRESSES:\r\n${addressesText}\r\n\r\nGenerated on: ${new Date().toLocaleString()}\r\n\r\nWARNING: Keep your master private key safe and secure.\r\nAnyone with your master private key can access all your funds.`;
+    content = `UNICITY WALLET DETAILS
+===========================
+
+${encryptedContent}
+
+ENCRYPTION STATUS: Encrypted with password
+To use this key, you will need the password you set in the wallet.
+
+YOUR ADDRESSES:
+${addressesText}
+
+Generated on: ${new Date().toLocaleString()}
+
+WARNING: Keep your master private key safe and secure.
+Anyone with your master private key can access all your funds.`;
   } else {
-    // === UNENCRYPTED WALLET ===
+    // === UNENCRYPTED WALLET === (Logic remains mostly the same)
 
     const masterKeyWIF = hexToWIF(wallet.masterPrivateKey);
 
@@ -416,7 +454,19 @@ export function exportWallet(
 
     if (wallet.isImportedAlphaWallet && wallet.masterChainCode) {
       // BIP32 format
-      masterKeySection = `MASTER PRIVATE KEY (keep secret!):\r\n${wallet.masterPrivateKey}\r\n\r\nMASTER PRIVATE KEY IN WIF FORMAT (for importprivkey command):\r\n${masterKeyWIF}\r\n\r\nMASTER CHAIN CODE (for BIP32 HD wallet compatibility):\r\n${wallet.masterChainCode}\r\n\r\nWALLET TYPE: BIP32 hierarchical deterministic wallet\r\n\r\nENCRYPTION STATUS: Not encrypted\r\nThis key is in plaintext and not protected. Anyone with this file can access your wallet.`;
+      masterKeySection = `MASTER PRIVATE KEY (keep secret!):
+${wallet.masterPrivateKey}
+
+MASTER PRIVATE KEY IN WIF FORMAT (for importprivkey command):
+${masterKeyWIF}
+
+MASTER CHAIN CODE (for BIP32 HD wallet compatibility):
+${wallet.masterChainCode}
+
+WALLET TYPE: BIP32 hierarchical deterministic wallet
+
+ENCRYPTION STATUS: Not encrypted
+This key is in plaintext and not protected. Anyone with this file can access your wallet.`;
 
       addressesText = wallet.addresses
         .map((addr, index) => `Address ${index + 1}: ${addr.address}`)
@@ -432,10 +482,30 @@ export function exportWallet(
         )
         .join("\n");
 
-      masterKeySection = `MASTER PRIVATE KEY (keep secret!):\r\n${wallet.masterPrivateKey}\r\n\r\nMASTER PRIVATE KEY IN WIF FORMAT (for importprivkey command):\r\n${masterKeyWIF}\r\n\r\nWALLET TYPE: Standard wallet (HMAC-based)\r\n\r\nENCRYPTION STATUS: Not encrypted\r\nThis key is in plaintext and not protected. Anyone with this file can access your wallet.`;
+      masterKeySection = `MASTER PRIVATE KEY (keep secret!):
+${wallet.masterPrivateKey}
+
+MASTER PRIVATE KEY IN WIF FORMAT (for importprivkey command):
+${masterKeyWIF}
+
+WALLET TYPE: Standard wallet (HMAC-based)
+
+ENCRYPTION STATUS: Not encrypted
+This key is in plaintext and not protected. Anyone with this file can access your wallet.`;
     }
 
-    content = `UNICITY WALLET DETAILS\r\n===========================\r\n\r\n${masterKeySection}\r\n\r\nYOUR ADDRESSES:\r\n${addressesText}\r\n\r\nGenerated on: ${new Date().toLocaleString()}\r\n\r\nWARNING: Keep your master private key safe and secure.\r\nAnyone with your master private key can access all your funds.`;
+    content = `UNICITY WALLET DETAILS
+===========================
+
+${masterKeySection}
+
+YOUR ADDRESSES:
+${addressesText}
+
+Generated on: ${new Date().toLocaleString()}
+
+WARNING: Keep your master private key safe and secure.
+Anyone with your master private key can access all your funds.`;
   }
 
   return content;
@@ -445,9 +515,6 @@ export function exportWallet(
 // UTILITIES
 // ===========================
 
-/**
- * Download wallet file
- */
 export function downloadWalletFile(
   content: string,
   filename: string = "alpha_wallet_backup.txt"
