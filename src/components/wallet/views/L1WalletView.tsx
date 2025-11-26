@@ -56,6 +56,14 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSending, setIsSending] = useState(false);
 
+  // Use ref to avoid stale closure in subscribeBlocks callback
+  const selectedAddressRef = useRef<string>("");
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    selectedAddressRef.current = selectedAddress;
+  }, [selectedAddress]);
+
   // -------------------------------
   // INIT: connect to RPC + load wallet
   // -------------------------------
@@ -74,9 +82,11 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
       await refreshBalance(list[0]);
 
-      // Auto-refresh on new block
+      // Auto-refresh on new block - use ref to get current value
       subscribeBlocks(() => {
-        refreshBalance(selectedAddress);
+        if (selectedAddressRef.current) {
+          refreshBalance(selectedAddressRef.current);
+        }
       });
     })();
   }, []);
@@ -124,6 +134,8 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   // Generate new HD address
   // -------------------------------
   async function handleNewAddress() {
+    if (!wallet) return;
+
     const addr = generateAddress(wallet);
     const updated = loadWallet();
     if (!updated) return;
