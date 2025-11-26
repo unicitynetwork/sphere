@@ -1,6 +1,6 @@
 import CryptoJS from "crypto-js";
 import elliptic from "elliptic";
-import { createBech32 } from "./bech32"; // переносим из index.html
+import { createBech32 } from "./bech32";
 
 const ec = new elliptic.ec("secp256k1");
 

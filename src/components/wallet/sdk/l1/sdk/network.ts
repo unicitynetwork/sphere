@@ -1,16 +1,33 @@
 // sdk/l1/network.ts
 
 import { addressToScriptHash } from "./addressToScriptHash";
+import type { UTXO } from "./types";
 
 const DEFAULT_ENDPOINT = "wss://fulcrum.unicity.network:50004";
+
+interface PendingRequest {
+  resolve: (result: unknown) => void;
+  reject: (err: unknown) => void;
+}
+
+export interface BlockHeader {
+  height: number;
+  hex: string;
+  [key: string]: unknown;
+}
+
+interface BalanceResult {
+  confirmed: number;
+  unconfirmed: number;
+}
 
 let ws: WebSocket | null = null;
 let isConnected = false;
 let isConnecting = false;
 let requestId = 0;
 
-const pending: Record<number, { resolve: (result: any) => void; reject: (err: any) => void }> = {};
-const blockSubscribers: ((header: any) => void)[] = [];
+const pending: Record<number, PendingRequest> = {};
+const blockSubscribers: ((header: BlockHeader) => void)[] = [];
 
 // ----------------------------------------
 // SINGLETON CONNECT — prevents double connect
@@ -76,7 +93,7 @@ function handleMessage(event: MessageEvent) {
 // ----------------------------------------
 // SAFE RPC
 // ----------------------------------------
-export function rpc(method: string, params: any[] = []): Promise<any> {
+export function rpc(method: string, params: unknown[] = []): Promise<unknown> {
   return new Promise((resolve, reject) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       return reject("WebSocket not connected (OPEN)");
@@ -103,7 +120,7 @@ export async function getUtxo(address: string) {
     return [];
   }
 
-  return result.map((u) => ({
+  return result.map((u: UTXO) => ({
     tx_hash: u.tx_hash,
     tx_pos: u.tx_pos,
     value: u.value,
@@ -114,7 +131,7 @@ export async function getUtxo(address: string) {
 
 export async function getBalance(address: string) {
   const scriptHash = addressToScriptHash(address);
-  const result = await rpc("blockchain.scripthash.get_balance", [scriptHash]);
+  const result = await rpc("blockchain.scripthash.get_balance", [scriptHash]) as BalanceResult;
 
   const confirmed = result.confirmed || 0;
   const unconfirmed = result.unconfirmed || 0;
@@ -131,7 +148,7 @@ export async function broadcast(rawHex: string) {
   return await rpc("blockchain.transaction.broadcast", [rawHex]);
 }
 
-export async function subscribeBlocks(cb: (header: any) => void) {
+export async function subscribeBlocks(cb: (header: BlockHeader) => void) {
   blockSubscribers.push(cb);
   await rpc("blockchain.headers.subscribe", []);
 }

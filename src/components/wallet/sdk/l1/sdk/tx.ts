@@ -3,7 +3,12 @@ import { getUtxo, broadcast } from "./network";
 import CryptoJS from "crypto-js";
 import elliptic from "elliptic";
 import { decodeBech32 } from "./bech32";
-import type { Wallet } from "./types";
+import type {
+  Wallet,
+  TransactionPlan,
+  Transaction,
+  UTXO,
+} from "./types";
 
 const ec = new elliptic.ec("secp256k1");
 
@@ -208,33 +213,21 @@ export function buildSegWitTransaction(
 
 // --------------------------------------------------
 // TX PLAN
-// utxos come from getUtxo(address) and must be:
+// UTXOs come from getUtxo(address) and must be:
 // { txid, vout, value, height, address }
 // --------------------------------------------------
 
-export interface TransactionPlan {
-  success: boolean;
-  transactions: Array<{
-    input: { txid: string; vout: number; value: number; address: string };
-    outputs: Array<{ value: number; address: string }>;
-    fee: number;
-    changeAmount: number;
-    changeAddress: string;
-  }>;
-  error?: string;
-}
-
 function rebalanceDustOutputs(
-  transactions: any[],
+  transactions: Transaction[],
   recipientAddress: string,
   senderAddress: string,
-  availableUtxos: any[],
+  availableUtxos: UTXO[],
   feePerTx: number
-) {
+): Transaction[] {
   // First pass: rebalance recipient dust outputs across transactions
   for (let i = 0; i < transactions.length; i++) {
     const tx = transactions[i];
-    const recipientOutput = tx.outputs.find((o: any) => o.address === recipientAddress);
+    const recipientOutput = tx.outputs.find((o) => o.address === recipientAddress);
 
     if (recipientOutput && recipientOutput.value < DUST && transactions.length > 1) {
       // Find another transaction to rebalance with
@@ -242,7 +235,7 @@ function rebalanceDustOutputs(
         if (i === j) continue;
 
         const otherTx = transactions[j];
-        const otherRecipientOutput = otherTx.outputs.find((o: any) => o.address === recipientAddress);
+        const otherRecipientOutput = otherTx.outputs.find((o) => o.address === recipientAddress);
 
         if (otherRecipientOutput) {
           // Calculate how much we need to move to make both outputs non-dust
@@ -261,7 +254,7 @@ function rebalanceDustOutputs(
   }
 
   // Second pass: handle dust change outputs
-  const finalTransactions = [];
+  const finalTransactions: Transaction[] = [];
   const usedUtxos = new Set(transactions.map((tx) => `${tx.input.txid}:${tx.input.vout}`));
 
   for (const tx of transactions) {
@@ -269,7 +262,7 @@ function rebalanceDustOutputs(
 
     // Check if we have dust change that needs to be handled
     if (tx.changeAmount > 0 && tx.changeAmount <= DUST) {
-      const recipientOutput = tx.outputs.find((o: any) => o.address === recipientAddress);
+      const recipientOutput = tx.outputs.find((o) => o.address === recipientAddress);
 
       if (recipientOutput && recipientOutput.value > DUST * 2) {
         // Find an unused UTXO first
@@ -298,11 +291,12 @@ function rebalanceDustOutputs(
           }
 
           // Create follow-up transaction
-          const followUpTx: any = {
+          const followUpTx: Transaction = {
             input: {
-              txid: nextUtxo.txid ?? nextUtxo.tx_hash,
-              vout: nextUtxo.vout ?? nextUtxo.tx_pos,
+              txid: nextUtxo.txid ?? nextUtxo.tx_hash ?? "",
+              vout: nextUtxo.vout ?? nextUtxo.tx_pos ?? 0,
               value: nextUtxo.value,
+              address: nextUtxo.address ?? senderAddress,
             },
             outputs: [
               { address: recipientAddress, value: remainingRecipientAmount },
@@ -330,7 +324,7 @@ function rebalanceDustOutputs(
 }
 
 export function collectUtxosForAmount(
-  utxoList: any[],
+  utxoList: UTXO[],
   amountSats: number,
   recipientAddress: string,
   senderAddress: string
@@ -348,7 +342,7 @@ export function collectUtxosForAmount(
     };
   }
 
-  const transactions = [];
+  const transactions: Transaction[] = [];
   let remainingAmount = amountSats;
 
   for (const utxo of sortedUtxos) {
@@ -371,12 +365,12 @@ export function collectUtxosForAmount(
       if (txAmount <= 0) continue;
     }
 
-    const tx: any = {
+    const tx: Transaction = {
       input: {
-        txid: utxo.txid ?? utxo.tx_hash,
-        vout: utxo.vout ?? utxo.tx_pos,
+        txid: utxo.txid ?? utxo.tx_hash ?? "",
+        vout: utxo.vout ?? utxo.tx_pos ?? 0,
         value: utxo.value,
-        address: utxo.address,
+        address: utxo.address ?? senderAddress,
       },
       outputs: [
         { address: recipientAddress, value: txAmount }
@@ -431,7 +425,7 @@ export async function createTransactionPlan(
 // --------------------------------------------------
 // SIGN (uses childPrivateKey or masterPrivateKey)
 // --------------------------------------------------
-export function createAndSignTransaction(wallet: Wallet, txPlan: any) {
+export function createAndSignTransaction(wallet: Wallet, txPlan: Transaction) {
   const inputAddress = txPlan.input.address;
   const walletAddress = wallet.addresses.find((a) => a.address === inputAddress);
 

@@ -24,11 +24,13 @@ import {
   exportWallet,
   downloadWalletFile,
   generateHDAddress,
-  restoreWalletReact,
+  importWallet,
+  type Wallet,
+  type TransactionPlan,
 } from "../sdk/l1/sdk";
 
 export function L1WalletView({ showBalances }: { showBalances: boolean }) {
-  const [wallet, setWallet] = useState<any>(null);
+  const [wallet, setWallet] = useState<Wallet | null>(null);
   const [addresses, setAddresses] = useState<string[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
 
@@ -40,7 +42,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const [destination, setDestination] = useState("");
   const [amount, setAmount] = useState("");
 
-  const [txPlan, setTxPlan] = useState<any>(null);
+  const [txPlan, setTxPlan] = useState<TransactionPlan | null>(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
 
   // Save/Load state
@@ -66,7 +68,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
       setWallet(w);
 
-      const list = w.addresses.map((a: any) => a.address);
+      const list = w.addresses.map((a) => a.address);
       setAddresses(list);
       setSelectedAddress(list[0]);
 
@@ -96,7 +98,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     const w = createWallet();
     setWallet(w);
 
-    const list = w.addresses.map((a: any) => a.address);
+    const list = w.addresses.map((a) => a.address);
     setAddresses(list);
     setSelectedAddress(list[0]);
 
@@ -126,7 +128,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     const updated = loadWallet();
     if (!updated) return;
 
-    const list = updated.addresses.map((a: any) => a.address);
+    const list = updated.addresses.map((a) => a.address);
     setAddresses(list);
     setSelectedAddress(addr.address);
 
@@ -163,8 +165,8 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
       setTxPlan(plan);
       setShowConfirmation(true);
-    } catch (err: any) {
-      alert("Error creating transaction: " + err.message);
+    } catch (err: unknown) {
+      alert("Error creating transaction: " + (err instanceof Error ? err.message : String(err)));
       console.error(err);
     }
   }
@@ -181,9 +183,9 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           const signed = createAndSignTransaction(wallet, tx);
           const result = await broadcast(signed.raw);
           results.push({ txid: signed.txid, raw: signed.raw, result });
-        } catch (e: any) {
+        } catch (e: unknown) {
           console.error("Broadcast failed for tx", e);
-          errors.push(e.message || e);
+          errors.push(e instanceof Error ? e.message : String(e));
         }
       }
 
@@ -206,8 +208,8 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       setDestination("");
       setAmount("");
       refreshBalance(selectedAddress);
-    } catch (err: any) {
-      alert("Transaction failed: " + err.message);
+    } catch (err: unknown) {
+      alert("Transaction failed: " + (err instanceof Error ? err.message : String(err)));
       console.error(err);
     } finally {
       setIsSending(false);
@@ -253,8 +255,8 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       setSavePassword("");
       setSavePasswordConfirm("");
       alert("Wallet saved successfully!");
-    } catch (err: any) {
-      alert("Error saving wallet: " + err.message);
+    } catch (err: unknown) {
+      alert("Error saving wallet: " + (err instanceof Error ? err.message : String(err)));
       console.error(err);
     }
   }
@@ -279,8 +281,8 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         setPendingFile(file);
         setShowLoadPasswordModal(true);
       } else {
-        // Unencrypted - use restoreWalletReact
-        const result = await restoreWalletReact(file);
+        // Unencrypted - use importWallet
+        const result = await importWallet(file);
 
         if (result.success && result.wallet) {
           // Regenerate addresses for BIP32 wallets
@@ -308,8 +310,8 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           alert("Error loading wallet: " + result.error);
         }
       }
-    } catch (err: any) {
-      alert("Error loading wallet: " + err.message);
+    } catch (err: unknown) {
+      alert("Error loading wallet: " + (err instanceof Error ? err.message : String(err)));
       console.error(err);
     }
 
@@ -324,8 +326,8 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     }
 
     try {
-      // Use restoreWalletReact with password
-      const result = await restoreWalletReact(pendingFile, loadPassword);
+      // Use importWallet with password
+      const result = await importWallet(pendingFile, loadPassword);
 
       if (result.success && result.wallet) {
         // Regenerate addresses for BIP32 wallets
@@ -355,8 +357,8 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       } else {
         alert("Error loading wallet: " + result.error);
       }
-    } catch (err: any) {
-      alert("Error loading wallet: " + err.message);
+    } catch (err: unknown) {
+      alert("Error loading wallet: " + (err instanceof Error ? err.message : String(err)));
       console.error(err);
     }
   }
