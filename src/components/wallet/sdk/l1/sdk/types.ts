@@ -1,16 +1,22 @@
 export interface Wallet {
   masterPrivateKey: string;
-  chainCode: string;
+  chainCode?: string;
   addresses: WalletAddress[];
-  createdAt: number;
+  createdAt?: number;
+  isEncrypted?: boolean;
+  encryptedMasterKey?: string;
+  childPrivateKey?: string | null;
+  isImportedAlphaWallet?: boolean;
+  masterChainCode?: string | null;
 }
 
 export interface WalletAddress {
   address: string;
-  publicKey: string;
-  privateKey: string;
-  path: string;
+  publicKey?: string;
+  privateKey?: string;
+  path: string | null;
   index: number;
+  createdAt?: string;
 }
 
 export interface StoredWallet {

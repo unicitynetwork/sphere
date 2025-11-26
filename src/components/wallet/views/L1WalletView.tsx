@@ -22,9 +22,9 @@ import {
   createAndSignTransaction,
   broadcast,
   exportWallet,
-  importWallet,
   downloadWalletFile,
   generateHDAddress,
+  restoreWalletReact,
 } from "../sdk/l1/sdk";
 
 export function L1WalletView({ showBalances }: { showBalances: boolean }) {
@@ -50,9 +50,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const [savePasswordConfirm, setSavePasswordConfirm] = useState("");
   const [showLoadPasswordModal, setShowLoadPasswordModal] = useState(false);
   const [loadPassword, setLoadPassword] = useState("");
-  const [pendingImportData, setPendingImportData] = useState<string | null>(
-    null
-  );
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSending, setIsSending] = useState(false);
 
@@ -278,31 +276,37 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       // Check if encrypted
       if (content.includes("ENCRYPTED MASTER KEY")) {
         // Needs password
-        setPendingImportData(content);
+        setPendingFile(file);
         setShowLoadPasswordModal(true);
       } else {
-        // Unencrypted - import directly
-        const { wallet: importedWallet, addressCount } = importWallet(content);
+        // Unencrypted - use restoreWalletReact
+        const result = await restoreWalletReact(file);
 
-        // Regenerate addresses
-        const addresses = [];
-        for (let i = 0; i < (addressCount || 1); i++) {
-          const addr = generateHDAddress(
-            importedWallet.masterPrivateKey,
-            importedWallet.chainCode,
-            i
-          );
-          addresses.push(addr);
+        if (result.success && result.wallet) {
+          // Regenerate addresses for BIP32 wallets
+          if (result.wallet.isImportedAlphaWallet && result.wallet.chainCode) {
+            const addresses = [];
+            for (let i = 0; i < (result.wallet.addresses.length || 1); i++) {
+              const addr = generateHDAddress(
+                result.wallet.masterPrivateKey,
+                result.wallet.chainCode,
+                i
+              );
+              addresses.push(addr);
+            }
+            result.wallet.addresses = addresses;
+          }
+
+          setWallet(result.wallet);
+          const list = result.wallet.addresses.map((a) => a.address);
+          setAddresses(list);
+          setSelectedAddress(list[0]);
+          await refreshBalance(list[0]);
+
+          alert("Wallet loaded successfully!");
+        } else {
+          alert("Error loading wallet: " + result.error);
         }
-        importedWallet.addresses = addresses;
-
-        setWallet(importedWallet);
-        const list = addresses.map((a) => a.address);
-        setAddresses(list);
-        setSelectedAddress(list[0]);
-        await refreshBalance(list[0]);
-
-        alert("Wallet loaded successfully!");
       }
     } catch (err: any) {
       alert("Error loading wallet: " + err.message);
@@ -314,39 +318,43 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   }
 
   async function handleConfirmLoadWithPassword() {
-    if (!pendingImportData || !loadPassword) {
+    if (!pendingFile || !loadPassword) {
       alert("Please enter password");
       return;
     }
 
     try {
-      const { wallet: importedWallet, addressCount } = importWallet(
-        pendingImportData,
-        loadPassword
-      );
+      // Use restoreWalletReact with password
+      const result = await restoreWalletReact(pendingFile, loadPassword);
 
-      // Regenerate addresses
-      const addresses = [];
-      for (let i = 0; i < (addressCount || 1); i++) {
-        const addr = generateHDAddress(
-          importedWallet.masterPrivateKey,
-          importedWallet.chainCode,
-          i
-        );
-        addresses.push(addr);
+      if (result.success && result.wallet) {
+        // Regenerate addresses for BIP32 wallets
+        if (result.wallet.isImportedAlphaWallet && result.wallet.chainCode) {
+          const addresses = [];
+          for (let i = 0; i < (result.wallet.addresses.length || 1); i++) {
+            const addr = generateHDAddress(
+              result.wallet.masterPrivateKey,
+              result.wallet.chainCode,
+              i
+            );
+            addresses.push(addr);
+          }
+          result.wallet.addresses = addresses;
+        }
+
+        setWallet(result.wallet);
+        const list = result.wallet.addresses.map((a) => a.address);
+        setAddresses(list);
+        setSelectedAddress(list[0]);
+        await refreshBalance(list[0]);
+
+        setShowLoadPasswordModal(false);
+        setPendingFile(null);
+        setLoadPassword("");
+        alert("Wallet loaded successfully!");
+      } else {
+        alert("Error loading wallet: " + result.error);
       }
-      importedWallet.addresses = addresses;
-
-      setWallet(importedWallet);
-      const list = addresses.map((a) => a.address);
-      setAddresses(list);
-      setSelectedAddress(list[0]);
-      await refreshBalance(list[0]);
-
-      setShowLoadPasswordModal(false);
-      setPendingImportData(null);
-      setLoadPassword("");
-      alert("Wallet loaded successfully!");
     } catch (err: any) {
       alert("Error loading wallet: " + err.message);
       console.error(err);
@@ -650,7 +658,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
               <button
                 onClick={() => {
                   setShowLoadPasswordModal(false);
-                  setPendingImportData(null);
+                  setPendingFile(null);
                   setLoadPassword("");
                 }}
                 className="flex-1 py-2 bg-neutral-700 rounded text-white"
