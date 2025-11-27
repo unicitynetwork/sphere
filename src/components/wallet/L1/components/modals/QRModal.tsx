@@ -58,30 +58,73 @@ export function QRModal({ show, address, onClose }: QRModalProps) {
   if (!show) return null;
 
   return (
-    <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-20 p-4">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-20 p-4"
+      onClick={onClose}
+    >
       <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ duration: 0.2 }}
-        className="bg-linear-to-br from-neutral-900 to-neutral-800 p-8 rounded-2xl shadow-2xl border border-neutral-700 max-w-sm w-full"
+        initial={{ scale: 0.8, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.8, opacity: 0, y: 20 }}
+        transition={{ type: "spring", duration: 0.5 }}
+        className="bg-linear-to-br from-neutral-900 to-neutral-800 p-8 rounded-2xl shadow-2xl border border-neutral-700/50 max-w-sm w-full"
+        onClick={(e) => e.stopPropagation()}
       >
-        <div className="text-center mb-6">
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="text-center mb-6"
+        >
           <h3 className="text-xl font-bold text-white mb-2">Receive ALPHA</h3>
           <p className="text-sm text-neutral-400">
             Scan QR code to receive payment
           </p>
-        </div>
+        </motion.div>
 
-        <div className="relative bg-neutral-900 p-8 rounded-2xl shadow-inner mb-6 flex items-center justify-center">
-          <div className="absolute top-2 left-2 w-6 h-6 border-t-4 border-l-4 border-orange-500 rounded-tl-lg"></div>
-          <div className="absolute top-2 right-2 w-6 h-6 border-t-4 border-r-4 border-orange-500 rounded-tr-lg"></div>
-          <div className="absolute bottom-2 left-2 w-6 h-6 border-b-4 border-l-4 border-orange-500 rounded-bl-lg"></div>
-          <div className="absolute bottom-2 right-2 w-6 h-6 border-b-4 border-r-4 border-orange-500 rounded-br-lg"></div>
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.2, type: "spring" }}
+          className="relative bg-neutral-900 p-8 rounded-2xl shadow-inner mb-6 flex items-center justify-center"
+        >
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+            className="absolute top-2 left-2 w-6 h-6 border-t-4 border-l-4 border-blue-500 rounded-tl-lg"
+          ></motion.div>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.35 }}
+            className="absolute top-2 right-2 w-6 h-6 border-t-4 border-r-4 border-blue-500 rounded-tr-lg"
+          ></motion.div>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.4 }}
+            className="absolute bottom-2 left-2 w-6 h-6 border-b-4 border-l-4 border-blue-500 rounded-bl-lg"
+          ></motion.div>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.45 }}
+            className="absolute bottom-2 right-2 w-6 h-6 border-b-4 border-r-4 border-blue-500 rounded-br-lg"
+          ></motion.div>
 
           <div ref={qrCodeRef} className="w-60 h-60"></div>
-        </div>
+        </motion.div>
 
-        <div className="bg-neutral-800/50 rounded-xl p-4 mb-6 border border-neutral-700">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+          className="bg-neutral-800/50 rounded-xl p-4 mb-6 border border-neutral-700/50 backdrop-blur-sm"
+        >
           <p className="text-xs text-neutral-400 mb-2 text-center">
             Your Address
           </p>
@@ -94,36 +137,45 @@ export function QRModal({ show, address, onClose }: QRModalProps) {
             >
               {address}
             </a>
-            <button
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
               onClick={() => {
                 navigator.clipboard.writeText(address);
                 setCopied(true);
                 setTimeout(() => setCopied(false), 2000);
               }}
-              className={`p-2 rounded-lg transition-colors ${
+              className={`p-2 rounded-lg transition-all ${
                 copied
-                  ? "bg-green-600 hover:bg-green-500"
+                  ? "bg-green-600 hover:bg-green-500 shadow-lg shadow-green-500/20"
                   : "bg-neutral-700 hover:bg-neutral-600"
               } text-white`}
               title={copied ? "Copied!" : "Copy address"}
             >
-              {copied ? (
-                <Check className="w-4 h-4" />
-              ) : (
-                <Copy className="w-4 h-4" />
-              )}
-            </button>
+              <motion.div
+                initial={false}
+                animate={{ rotate: copied ? [0, -10, 10, 0] : 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                {copied ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
+              </motion.div>
+            </motion.button>
           </div>
-        </div>
+        </motion.div>
 
         <motion.button
+          whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           onClick={onClose}
-          className="w-full px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-lg shadow-blue-500/20 transition-colors"
+          className="w-full px-4 py-3 rounded-xl bg-linear-to-br from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-semibold shadow-lg shadow-blue-500/20 transition-all"
         >
           Close
         </motion.button>
       </motion.div>
-    </div>
+    </motion.div>
   );
 }

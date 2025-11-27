@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -11,7 +11,7 @@ import {
   ExternalLink,
   Check,
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import type { Wallet, TransactionPlan } from "../sdk";
 import {
   QRModal,
@@ -19,6 +19,52 @@ import {
   DeleteConfirmationModal,
   TransactionConfirmationModal,
 } from "../components/modals";
+
+// Animated balance display component
+function AnimatedBalance({ value, show }: { value: number; show: boolean }) {
+  const [displayValue, setDisplayValue] = useState(value);
+  const [isAnimating, setIsAnimating] = useState(false);
+
+  useEffect(() => {
+    if (value === displayValue) return;
+
+    setIsAnimating(true);
+    const startValue = displayValue;
+    const endValue = value;
+    const duration = 600;
+    const startTime = Date.now();
+
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+
+      // Easing function for smooth animation
+      const easeOutExpo = 1 - Math.pow(2, -10 * progress);
+
+      const currentValue = startValue + (endValue - startValue) * easeOutExpo;
+      setDisplayValue(Math.round(currentValue * 100) / 100);
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        setDisplayValue(endValue);
+        setIsAnimating(false);
+      }
+    };
+
+    requestAnimationFrame(animate);
+  }, [value, displayValue]);
+
+  if (!show) {
+    return <span>••••••</span>;
+  }
+
+  return (
+    <span className={isAnimating ? "transition-opacity" : ""}>
+      {displayValue} ALPHA
+    </span>
+  );
+}
 
 interface MainWalletViewProps {
   wallet: Wallet;
@@ -105,26 +151,46 @@ export function MainWalletView({
       />
 
       <div className="px-6 mb-6">
-        <p className="text-xs text-blue-300/70 mb-1">Mainnet Balance</p>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-blue-300/70">Mainnet Balance</p>
+            <span className="flex h-2 w-2 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+            </span>
+          </div>
+        </div>
 
-        <h2 className="text-3xl text-white font-bold tracking-tight mb-4">
-          {showBalances ? `${balance} ALPHA` : "••••••"}
-        </h2>
+        <AnimatePresence mode="wait">
+          <motion.h2
+            key={selectedAddress}
+            initial={{ opacity: 0, y: -20, filter: "blur(10px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: 20, filter: "blur(10px)" }}
+            transition={{ type: "spring", duration: 0.6, bounce: 0.2 }}
+            className="text-3xl text-white font-bold tracking-tight mb-4"
+          >
+            <AnimatedBalance value={balance} show={showBalances} />
+          </motion.h2>
+        </AnimatePresence>
 
         <div className="grid grid-cols-2 gap-3 mb-4">
           <motion.button
             onClick={() => setShowQR(true)}
             whileHover={{ scale: 1.02, y: -2 }}
-            className="px-4 py-3 rounded-xl bg-blue-600 text-white text-sm flex items-center justify-center gap-2 shadow-blue-500/20"
+            whileTap={{ scale: 0.98 }}
+            className="relative px-4 py-3 rounded-xl bg-linear-to-br from-blue-500 to-blue-600 text-white text-sm shadow-xl shadow-blue-500/20 flex items-center justify-center gap-2 overflow-hidden group"
           >
-            <ArrowDownLeft className="w-4 h-4" />
-            Receive
+            <div className="absolute inset-0 bg-linear-to-r from-transparent via-white/10 to-transparent translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000" />
+            <ArrowDownLeft className="w-4 h-4 relative z-10" />
+            <span className="relative z-10">Receive</span>
           </motion.button>
 
           <motion.button
             onClick={onNewAddress}
             whileHover={{ scale: 1.02, y: -2 }}
-            className="px-4 py-3 rounded-xl bg-neutral-800 text-white text-sm border border-neutral-700 flex items-center justify-center gap-2"
+            whileTap={{ scale: 0.98 }}
+            className="relative px-4 py-3 rounded-xl bg-neutral-800/80 hover:bg-neutral-700/80 text-white text-sm border border-neutral-700/50 flex items-center justify-center gap-2"
           >
             <ArrowUpRight className="w-4 h-4" />
             New Address
@@ -185,12 +251,21 @@ export function MainWalletView({
           </div>
 
           {showDropdown && (
-            <div className="absolute z-20 mt-2 w-full bg-neutral-900 border border-neutral-700 rounded-xl shadow-xl max-h-52 overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0, y: -10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className="absolute z-20 mt-2 w-full bg-neutral-900 border border-neutral-700 rounded-xl shadow-xl max-h-52 overflow-y-auto custom-scrollbar"
+            >
               {addresses.map((a, i) => (
-                <div
+                <motion.div
                   key={i}
-                  className={`flex items-center gap-2 px-3 py-2 hover:bg-neutral-800 ${
-                    a === selectedAddress ? "bg-neutral-800" : ""
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                  className={`flex items-center gap-2 px-3 py-2 hover:bg-neutral-800 transition-colors ${
+                    a === selectedAddress ? "bg-neutral-800/50" : ""
                   }`}
                 >
                   <button
@@ -206,62 +281,91 @@ export function MainWalletView({
                     href={`https://www.unicity.network/address/${a}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="p-1 text-blue-400 hover:text-blue-300"
+                    className="p-1 text-blue-400 hover:text-blue-300 transition-colors"
                     title="View in explorer"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <ExternalLink className="w-3 h-3" />
                   </a>
-                </div>
+                </motion.div>
               ))}
-            </div>
+            </motion.div>
           )}
         </div>
       </div>
 
       <div className="px-6">
-        <div className="flex flex-col gap-3 bg-neutral-900 p-4 rounded-xl border border-neutral-800">
-          <input
-            placeholder="Destination"
-            className="px-3 py-2 bg-neutral-800 rounded text-neutral-200 border border-neutral-700 focus:border-blue-500 outline-none"
-            value={destination}
-            onChange={(e) => setDestination(e.target.value)}
-          />
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="flex flex-col gap-3 bg-neutral-900/50 p-4 rounded-xl border border-neutral-800/50 backdrop-blur-sm"
+        >
+          <div className="relative">
+            <input
+              placeholder="Destination Address"
+              className="w-full px-3 py-2 bg-neutral-800/50 rounded-lg text-neutral-200 border border-neutral-700/50 focus:border-blue-500 focus:bg-neutral-800 outline-none transition-all"
+              value={destination}
+              onChange={(e) => setDestination(e.target.value)}
+            />
+          </div>
 
-          <input
-            placeholder="Amount"
-            className="px-3 py-2 bg-neutral-800 rounded text-neutral-200 border border-neutral-700 focus:border-blue-500 outline-none"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-          />
+          <div className="relative">
+            <input
+              placeholder="Amount (ALPHA)"
+              className="w-full px-3 py-2 bg-neutral-800/50 rounded-lg text-neutral-200 border border-neutral-700/50 focus:border-blue-500 focus:bg-neutral-800 outline-none transition-all"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+          </div>
 
           <motion.button
+            whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={handleSend}
-            className="px-4 py-3 bg-green-600 rounded-xl text-white font-semibold flex items-center justify-center gap-2 shadow-lg shadow-green-500/10"
+            className="px-4 py-3 bg-linear-to-br from-green-600 to-green-700 rounded-xl text-white font-semibold flex items-center justify-center gap-2 shadow-lg shadow-green-500/20 hover:shadow-green-500/30 transition-shadow"
           >
-            <Send className="w-4 h-4" /> Send
+            <Send className="w-4 h-4" /> Send Transaction
           </motion.button>
-        </div>
+        </motion.div>
       </div>
 
-      <div className="mt-auto px-6 pb-6 pt-4 flex items-center justify-between border-t border-neutral-800/50">
-        <button
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3 }}
+        className="mt-auto px-6 pb-6 pt-4 flex items-center justify-between border-t border-neutral-800/50"
+      >
+        <motion.button
+          whileHover={{ scale: 1.05, x: 2 }}
+          whileTap={{ scale: 0.95 }}
           onClick={() => setShowSaveModal(true)}
-          className="flex items-center gap-2 text-xs text-neutral-500 hover:text-white transition-colors"
+          className="flex items-center gap-2 text-xs text-neutral-500 hover:text-blue-400 transition-colors group"
         >
-          <Download className="w-3 h-3" />
-          Backup Wallet
-        </button>
+          <motion.div
+            whileHover={{ y: -1 }}
+            transition={{ type: "spring", stiffness: 300 }}
+          >
+            <Download className="w-3 h-3 group-hover:drop-shadow-[0_0_4px_rgba(59,130,246,0.5)]" />
+          </motion.div>
+          <span className="font-medium">Backup Wallet</span>
+        </motion.button>
 
-        <button
+        <motion.button
+          whileHover={{ scale: 1.05, x: -2 }}
+          whileTap={{ scale: 0.95 }}
           onClick={() => setShowDeleteModal(true)}
-          className="flex items-center gap-2 text-xs text-neutral-500 hover:text-red-400 transition-colors"
+          className="flex items-center gap-2 text-xs text-neutral-500 hover:text-red-400 transition-colors group"
         >
-          <Trash2 className="w-3 h-3" />
-          Delete Wallet
-        </button>
-      </div>
+          <motion.div
+            whileHover={{ rotate: [0, -10, 10, -10, 0] }}
+            transition={{ duration: 0.5 }}
+          >
+            <Trash2 className="w-3 h-3 group-hover:drop-shadow-[0_0_4px_rgba(239,68,68,0.5)]" />
+          </motion.div>
+          <span className="font-medium">Delete Wallet</span>
+        </motion.button>
+      </motion.div>
 
       <SaveWalletModal
         show={showSaveModal}

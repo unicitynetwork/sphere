@@ -1,4 +1,5 @@
 import { AlertTriangle, Download } from "lucide-react";
+import { motion } from "framer-motion";
 
 interface DeleteConfirmationModalProps {
   show: boolean;
@@ -16,12 +17,40 @@ export function DeleteConfirmationModal({
   if (!show) return null;
 
   return (
-    <div className="absolute inset-0 bg-black/90 flex items-center justify-center z-50 p-6">
-      <div className="bg-neutral-900 p-6 rounded-xl w-full max-w-md border border-red-900/50 shadow-2xl">
-        <div className="flex flex-col items-center text-center mb-6">
-          <div className="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center mb-4">
-            <AlertTriangle className="w-6 h-6 text-red-500" />
-          </div>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="absolute inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-6"
+      onClick={onCancel}
+    >
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.9, opacity: 0, y: 20 }}
+        transition={{ type: "spring", duration: 0.4 }}
+        className="bg-neutral-900 p-6 rounded-xl w-full max-w-md border border-red-900/50 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.1 }}
+          className="flex flex-col items-center text-center mb-6"
+        >
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
+            className="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center mb-4"
+          >
+            <motion.div
+              animate={{ rotate: [0, -10, 10, -10, 0] }}
+              transition={{ delay: 0.3, duration: 0.5 }}
+            >
+              <AlertTriangle className="w-6 h-6 text-red-500" />
+            </motion.div>
+          </motion.div>
           <h3 className="text-white text-xl font-bold mb-2">
             Delete Wallet?
           </h3>
@@ -35,33 +64,44 @@ export function DeleteConfirmationModal({
             If you haven't saved your backup, your funds will be lost
             forever.
           </p>
-        </div>
+        </motion.div>
 
-        <div className="flex flex-col gap-3">
-          <button
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="flex flex-col gap-3"
+        >
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             onClick={onSaveFirst}
-            className="w-full py-3 bg-neutral-800 rounded-xl text-white font-medium border border-neutral-700 hover:bg-neutral-700 flex items-center justify-center gap-2"
+            className="w-full py-3 bg-neutral-800 rounded-xl text-white font-medium border border-neutral-700 hover:bg-neutral-700 flex items-center justify-center gap-2 transition-colors"
           >
             <Download className="w-4 h-4" />
             Save Backup First
-          </button>
+          </motion.button>
 
           <div className="flex gap-3 mt-2">
-            <button
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               onClick={onCancel}
-              className="flex-1 py-3 bg-neutral-800 rounded-xl text-white font-medium hover:bg-neutral-700"
+              className="flex-1 py-3 bg-neutral-800 rounded-xl text-white font-medium hover:bg-neutral-700 transition-colors"
             >
               Cancel
-            </button>
-            <button
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               onClick={onConfirmDelete}
               className="flex-1 py-3 bg-red-600/20 text-red-500 border border-red-900/50 rounded-xl font-medium hover:bg-red-600 hover:text-white transition-all"
             >
               Delete Anyway
-            </button>
+            </motion.button>
           </div>
-        </div>
-      </div>
-    </div>
+        </motion.div>
+      </motion.div>
+    </motion.div>
   );
 }
