@@ -160,7 +160,7 @@ export function useTransactions() {
   }, [transactionDetailsCache]);
 
   const analyzeTransaction = useCallback(
-    (tx: TransactionHistoryItem, detail: TransactionDetail | undefined, wallet: Wallet) => {
+    (tx: TransactionHistoryItem, detail: TransactionDetail | undefined, wallet: Wallet, selectedAddress?: string) => {
       if (!detail || !wallet) {
         return {
           direction: "unknown" as const,
@@ -170,8 +170,11 @@ export function useTransactions() {
         };
       }
 
-      // Build set of all our addresses including potential change addresses
+      // Build set of all our wallet addresses (for change detection)
       const walletAddresses = new Set(wallet.addresses.map((a) => a.address.toLowerCase()));
+
+      // Current address we're viewing (if specified)
+      const currentAddress = selectedAddress?.toLowerCase();
 
 
       // IMPORTANT: Also include potential change addresses (first 20)
@@ -221,11 +224,13 @@ export function useTransactions() {
             // Collect all input addresses
             allInputAddresses.push(...addresses);
 
-            const isOurs = addresses.some((addr) =>
-              walletAddresses.has(addr.toLowerCase())
-            );
+            // Check if input is from the CURRENT selected address (if specified)
+            // or from any wallet address (if no specific address selected)
+            const isFromCurrentAddress = currentAddress
+              ? addresses.some((addr) => addr.toLowerCase() === currentAddress)
+              : addresses.some((addr) => walletAddresses.has(addr.toLowerCase()));
 
-            if (isOurs) {
+            if (isFromCurrentAddress) {
               isOurInput = true;
               // Add to total input amount for fee calculation
               totalInputAmount += prevOutput.value;
@@ -239,9 +244,9 @@ export function useTransactions() {
       }
 
       // Analyze outputs to calculate amounts
-      let amountToUs = 0;  // What we received (outputs to our addresses)
-      let amountToOthers = 0;  // What was sent to others (outputs to non-our addresses)
-      const toAddresses: string[] = []; // External addresses (non-wallet)
+      let amountToUs = 0;  // What we received (outputs to current address)
+      let amountToOthers = 0;  // What was sent to others (outputs not to current address)
+      const toAddresses: string[] = []; // Addresses that are NOT the current address
       const allOutputAddresses: string[] = []; // All output addresses (including ours)
 
       for (const output of detail.vout) {
@@ -252,11 +257,13 @@ export function useTransactions() {
         // Collect ALL output addresses
         allOutputAddresses.push(...addresses);
 
-        const isOurOutput = addresses.some((addr) =>
-          walletAddresses.has(addr.toLowerCase())
-        );
+        // Check if output is to the CURRENT selected address (if specified)
+        // or to any wallet address (if no specific address selected)
+        const isToCurrentAddress = currentAddress
+          ? addresses.some((addr) => addr.toLowerCase() === currentAddress)
+          : addresses.some((addr) => walletAddresses.has(addr.toLowerCase()));
 
-        if (isOurOutput) {
+        if (isToCurrentAddress) {
           amountToUs += output.value;
         } else {
           amountToOthers += output.value;
@@ -339,11 +346,15 @@ export function useTransactions() {
         }
       } else {
         // We received: show FROM addresses (who sent to us)
-        finalFromAddresses = allInputAddresses.filter(
-          (addr) => !walletAddresses.has(addr.toLowerCase())
-        );
-        // To is us (don't show or show receiving addresses)
-        finalToAddresses = [];
+        if (currentAddress) {
+          // When viewing a specific address, show ALL input addresses (including our other wallet addresses)
+          finalFromAddresses = allInputAddresses;
+        } else {
+          // When viewing entire wallet, filter out our own addresses
+          finalFromAddresses = allInputAddresses.filter(
+            (addr) => !walletAddresses.has(addr.toLowerCase())
+          );
+        }
       }
 
       return {

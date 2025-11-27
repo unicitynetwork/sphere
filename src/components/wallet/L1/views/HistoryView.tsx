@@ -16,7 +16,8 @@ interface HistoryViewProps {
   analyzeTransaction: (
     tx: TransactionHistoryItem,
     detail: TransactionDetail | undefined,
-    wallet: Wallet
+    wallet: Wallet,
+    selectedAddress?: string
   ) => {
     direction: string;
     amount: number;
@@ -94,7 +95,7 @@ export function HistoryView({
                 tx.tx_hash.substring(tx.tx_hash.length - 6);
 
               const detail = transactionDetails[tx.tx_hash];
-              const analysis = analyzeTransaction(tx, detail, wallet);
+              const analysis = analyzeTransaction(tx, detail, wallet, selectedAddress);
               const isSent = analysis.direction === "sent";
               const directionText = isSent ? "Sent" : "Received";
               const directionColor = isSent ? "#ef4444" : "#10b981";
