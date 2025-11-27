@@ -8,6 +8,8 @@ import {
   ChevronDown,
   Download,
   History,
+  ExternalLink,
+  Check,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import type { Wallet, TransactionPlan } from "../sdk";
@@ -60,6 +62,7 @@ export function MainWalletView({
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const handleSend = async () => {
     await onSendTransaction(destination, amount);
@@ -154,29 +157,62 @@ export function MainWalletView({
               <ChevronDown className="w-4 h-4 text-neutral-400" />
             </button>
 
-            <button
-              onClick={() => navigator.clipboard.writeText(selectedAddress)}
+            <a
+              href={`https://www.unicity.network/address/${selectedAddress}`}
+              target="_blank"
+              rel="noopener noreferrer"
               className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 hover:bg-neutral-700 text-neutral-300"
+              title="View in explorer"
             >
-              <Copy className="w-4 h-4" />
+              <ExternalLink className="w-4 h-4" />
+            </a>
+
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(selectedAddress);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              }}
+              className={`p-2 rounded-lg border transition-colors ${
+                copied
+                  ? "bg-green-600 border-green-500 text-white"
+                  : "bg-neutral-800 border-neutral-700 hover:bg-neutral-700 text-neutral-300"
+              }`}
+              title={copied ? "Copied!" : "Copy address"}
+            >
+              {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
             </button>
           </div>
 
           {showDropdown && (
             <div className="absolute z-20 mt-2 w-full bg-neutral-900 border border-neutral-700 rounded-xl shadow-xl max-h-52 overflow-y-auto">
               {addresses.map((a, i) => (
-                <button
+                <div
                   key={i}
-                  onClick={() => {
-                    onSelectAddress(a);
-                    setShowDropdown(false);
-                  }}
-                  className={`w-full text-left px-3 py-2 text-neutral-200 hover:bg-neutral-800 ${
+                  className={`flex items-center gap-2 px-3 py-2 hover:bg-neutral-800 ${
                     a === selectedAddress ? "bg-neutral-800" : ""
                   }`}
                 >
-                  {a}
-                </button>
+                  <button
+                    onClick={() => {
+                      onSelectAddress(a);
+                      setShowDropdown(false);
+                    }}
+                    className="flex-1 text-left text-xs text-neutral-200 font-mono"
+                  >
+                    {a}
+                  </button>
+                  <a
+                    href={`https://www.unicity.network/address/${a}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1 text-blue-400 hover:text-blue-300"
+                    title="View in explorer"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
               ))}
             </div>
           )}

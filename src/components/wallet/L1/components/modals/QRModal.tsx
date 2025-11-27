@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { Copy } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Copy, Check } from "lucide-react";
 import { motion } from "framer-motion";
 import QRCodeStyling from "qr-code-styling";
 import unicityLogo from "/images/unicity_logo.svg";
@@ -12,6 +12,7 @@ interface QRModalProps {
 
 export function QRModal({ show, address, onClose }: QRModalProps) {
   const qrCodeRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (show && address && qrCodeRef.current) {
@@ -85,16 +86,32 @@ export function QRModal({ show, address, onClose }: QRModalProps) {
             Your Address
           </p>
           <div className="flex items-center gap-2">
-            <p className="flex-1 text-xs font-mono text-white break-all text-center">
+            <a
+              href={`https://www.unicity.network/address/${address}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 text-xs font-mono text-blue-400 hover:text-blue-300 break-all text-center transition-colors"
+            >
               {address}
-            </p>
+            </a>
             <button
               onClick={() => {
                 navigator.clipboard.writeText(address);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
               }}
-              className="p-2 rounded-lg bg-neutral-700 hover:bg-neutral-600 text-white transition-colors"
+              className={`p-2 rounded-lg transition-colors ${
+                copied
+                  ? "bg-green-600 hover:bg-green-500"
+                  : "bg-neutral-700 hover:bg-neutral-600"
+              } text-white`}
+              title={copied ? "Copied!" : "Copy address"}
             >
-              <Copy className="w-4 h-4" />
+              {copied ? (
+                <Check className="w-4 h-4" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
             </button>
           </div>
         </div>
