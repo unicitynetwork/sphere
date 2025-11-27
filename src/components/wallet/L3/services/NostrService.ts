@@ -5,7 +5,7 @@ import {
   Filter,
   TokenTransferProtocol,
   Event,
-} from "@unicitylabs/nostr-sdk";
+} from "@unicitylabs/nostr-js-sdk";
 import { IdentityManager } from "./IdentityManager";
 import { Buffer } from "buffer";
 
