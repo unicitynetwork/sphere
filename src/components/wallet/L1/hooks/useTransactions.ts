@@ -137,25 +137,19 @@ export function useTransactions() {
         }
       }
 
-      console.log(`[loadTransactionHistory] Need to fetch ${requiredPrevTxIds.size} previous transactions`);
 
       // Fetch missing previous transactions and add to cache
       const newCache = { ...transactionDetailsCache };
-      let fetchedCount = 0;
-      let failedCount = 0;
 
       for (const txid of requiredPrevTxIds) {
         try {
           const prevTxDetail = (await getTransaction(txid)) as TransactionDetail;
           newCache[txid] = prevTxDetail;
-          fetchedCount++;
         } catch (err) {
           console.error(`Failed to fetch prev tx ${txid}:`, err);
-          failedCount++;
         }
       }
 
-      console.log(`[loadTransactionHistory] Fetched ${fetchedCount} prev txs, failed ${failedCount}, cache now has ${Object.keys(newCache).length} entries`);
       setTransactionDetailsCache(newCache);
     } catch (err) {
       console.error("Error loading transactions:", err);
@@ -179,11 +173,6 @@ export function useTransactions() {
       // Build set of all our addresses including potential change addresses
       const walletAddresses = new Set(wallet.addresses.map((a) => a.address.toLowerCase()));
 
-      // Debug: log our wallet addresses for problematic transactions
-      if (detail.txid === '09865cce1160599b5bfa602710fa5c1fb040b964148d884b2610da5c7a2f6dfb' ||
-          detail.txid === 'c3c48f4def4a07bf95346cec95eafe35b74f7a8635e9a544c2d331c89b50ec6e') {
-        console.log(`[analyzeTransaction] TX ${detail.txid} our wallet addresses:`, Array.from(walletAddresses));
-      }
 
       // IMPORTANT: Also include potential change addresses (first 20)
       // The wallet uses HD derivation for change, we need to check these too
@@ -211,7 +200,7 @@ export function useTransactions() {
       let isOurInput = false;
       let hasMissingInputData = false;
       let totalInputAmount = 0; // Sum of all input amounts (for fee calculation)
-      const fromAddresses: string[] = [];
+      const allInputAddresses: string[] = []; // All input addresses (for "from" field)
 
       if (detail.vin) {
         for (const input of detail.vin) {
@@ -229,6 +218,9 @@ export function useTransactions() {
               prevOutput.scriptPubKey.addresses ||
               (prevOutput.scriptPubKey.address ? [prevOutput.scriptPubKey.address] : []);
 
+            // Collect all input addresses
+            allInputAddresses.push(...addresses);
+
             const isOurs = addresses.some((addr) =>
               walletAddresses.has(addr.toLowerCase())
             );
@@ -237,8 +229,6 @@ export function useTransactions() {
               isOurInput = true;
               // Add to total input amount for fee calculation
               totalInputAmount += prevOutput.value;
-            } else {
-              fromAddresses.push(...addresses);
             }
           } else {
             // Previous transaction not in cache - cannot determine input ownership
@@ -251,12 +241,16 @@ export function useTransactions() {
       // Analyze outputs to calculate amounts
       let amountToUs = 0;  // What we received (outputs to our addresses)
       let amountToOthers = 0;  // What was sent to others (outputs to non-our addresses)
-      const toAddresses: string[] = [];
+      const toAddresses: string[] = []; // External addresses (non-wallet)
+      const allOutputAddresses: string[] = []; // All output addresses (including ours)
 
       for (const output of detail.vout) {
         const addresses =
           output.scriptPubKey.addresses ||
           (output.scriptPubKey.address ? [output.scriptPubKey.address] : []);
+
+        // Collect ALL output addresses
+        allOutputAddresses.push(...addresses);
 
         const isOurOutput = addresses.some((addr) =>
           walletAddresses.has(addr.toLowerCase())
@@ -269,19 +263,6 @@ export function useTransactions() {
           toAddresses.push(...addresses);
         }
 
-        // Debug: log all outputs for problematic transactions
-        if (detail.txid === '09865cce1160599b5bfa602710fa5c1fb040b964148d884b2610da5c7a2f6dfb' ||
-            detail.txid === 'c3c48f4def4a07bf95346cec95eafe35b74f7a8635e9a544c2d331c89b50ec6e') {
-          console.log(`[analyzeTransaction] TX ${detail.txid} output:`, {
-            addresses,
-            value: output.value,
-            isOurOutput,
-            inOurAddressSet: addresses.map(a => ({
-              addr: a,
-              inSet: walletAddresses.has(a.toLowerCase())
-            }))
-          });
-        }
       }
 
       // Determine direction based on inputs (like old wallet):
@@ -321,7 +302,6 @@ export function useTransactions() {
             const totalOutputAmount = amountToUs; // All outputs are to us
             const fee = totalInputAmount - totalOutputAmount;
             amount = fee > 0 ? fee : 0;
-            console.log(`[analyzeTransaction] Internal transfer detected for tx ${detail.txid}: all outputs to our addresses, showing fee ${fee} ALPHA`);
           }
         } else {
           // Incoming transaction
@@ -342,11 +322,35 @@ export function useTransactions() {
         }
       }
 
+      // Determine from/to addresses based on direction:
+      // - If SENT: fromAddresses = our addresses (inputs), toAddresses = external outputs
+      // - If RECEIVED: fromAddresses = external inputs, toAddresses = our addresses (outputs)
+      let finalFromAddresses: string[] = [];
+      let finalToAddresses: string[] = [];
+
+      if (direction === "sent") {
+        // We sent: show TO addresses (where we sent to)
+        if (toAddresses.length > 0) {
+          // Normal send to external addresses
+          finalToAddresses = toAddresses;
+        } else {
+          // Internal transfer: all outputs are to our addresses
+          finalToAddresses = allOutputAddresses;
+        }
+      } else {
+        // We received: show FROM addresses (who sent to us)
+        finalFromAddresses = allInputAddresses.filter(
+          (addr) => !walletAddresses.has(addr.toLowerCase())
+        );
+        // To is us (don't show or show receiving addresses)
+        finalToAddresses = [];
+      }
+
       return {
         direction,
         amount: amount, // output.value is already in ALPHA (decimal), not satoshis
-        fromAddresses,
-        toAddresses,
+        fromAddresses: finalFromAddresses,
+        toAddresses: finalToAddresses,
       };
     },
     [transactionDetailsCache]
