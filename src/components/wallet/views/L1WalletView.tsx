@@ -37,7 +37,7 @@ import {
   type TransactionPlan,
   type TransactionHistoryItem,
   type TransactionDetail,
-} from "../sdk/l1/sdk";
+} from "../l1/sdk";
 
 type ViewMode = "main" | "history";
 
