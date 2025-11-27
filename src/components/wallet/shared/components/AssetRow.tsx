@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { AggregatedAsset } from '../data/model'; // Импортируем наш класс
+import { AggregatedAsset } from '../../L3/data/model'; // Импортируем наш класс
 import { Box } from 'lucide-react';
 
 interface AssetRowProps {

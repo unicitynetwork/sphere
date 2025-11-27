@@ -1,9 +1,9 @@
 import { Plus, ArrowUpRight, Sparkles, TrendingUp, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { AssetRow } from '../L3/components/AssetRow';
+import { AssetRow } from '../../shared/components';
 import { useMemo } from 'react';
-import { useWallet } from '../L3/hooks/useWallet';
-import { CreateWalletFlow } from '../L3/onboarding/CreateWalletFlow';
+import { useWallet } from '../hooks/useWallet';
+import { CreateWalletFlow } from '../onboarding/CreateWalletFlow';
 
 export function L3WalletView({ showBalances }: { showBalances: boolean }) {
   const { identity, assets, isLoadingAssets, isLoadingIdentity, nametag } = useWallet();
