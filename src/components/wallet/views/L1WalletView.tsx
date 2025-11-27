@@ -33,6 +33,7 @@ import {
   getTransactionHistory,
   getTransaction,
   getCurrentBlockHeight,
+  saveWalletToStorage,
   type Wallet,
   type TransactionPlan,
   type TransactionHistoryItem,
@@ -525,6 +526,9 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
             result.wallet.addresses = addresses;
           }
 
+          // Save to localStorage
+          saveWalletToStorage("main", result.wallet);
+
           setWallet(result.wallet);
           const list = result.wallet.addresses.map((a) => a.address);
           setAddresses(list);
@@ -572,6 +576,9 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           }
           result.wallet.addresses = addresses;
         }
+
+        // Save to localStorage
+        saveWalletToStorage("main", result.wallet);
 
         setWallet(result.wallet);
         const list = result.wallet.addresses.map((a) => a.address);
