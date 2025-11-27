@@ -39,3 +39,10 @@ export interface IUserContact {
   lastMessage?: string;
   unread?: number;
 }
+
+export interface ICryptoPriceData {
+  priceUsd: number;
+  priceEur: number;
+  change24h: number;
+  timestamp: number;
+}

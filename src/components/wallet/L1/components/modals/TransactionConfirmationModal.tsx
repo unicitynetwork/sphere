@@ -1,4 +1,4 @@
-import type { TransactionPlan } from "../../../l1/sdk";
+import type { TransactionPlan } from "../../sdk";
 
 interface TransactionConfirmationModalProps {
   show: boolean;

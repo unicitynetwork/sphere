@@ -1,0 +1,74 @@
+[
+  {
+    "network": "unicity:testnet",
+    "assetKind": "non-fungible",
+    "name": "unicity",
+    "description": "Unicity testnet token type",
+    "id": "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9ef0efbe397867509"
+  },
+  {
+    "network": "unicity:testnet",
+    "assetKind": "fungible",
+    "name": "solana",
+    "symbol": "SOL",
+    "decimals": 9,
+    "description": "Solana testnet coin on Unicity",
+    "icons": [
+      { "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/svg/icon/sol.svg" }, 
+      { "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/sol.png" }
+    ],
+    "id": "dee5f8ce778562eec90e9c38a91296a023210ccc76ff4c29d527ac3eb64ade93"
+  },
+  {
+    "network": "unicity:testnet",
+    "assetKind": "fungible",
+    "name": "bitcoin",
+    "symbol": "BTC",
+    "decimals": 8,
+    "description": "Bitcoin testnet coin on Unicity",
+    "icons": [
+      { "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/svg/icon/btc.svg" }, 
+      { "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/btc.png" }
+    ],
+    "id": "86bc190fcf7b2d07c6078de93db803578760148b16d4431aa2f42a3241ff0daa"
+  },
+  {
+    "network": "unicity:testnet",
+    "assetKind": "fungible",
+    "name": "ethereum",
+    "symbol": "ETH",
+    "decimals": 18,
+    "description": "Ethereum testnet coin on Unicity",
+    "icons": [
+      { "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/svg/icon/eth.svg" }, 
+      { "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/eth.png" }
+    ],
+    "id": "3c2450f2fd867e7bb60c6a69d7ad0e53ce967078c201a3ecaa6074ed4c0deafb"
+  },
+  {
+    "network": "unicity:testnet",
+    "assetKind": "fungible",
+    "name": "tether",
+    "symbol": "USDT",
+    "decimals": 6,
+    "description": "Tether (Ethereum) testnet coin on Unicity",
+    "icons": [
+      { "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/svg/icon/usdt.svg" }, 
+      { "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/usdt.png" }
+    ],
+    "id": "40d25444648418fe7efd433e147187a3a6adf049ac62bc46038bda5b960bf690"
+  },
+  {
+    "network": "unicity:testnet",
+    "assetKind": "fungible",
+    "name": "usd-coin",
+    "symbol": "USDC",
+    "decimals": 6,
+    "description": "USDC (Ethereum) testnet coin on Unicity",
+    "icons": [
+      { "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/svg/icon/usdc.svg" }, 
+      { "url": "https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/icon/usdc.png" }
+    ],
+    "id": "2265121770fa6f41131dd9a6cc571e28679263d09a53eb2642e145b5b9a5b0a2"
+  }
+]

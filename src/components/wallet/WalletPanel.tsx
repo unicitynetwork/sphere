@@ -1,8 +1,8 @@
 import { Wallet, Eye, EyeOff, Layers, Network } from 'lucide-react';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { L1WalletView } from './l1/views/L1WalletView';
-import { L3WalletView } from './l3/views/L3WalletView';
+import { L1WalletView } from './L1/views/L1WalletView';
+import { L3WalletView } from './L3/views/L3WalletView';
 
 type LayerType = 'L1' | 'L3';
 
