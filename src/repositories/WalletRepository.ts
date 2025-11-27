@@ -1,4 +1,4 @@
-import { Token, Wallet } from "../data/model";
+import { Token, Wallet } from "../components/wallet/L3/data/model";
 import { v4 as uuidv4 } from "uuid";
 
 const STORAGE_KEY_WALLET = "unicity_wallet_data";
@@ -57,10 +57,43 @@ export class WalletRepository {
     return this._wallet?.tokens || [];
   }
 
+  private isSameToken(t1: Token, t2: Token): boolean {
+    if (t1.id === t2.id) return true;
+
+    try {
+      const p1 = JSON.parse(t1.jsonData || "{}");
+      const p2 = JSON.parse(t2.jsonData || "{}");
+
+      const id1 = p1.genesis?.data?.tokenId;
+      const id2 = p2.genesis?.data?.tokenId;
+
+      if (id1 && id2 && id1 === id2) return true;
+    } catch {
+      return false;
+    }
+
+    return false;
+  }
+
   addToken(token: Token): void {
-    if (!this._wallet) throw new Error("Wallet not initialized");
+    console.log("💾 Repository: Adding token...", token.id);
+    if (!this._wallet) {
+      console.error("💾 Repository: Wallet not initialized!");
+      return;
+    }
 
     const currentTokens = this._wallet.tokens;
+
+    const isDuplicate = currentTokens.some((existing) =>
+      this.isSameToken(existing, token)
+    );
+
+    if (isDuplicate) {
+      console.warn(
+        `⛔ Duplicate token detected (CoinID: ${token.coinId}). Skipping add.`
+      );
+      return;
+    }
 
     if (currentTokens.some((t) => t.id === token.id)) {
       console.warn(`Token ${token.id} already exists`);
@@ -77,6 +110,7 @@ export class WalletRepository {
     );
 
     this.saveWallet(updatedWallet);
+    console.log(`💾 Repository: Saved! Total tokens: ${updatedTokens.length}`);
   }
 
   removeToken(tokenId: string): void {

@@ -83,6 +83,7 @@ export class NametagService {
         );
 
         if (published) {
+          this.setActiveNametag(nametag);
           return { status: "success", token: sdkToken };
         } else {
           return {
@@ -193,13 +194,13 @@ export class NametagService {
     }
   }
 
-  private saveNametagToStorage(nametag: string, token: Token<any>){
+  private saveNametagToStorage(nametag: string, token: Token<any>) {
     const nametagData = {
       nametag: nametag,
       token: token.toJSON(),
       timeStamp: Date.now(),
       format: "txf",
-      version: "2.0"
+      version: "2.0",
     };
 
     const raw = localStorage.getItem(STORAGE_KEY_NAMETAGS);
@@ -208,5 +209,37 @@ export class NametagService {
     registry[nametag] = nametagData;
 
     localStorage.setItem(STORAGE_KEY_NAMETAGS, JSON.stringify(registry));
+  }
+
+  setActiveNametag(nametag: string) {
+    localStorage.setItem("unicity_active_nametag", nametag);
+  }
+
+  getActiveNametag(): string | null {
+    return localStorage.getItem("unicity_active_nametag");
+  }
+
+  async getAllNametagTokens(): Promise<Token<any>[]> {
+    const raw = localStorage.getItem(STORAGE_KEY_NAMETAGS);
+    if (!raw) return [];
+
+    const registry = JSON.parse(raw);
+
+    console.log(registry)
+    
+    const promises = Object.values(registry).map(async (entry: any) => {
+      try {
+        const tokenData = entry.token || entry;
+        
+        return await Token.fromJSON(tokenData);
+      } catch (e) {
+        console.error("Failed to parse nametag token", e);
+        return null;
+      }
+    });
+
+    const results = await Promise.all(promises);
+
+    return results.filter((t): t is Token<any> => t !== null);
   }
 }

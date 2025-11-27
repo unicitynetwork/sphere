@@ -1,15 +1,18 @@
 import { IdentityManager } from "../services/IdentityManager";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { NostrService } from "../services/NostrService";
-import { AggregatedAsset, Token } from "../data/model";
+import { AggregatedAsset, Token, TokenStatus } from "../data/model";
 import { ProxyAddress } from "@unicitylabs/state-transition-sdk/lib/address/ProxyAddress";
 import { Token as SdkToken } from "@unicitylabs/state-transition-sdk/lib/token/Token";
 import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
 import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment";
-import { randomBytes } from "crypto";
 import { ServiceProvider } from "../services/ServiceProvider";
 import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
 import { ApiService } from "../services/api";
+import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { NametagService } from "../services/NametagService";
+import { RegistryService } from "../services/RegistryService";
+import { useEffect } from "react";
 
 export const KEYS = {
   IDENTITY: ["wallet", "identity"],
@@ -17,6 +20,7 @@ export const KEYS = {
   PRICES: ["market", "prices"],
   REGISTRY: ["market", "registry"],
   AGGREGATED: ["wallet", "aggregated"],
+  NAMETAG: ["wallet", "nametag"],
 };
 
 const TOKENS_STORAGE_KEY = "unicity_wallet_tokens";
@@ -38,14 +42,34 @@ const saveTokensToStorage = (tokens: Token[]) => {
 
 const SESSION_KEY = "user-pin-1234";
 const identityManager = new IdentityManager(SESSION_KEY);
+const walletRepo = WalletRepository.getInstance();
+const nametagService = NametagService.getInstance(identityManager);
+const nostrService = NostrService.getInstance(identityManager);
+const registryService = RegistryService.getInstance();
 
 export const useWallet = () => {
   const queryClient = useQueryClient();
-  const nostrService = NostrService.getInstance(identityManager);
+
+  useEffect(() => {
+        const handleWalletUpdate = () => {
+            console.log("♻️ Wallet update detected! Force refreshing...");
+            queryClient.refetchQueries({ queryKey: KEYS.TOKENS });
+            queryClient.refetchQueries({ queryKey: KEYS.AGGREGATED });
+        };
+
+        window.addEventListener('wallet-updated', handleWalletUpdate);
+        return () => window.removeEventListener('wallet-updated', handleWalletUpdate);
+    }, [queryClient]);
 
   const identityQuery = useQuery({
     queryKey: KEYS.IDENTITY,
     queryFn: () => identityManager.getCurrentIdentity(),
+    staleTime: Infinity,
+  });
+
+  const nametagQuery = useQuery({
+    queryKey: KEYS.NAMETAG,
+    queryFn: () => nametagService.getActiveNametag(),
   });
 
   const pricesQuery = useQuery({
@@ -54,16 +78,10 @@ export const useWallet = () => {
     refetchInterval: 60000,
   });
 
-  const registryQuery = useQuery({
-    queryKey: KEYS.REGISTRY,
-    queryFn: ApiService.fetchRegistry,
-    staleTime: Infinity,
-  });
-
   const tokensQuery = useQuery({
     queryKey: KEYS.TOKENS,
     queryFn: async () => {
-      return loadTokensFromStorage();
+      return walletRepo.getTokens();
     },
     enabled: !!identityQuery.data,
   });
@@ -72,49 +90,62 @@ export const useWallet = () => {
     queryKey: KEYS.AGGREGATED,
     queryFn: async () => {
       const tokens = tokensQuery.data || [];
+
+      console.log("📊 Aggregating tokens:", tokens);
+
       const prices = pricesQuery.data || {};
-      const registry = registryQuery.data || [];
 
       const groupedTokens: Record<string, Token[]> = {};
 
       tokens.forEach((token) => {
-        const key = token.coinId || token.id || "unknown";
+        if (
+          token.status === TokenStatus.BURNED ||
+          token.status === TokenStatus.TRANSFERRED
+        )
+          return;
+        const key = token.coinId || token.id;
         if (!groupedTokens[key]) groupedTokens[key] = [];
         groupedTokens[key].push(token);
       });
 
       const assets: AggregatedAsset[] = Object.keys(groupedTokens).map(
-        (coinId) => {
-          const group = groupedTokens[coinId];
+        (key) => {
+          const group = groupedTokens[key];
           const firstToken = group[0];
 
-          const def = registry.find((r) => r.id === coinId);
+          const def = registryService.getCoinDefinition(key);
 
           let totalAmount = BigInt(0);
           group.forEach((t) => {
             if (t.amount) totalAmount += BigInt(t.amount);
           });
 
-          const ticker = def?.symbol || firstToken.symbol || "UNK";
+          const symbol = def?.symbol || firstToken.symbol || "UNK";
+          const name = def?.name || firstToken.name || "Unknown Token";
           const priceKey =
-            ticker.toLowerCase() === "btc"
+            symbol.toLowerCase() === "btc"
               ? "bitcoin"
-              : ticker.toLowerCase() === "eth"
+              : symbol.toLowerCase() === "eth"
               ? "ethereum"
-              : ticker.toLowerCase() === "sol"
+              : symbol.toLowerCase() === "sol"
               ? "solana"
               : "tether";
 
-          const priceData = prices[priceKey];
+          const decimals = def?.decimals || 0;
+
+          const priceData = priceKey ? prices[priceKey] : null;
+          const iconUrl = def
+            ? registryService.getIconUrl(def)
+            : firstToken.iconUrl;
 
           return new AggregatedAsset({
-            coinId: coinId,
-            symbol: ticker,
-            name: def?.name || firstToken.name,
+            coinId: key,
+            symbol: symbol,
+            name: name,
             totalAmount: totalAmount.toString(),
-            decimals: def?.decimals || 8,
+            decimals: decimals,
             tokenCount: group.length,
-            iconUrl: def?.icons?.[0]?.url || firstToken.iconUrl,
+            iconUrl: iconUrl,
             priceUsd: priceData?.priceUsd || 0,
             priceEur: priceData?.priceEur || 0,
             change24h: priceData?.change24h || 0,
@@ -122,9 +153,38 @@ export const useWallet = () => {
         }
       );
 
-      return assets;
+      return assets.sort((a, b) => {
+        const valA = a.priceUsd * a.getAmountAsDecimal();
+        const valB = b.priceUsd * b.getAmountAsDecimal();
+        return valB - valA;
+      });
     },
-    enabled: !!tokensQuery.data && !!pricesQuery.data,
+    enabled: !!tokensQuery.data,
+  });
+
+  const createWalletMutation = useMutation({
+    mutationFn: async () => {
+      const identity = await identityManager.generateNewIdentity();
+      walletRepo.createWallet(identity.address);
+      return identity;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["wallet"] });
+    },
+  });
+
+  const mintNametagMutation = useMutation({
+    mutationFn: async (nametag: string) => {
+      const result = await nametagService.mintNametagAndPublish(nametag);
+
+      if (result.status === "error") {
+        throw new Error(result.message);
+      }
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["wallet"] });
+    },
   });
 
   const sendTokenMutation = useMutation({
@@ -153,7 +213,7 @@ export const useWallet = () => {
       const sourceToken = await SdkToken.fromJSON(token.jsonData);
 
       const signingService = await SigningService.createFromSecret(secret);
-      const salt = randomBytes(32);
+      const salt = window.crypto.getRandomValues(Buffer.alloc(32));
 
       const transferCommitment = await TransferCommitment.create(
         sourceToken,
@@ -181,16 +241,14 @@ export const useWallet = () => {
 
       const transferTx = transferCommitment.toTransaction(inclusionProof);
 
-      const payload = {
+      const payload = JSON.stringify({
         sourceToken: sourceToken.toJSON(),
         transferTx: transferTx.toJSON(),
-      };
-
-      const payloadJson = JSON.stringify(payload);
+      });
 
       const sent = await nostrService.sendTokenTransfer(
         recipientPubkey,
-        payloadJson
+        payload
       );
 
       if (!sent) throw new Error("Failed to send p2p message via Nostr");
@@ -210,11 +268,16 @@ export const useWallet = () => {
   return {
     identity: identityQuery.data,
     isLoadingIdentity: identityQuery.isLoading,
-    
+
+    nametag: nametagQuery.data,
+    isLoadingNametag: nametagQuery.isLoading,
+
     assets: aggregatedAssetsQuery.data || [],
     isLoadingAssets: aggregatedAssetsQuery.isLoading,
 
     tokens: tokensQuery.data || [],
+    createWallet: createWalletMutation.mutateAsync,
+    mintNametag: mintNametagMutation.mutateAsync,
 
     sendToken: sendTokenMutation.mutateAsync,
     isSending: sendTokenMutation.isPending,
