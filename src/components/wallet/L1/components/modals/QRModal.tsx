@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Copy } from "lucide-react";
 import { motion } from "framer-motion";
 import QRCodeStyling from "qr-code-styling";
+import unicityLogo from "/images/unicity_logo.svg";
 
 interface QRModalProps {
   show: boolean;
@@ -20,15 +21,15 @@ export function QRModal({ show, address, onClose }: QRModalProps) {
         width: 240,
         height: 240,
         data: address,
-        margin: 5,
+        margin: 0,
         qrOptions: {
           typeNumber: 0,
           mode: "Byte",
-          errorCorrectionLevel: "H",
+          errorCorrectionLevel: "M",
         },
         imageOptions: {
           hideBackgroundDots: true,
-          imageSize: 0.25,
+          imageSize: 0.2,
           margin: 3,
         },
         dotsOptions: {
@@ -46,7 +47,7 @@ export function QRModal({ show, address, onClose }: QRModalProps) {
           type: "dot",
           color: "#ffffff",
         },
-        image: "/images/unicity_logo.svg",
+        image: unicityLogo,
       });
 
       qrCode.append(qrCodeRef.current);
@@ -70,13 +71,13 @@ export function QRModal({ show, address, onClose }: QRModalProps) {
           </p>
         </div>
 
-        <div className="relative bg-neutral-900 p-4 rounded-2xl shadow-inner mb-6 flex items-center justify-center">
+        <div className="relative bg-neutral-900 p-8 rounded-2xl shadow-inner mb-6 flex items-center justify-center">
           <div className="absolute top-2 left-2 w-6 h-6 border-t-4 border-l-4 border-orange-500 rounded-tl-lg"></div>
           <div className="absolute top-2 right-2 w-6 h-6 border-t-4 border-r-4 border-orange-500 rounded-tr-lg"></div>
           <div className="absolute bottom-2 left-2 w-6 h-6 border-b-4 border-l-4 border-orange-500 rounded-bl-lg"></div>
           <div className="absolute bottom-2 right-2 w-6 h-6 border-b-4 border-r-4 border-orange-500 rounded-br-lg"></div>
 
-          <div ref={qrCodeRef} className="flex items-center justify-center"></div>
+          <div ref={qrCodeRef} className="w-60 h-60"></div>
         </div>
 
         <div className="bg-neutral-800/50 rounded-xl p-4 mb-6 border border-neutral-700">
