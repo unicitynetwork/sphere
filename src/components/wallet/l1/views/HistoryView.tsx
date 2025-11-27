@@ -4,7 +4,7 @@ import type {
   TransactionHistoryItem,
   TransactionDetail,
   Wallet,
-} from "../../l1/sdk";
+} from "../sdk";
 
 interface HistoryViewProps {
   wallet: Wallet;

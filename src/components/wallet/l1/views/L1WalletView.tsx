@@ -6,9 +6,9 @@ import {
   exportWallet,
   downloadWalletFile,
   type Wallet,
-} from "../l1/sdk";
+} from "../sdk";
 import { useWalletOperations, useTransactions, useBalance } from "../hooks";
-import { NoWalletView, HistoryView, MainWalletView } from "./l1";
+import { NoWalletView, HistoryView, MainWalletView } from ".";
 
 type ViewMode = "main" | "history";
 

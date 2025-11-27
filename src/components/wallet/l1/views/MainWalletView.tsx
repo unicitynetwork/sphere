@@ -10,13 +10,13 @@ import {
   History,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import type { Wallet, TransactionPlan } from "../../l1/sdk";
+import type { Wallet, TransactionPlan } from "../sdk";
 import {
   QRModal,
   SaveWalletModal,
   DeleteConfirmationModal,
   TransactionConfirmationModal,
-} from "../../components/l1-modals";
+} from "../components/modals";
 
 interface MainWalletViewProps {
   wallet: Wallet;

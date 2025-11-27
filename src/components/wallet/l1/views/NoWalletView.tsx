@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { Upload } from "lucide-react";
 import { motion } from "framer-motion";
-import { LoadPasswordModal } from "../../components/l1-modals";
+import { LoadPasswordModal } from "../components/modals";
 
 interface NoWalletViewProps {
   onCreateWallet: () => void;

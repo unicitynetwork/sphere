@@ -1,7 +1,7 @@
 import { Plus, ArrowUpRight, Sparkles, TrendingUp } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { l2Assets } from '../../../data/mockData';
-import { AssetRow } from '../components/AssetRow';
+import { l2Assets } from '../../../../data/mockData';
+import { AssetRow } from '../../shared/components';
 import { useMemo } from 'react';
 
 export function L3WalletView({ showBalances }: { showBalances: boolean }) {

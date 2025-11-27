@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
-import type { IAsset } from '../../../types';
+import type { IAsset } from '../../../../types';
+
 
 interface AssetRowProps {
   asset: IAsset;

@@ -8,7 +8,7 @@ import {
   generateHDAddress,
   saveWalletToStorage,
   type Wallet,
-} from "../l1/sdk";
+} from "../sdk";
 
 export function useWalletOperations() {
   const [pendingFile, setPendingFile] = useState<File | null>(null);

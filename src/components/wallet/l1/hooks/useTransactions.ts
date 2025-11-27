@@ -10,7 +10,7 @@ import {
   type TransactionPlan,
   type TransactionHistoryItem,
   type TransactionDetail,
-} from "../l1/sdk";
+} from "../sdk";
 
 export function useTransactions() {
   const [txPlan, setTxPlan] = useState<TransactionPlan | null>(null);

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { getBalance } from "../l1/sdk";
-import { subscribeBlocks } from "../l1/sdk/network";
+import { getBalance } from "../sdk";
+import { subscribeBlocks } from "../sdk/network";
 
 export function useBalance(initialAddress?: string) {
   const [balance, setBalance] = useState<number>(0);
