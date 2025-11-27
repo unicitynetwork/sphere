@@ -29,6 +29,26 @@ let requestId = 0;
 const pending: Record<number, PendingRequest> = {};
 const blockSubscribers: ((header: BlockHeader) => void)[] = [];
 
+// Connection state callbacks
+const connectionCallbacks: (() => void)[] = [];
+
+// ----------------------------------------
+// CONNECTION STATE
+// ----------------------------------------
+export function isWebSocketConnected(): boolean {
+  return isConnected && ws !== null && ws.readyState === WebSocket.OPEN;
+}
+
+export function waitForConnection(): Promise<void> {
+  if (isWebSocketConnected()) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    connectionCallbacks.push(resolve);
+  });
+}
+
 // ----------------------------------------
 // SINGLETON CONNECT — prevents double connect
 // ----------------------------------------
@@ -56,6 +76,10 @@ export function connect(endpoint: string = DEFAULT_ENDPOINT): Promise<void> {
       isConnected = true;
       isConnecting = false;
       resolve();
+
+      // Notify all waiting callbacks
+      connectionCallbacks.forEach((cb) => cb());
+      connectionCallbacks.length = 0;
     };
 
     ws.onclose = () => {
@@ -148,13 +172,24 @@ export async function broadcast(rawHex: string) {
   return await rpc("blockchain.transaction.broadcast", [rawHex]);
 }
 
-export async function subscribeBlocks(cb: (header: BlockHeader) => void) {
+export async function subscribeBlocks(cb: (header: BlockHeader) => void): Promise<() => void> {
+  // Wait for connection to be established
+  await waitForConnection();
+
   blockSubscribers.push(cb);
   const header = await rpc("blockchain.headers.subscribe", []) as BlockHeader;
   // Call callback immediately with current block
   if (header) {
     cb(header);
   }
+
+  // Return unsubscribe function
+  return () => {
+    const index = blockSubscribers.indexOf(cb);
+    if (index > -1) {
+      blockSubscribers.splice(index, 1);
+    }
+  };
 }
 
 export interface TransactionHistoryItem {
