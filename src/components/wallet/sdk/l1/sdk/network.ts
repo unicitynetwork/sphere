@@ -150,7 +150,75 @@ export async function broadcast(rawHex: string) {
 
 export async function subscribeBlocks(cb: (header: BlockHeader) => void) {
   blockSubscribers.push(cb);
-  await rpc("blockchain.headers.subscribe", []);
+  const header = await rpc("blockchain.headers.subscribe", []) as BlockHeader;
+  // Call callback immediately with current block
+  if (header) {
+    cb(header);
+  }
+}
+
+export interface TransactionHistoryItem {
+  tx_hash: string;
+  height: number;
+  fee?: number;
+}
+
+export interface TransactionDetail {
+  txid: string;
+  version: number;
+  locktime: number;
+  vin: Array<{
+    txid: string;
+    vout: number;
+    scriptSig?: {
+      hex: string;
+    };
+    sequence: number;
+  }>;
+  vout: Array<{
+    value: number;
+    n: number;
+    scriptPubKey: {
+      hex: string;
+      type: string;
+      addresses?: string[];
+      address?: string;
+    };
+  }>;
+  blockhash?: string;
+  confirmations?: number;
+  time?: number;
+  blocktime?: number;
+}
+
+export async function getTransactionHistory(address: string): Promise<TransactionHistoryItem[]> {
+  const scriptHash = addressToScriptHash(address);
+  const result = await rpc("blockchain.scripthash.get_history", [scriptHash]);
+
+  if (!Array.isArray(result)) {
+    console.warn("get_history returned non-array:", result);
+    return [];
+  }
+
+  return result as TransactionHistoryItem[];
+}
+
+export async function getTransaction(txid: string) {
+  return await rpc("blockchain.transaction.get", [txid, true]);
+}
+
+export async function getBlockHeader(height: number) {
+  return await rpc("blockchain.block.header", [height, height]);
+}
+
+export async function getCurrentBlockHeight(): Promise<number> {
+  try {
+    const header = await rpc("blockchain.headers.subscribe", []) as BlockHeader;
+    return header?.height || 0;
+  } catch (err) {
+    console.error("Error getting current block height:", err);
+    return 0;
+  }
 }
 
 export function disconnect() {

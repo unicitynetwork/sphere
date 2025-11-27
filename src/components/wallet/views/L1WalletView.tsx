@@ -10,6 +10,8 @@ import {
   Download,
   AlertTriangle,
   Upload,
+  History,
+  ArrowLeft,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -28,9 +30,16 @@ import {
   downloadWalletFile,
   generateHDAddress,
   importWallet,
+  getTransactionHistory,
+  getTransaction,
+  getCurrentBlockHeight,
   type Wallet,
   type TransactionPlan,
+  type TransactionHistoryItem,
+  type TransactionDetail,
 } from "../sdk/l1/sdk";
+
+type ViewMode = "main" | "history";
 
 export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const [wallet, setWallet] = useState<Wallet | null>(null);
@@ -38,6 +47,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const [showDropdown, setShowDropdown] = useState(false);
 
   const [selectedAddress, setSelectedAddress] = useState<string>("");
+  const [viewMode, setViewMode] = useState<ViewMode>("main");
 
   const [balance, setBalance] = useState<number>(0);
   const [showQR, setShowQR] = useState(false);
@@ -47,6 +57,12 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
   const [txPlan, setTxPlan] = useState<TransactionPlan | null>(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
+
+  // Transaction History State
+  const [transactions, setTransactions] = useState<TransactionHistoryItem[]>([]);
+  const [loadingTransactions, setLoadingTransactions] = useState(false);
+  const [currentBlockHeight, setCurrentBlockHeight] = useState(0);
+  const [transactionDetails, setTransactionDetails] = useState<Record<string, TransactionDetail>>({});
 
   // Save/Load state
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -89,7 +105,8 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       await refreshBalance(list[0]);
 
       // Auto-refresh on new block - use ref to get current value
-      subscribeBlocks(() => {
+      subscribeBlocks((header) => {
+        setCurrentBlockHeight(header.height);
         if (selectedAddressRef.current) {
           refreshBalance(selectedAddressRef.current);
         }
@@ -105,6 +122,136 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
     const bal = await getBalance(addr);
     setBalance(bal);
+  }
+
+  // -------------------------------
+  // Load Transaction History
+  // -------------------------------
+  async function loadTransactions(addr: string) {
+    if (!addr) return;
+
+    setLoadingTransactions(true);
+    try {
+      // Get current block height first
+      const height = await getCurrentBlockHeight();
+      setCurrentBlockHeight(height);
+
+      const history = await getTransactionHistory(addr);
+      // Sort by height (most recent first)
+      const sorted = [...history].sort((a, b) => {
+        if (a.height === 0 && b.height === 0) return 0;
+        if (a.height === 0) return -1;
+        if (b.height === 0) return 1;
+        return b.height - a.height;
+      });
+      setTransactions(sorted);
+
+      // Load transaction details for all transactions
+      const details: Record<string, TransactionDetail> = {};
+      for (const tx of sorted) {
+        try {
+          const detail = await getTransaction(tx.tx_hash) as TransactionDetail;
+          details[tx.tx_hash] = detail;
+        } catch (err) {
+          console.error(`Error loading transaction ${tx.tx_hash}:`, err);
+        }
+      }
+      setTransactionDetails(details);
+    } catch (err) {
+      console.error("Error loading transactions:", err);
+      setTransactions([]);
+    } finally {
+      setLoadingTransactions(false);
+    }
+  }
+
+  // -------------------------------
+  // Analyze Transaction
+  // -------------------------------
+  function analyzeTransaction(tx: TransactionHistoryItem, detail: TransactionDetail | undefined) {
+    if (!detail || !wallet) {
+      return {
+        direction: "unknown" as const,
+        amount: 0,
+        fromAddresses: [] as string[],
+        toAddresses: [] as string[],
+      };
+    }
+
+    // Get all wallet addresses
+    const walletAddresses = new Set(wallet.addresses.map(a => a.address.toLowerCase()));
+
+    // Check inputs to see if we sent this transaction
+    let isOutgoing = false;
+    const fromAddresses: string[] = [];
+
+    // We need to fetch input transaction details to get sender addresses
+    // For now, we'll mark as outgoing if any output goes to an address we don't own
+    for (const output of detail.vout) {
+      const addresses = output.scriptPubKey.addresses || (output.scriptPubKey.address ? [output.scriptPubKey.address] : []);
+      for (const addr of addresses) {
+        if (!walletAddresses.has(addr.toLowerCase())) {
+          isOutgoing = true;
+        }
+      }
+    }
+
+    // Calculate net amount
+    let totalInput = 0;
+    let totalOutput = 0;
+    const toAddresses: string[] = [];
+
+    for (const output of detail.vout) {
+      const addresses = output.scriptPubKey.addresses || (output.scriptPubKey.address ? [output.scriptPubKey.address] : []);
+      const isOurOutput = addresses.some(addr => walletAddresses.has(addr.toLowerCase()));
+
+      if (isOurOutput) {
+        totalInput += output.value;
+      } else {
+        totalOutput += output.value;
+        toAddresses.push(...addresses);
+      }
+    }
+
+    const direction = isOutgoing ? "sent" : "received";
+    const amount = direction === "sent" ? totalOutput : totalInput;
+
+    return {
+      direction,
+      amount: amount / 100_000_000, // Convert satoshis to ALPHA
+      fromAddresses,
+      toAddresses,
+    };
+  }
+
+  // -------------------------------
+  // Format timestamp
+  // -------------------------------
+  function formatTimestamp(time: number | undefined) {
+    if (!time) return "";
+    const date = new Date(time * 1000);
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  // -------------------------------
+  // Switch to History View
+  // -------------------------------
+  function handleShowHistory() {
+    setViewMode("history");
+    loadTransactions(selectedAddress);
+  }
+
+  // -------------------------------
+  // Back to Main View
+  // -------------------------------
+  function handleBackToMain() {
+    setViewMode("main");
   }
 
   // -------------------------------
@@ -491,6 +638,165 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   // -------------------------------
   // WALLET UI
   // -------------------------------
+
+  // Render History View
+  if (viewMode === "history") {
+    return (
+      <div className="flex flex-col h-full relative">
+        {/* HEADER */}
+        <div className="px-6 mb-4">
+          <div className="flex items-center gap-3 mb-4">
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={handleBackToMain}
+              className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 hover:bg-neutral-700 text-white"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </motion.button>
+            <h2 className="text-xl text-white font-bold">Transaction History</h2>
+          </div>
+
+          <p className="text-xs text-neutral-400">
+            {selectedAddress.slice(0, 10)}...{selectedAddress.slice(-6)}
+          </p>
+        </div>
+
+        {/* TRANSACTION LIST */}
+        <div className="flex-1 overflow-y-auto px-6">
+          {loadingTransactions ? (
+            <div className="flex items-center justify-center h-32">
+              <p className="text-neutral-400">Loading transactions...</p>
+            </div>
+          ) : transactions.length === 0 ? (
+            <div className="flex items-center justify-center h-32">
+              <p className="text-neutral-400">No transactions found</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {transactions.map((tx) => {
+                const confirmations =
+                  tx.height > 0 && currentBlockHeight > 0
+                    ? Math.max(0, currentBlockHeight - tx.height + 1)
+                    : 0;
+                const statusColor = confirmations > 0 ? "#10b981" : "#fbbf24";
+                const statusText =
+                  confirmations > 0
+                    ? `${confirmations} confirmations`
+                    : "Unconfirmed";
+                const truncatedTxid =
+                  tx.tx_hash.substring(0, 6) +
+                  "..." +
+                  tx.tx_hash.substring(tx.tx_hash.length - 6);
+
+                const detail = transactionDetails[tx.tx_hash];
+                const analysis = analyzeTransaction(tx, detail);
+                const isSent = analysis.direction === "sent";
+                const directionText = isSent ? "Sent" : "Received";
+                const directionColor = isSent ? "#ef4444" : "#10b981";
+
+                return (
+                  <div
+                    key={tx.tx_hash}
+                    className="bg-neutral-900 border border-neutral-800 rounded-xl p-4"
+                  >
+                    {/* Header: Direction + TXID + Amount */}
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="text-sm font-semibold"
+                          style={{ color: directionColor }}
+                        >
+                          {isSent ? "↑" : "↓"} {directionText}
+                        </span>
+                        <a
+                          href={`https://www.unicity.network/tx/${tx.tx_hash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-mono text-xs text-blue-400 hover:text-blue-300"
+                        >
+                          {truncatedTxid}
+                        </a>
+                      </div>
+                      <div className="text-right">
+                        <div
+                          className="font-bold text-sm"
+                          style={{ color: directionColor }}
+                        >
+                          {isSent ? "-" : ""}
+                          {analysis.amount.toFixed(8)} ALPHA
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Status + Block + Time */}
+                    <div className="flex items-center gap-2 text-xs mb-2">
+                      <span style={{ color: statusColor }}>{statusText}</span>
+                      {tx.height > 0 && (
+                        <>
+                          <span className="text-neutral-600">•</span>
+                          <span className="text-neutral-400">
+                            Block {tx.height}
+                          </span>
+                        </>
+                      )}
+                      {detail?.blocktime && (
+                        <>
+                          <span className="text-neutral-600">•</span>
+                          <span className="text-neutral-400">
+                            {formatTimestamp(detail.blocktime)}
+                          </span>
+                        </>
+                      )}
+                    </div>
+
+                    {/* From/To Addresses */}
+                    {detail && (
+                      <div className="space-y-1">
+                        {analysis.fromAddresses.length > 0 && (
+                          <div className="text-xs text-neutral-400">
+                            From:{" "}
+                            <a
+                              href={`https://www.unicity.network/address/${analysis.fromAddresses[0]}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-400 hover:text-blue-300 font-mono"
+                            >
+                              {analysis.fromAddresses[0].substring(0, 11)}...
+                              {analysis.fromAddresses[0].substring(
+                                analysis.fromAddresses[0].length - 6
+                              )}
+                            </a>
+                          </div>
+                        )}
+                        {analysis.toAddresses.length > 0 && (
+                          <div className="text-xs text-neutral-400">
+                            To:{" "}
+                            <a
+                              href={`https://www.unicity.network/address/${analysis.toAddresses[0]}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-400 hover:text-blue-300 font-mono"
+                            >
+                              {analysis.toAddresses[0].substring(0, 11)}...
+                              {analysis.toAddresses[0].substring(
+                                analysis.toAddresses[0].length - 6
+                              )}
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Render Main View
   return (
     <div className="flex flex-col h-full relative">
       {/* CONFIRMATION MODAL */}
@@ -587,6 +893,17 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
             New Address
           </motion.button>
         </div>
+
+        {/* TRANSACTION HISTORY BUTTON */}
+        <motion.button
+          onClick={handleShowHistory}
+          whileHover={{ scale: 1.01 }}
+          whileTap={{ scale: 0.99 }}
+          className="w-full mb-4 px-4 py-3 rounded-xl bg-neutral-800/50 text-white text-sm border border-neutral-700/50 flex items-center justify-center gap-2 hover:bg-neutral-800"
+        >
+          <History className="w-4 h-4" />
+          Transaction History
+        </motion.button>
 
         {/* ADDRESS SELECT + COPY */}
         <div className="mb-6 relative">
