@@ -2,7 +2,6 @@ import { useEffect, useState, useRef } from "react";
 import {
   ArrowDownLeft,
   ArrowUpRight,
-  QrCode,
   Send,
   Trash2,
   Copy,
@@ -14,6 +13,7 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import { motion } from "framer-motion";
+import QRCodeStyling from "qr-code-styling";
 
 import {
   createWallet,
@@ -81,10 +81,56 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   // Use ref to avoid stale closure in subscribeBlocks callback
   const selectedAddressRef = useRef<string>("");
 
+  // QR Code ref
+  const qrCodeRef = useRef<HTMLDivElement>(null);
+
   // Keep ref in sync with state
   useEffect(() => {
     selectedAddressRef.current = selectedAddress;
   }, [selectedAddress]);
+
+  // Generate QR Code when modal opens
+  useEffect(() => {
+    if (showQR && selectedAddress && qrCodeRef.current) {
+      // Clear previous QR code
+      qrCodeRef.current.innerHTML = "";
+
+      const qrCode = new QRCodeStyling({
+        width: 240,
+        height: 240,
+        data: selectedAddress,
+        margin: 5,
+        qrOptions: {
+          typeNumber: 0,
+          mode: "Byte",
+          errorCorrectionLevel: "H",
+        },
+        imageOptions: {
+          hideBackgroundDots: true,
+          imageSize: 0.25,
+          margin: 3,
+        },
+        dotsOptions: {
+          type: "rounded",
+          color: "#ffffff",
+        },
+        backgroundOptions: {
+          color: "#1a1a1a",
+        },
+        cornersSquareOptions: {
+          type: "extra-rounded",
+          color: "#ffffff",
+        },
+        cornersDotOptions: {
+          type: "dot",
+          color: "#ffffff",
+        },
+        image: "/images/unicity_logo.svg",
+      });
+
+      qrCode.append(qrCodeRef.current);
+    }
+  }, [showQR, selectedAddress]);
 
   // -------------------------------
   // INIT: connect to RPC + load wallet
@@ -852,16 +898,62 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
       {/* QR Modal */}
       {showQR && (
-        <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-20">
-          <div className="bg-white p-6 rounded-xl shadow-2xl">
-            <QrCode size={180} />
-            <button
+        <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-20 p-4">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.2 }}
+            className="bg-linear-to-br from-neutral-900 to-neutral-800 p-8 rounded-2xl shadow-2xl border border-neutral-700 max-w-sm w-full"
+          >
+            {/* Header */}
+            <div className="text-center mb-6">
+              <h3 className="text-xl font-bold text-white mb-2">Receive ALPHA</h3>
+              <p className="text-sm text-neutral-400">
+                Scan QR code to receive payment
+              </p>
+            </div>
+
+            {/* QR Code Container with custom design */}
+            <div className="relative bg-neutral-900 p-4 rounded-2xl shadow-inner mb-6 flex items-center justify-center">
+              {/* Decorative corners */}
+              <div className="absolute top-2 left-2 w-6 h-6 border-t-4 border-l-4 border-orange-500 rounded-tl-lg"></div>
+              <div className="absolute top-2 right-2 w-6 h-6 border-t-4 border-r-4 border-orange-500 rounded-tr-lg"></div>
+              <div className="absolute bottom-2 left-2 w-6 h-6 border-b-4 border-l-4 border-orange-500 rounded-bl-lg"></div>
+              <div className="absolute bottom-2 right-2 w-6 h-6 border-b-4 border-r-4 border-orange-500 rounded-br-lg"></div>
+
+              {/* QR Code with rounded elements */}
+              <div ref={qrCodeRef} className="flex items-center justify-center"></div>
+            </div>
+
+            {/* Address Display */}
+            <div className="bg-neutral-800/50 rounded-xl p-4 mb-6 border border-neutral-700">
+              <p className="text-xs text-neutral-400 mb-2 text-center">
+                Your Address
+              </p>
+              <div className="flex items-center gap-2">
+                <p className="flex-1 text-xs font-mono text-white break-all text-center">
+                  {selectedAddress}
+                </p>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(selectedAddress);
+                  }}
+                  className="p-2 rounded-lg bg-neutral-700 hover:bg-neutral-600 text-white transition-colors"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Close Button */}
+            <motion.button
+              whileTap={{ scale: 0.98 }}
               onClick={() => setShowQR(false)}
-              className="block mt-4 mx-auto px-4 py-2 rounded-lg bg-neutral-900 text-white"
+              className="w-full px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-lg shadow-blue-500/20 transition-colors"
             >
               Close
-            </button>
-          </div>
+            </motion.button>
+          </motion.div>
         </div>
       )}
 
