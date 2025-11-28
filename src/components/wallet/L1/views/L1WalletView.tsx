@@ -227,7 +227,8 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const onSendTransaction = async (destination: string, amount: string) => {
     if (!wallet) return;
 
-    const result = await createTxPlan(wallet, destination, amount);
+    // Use selected address as sender
+    const result = await createTxPlan(wallet, destination, amount, selectedAddress);
 
     if (!result.success) {
       alert("Transaction failed: " + result.error);
