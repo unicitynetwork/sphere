@@ -61,7 +61,7 @@ export function WalletPanel() {
                 className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold uppercase tracking-wider rounded-lg relative z-10 transition-colors ${activeLayer === 'L3' ? 'text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
             >
                 <Network className="w-3 h-3" />
-                <span>Layer 2</span>
+                <span>Layer 3</span>
             </button>
 
             {/* Sliding Indicator */}
