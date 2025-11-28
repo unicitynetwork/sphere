@@ -6,6 +6,7 @@ import {
   getTransactionHistory,
   getTransaction,
   getCurrentBlockHeight,
+  generateHDAddress,
   type Wallet,
   type TransactionPlan,
   type TransactionHistoryItem,
@@ -19,6 +20,7 @@ export function useTransactions() {
   const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [currentBlockHeight, setCurrentBlockHeight] = useState(0);
   const [transactionDetails, setTransactionDetails] = useState<Record<string, TransactionDetail>>({});
+  const [transactionDetailsCache, setTransactionDetailsCache] = useState<Record<string, TransactionDetail>>({});
 
   const createTxPlan = useCallback(
     async (wallet: Wallet, destination: string, amount: string) => {
@@ -121,16 +123,44 @@ export function useTransactions() {
         }
       }
       setTransactionDetails(details);
+
+      // Collect all previous transaction IDs from inputs that we need to fetch
+      const requiredPrevTxIds = new Set<string>();
+      for (const tx of sorted) {
+        const detail = details[tx.tx_hash];
+        if (detail?.vin) {
+          for (const input of detail.vin) {
+            if (input.txid && !transactionDetailsCache[input.txid]) {
+              requiredPrevTxIds.add(input.txid);
+            }
+          }
+        }
+      }
+
+
+      // Fetch missing previous transactions and add to cache
+      const newCache = { ...transactionDetailsCache };
+
+      for (const txid of requiredPrevTxIds) {
+        try {
+          const prevTxDetail = (await getTransaction(txid)) as TransactionDetail;
+          newCache[txid] = prevTxDetail;
+        } catch (err) {
+          console.error(`Failed to fetch prev tx ${txid}:`, err);
+        }
+      }
+
+      setTransactionDetailsCache(newCache);
     } catch (err) {
       console.error("Error loading transactions:", err);
       setTransactions([]);
     } finally {
       setLoadingTransactions(false);
     }
-  }, []);
+  }, [transactionDetailsCache]);
 
   const analyzeTransaction = useCallback(
-    (tx: TransactionHistoryItem, detail: TransactionDetail | undefined, wallet: Wallet) => {
+    (tx: TransactionHistoryItem, detail: TransactionDetail | undefined, wallet: Wallet, selectedAddress?: string) => {
       if (!detail || !wallet) {
         return {
           direction: "unknown" as const,
@@ -140,53 +170,201 @@ export function useTransactions() {
         };
       }
 
+      // Build set of all our wallet addresses (for change detection)
       const walletAddresses = new Set(wallet.addresses.map((a) => a.address.toLowerCase()));
 
-      let isOutgoing = false;
-      const fromAddresses: string[] = [];
+      // Current address we're viewing (if specified)
+      const currentAddress = selectedAddress?.toLowerCase();
 
-      for (const output of detail.vout) {
-        const addresses =
-          output.scriptPubKey.addresses ||
-          (output.scriptPubKey.address ? [output.scriptPubKey.address] : []);
-        for (const addr of addresses) {
-          if (!walletAddresses.has(addr.toLowerCase())) {
-            isOutgoing = true;
+
+      // IMPORTANT: Also include potential change addresses (first 20)
+      // The wallet uses HD derivation for change, we need to check these too
+      // Otherwise, change outputs will be counted as "sent to others"
+      if (wallet.masterPrivateKey && wallet.chainCode) {
+        // Generate first 20 potential change addresses and add them to our address set
+        // This matches the behavior of the old wallet (index.html:7939-7952)
+        for (let i = 0; i < 20; i++) {
+          try {
+            // Change addresses use indices 1000000 + i (standard HD wallet gap)
+            // Or we might need to check the actual derivation path used by the wallet
+            const changeAddr = generateHDAddress(
+              wallet.masterPrivateKey,
+              wallet.chainCode,
+              1000000 + i // Standard change address offset
+            );
+            walletAddresses.add(changeAddr.address.toLowerCase());
+          } catch (err) {
+            console.error(`Failed to generate change address ${i}:`, err);
           }
         }
       }
 
-      let totalInput = 0;
-      let totalOutput = 0;
-      const toAddresses: string[] = [];
+      // Check inputs to determine if this is our transaction (we're spending)
+      let isOurInput = false;
+      let hasMissingInputData = false;
+      let totalInputAmount = 0; // Sum of all input amounts (for fee calculation)
+      const allInputAddresses: string[] = []; // All input addresses (for "from" field)
+
+      if (detail.vin) {
+        for (const input of detail.vin) {
+          // Skip coinbase transactions (mining/generation) - they have no txid
+          if (!input.txid) {
+            // This is a coinbase input (newly mined coins) - we're receiving, not spending
+            continue;
+          }
+
+          // Check cache for the previous transaction
+          const prevTx = transactionDetailsCache[input.txid];
+          if (prevTx && prevTx.vout && prevTx.vout[input.vout]) {
+            const prevOutput = prevTx.vout[input.vout];
+            const addresses =
+              prevOutput.scriptPubKey.addresses ||
+              (prevOutput.scriptPubKey.address ? [prevOutput.scriptPubKey.address] : []);
+
+            // Collect all input addresses
+            allInputAddresses.push(...addresses);
+
+            // Check if input is from the CURRENT selected address (if specified)
+            // or from any wallet address (if no specific address selected)
+            const isFromCurrentAddress = currentAddress
+              ? addresses.some((addr) => addr.toLowerCase() === currentAddress)
+              : addresses.some((addr) => walletAddresses.has(addr.toLowerCase()));
+
+            if (isFromCurrentAddress) {
+              isOurInput = true;
+              // Add to total input amount for fee calculation
+              totalInputAmount += prevOutput.value;
+            }
+          } else {
+            // Previous transaction not in cache - cannot determine input ownership
+            hasMissingInputData = true;
+            console.warn(`[analyzeTransaction] Missing prev tx ${input.txid} in cache for tx ${detail.txid}`);
+          }
+        }
+      }
+
+      // Analyze outputs to calculate amounts
+      let amountToUs = 0;  // What we received (outputs to current address)
+      let amountToOthers = 0;  // What was sent to others (outputs not to current address)
+      const toAddresses: string[] = []; // Addresses that are NOT the current address
+      const allOutputAddresses: string[] = []; // All output addresses (including ours)
 
       for (const output of detail.vout) {
         const addresses =
           output.scriptPubKey.addresses ||
           (output.scriptPubKey.address ? [output.scriptPubKey.address] : []);
-        const isOurOutput = addresses.some((addr) =>
-          walletAddresses.has(addr.toLowerCase())
-        );
 
-        if (isOurOutput) {
-          totalInput += output.value;
+        // Collect ALL output addresses
+        allOutputAddresses.push(...addresses);
+
+        // Check if output is to the CURRENT selected address (if specified)
+        // or to any wallet address (if no specific address selected)
+        const isToCurrentAddress = currentAddress
+          ? addresses.some((addr) => addr.toLowerCase() === currentAddress)
+          : addresses.some((addr) => walletAddresses.has(addr.toLowerCase()));
+
+        if (isToCurrentAddress) {
+          amountToUs += output.value;
         } else {
-          totalOutput += output.value;
+          amountToOthers += output.value;
           toAddresses.push(...addresses);
+        }
+
+      }
+
+      // Determine direction based on inputs (like old wallet):
+      // If ANY input is ours -> SENT (outgoing)
+      // If NO inputs are ours -> RECEIVED (incoming)
+      let direction: "sent" | "received";
+      let amount: number;
+
+      if (hasMissingInputData) {
+        // Fallback: if we're missing input data, try to infer from outputs
+        // If we have outputs to us but none to others -> likely RECEIVED
+        // If we have outputs to others -> likely SENT
+        if (amountToUs > 0 && amountToOthers === 0) {
+          direction = "received";
+          amount = amountToUs;
+        } else if (amountToOthers > 0) {
+          direction = "sent";
+          amount = amountToOthers;
+        } else {
+          // Unknown case
+          direction = "received";
+          amount = amountToUs;
+        }
+        console.warn(`[analyzeTransaction] Using fallback direction for tx ${detail.txid}: ${direction}, amountToUs=${amountToUs}, amountToOthers=${amountToOthers}`);
+      } else {
+        // Normal case: we have complete input data
+        direction = isOurInput ? "sent" : "received";
+
+        if (direction === "sent") {
+          if (amountToOthers > 0) {
+            // Normal send: we sent to other addresses
+            amount = amountToOthers;
+          } else {
+            // Special case: all outputs are back to us (internal transfer/consolidation)
+            // Show only the fee amount (like old wallet does at index.html:8144-8148)
+            // Fee = total inputs - total outputs
+            const totalOutputAmount = amountToUs; // All outputs are to us
+            const fee = totalInputAmount - totalOutputAmount;
+            amount = fee > 0 ? fee : 0;
+          }
+        } else {
+          // Incoming transaction
+          amount = amountToUs;
+        }
+
+        // Debug logging for problematic transactions
+        if (amount === 0 || amount < 0.00001) {
+          console.warn(`[analyzeTransaction] Small/zero amount for tx ${detail.txid}:`, {
+            direction,
+            isOurInput,
+            amountToUs,
+            amountToOthers,
+            finalAmount: amount,
+            voutCount: detail.vout.length,
+            vinCount: detail.vin?.length || 0
+          });
         }
       }
 
-      const direction = isOutgoing ? "sent" : "received";
-      const amount = direction === "sent" ? totalOutput : totalInput;
+      // Determine from/to addresses based on direction:
+      // - If SENT: fromAddresses = our addresses (inputs), toAddresses = external outputs
+      // - If RECEIVED: fromAddresses = external inputs, toAddresses = our addresses (outputs)
+      let finalFromAddresses: string[] = [];
+      let finalToAddresses: string[] = [];
+
+      if (direction === "sent") {
+        // We sent: show TO addresses (where we sent to)
+        if (toAddresses.length > 0) {
+          // Normal send to external addresses
+          finalToAddresses = toAddresses;
+        } else {
+          // Internal transfer: all outputs are to our addresses
+          finalToAddresses = allOutputAddresses;
+        }
+      } else {
+        // We received: show FROM addresses (who sent to us)
+        if (currentAddress) {
+          // When viewing a specific address, show ALL input addresses (including our other wallet addresses)
+          finalFromAddresses = allInputAddresses;
+        } else {
+          // When viewing entire wallet, filter out our own addresses
+          finalFromAddresses = allInputAddresses.filter(
+            (addr) => !walletAddresses.has(addr.toLowerCase())
+          );
+        }
+      }
 
       return {
         direction,
-        amount: amount / 100_000_000,
-        fromAddresses,
-        toAddresses,
+        amount: amount, // output.value is already in ALPHA (decimal), not satoshis
+        fromAddresses: finalFromAddresses,
+        toAddresses: finalToAddresses,
       };
     },
-    []
+    [transactionDetailsCache]
   );
 
   return {

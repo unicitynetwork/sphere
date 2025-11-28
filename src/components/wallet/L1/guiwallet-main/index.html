@@ -578,7 +578,81 @@
         .help-link:hover {
             text-decoration: underline;
         }
-        
+
+        /* Vesting Balance Styles */
+        .vesting-balance-section {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .vesting-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background-color 0.2s ease;
+        }
+
+        .vesting-row:hover {
+            background-color: rgba(0, 0, 0, 0.03);
+        }
+
+        .vesting-radio-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            margin: 0;
+            min-width: 90px;
+        }
+
+        .vesting-radio-label input[type="radio"] {
+            cursor: pointer;
+            margin: 0;
+            width: 14px;
+            height: 14px;
+        }
+
+        .vesting-mode-name {
+            font-weight: 500;
+            font-size: 13px;
+        }
+
+        .vesting-amount {
+            font-size: 14px;
+        }
+
+        .vesting-unconfirmed {
+            font-size: 12px;
+        }
+
+        .vesting-color-vested {
+            color: #4CAF50;
+        }
+
+        .vesting-color-unvested {
+            color: #FF9800;
+        }
+
+        .vesting-row-all .vesting-mode-name {
+            color: #2196F3;
+        }
+
+        /* Highlight selected vesting mode */
+        .vesting-row.selected {
+            background-color: rgba(33, 150, 243, 0.08);
+        }
+
+        .vesting-row-vested.selected {
+            background-color: rgba(76, 175, 80, 0.08);
+        }
+
+        .vesting-row-unvested.selected {
+            background-color: rgba(255, 152, 0, 0.08);
+        }
+
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
@@ -587,7 +661,7 @@
 </head>
 <body>
     <!-- Version Number -->
-    <div style="position: fixed; top: 10px; right: 10px; font-size: 10px; color: #999; z-index: 1000; font-family: monospace;">v0.4.5</div>
+    <div style="position: fixed; top: 10px; right: 10px; font-size: 10px; color: #999; z-index: 1000; font-family: monospace;">v0.4.7</div>
     
     <!-- Notification Container -->
     <div id="notificationContainer" class="notification-container"></div>
@@ -743,7 +817,7 @@
                     <circle cx="12" cy="12" r="2"></circle>
                     <path d="M6 12h.01M18 12h.01"></path>
                 </svg>
-                Unicity WEB GUI Wallet v0.4.5
+                Unicity WEB GUI Wallet v0.4.7
             </h1>
         </div>
         
@@ -809,33 +883,74 @@
             
             <!-- Wallet Info Section -->
             <div id="walletInfo" style="display: none; margin-bottom: 15px; padding: 15px; background-color: rgba(52, 211, 153, 0.05); border-radius: 8px; border: 1px solid rgba(52, 211, 153, 0.2);">
-                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-                    <div style="display: flex; align-items: center; gap: 15px;">
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <a id="walletAddressLink" href="#" target="_blank" style="color: var(--primary-color); text-decoration: none; font-family: monospace;">
-                                <span id="walletAddress">-</span>
-                            </a>
-                            <button onclick="copyAddress('wallet')" style="background: none; border: none; cursor: pointer; padding: 4px; display: flex; align-items: center;" title="Copy address">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                </svg>
-                            </button>
-                        </div>
-                        <div>
-                            <span id="walletBalance" style="font-weight: 600;">0 ALPHA</span>
-                            <span id="walletUnconfirmed" style="color: #999;">(0)</span>
-                            <span id="totalScannedBalance" style="display: none; margin-left: 15px;">
-                                | Total: <span style="font-weight: 600;" id="totalScannedAmount">0 ALPHA</span>
-                                <a href="#" onclick="showScannedWalletsDialog(); return false;" style="color: var(--primary-color); text-decoration: none; margin-left: 5px;" title="View all scanned wallets">[view all]</a>
-                            </span>
-                            <span id="totalScannedLoading" style="display: none; margin-left: 15px; color: #666;">
-                                | <span id="scanStatusText">Scanning wallets <span id="scanPercentage">0%</span></span>... <span style="display: inline-block; width: 12px; height: 12px; border: 2px solid #f3f3f3; border-top: 2px solid #666; border-radius: 50%; animation: spin 1s linear infinite;"></span>
-                            </span>
-                        </div>
+                <!-- Address Row -->
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <a id="walletAddressLink" href="#" target="_blank" style="color: var(--primary-color); text-decoration: none; font-family: monospace;">
+                            <span id="walletAddress">-</span>
+                        </a>
+                        <button onclick="copyAddress('wallet')" style="background: none; border: none; cursor: pointer; padding: 4px; display: flex; align-items: center;" title="Copy address">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                        </button>
                     </div>
                     <div>
                         <span style="font-size: 12px; color: #999;">Last update: <span id="lastUpdateTime">-</span></span>
+                    </div>
+                </div>
+
+                <!-- Vesting Balance Display -->
+                <div id="vestingBalanceSection" class="vesting-balance-section">
+                    <!-- All Balance Row -->
+                    <div class="vesting-row vesting-row-all">
+                        <label class="vesting-radio-label">
+                            <input type="radio" name="vestingMode" value="all" checked onchange="setVestingMode('all')">
+                            <span class="vesting-mode-name">All:</span>
+                        </label>
+                        <span id="walletBalance" class="vesting-amount" style="font-weight: 600;">0 ALPHA</span>
+                        <span id="walletUnconfirmed" class="vesting-unconfirmed" style="color: #999;">(0)</span>
+                    </div>
+
+                    <!-- Vested Balance Row -->
+                    <div class="vesting-row vesting-row-vested">
+                        <label class="vesting-radio-label">
+                            <input type="radio" name="vestingMode" value="vested" onchange="setVestingMode('vested')">
+                            <span class="vesting-mode-name vesting-color-vested">Vested:</span>
+                        </label>
+                        <span id="vestedBalance" class="vesting-amount vesting-color-vested">0 ALPHA</span>
+                        <span id="vestedUnconfirmed" class="vesting-unconfirmed" style="color: #999;"></span>
+                    </div>
+
+                    <!-- Unvested Balance Row -->
+                    <div class="vesting-row vesting-row-unvested">
+                        <label class="vesting-radio-label">
+                            <input type="radio" name="vestingMode" value="unvested" onchange="setVestingMode('unvested')">
+                            <span class="vesting-mode-name vesting-color-unvested">Unvested:</span>
+                        </label>
+                        <span id="unvestedBalance" class="vesting-amount vesting-color-unvested">0 ALPHA</span>
+                        <span id="unvestedUnconfirmed" class="vesting-unconfirmed" style="color: #999;"></span>
+                    </div>
+
+                    <!-- Classification Progress -->
+                    <div id="vestingClassificationProgress" style="display: none; margin-top: 8px; padding: 6px 10px; background-color: rgba(33, 150, 243, 0.1); border-radius: 4px;">
+                        <span style="font-size: 12px; color: #666;">
+                            Classifying coins... <span id="vestingProgressText">0/0</span>
+                            <span style="display: inline-block; width: 10px; height: 10px; border: 2px solid #f3f3f3; border-top: 2px solid #2196F3; border-radius: 50%; animation: spin 1s linear infinite; margin-left: 5px;"></span>
+                        </span>
+                    </div>
+
+                    <!-- Total Scanned Balance (BIP32 wallets) -->
+                    <div id="totalScannedBalanceRow" style="display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(0,0,0,0.1);">
+                        <span id="totalScannedBalance" style="font-size: 13px;">
+                            Total (all addresses): <span style="font-weight: 600;" id="totalScannedAmount">0 ALPHA</span>
+                            <a href="#" onclick="showScannedWalletsDialog(); return false;" style="color: var(--primary-color); text-decoration: none; margin-left: 5px;" title="View all scanned wallets">[view all]</a>
+                        </span>
+                        <span id="totalScannedLoading" style="display: none; margin-left: 10px; color: #666; font-size: 12px;">
+                            <span id="scanStatusText">Scanning <span id="scanPercentage">0%</span></span>
+                            <span style="display: inline-block; width: 10px; height: 10px; border: 2px solid #f3f3f3; border-top: 2px solid #666; border-radius: 50%; animation: spin 1s linear infinite; margin-left: 3px;"></span>
+                        </span>
                     </div>
                 </div>
             </div>
@@ -1569,7 +1684,16 @@ Anyone with your master private key can access all your funds.`;
             const MAX_TRANSACTIONS_PER_BLOCK = 30;
             let queueStatusElement = null;
             let autoClearTimeout = null;
-            
+
+            // Vesting classification state
+            const VESTING_THRESHOLD = 280000;  // Block 280000 is the cutoff
+            let vestingMode = 'all';  // 'all', 'vested', 'unvested'
+            let vestingClassificationInProgress = false;
+
+            // Per-address vesting cache: address -> { classifiedUtxos, vestingBalances }
+            window.addressVestingCache = new Map();
+            let addressVestingCache = window.addressVestingCache;
+
             // HTML elements
             // const masterKeyElement = document.getElementById('masterKey'); // Removed with Security section
             const addressList = document.getElementById('addressList');
@@ -2731,11 +2855,15 @@ Anyone with your master private key can access all your funds.`;
                     currentTransactions = [];
                     currentUtxos = [];
                     offlineUtxoData = null;
+                    // Clear vesting classification state
+                    addressVestingCache.clear();
+                    VestingClassifier.clearCache();
                     // Reset pagination
                     currentTransactionPage = 1;
                     currentUtxoPage = 1;
                     updateTransactionHistory();
                     updateCommonBalance();
+                    updateVestingBalanceDisplay();
                     updateUtxoListDisplay();
                     document.getElementById('transactionHistoryContainer').style.display = 'none';
                     
@@ -3034,6 +3162,359 @@ Anyone with your master private key can access all your funds.`;
                 BigInt.prototype.toJSON = function() {
                     return this.toString();
                 };
+            }
+
+            /**
+             * VestingClassifier - Traces UTXOs to their coinbase origin to determine vesting status
+             * VESTED: Coins from coinbase transactions in blocks <= VESTING_THRESHOLD (280000)
+             * UNVESTED: Coins from coinbase transactions in blocks > VESTING_THRESHOLD
+             */
+            window.VestingClassifier = {
+                // In-memory cache: txid -> { blockHeight, isCoinbase, inputTxId }
+                memoryCache: new Map(),
+
+                // IndexedDB cache name
+                DB_STORE_NAME: 'vestingCache',
+
+                /**
+                 * Trace a UTXO to its coinbase origin and determine vesting status
+                 * @param {Object} utxo - The UTXO to classify
+                 * @returns {Promise<{isVested: boolean, coinbaseHeight: number, error?: string}>}
+                 */
+                async classifyUtxo(utxo) {
+                    try {
+                        const result = await this.traceToOrigin(utxo.tx_hash);
+                        if (result.error) {
+                            return { isVested: null, coinbaseHeight: null, error: result.error };
+                        }
+                        return {
+                            isVested: result.coinbaseHeight <= VESTING_THRESHOLD,
+                            coinbaseHeight: result.coinbaseHeight
+                        };
+                    } catch (err) {
+                        console.error('Error classifying UTXO:', err);
+                        return { isVested: null, coinbaseHeight: null, error: err.message };
+                    }
+                },
+
+                /**
+                 * Trace a transaction to its coinbase origin
+                 * Alpha blockchain has single-input transactions, making this a linear trace
+                 * @param {string} txHash - Transaction hash to trace
+                 * @returns {Promise<{coinbaseHeight: number, error?: string}>}
+                 */
+                async traceToOrigin(txHash) {
+                    let currentTxHash = txHash;
+                    let iterations = 0;
+                    const MAX_ITERATIONS = 10000; // Safety limit
+
+                    while (iterations < MAX_ITERATIONS) {
+                        iterations++;
+
+                        // Check memory cache first
+                        const cached = this.memoryCache.get(currentTxHash);
+                        if (cached) {
+                            if (cached.isCoinbase) {
+                                // Skip cache if blockHeight is null - needs re-fetch
+                                if (cached.blockHeight !== null && cached.blockHeight !== undefined) {
+                                    return { coinbaseHeight: cached.blockHeight };
+                                }
+                                // Fall through to re-fetch
+                            } else {
+                                // Follow the input chain
+                                currentTxHash = cached.inputTxId;
+                                continue;
+                            }
+                        }
+
+                        // Check IndexedDB cache
+                        const dbCached = await this.loadFromIndexedDB(currentTxHash);
+                        if (dbCached) {
+                            // Also store in memory cache
+                            this.memoryCache.set(currentTxHash, dbCached);
+                            if (dbCached.isCoinbase) {
+                                // Skip cache if blockHeight is null - needs re-fetch
+                                if (dbCached.blockHeight !== null && dbCached.blockHeight !== undefined) {
+                                    return { coinbaseHeight: dbCached.blockHeight };
+                                }
+                                // Fall through to re-fetch
+                            } else {
+                                currentTxHash = dbCached.inputTxId;
+                                continue;
+                            }
+                        }
+
+                        // Fetch from Fulcrum
+                        const txData = await this.fetchTransaction(currentTxHash);
+                        if (txData.error) {
+                            return { coinbaseHeight: null, error: txData.error };
+                        }
+
+                        // Determine if this is a coinbase transaction
+                        const isCoinbase = this.isCoinbaseTransaction(txData);
+                        // Calculate block height - need both confirmations and currentBlockHeight
+                        let blockHeight = null;
+                        if (txData.confirmations && currentBlockHeight !== null && currentBlockHeight !== undefined) {
+                            blockHeight = currentBlockHeight - txData.confirmations + 1;
+                        }
+
+                        // Get input transaction ID (if not coinbase)
+                        let inputTxId = null;
+                        if (!isCoinbase && txData.vin && txData.vin.length > 0 && txData.vin[0].txid) {
+                            inputTxId = txData.vin[0].txid;
+                        }
+
+                        // Cache the result
+                        const cacheEntry = {
+                            blockHeight: blockHeight,
+                            isCoinbase: isCoinbase,
+                            inputTxId: inputTxId
+                        };
+                        this.memoryCache.set(currentTxHash, cacheEntry);
+                        await this.saveToIndexedDB(currentTxHash, cacheEntry);
+
+                        if (isCoinbase) {
+                            return { coinbaseHeight: blockHeight };
+                        }
+
+                        if (!inputTxId) {
+                            return { coinbaseHeight: null, error: 'Could not find input transaction' };
+                        }
+
+                        currentTxHash = inputTxId;
+                    }
+
+                    return { coinbaseHeight: null, error: 'Max iterations exceeded - possible loop' };
+                },
+
+                /**
+                 * Check if a transaction is a coinbase transaction
+                 */
+                isCoinbaseTransaction(txData) {
+                    // Coinbase transactions have a single input with no txid (or special coinbase field)
+                    if (txData.vin && txData.vin.length === 1) {
+                        const vin = txData.vin[0];
+                        // Check for coinbase field or missing txid
+                        if (vin.coinbase || (!vin.txid && vin.coinbase !== undefined)) {
+                            return true;
+                        }
+                        // Some formats use empty txid for coinbase
+                        if (vin.txid === '0000000000000000000000000000000000000000000000000000000000000000') {
+                            return true;
+                        }
+                    }
+                    return false;
+                },
+
+                /**
+                 * Fetch transaction data from Fulcrum
+                 */
+                async fetchTransaction(txHash) {
+                    return new Promise((resolve) => {
+                        // Note: electrumRequest callback signature is (result, error) - result first on success,
+                        // or (null, error) on error
+                        electrumRequest('blockchain.transaction.get', [txHash, true], (result, error) => {
+                            if (error) {
+                                const errorMsg = typeof error === 'object' ? (error.message || JSON.stringify(error)) : String(error);
+                                resolve({ error: errorMsg || 'Failed to fetch transaction' });
+                            } else if (result && typeof result === 'object' && result.txid) {
+                                // Valid transaction data
+                                resolve(result);
+                            } else {
+                                // Unexpected result format
+                                resolve({ error: 'Invalid transaction data received' });
+                            }
+                        });
+                    });
+                },
+
+                /**
+                 * Classify multiple UTXOs with progress callback
+                 * @param {Array} utxos - Array of UTXOs to classify
+                 * @param {Function} progressCallback - Called with (current, total)
+                 * @returns {Promise<{vested: Array, unvested: Array, errors: Array}>}
+                 */
+                async classifyUtxos(utxos, progressCallback) {
+                    const vested = [];
+                    const unvested = [];
+                    const errors = [];
+
+                    for (let i = 0; i < utxos.length; i++) {
+                        const utxo = utxos[i];
+                        const result = await this.classifyUtxo(utxo);
+
+                        if (result.error) {
+                            errors.push({ utxo, error: result.error });
+                            // Default to unvested on error for safety
+                            unvested.push({ ...utxo, vestingStatus: 'error', coinbaseHeight: null });
+                        } else if (result.isVested) {
+                            vested.push({ ...utxo, vestingStatus: 'vested', coinbaseHeight: result.coinbaseHeight });
+                        } else {
+                            unvested.push({ ...utxo, vestingStatus: 'unvested', coinbaseHeight: result.coinbaseHeight });
+                        }
+
+                        if (progressCallback) {
+                            progressCallback(i + 1, utxos.length);
+                        }
+
+                        // Yield to UI every 5 UTXOs to prevent blocking
+                        if (i % 5 === 0) {
+                            await new Promise(resolve => setTimeout(resolve, 0));
+                        }
+                    }
+
+                    return { vested, unvested, errors };
+                },
+
+                /**
+                 * Load cached entry from IndexedDB
+                 */
+                async loadFromIndexedDB(txHash) {
+                    return new Promise((resolve) => {
+                        try {
+                            const request = indexedDB.open('AlphaWallet', 2);
+                            request.onerror = () => resolve(null);
+                            request.onsuccess = (event) => {
+                                const db = event.target.result;
+                                if (!db.objectStoreNames.contains(this.DB_STORE_NAME)) {
+                                    db.close();
+                                    resolve(null);
+                                    return;
+                                }
+                                const transaction = db.transaction([this.DB_STORE_NAME], 'readonly');
+                                const store = transaction.objectStore(this.DB_STORE_NAME);
+                                const getRequest = store.get(txHash);
+                                getRequest.onsuccess = () => {
+                                    db.close();
+                                    resolve(getRequest.result || null);
+                                };
+                                getRequest.onerror = () => {
+                                    db.close();
+                                    resolve(null);
+                                };
+                            };
+                        } catch (err) {
+                            resolve(null);
+                        }
+                    });
+                },
+
+                /**
+                 * Save entry to IndexedDB
+                 */
+                async saveToIndexedDB(txHash, entry) {
+                    return new Promise((resolve) => {
+                        try {
+                            const request = indexedDB.open('AlphaWallet', 2);
+                            request.onerror = () => resolve(false);
+                            request.onupgradeneeded = (event) => {
+                                const db = event.target.result;
+                                if (!db.objectStoreNames.contains(this.DB_STORE_NAME)) {
+                                    db.createObjectStore(this.DB_STORE_NAME, { keyPath: 'txid' });
+                                }
+                            };
+                            request.onsuccess = (event) => {
+                                const db = event.target.result;
+                                if (!db.objectStoreNames.contains(this.DB_STORE_NAME)) {
+                                    db.close();
+                                    resolve(false);
+                                    return;
+                                }
+                                const transaction = db.transaction([this.DB_STORE_NAME], 'readwrite');
+                                const store = transaction.objectStore(this.DB_STORE_NAME);
+                                store.put({ txid: txHash, ...entry, timestamp: Date.now() });
+                                transaction.oncomplete = () => {
+                                    db.close();
+                                    resolve(true);
+                                };
+                                transaction.onerror = () => {
+                                    db.close();
+                                    resolve(false);
+                                };
+                            };
+                        } catch (err) {
+                            resolve(false);
+                        }
+                    });
+                },
+
+                /**
+                 * Clear all caches
+                 */
+                clearCache() {
+                    this.memoryCache.clear();
+                },
+
+                /**
+                 * Clear IndexedDB vesting cache (for when cached data is stale)
+                 */
+                async clearIndexedDBCache() {
+                    return new Promise((resolve) => {
+                        try {
+                            const request = indexedDB.open('AlphaWallet', 2);
+                            request.onerror = () => resolve(false);
+                            request.onsuccess = (event) => {
+                                const db = event.target.result;
+                                if (!db.objectStoreNames.contains(this.DB_STORE_NAME)) {
+                                    db.close();
+                                    resolve(true);
+                                    return;
+                                }
+                                const transaction = db.transaction([this.DB_STORE_NAME], 'readwrite');
+                                const store = transaction.objectStore(this.DB_STORE_NAME);
+                                const clearRequest = store.clear();
+                                clearRequest.onsuccess = () => {
+                                    db.close();
+                                    console.log('Vesting IndexedDB cache cleared');
+                                    resolve(true);
+                                };
+                                clearRequest.onerror = () => {
+                                    db.close();
+                                    resolve(false);
+                                };
+                            };
+                        } catch (err) {
+                            resolve(false);
+                        }
+                    });
+                },
+
+                /**
+                 * Clear all caches (memory and IndexedDB)
+                 */
+                async clearAllCaches() {
+                    this.memoryCache.clear();
+                    await this.clearIndexedDBCache();
+                }
+            };
+
+            /**
+             * Get or initialize vesting cache for a specific address
+             * @param {string} address - The address to get cache for
+             * @returns {Object} { classifiedUtxos, vestingBalances }
+             */
+            function getAddressVestingCache(address) {
+                if (!address) return null;
+                if (!addressVestingCache.has(address)) {
+                    addressVestingCache.set(address, {
+                        classifiedUtxos: { vested: [], unvested: [], all: [] },
+                        vestingBalances: { vested: 0n, unvested: 0n, all: 0n }
+                    });
+                }
+                return addressVestingCache.get(address);
+            }
+
+            /**
+             * Get the current address for vesting operations
+             * @returns {string|null} Current wallet or watch-only address
+             */
+            function getCurrentVestingAddress() {
+                if (watchOnlyMode && watchOnlyAddressValue) {
+                    return watchOnlyAddressValue;
+                } else if (wallet && wallet.addresses && wallet.addresses.length > 0) {
+                    return wallet.addresses[0].address;
+                }
+                return null;
             }
 
             // Helper function to convert bytes to hex string
@@ -4471,6 +4952,8 @@ Anyone with your master private key can access all your funds.`;
                             // Show loading indicator if we'll be doing background scan and have multiple wallets
                             const nonZeroWallets = uniqueWallets.filter(w => w.balance > 0).length;
                             if (nonZeroWallets > 1) {
+                                const rowEl = document.getElementById('totalScannedBalanceRow');
+                                if (rowEl) rowEl.style.display = 'block';
                                 document.getElementById('totalScannedLoading').style.display = 'inline';
                                 // Keep balance visible alongside loading
                                 document.getElementById('totalScannedBalance').style.display = 'inline';
@@ -5098,41 +5581,43 @@ Anyone with your master private key can access all your funds.`;
             
             // Update the main UI to show total scanned balance
             function updateScannedWalletsDisplay() {
+                const totalScannedBalanceRow = document.getElementById('totalScannedBalanceRow');
                 const totalScannedBalance = document.getElementById('totalScannedBalance');
                 const totalScannedLoading = document.getElementById('totalScannedLoading');
-                
+
                 if (!lastScannedWalletData || !lastScannedWalletData.wallets) {
-                    // Hide both total balance and loading indicator if no scan data
-                    totalScannedBalance.style.display = 'none';
-                    totalScannedLoading.style.display = 'none';
+                    // Hide the entire row if no scan data
+                    if (totalScannedBalanceRow) totalScannedBalanceRow.style.display = 'none';
                     return;
                 }
-                
+
                 // Count non-zero balance wallets
                 const nonZeroWallets = lastScannedWalletData.wallets.filter(w => w.balance > 0).length;
-                
+
                 if (nonZeroWallets <= 1 && !scanningActive) {
-                    // Hide both if only one or no wallets with balance (unless actively scanning)
-                    totalScannedBalance.style.display = 'none';
-                    totalScannedLoading.style.display = 'none';
+                    // Hide row if only one or no wallets with balance (unless actively scanning)
+                    if (totalScannedBalanceRow) totalScannedBalanceRow.style.display = 'none';
                     return;
                 }
-                
+
+                // Show the row for BIP32 wallets with multiple addresses
+                if (totalScannedBalanceRow) totalScannedBalanceRow.style.display = 'block';
+
                 // If actively scanning, show loading indicator
                 if (scanningActive) {
-                    totalScannedLoading.style.display = 'inline';
-                    // Hide balance during scan
-                    totalScannedBalance.style.display = 'none';
+                    if (totalScannedLoading) totalScannedLoading.style.display = 'inline';
+                    // Hide balance text during scan
+                    if (totalScannedBalance) totalScannedBalance.style.display = 'none';
                 } else if (nonZeroWallets > 1) {
                     // Show total balance if multiple wallets found and not scanning
                     const totalBalance = lastScannedWalletData.totalBalance || 0;
                     document.getElementById('totalScannedAmount').textContent = `${SatoshiMath.satoshisToAlpha(totalBalance)} ALPHA`;
-                    totalScannedBalance.style.display = 'inline';
-                    totalScannedLoading.style.display = 'none';
+                    if (totalScannedBalance) totalScannedBalance.style.display = 'inline';
+                    if (totalScannedLoading) totalScannedLoading.style.display = 'none';
                 } else {
-                    // Hide both if conditions not met
-                    totalScannedBalance.style.display = 'none';
-                    totalScannedLoading.style.display = 'none';
+                    // Hide both balance and loading within the row
+                    if (totalScannedBalance) totalScannedBalance.style.display = 'none';
+                    if (totalScannedLoading) totalScannedLoading.style.display = 'none';
                 }
             }
             
@@ -5379,13 +5864,28 @@ Anyone with your master private key can access all your funds.`;
                 const content = document.createElement('div');
                 content.style.cssText = 'padding: 20px; overflow-y: auto; flex: 1;';
                 
+                // Check if master keys are available for switching
+                const canSwitchAddresses = lastScannedWalletData.masterKey && lastScannedWalletData.masterChainCode;
+
                 // Recreate the wallet list
                 lastScannedWalletData.wallets.forEach(walletInfo => {
                     const walletDiv = document.createElement('div');
-                    walletDiv.style.cssText = 'padding: 15px; margin-bottom: 10px; background: #f8f9fa; border-radius: 8px; cursor: pointer; transition: background 0.2s;';
-                    walletDiv.onmouseover = () => walletDiv.style.background = '#e9ecef';
-                    walletDiv.onmouseout = () => walletDiv.style.background = '#f8f9fa';
-                    
+                    walletDiv.style.cssText = `padding: 15px; margin-bottom: 10px; background: #f8f9fa; border-radius: 8px; cursor: ${canSwitchAddresses ? 'pointer' : 'default'}; transition: background 0.2s;${!canSwitchAddresses ? ' opacity: 0.7;' : ''}`;
+                    if (canSwitchAddresses) {
+                        walletDiv.onmouseover = () => walletDiv.style.background = '#e9ecef';
+                        walletDiv.onmouseout = () => walletDiv.style.background = '#f8f9fa';
+                    }
+
+                    // Determine action text based on availability
+                    let actionText;
+                    if (!canSwitchAddresses) {
+                        actionText = 'Re-import wallet.dat to switch';
+                    } else if (walletInfo.balance === -1) {
+                        actionText = 'Offline';
+                    } else {
+                        actionText = 'Click to load';
+                    }
+
                     walletDiv.innerHTML = `
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <div>
@@ -5400,14 +5900,20 @@ Anyone with your master private key can access all your funds.`;
                                 <div style="font-weight: bold; color: var(--primary-color);">
                                     ${walletInfo.balance === -1 ? 'Balance Unknown' : `${SatoshiMath.satoshisToAlpha(walletInfo.balance)} ALPHA`}
                                 </div>
-                                <div style="font-size: 11px; color: #666;">
-                                    ${walletInfo.balance === -1 ? 'Offline' : 'Click to load'}
+                                <div style="font-size: 11px; color: ${canSwitchAddresses ? '#666' : '#999'};">
+                                    ${actionText}
                                 </div>
                             </div>
                         </div>
                     `;
                     
                     walletDiv.onclick = () => {
+                        // Check if master key is available (not from cache-only data)
+                        if (!lastScannedWalletData.masterKey || !lastScannedWalletData.masterChainCode) {
+                            showInAppNotification('Wallet Not Available', 'Please re-import the wallet.dat file to switch addresses. Cached data does not include the master key.', 'warning');
+                            return;
+                        }
+
                         document.body.removeChild(modal);
                         // Reconstruct full wallet info from stored data
                         const fullWalletInfo = deriveAddressAtIndex(
@@ -5420,10 +5926,10 @@ Anyone with your master private key can access all your funds.`;
                         );
                         fullWalletInfo.balance = walletInfo.balance;
                         fullWalletInfo.utxoCount = walletInfo.utxoCount;
-                        
+
                         // Store the extracted wallet data globally before importing
                         extractedWalletData = lastScannedWalletData;
-                        
+
                         selectWalletForImport(fullWalletInfo);
                     };
                     
@@ -5546,7 +6052,10 @@ Anyone with your master private key can access all your funds.`;
                 currentTransactionPage = 1;
                 currentUtxoPage = 1;
                 offlineUtxoData = null;
-                
+                // Clear vesting classification state
+                addressVestingCache.clear();
+                VestingClassifier.clearCache();
+
                 // Clear UI displays
                 if (walletBalance) walletBalance.textContent = '0.00000000 ALPHA';
                 if (walletUnconfirmed) walletUnconfirmed.textContent = '';
@@ -6142,7 +6651,10 @@ Anyone with your master private key can access all your funds.`;
                             currentTransactions = [];
                             lastScannedWalletData = null;
                             scannedWallets = [];
-                            
+                            // Clear vesting classification state
+                            addressVestingCache.clear();
+                            VestingClassifier.clearCache();
+
                             // Load selected wallet
                             loadWalletByKey(selectedKey);
                             showInAppNotification('Wallet Switched', 'Successfully switched wallet', 'success');
@@ -6759,7 +7271,7 @@ Anyone with your master private key can access all your funds.`;
                             if (response.id && electrumCallbacks[response.id]) {
                                 const callback = electrumCallbacks[response.id];
                                 delete electrumCallbacks[response.id];
-                                
+
                                 if (response.error) {
                                     console.error('Electrum error:', response.error);
                                     callback(null, response.error);
@@ -7782,8 +8294,233 @@ Anyone with your master private key can access all your funds.`;
                 
                 // Handle watch-only mode visibility
                 updateWatchOnlyMode();
+
+                // Trigger vesting classification if connected
+                if (electrumConnected && currentUtxos && currentUtxos.length > 0) {
+                    classifyAllUtxos();
+                }
             }
-            
+
+            /**
+             * Classify all current UTXOs by vesting status
+             * This runs asynchronously after UTXOs are fetched
+             */
+            async function classifyAllUtxos() {
+                if (vestingClassificationInProgress) {
+                    console.log('Vesting classification already in progress');
+                    return;
+                }
+
+                // Ensure we have current block height for accurate classification
+                if (currentBlockHeight === null || currentBlockHeight === undefined) {
+                    console.log('Waiting for block height before vesting classification...');
+                    // Retry after a short delay
+                    setTimeout(() => {
+                        if (currentBlockHeight !== null && currentBlockHeight !== undefined) {
+                            classifyAllUtxos();
+                        }
+                    }, 1000);
+                    return;
+                }
+
+                // Get current address for caching
+                const currentAddress = getCurrentVestingAddress();
+                if (!currentAddress) {
+                    console.log('No current address for vesting classification');
+                    updateVestingBalanceDisplay();
+                    return;
+                }
+
+                // Get or initialize cache for this address
+                const addressCache = getAddressVestingCache(currentAddress);
+
+                if (!currentUtxos || currentUtxos.length === 0) {
+                    // Reset classified UTXOs for this address
+                    addressCache.classifiedUtxos = { vested: [], unvested: [], all: [] };
+                    addressCache.vestingBalances = { vested: 0n, unvested: 0n, all: 0n };
+                    updateVestingBalanceDisplay();
+                    return;
+                }
+
+                vestingClassificationInProgress = true;
+                const progressEl = document.getElementById('vestingClassificationProgress');
+                const progressTextEl = document.getElementById('vestingProgressText');
+
+                // Show progress indicator
+                if (progressEl) {
+                    progressEl.style.display = 'block';
+                }
+
+                try {
+                    const result = await VestingClassifier.classifyUtxos(currentUtxos, (current, total) => {
+                        if (progressTextEl) {
+                            progressTextEl.textContent = `${current}/${total}`;
+                        }
+                    });
+
+                    // Update classified UTXOs for this address
+                    addressCache.classifiedUtxos = {
+                        vested: result.vested,
+                        unvested: result.unvested,
+                        all: [...result.vested, ...result.unvested]
+                    };
+
+                    // Calculate balances for each mode using BigInt
+                    const consumedUtxos = getConsumedUtxos();
+
+                    addressCache.vestingBalances.vested = result.vested.reduce((sum, utxo) => {
+                        const utxoKey = `${utxo.tx_hash || utxo.txid}:${utxo.tx_pos || utxo.vout}`;
+                        if (!consumedUtxos.has(utxoKey)) {
+                            return sum + BigInt(utxo.value);
+                        }
+                        return sum;
+                    }, 0n);
+
+                    addressCache.vestingBalances.unvested = result.unvested.reduce((sum, utxo) => {
+                        const utxoKey = `${utxo.tx_hash || utxo.txid}:${utxo.tx_pos || utxo.vout}`;
+                        if (!consumedUtxos.has(utxoKey)) {
+                            return sum + BigInt(utxo.value);
+                        }
+                        return sum;
+                    }, 0n);
+
+                    addressCache.vestingBalances.all = addressCache.vestingBalances.vested + addressCache.vestingBalances.unvested;
+
+                    // Update display
+                    updateVestingBalanceDisplay();
+
+                    if (result.errors.length > 0) {
+                        console.warn('Vesting classification errors:', result.errors.length, 'errors');
+                        // Log first few error details for debugging
+                        result.errors.slice(0, 5).forEach((err, i) => {
+                            console.warn(`  Error ${i+1}: ${err.error} for UTXO ${err.utxo?.tx_hash?.substring(0, 16)}...`);
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error during vesting classification:', error);
+                } finally {
+                    vestingClassificationInProgress = false;
+                    if (progressEl) {
+                        progressEl.style.display = 'none';
+                    }
+                }
+            }
+
+            /**
+             * Update the vesting balance display in the UI
+             */
+            function updateVestingBalanceDisplay() {
+                const vestedBalanceEl = document.getElementById('vestedBalance');
+                const unvestedBalanceEl = document.getElementById('unvestedBalance');
+                const vestedUnconfirmedEl = document.getElementById('vestedUnconfirmed');
+                const unvestedUnconfirmedEl = document.getElementById('unvestedUnconfirmed');
+
+                // Get balances from current address cache
+                const currentAddress = getCurrentVestingAddress();
+                const addressCache = currentAddress ? getAddressVestingCache(currentAddress) : null;
+                const vestingBalances = addressCache ? addressCache.vestingBalances : { vested: 0n, unvested: 0n, all: 0n };
+
+                if (vestedBalanceEl) {
+                    vestedBalanceEl.textContent = SatoshiMath.satoshisToAlpha(vestingBalances.vested) + ' ALPHA';
+                }
+                if (unvestedBalanceEl) {
+                    unvestedBalanceEl.textContent = SatoshiMath.satoshisToAlpha(vestingBalances.unvested) + ' ALPHA';
+                }
+
+                // Update row selection highlighting
+                const allRow = document.querySelector('.vesting-row-all');
+                const vestedRow = document.querySelector('.vesting-row-vested');
+                const unvestedRow = document.querySelector('.vesting-row-unvested');
+
+                if (allRow) allRow.classList.toggle('selected', vestingMode === 'all');
+                if (vestedRow) vestedRow.classList.toggle('selected', vestingMode === 'vested');
+                if (unvestedRow) unvestedRow.classList.toggle('selected', vestingMode === 'unvested');
+            }
+
+            /**
+             * Set the current vesting mode and update UI
+             * @param {string} mode - 'all', 'vested', or 'unvested'
+             */
+            window.setVestingMode = function(mode) {
+                if (!['all', 'vested', 'unvested'].includes(mode)) {
+                    console.error('Invalid vesting mode:', mode);
+                    return;
+                }
+
+                vestingMode = mode;
+                console.log('Vesting mode changed to:', mode);
+
+                // Update radio button selection
+                const radioButtons = document.querySelectorAll('input[name="vestingMode"]');
+                radioButtons.forEach(radio => {
+                    radio.checked = (radio.value === mode);
+                });
+
+                // Update row highlighting
+                updateVestingBalanceDisplay();
+
+                // Update UTXO list to show only UTXOs of selected mode
+                updateUtxoListDisplay();
+            };
+
+            /**
+             * Get UTXOs filtered by current vesting mode
+             * @returns {Array} Filtered UTXOs based on vesting mode
+             */
+            function getFilteredUtxos() {
+                const consumedUtxos = getConsumedUtxos();
+
+                // Get per-address cache
+                const currentAddress = getCurrentVestingAddress();
+                const addressCache = currentAddress ? getAddressVestingCache(currentAddress) : null;
+                const classifiedUtxos = addressCache ? addressCache.classifiedUtxos : { vested: [], unvested: [], all: [] };
+
+                let utxoSource = [];
+                if (classifiedUtxos.all.length > 0) {
+                    // Use classified UTXOs if available
+                    switch (vestingMode) {
+                        case 'vested':
+                            utxoSource = classifiedUtxos.vested;
+                            break;
+                        case 'unvested':
+                            utxoSource = classifiedUtxos.unvested;
+                            break;
+                        default:
+                            utxoSource = classifiedUtxos.all;
+                    }
+                } else if (currentUtxos && currentUtxos.length > 0) {
+                    // Fall back to currentUtxos if not yet classified
+                    utxoSource = currentUtxos;
+                } else if (offlineUtxoData && offlineUtxoData.utxos) {
+                    utxoSource = offlineUtxoData.utxos;
+                }
+
+                // Filter out consumed UTXOs
+                return utxoSource.filter(utxo => {
+                    const utxoKey = `${utxo.tx_hash || utxo.txid}:${utxo.tx_pos || utxo.vout}`;
+                    return !consumedUtxos.has(utxoKey);
+                });
+            }
+
+            /**
+             * Get available balance for current vesting mode
+             * @returns {BigInt} Available balance in satoshis
+             */
+            function getAvailableBalanceForMode() {
+                // Get per-address cache
+                const currentAddress = getCurrentVestingAddress();
+                const addressCache = currentAddress ? getAddressVestingCache(currentAddress) : null;
+                const vestingBalances = addressCache ? addressCache.vestingBalances : { vested: 0n, unvested: 0n, all: 0n };
+
+                if (vestingMode === 'all') {
+                    return vestingBalances.all;
+                } else if (vestingMode === 'vested') {
+                    return vestingBalances.vested;
+                } else {
+                    return vestingBalances.unvested;
+                }
+            }
+
             // Format transaction for display
             function formatTransactionDisplay(tx, ourAddress, confirmations, txDetails) {
                 const txid = tx.tx_hash || tx.txid || tx.id;
@@ -9820,24 +10557,33 @@ Anyone with your master private key can access all your funds.`;
             
             // Calculate maximum sendable amount
             window.calculateMaxAmount = function() {
-                // Check if we have UTXOs
-                let availableUtxos = [];
-                const consumedUtxos = getConsumedUtxos();
-                
-                if (currentUtxos && currentUtxos.length > 0) {
-                    availableUtxos = currentUtxos.filter(utxo => {
-                        const utxoKey = `${utxo.txid}:${utxo.vout}`;
-                        return !consumedUtxos.has(utxoKey);
-                    });
-                } else if (offlineUtxoData && offlineUtxoData.utxos && offlineUtxoData.utxos.length > 0) {
-                    availableUtxos = offlineUtxoData.utxos.filter(utxo => {
-                        const utxoKey = `${utxo.txid}:${utxo.vout}`;
-                        return !consumedUtxos.has(utxoKey);
-                    });
+                // Use vesting-filtered UTXOs based on current mode
+                let availableUtxos = getFilteredUtxos();
+
+                // Get per-address cache for classification check
+                const currentAddress = getCurrentVestingAddress();
+                const addressCache = currentAddress ? getAddressVestingCache(currentAddress) : null;
+                const classifiedUtxos = addressCache ? addressCache.classifiedUtxos : { vested: [], unvested: [], all: [] };
+
+                // If classification not done yet, fall back to original logic
+                if (availableUtxos.length === 0 && classifiedUtxos.all.length === 0) {
+                    const consumedUtxos = getConsumedUtxos();
+                    if (currentUtxos && currentUtxos.length > 0) {
+                        availableUtxos = currentUtxos.filter(utxo => {
+                            const utxoKey = `${utxo.tx_hash || utxo.txid}:${utxo.tx_pos || utxo.vout}`;
+                            return !consumedUtxos.has(utxoKey);
+                        });
+                    } else if (offlineUtxoData && offlineUtxoData.utxos && offlineUtxoData.utxos.length > 0) {
+                        availableUtxos = offlineUtxoData.utxos.filter(utxo => {
+                            const utxoKey = `${utxo.txid}:${utxo.vout}`;
+                            return !consumedUtxos.has(utxoKey);
+                        });
+                    }
                 }
-                
+
                 if (availableUtxos.length === 0) {
-                    showInAppNotification('No UTXOs', 'No UTXOs available to calculate maximum amount', 'warning');
+                    const modeText = vestingMode === 'all' ? '' : ` (${vestingMode} mode)`;
+                    showInAppNotification('No UTXOs', `No UTXOs available to calculate maximum amount${modeText}`, 'warning');
                     return;
                 }
 
@@ -9860,9 +10606,10 @@ Anyone with your master private key can access all your funds.`;
                 const maxAlphaStr = SatoshiMath.satoshisToAlpha(maxSendable);
                 document.getElementById('sendAmount').value = maxAlphaStr;
 
-                // Show notification
+                // Show notification with vesting mode info
                 const feesAlphaStr = SatoshiMath.satoshisToAlpha(totalFees);
-                showInAppNotification('Max Amount', `Maximum sendable: ${maxAlphaStr} ALPHA (${availableUtxos.length} UTXOs, ${feesAlphaStr} ALPHA in fees)`, 'info');
+                const modeText = vestingMode === 'all' ? '' : ` [${vestingMode}]`;
+                showInAppNotification('Max Amount', `Maximum sendable${modeText}: ${maxAlphaStr} ALPHA (${availableUtxos.length} UTXOs, ${feesAlphaStr} ALPHA in fees)`, 'info');
             };
             
             // Prepare send transaction with enhanced debugging
@@ -9950,33 +10697,49 @@ Anyone with your master private key can access all your funds.`;
                 }
                 
                     // Check if we have UTXOs with detailed logging
-                    let availableUtxos = [];
+                    // Use vesting-filtered UTXOs based on current mode
                     const consumedUtxos = getConsumedUtxos();
-                    
+
+                    // Get per-address cache for classification check
+                    const currentAddress = getCurrentVestingAddress();
+                    const addressCache = currentAddress ? getAddressVestingCache(currentAddress) : null;
+                    const classifiedUtxos = addressCache ? addressCache.classifiedUtxos : { vested: [], unvested: [], all: [] };
+
                     debugSession.log('info', 'Checking UTXO availability', {
                         hasCurrentUtxos: !!(currentUtxos && currentUtxos.length > 0),
                         currentUtxosCount: currentUtxos ? currentUtxos.length : 0,
                         hasOfflineUtxos: !!(offlineUtxoData && offlineUtxoData.utxos),
                         offlineUtxosCount: offlineUtxoData?.utxos ? offlineUtxoData.utxos.length : 0,
-                        consumedCount: consumedUtxos.size
+                        consumedCount: consumedUtxos.size,
+                        vestingMode: vestingMode,
+                        classifiedVested: classifiedUtxos.vested.length,
+                        classifiedUnvested: classifiedUtxos.unvested.length
                     });
-                    
-                    if (currentUtxos && currentUtxos.length > 0) {
-                        availableUtxos = currentUtxos.filter(utxo => {
-                            const utxoKey = `${utxo.txid}:${utxo.vout}`;
-                            const isConsumed = consumedUtxos.has(utxoKey);
-                            if (isConsumed) {
-                                debugSession.log('debug', `UTXO consumed: ${utxoKey}`);
-                            }
-                            return !isConsumed;
-                        });
-                        debugSession.log('info', `Filtered ${availableUtxos.length} available UTXOs from ${currentUtxos.length} current UTXOs`);
-                    } else if (offlineUtxoData && offlineUtxoData.utxos && offlineUtxoData.utxos.length > 0) {
-                        availableUtxos = offlineUtxoData.utxos.filter(utxo => {
-                            const utxoKey = `${utxo.txid}:${utxo.vout}`;
-                            return !consumedUtxos.has(utxoKey);
-                        });
-                        debugSession.log('info', `Using ${availableUtxos.length} offline UTXOs`);
+
+                    // Get UTXOs filtered by vesting mode (already excludes consumed UTXOs)
+                    let availableUtxos = getFilteredUtxos();
+
+                    // If classification not done yet, fall back to original logic
+                    if (availableUtxos.length === 0 && classifiedUtxos.all.length === 0) {
+                        if (currentUtxos && currentUtxos.length > 0) {
+                            availableUtxos = currentUtxos.filter(utxo => {
+                                const utxoKey = `${utxo.tx_hash || utxo.txid}:${utxo.tx_pos || utxo.vout}`;
+                                const isConsumed = consumedUtxos.has(utxoKey);
+                                if (isConsumed) {
+                                    debugSession.log('debug', `UTXO consumed: ${utxoKey}`);
+                                }
+                                return !isConsumed;
+                            });
+                            debugSession.log('info', `Filtered ${availableUtxos.length} available UTXOs from ${currentUtxos.length} current UTXOs (classification pending)`);
+                        } else if (offlineUtxoData && offlineUtxoData.utxos && offlineUtxoData.utxos.length > 0) {
+                            availableUtxos = offlineUtxoData.utxos.filter(utxo => {
+                                const utxoKey = `${utxo.txid}:${utxo.vout}`;
+                                return !consumedUtxos.has(utxoKey);
+                            });
+                            debugSession.log('info', `Using ${availableUtxos.length} offline UTXOs`);
+                        }
+                    } else {
+                        debugSession.log('info', `Using ${availableUtxos.length} vesting-filtered UTXOs (mode: ${vestingMode})`);
                     }
                     
                     if (availableUtxos.length === 0) {
@@ -12677,7 +13440,7 @@ Anyone with your master private key can access all your funds.`;
                 sessions: transactionDebugLog,
                 readyToImport: failedTxs,
                 metadata: {
-                    walletVersion: 'v0.4.5',
+                    walletVersion: 'v0.4.7',
                     timestamp: new Date().toISOString(),
                     userAgent: navigator.userAgent,
                     totalSessions: transactionDebugLog.length,
