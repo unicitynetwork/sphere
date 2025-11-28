@@ -1,36 +1,28 @@
 import { saveWalletToStorage, loadWalletFromStorage } from "./storage";
 import {
-  generateMasterKeyFromSeed,
   generateHDAddressBIP32,
-  generateHDAddress,
+  generateAddressFromMasterKey,
 } from "./address";
 import type { Wallet } from "./types";
 import CryptoJS from "crypto-js";
 
 /**
- * Create a new wallet using standard BIP32 derivation
- * Generates a 64-byte seed and derives master key per BIP32 spec
+ * Create a new wallet matching the original index.html implementation
+ * Uses 32-byte random private key with HMAC-SHA512 derivation
  */
 export function createWallet(): Wallet {
-  // Generate 64-byte seed (512 bits) for BIP32
-  const seed = CryptoJS.lib.WordArray.random(64).toString();
+  // Generate 32 random bytes (256 bits) for the private key - same as index.html
+  const randomBytes = CryptoJS.lib.WordArray.random(32);
+  const masterPrivateKey = randomBytes.toString();
 
-  // Derive master key and chain code per BIP32 standard
-  const { masterPrivateKey, masterChainCode } = generateMasterKeyFromSeed(seed);
-
-  // Generate first address using BIP32 path m/44'/0'/0'/0/0
-  const firstAddress = generateHDAddressBIP32(
-    masterPrivateKey,
-    masterChainCode,
-    0
-  );
+  // Generate first address using HMAC-SHA512 derivation (matching index.html)
+  const firstAddress = generateAddressFromMasterKey(masterPrivateKey, 0);
 
   const wallet: Wallet = {
     masterPrivateKey,
-    chainCode: masterChainCode,
     addresses: [firstAddress],
     createdAt: Date.now(),
-    isBIP32: true, // Mark as BIP32 wallet
+    childPrivateKey: firstAddress.privateKey, // Store for transactions
   };
 
   saveWalletToStorage("main", wallet);
@@ -47,15 +39,17 @@ export function loadWallet(): Wallet | null {
 
 /**
  * Generate a new address for the wallet
- * Uses BIP32 for new wallets, legacy derivation for old wallets
+ * For standard wallets: uses HMAC-SHA512 derivation (index.html compatible)
+ * For imported BIP32 wallets: uses proper BIP32 derivation
  */
 export function generateAddress(wallet: Wallet) {
   const index = wallet.addresses.length;
 
-  // Use BIP32 for new wallets, legacy for backward compatibility
-  const addr = wallet.isBIP32
-    ? generateHDAddressBIP32(wallet.masterPrivateKey, wallet.chainCode!, index)
-    : generateHDAddress(wallet.masterPrivateKey, wallet.chainCode!, index);
+  // For imported BIP32 wallets with chainCode, use BIP32 derivation
+  // For standard wallets created in this app, use HMAC-SHA512 derivation
+  const addr = wallet.isImportedAlphaWallet && wallet.chainCode
+    ? generateHDAddressBIP32(wallet.masterPrivateKey, wallet.chainCode, index)
+    : generateAddressFromMasterKey(wallet.masterPrivateKey, index);
 
   wallet.addresses.push(addr);
 
