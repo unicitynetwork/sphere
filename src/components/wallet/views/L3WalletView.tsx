@@ -1,16 +1,22 @@
-import { Plus, ArrowUpRight, Sparkles, TrendingUp, Loader2 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Plus, ArrowUpRight, Sparkles, TrendingUp, Loader2, Coins, Layers } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { AssetRow } from '../L3/components/AssetRow';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useWallet } from '../L3/hooks/useWallet';
 import { CreateWalletFlow } from '../L3/onboarding/CreateWalletFlow';
+import { TokenRow } from '../L3/components/TokenRow';
+import { SendModal } from '../L3/modals/SendModal';
+
+type Tab = 'assets' | 'tokens';
 
 export function L3WalletView({ showBalances }: { showBalances: boolean }) {
-  const { identity, assets, isLoadingAssets, isLoadingIdentity, nametag } = useWallet();
-  // const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+  const { identity, assets, tokens, isLoadingAssets, isLoadingIdentity, nametag } = useWallet();
+  const [activeTab, setActiveTab] = useState<Tab>('assets');
+  const [isSendModalOpen, setIsSendModalOpen] = useState(false);
 
   const totalValue = useMemo(() => {
-    return assets.reduce((sum, asset) => sum + asset.priceUsd, 0);
+    console.log(assets)
+    return assets.reduce((sum, asset) => sum + asset.getTotalFiatValue('USD'), 0);
   }, [assets]);
 
   if (isLoadingIdentity) {
@@ -65,11 +71,47 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
           <motion.button
             whileHover={{ scale: 1.02, y: -2 }}
             whileTap={{ scale: 0.98 }}
+            onClick={() => setIsSendModalOpen(true)}
             className="relative px-4 py-3 rounded-xl bg-neutral-800/80 hover:bg-neutral-700/80 text-white text-sm border border-neutral-700/50 flex items-center justify-center gap-2"
           >
             <ArrowUpRight className="w-4 h-4" />
             <span>Send</span>
           </motion.button>
+        </div>
+      </div>
+
+      <div className="px-6 mb-4">
+        <div className="flex p-1 bg-neutral-900/50 rounded-xl border border-neutral-800">
+          <button
+            onClick={() => setActiveTab('assets')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-lg transition-all relative ${activeTab === 'assets' ? 'text-white' : 'text-neutral-500 hover:text-neutral-400'}`}
+          >
+            {activeTab === 'assets' && (
+              <motion.div
+                layoutId="activeTab"
+                className="absolute inset-0 bg-neutral-800 rounded-lg shadow-sm"
+                transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+              />
+            )}
+            <span className="relative z-10 flex items-center gap-2">
+              <Layers className="w-3 h-3" /> Assets
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab('tokens')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-lg transition-all relative ${activeTab === 'tokens' ? 'text-white' : 'text-neutral-500 hover:text-neutral-400'}`}
+          >
+            {activeTab === 'tokens' && (
+              <motion.div
+                layoutId="activeTab"
+                className="absolute inset-0 bg-neutral-800 rounded-lg shadow-sm"
+                transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+              />
+            )}
+            <span className="relative z-10 flex items-center gap-2">
+              <Coins className="w-3 h-3" /> UTXOs
+            </span>
+          </button>
         </div>
       </div>
 
@@ -87,28 +129,74 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
           <div className="py-10 text-center">
             <Loader2 className="w-6 h-6 text-orange-500 animate-spin mx-auto" />
           </div>
-        ) : assets.length === 0 ? (
-          <div className="text-center py-10 flex flex-col items-center gap-3">
-            <div className="w-12 h-12 rounded-full bg-neutral-800 flex items-center justify-center">
-              <Sparkles className="w-6 h-6 text-neutral-600" />
-            </div>
-            <div className="text-neutral-500 text-sm">
-              Wallet is empty.<br />Mint some tokens to start!
-            </div>
-          </div>
         ) : (
-          <div className="space-y-2">
-            {assets.map((asset, index) => (
-              <AssetRow
-                key={asset.coinId}
-                asset={asset}
-                showBalances={showBalances}
-                delay={index * 0.05}
-              />
-            ))}
-          </div>
+          <AnimatePresence mode="wait">
+            {activeTab === 'assets' ? (
+              /* ASSETS VIEW */
+              <motion.div
+                key="assets"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                transition={{ duration: 0.2 }}
+                className="space-y-2"
+              >
+                {assets.length === 0 ? (
+                  <EmptyState />
+                ) : (
+                  assets.map((asset, index) => (
+                    <AssetRow
+                      key={asset.coinId}
+                      asset={asset}
+                      showBalances={showBalances}
+                      delay={index * 0.05}
+                    />
+                  ))
+                )}
+              </motion.div>
+            ) : (
+              <motion.div
+                key="tokens"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.2 }}
+                className="space-y-2"
+              >
+                {tokens.filter(t => t.type !== 'Nametag').length === 0 ? (
+                  <EmptyState text="No individual tokens found." />
+                ) : (
+                  tokens
+                    .filter(t => t.type !== 'Nametag')
+                    .sort((a, b) => b.timestamp - a.timestamp)
+                    .map((token, index) => (
+                      <TokenRow
+                        key={token.id}
+                        token={token}
+                        delay={index * 0.05}
+                      />
+                    ))
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         )}
       </div>
+      <SendModal isOpen={isSendModalOpen} onClose={() => setIsSendModalOpen(false)} />
     </div>
   );
+}
+
+// Helper Component
+function EmptyState({ text }: { text?: string }) {
+    return (
+        <div className="text-center py-10 flex flex-col items-center gap-3">
+            <div className="w-12 h-12 rounded-full bg-neutral-800 flex items-center justify-center">
+                <Sparkles className="w-6 h-6 text-neutral-600" />
+            </div>
+            <div className="text-neutral-500 text-sm">
+                {text || <>Wallet is empty.<br />Mint some tokens to start!</>}
+            </div>
+        </div>
+    );
 }

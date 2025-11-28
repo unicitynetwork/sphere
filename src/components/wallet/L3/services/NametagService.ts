@@ -224,8 +224,6 @@ export class NametagService {
     if (!raw) return [];
 
     const registry = JSON.parse(raw);
-
-    console.log(registry)
     
     const promises = Object.values(registry).map(async (entry: any) => {
       try {

@@ -31,6 +31,8 @@ export class WalletRepository {
           parsed.address,
           tokens
         );
+
+        this.refreshWallet();
       }
     } catch (error) {
       console.error("Failed to load wallet", error);
@@ -111,6 +113,7 @@ export class WalletRepository {
 
     this.saveWallet(updatedWallet);
     console.log(`💾 Repository: Saved! Total tokens: ${updatedTokens.length}`);
+    this.refreshWallet();
   }
 
   removeToken(tokenId: string): void {
@@ -125,10 +128,16 @@ export class WalletRepository {
     );
 
     this.saveWallet(updatedWallet);
+    this.refreshWallet();
   }
 
   clearWallet(): void {
     localStorage.removeItem(STORAGE_KEY_WALLET);
     this._wallet = null;
+    this.refreshWallet();
+  }
+
+  refreshWallet(): void {
+    window.dispatchEvent(new Event("wallet-updated"));
   }
 }
