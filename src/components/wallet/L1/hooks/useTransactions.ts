@@ -160,7 +160,7 @@ export function useTransactions() {
   }, [transactionDetailsCache]);
 
   const analyzeTransaction = useCallback(
-    (tx: TransactionHistoryItem, detail: TransactionDetail | undefined, wallet: Wallet, selectedAddress?: string) => {
+    (_tx: TransactionHistoryItem, detail: TransactionDetail | undefined, wallet: Wallet, selectedAddress?: string) => {
       if (!detail || !wallet) {
         return {
           direction: "unknown" as const,
