@@ -231,7 +231,7 @@ export function MainWalletView({
                   "..." +
                   selectedAddress.slice(-6)}
               </span>
-              <ChevronDown className="w-4 h-4 text-neutral-400" />
+              <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform ${showDropdown ? "rotate-180" : ""}`} />
             </button>
 
             <a
@@ -261,47 +261,53 @@ export function MainWalletView({
             </button>
           </div>
 
-          {showDropdown && (
-            <motion.div
-              initial={{ opacity: 0, y: -10, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -10, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-              className="absolute z-20 mt-2 w-full bg-neutral-900 border border-neutral-700 rounded-xl shadow-xl max-h-52 overflow-y-auto custom-scrollbar"
-            >
-              {addresses.map((a, i) => (
+          <AnimatePresence>
+            {showDropdown && (
+              <>
                 <motion.div
-                  key={i}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.05 }}
-                  className={`flex items-center gap-2 px-3 py-2 hover:bg-neutral-800 transition-colors ${
-                    a === selectedAddress ? "bg-neutral-800/50" : ""
-                  }`}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowDropdown(false)}
+                />
+                <motion.div
+                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                  transition={{ duration: 0.2 }}
+                  className="absolute z-20 mt-2 w-full bg-neutral-900 border border-neutral-700 rounded-xl shadow-xl max-h-52 overflow-y-auto custom-scrollbar"
                 >
-                  <button
-                    onClick={() => {
-                      onSelectAddress(a);
-                      setShowDropdown(false);
-                    }}
-                    className="flex-1 text-left text-xs text-neutral-200 font-mono"
-                  >
-                    {a}
-                  </button>
-                  <a
-                    href={`https://www.unicity.network/address/${a}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-1 text-blue-400 hover:text-blue-300 transition-colors"
-                    title="View in explorer"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
+                  {addresses.map((a) => (
+                    <div
+                      key={a}
+                      className={`flex items-center gap-2 px-3 py-2 hover:bg-neutral-800 transition-colors cursor-pointer ${
+                        a === selectedAddress ? "bg-neutral-800/50" : ""
+                      }`}
+                      onClick={() => {
+                        onSelectAddress(a);
+                        setShowDropdown(false);
+                      }}
+                    >
+                      <span className="flex-1 text-left text-xs text-neutral-200 font-mono truncate">
+                        {a}
+                      </span>
+                      <a
+                        href={`https://www.unicity.network/address/${a}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1 text-blue-400 hover:text-blue-300 transition-colors"
+                        title="View in explorer"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  ))}
                 </motion.div>
-              ))}
-            </motion.div>
-          )}
+              </>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
