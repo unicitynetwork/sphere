@@ -131,15 +131,11 @@ export class AggregatedAsset {
     }
 
     getFormattedAmount(): string {
-        // Логика аналогична BigDecimal.divide(divisor)
         const bigIntAmount = this.getAmountAsBigInt();
         if (bigIntAmount === BigInt(0)) return "0";
 
-        // Для JS нам нужно аккуратно работать с делением BigInt
-        // Самый простой способ для отображения - конвертация строки
         const amountStr = bigIntAmount.toString();
-        
-        // Если число меньше чем 10^decimals (0.00...1)
+
         if (amountStr.length <= this.decimals) {
             const padded = amountStr.padStart(this.decimals + 1, '0');
             const integerPart = "0";
@@ -160,10 +156,8 @@ export class AggregatedAsset {
     }
 
     getAmountAsDecimal(): number {
-        // Note: JS Number has precision limits, but for display logic usually acceptable
         const bigIntAmount = this.getAmountAsBigInt();
         const divisor = Math.pow(10, this.decimals);
-        // We convert BigInt to string then to Number to avoid direct precision loss on huge integers before division
         return Number(bigIntAmount) / divisor;
     }
 

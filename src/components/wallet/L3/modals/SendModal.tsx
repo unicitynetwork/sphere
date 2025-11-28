@@ -58,7 +58,6 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
       const nostr = NostrService.getInstance(identityManager);
       const cleanTag = recipient.replace('@', '').replace('@unicity', '').trim();
 
-      // Проверяем, есть ли такой юзер в сети
       const pubkey = await nostr.queryPubkeyByNametag(cleanTag);
 
       if (pubkey) {

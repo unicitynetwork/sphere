@@ -76,8 +76,6 @@ export class TokenSplitExecutor {
       plan.remainderAmount
     ) {
       const coinIdBuffer = Buffer.from(plan.coinId, "hex");
-      // Проверяем, является ли CoinId классом или буфером в этой версии SDK
-      // Обычно конструктор принимает Buffer/Uint8Array
       const coinId = new CoinId(coinIdBuffer);
 
       const splitResult = await this.executeSingleTokenSplit(
@@ -113,10 +111,8 @@ export class TokenSplitExecutor {
     const tokenIdHex = Buffer.from(tokenToSplit.id.bytes).toString("hex");
     console.log(`🔪 Splitting token ${tokenIdHex.slice(0, 8)}...`);
 
-    // 1. Инициализация Builder
     const builder = new TokenSplitBuilder();
 
-    // 2. Генерация детерминированных ID
     const seedString = `${tokenIdHex}_${splitAmount.toString()}_${remainderAmount.toString()}`;
 
     const recipientTokenId = new TokenId(await sha256(seedString));
@@ -125,8 +121,6 @@ export class TokenSplitExecutor {
     const recipientSalt = await sha256(seedString + "_recipient_salt");
     const senderSalt = await sha256(seedString + "_sender_salt");
 
-    // Адрес отправителя (для минтинга обоих токенов себе)
-    // Используем UnmaskedPredicateReference, как в Android
     const senderAddressRef = await UnmaskedPredicateReference.create(
       tokenToSplit.type,
       signingService.algorithm,
@@ -135,9 +129,6 @@ export class TokenSplitExecutor {
     );
     const senderAddress = await senderAddressRef.toAddress();
 
-    // 3. Настройка новых токенов в Builder (Токен A и Токен B)
-
-    // Токен для получателя (минтим себе)
     const coinDataA = TokenCoinData.create([[coinId, splitAmount]]);
 
     builder.createToken(
@@ -150,7 +141,6 @@ export class TokenSplitExecutor {
       null // dataHash
     );
 
-    // Токен для отправителя (сдача)
     const coinDataB = TokenCoinData.create([[coinId, remainderAmount]]);
 
     builder.createToken(
@@ -173,14 +163,12 @@ export class TokenSplitExecutor {
     console.log("🔥 Submitting burn commitment...");
     const burnResponse = await this.client.submitTransferCommitment(burnCommitment);
 
-    // Обработка идемпотентности
     if (burnResponse.status === "REQUEST_ID_EXISTS") {
       console.warn("Token already burned, attempting recovery...");
     } else if (burnResponse.status !== "SUCCESS") {
       throw new Error(`Burn failed: ${burnResponse.status}`);
     }
 
-    // Удаляем из UI сразу
     onTokenBurned(uiTokenId);
 
     const burnInclusionProof = await waitInclusionProof(
@@ -193,8 +181,6 @@ export class TokenSplitExecutor {
     // === STEP 2: MINT SPLIT TOKENS ===
     console.log("✨ Creating split mint commitments...");
 
-    // Android: split.createSplitMintCommitments(trustBase, burnTransaction)
-    // Надеемся, что сигнатура совпадает
     const mintCommitments = await split.createSplitMintCommitments(
       this.trustBase,
       burnTransaction
@@ -203,22 +189,17 @@ export class TokenSplitExecutor {
     const mintedTokensInfo: MintedTokenInfo[] = [];
 
     for (const commitment of mintCommitments) {
-      // Сабмит
       const res = await this.client.submitMintCommitment(commitment);
       if (res.status !== "SUCCESS" && res.status !== "REQUEST_ID_EXISTS") {
         throw new Error(`Mint split token failed: ${res.status}`);
       }
 
-      // Ожидание пруфа
       const proof = await waitInclusionProof(
         this.trustBase,
         this.client,
         commitment
       );
 
-      // Определение, чей это токен (по ID)
-      // ВАЖНО: Сравниваем байты или hex строки ID
-      // commitment.transactionData.tokenId vs recipientTokenId
       const commTokenIdHex = Buffer.from(
         commitment.transactionData.tokenId.bytes
       ).toString("hex");
@@ -246,7 +227,6 @@ export class TokenSplitExecutor {
     if (!recipientInfo || !senderInfo)
       throw new Error("Failed to identify split tokens");
 
-    // Восстанавливаем объекты токенов
     const recipientTokenBeforeTransfer = await this.createAndVerifyToken(
       recipientInfo,
       signingService,
@@ -331,7 +311,6 @@ export class TokenSplitExecutor {
     );
 
     // 4. Verify
-    // verify в TS SDK может быть асинхронным или синхронным, проверим
     const verification = await token.verify(this.trustBase);
 
     if (!verification.isSuccessful) {

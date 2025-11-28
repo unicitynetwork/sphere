@@ -341,13 +341,9 @@ export const useWallet = () => {
         remainder: plan.remainderAmount?.toString(),
       });
 
-      // 3. EXECUTE DIRECT TRANSFERS (Целые токены)
-      // Стратегия 1 и 2, а также часть Стратегии 3
+      // 3. EXECUTE DIRECT TRANSFERS
       for (const item of plan.tokensToTransferDirectly) {
         console.log(`➡️ Sending whole token ${item.uiToken.id.slice(0, 8)}...`);
-
-        // Используем логику обычного трансфера (можно вызвать мутацию или код напрямую)
-        // Вызываем код напрямую для скорости (чтобы не ре-инициализировать сервисы)
         await executeDirectTransfer(
           item.sdkToken,
           item.uiToken.id,
@@ -358,8 +354,7 @@ export const useWallet = () => {
         );
       }
 
-      // 4. EXECUTE SPLIT (Если нужно)
-      // Стратегия 3 (остаток)
+      // 4. EXECUTE SPLIT
       if (plan.requiresSplit) {
         console.log("✂️ Executing split...");
         const executor = new TokenSplitExecutor();
@@ -368,13 +363,8 @@ export const useWallet = () => {
           plan,
           recipientAddress,
           signingService,
-          (burnedId) => walletRepo.removeToken(burnedId) // Callback удаления старого
+          (burnedId) => walletRepo.removeToken(burnedId)
         );
-
-        // A. Отправляем токены получателя через Nostr
-        // У нас есть массив пар: (Token, TransferTx)
-        // В executeSplitPlan мы возвращаем parallel arrays.
-        // Executor возвращает recipientTransferTxs и tokensForRecipient
 
         for (let i = 0; i < splitResult.tokensForRecipient.length; i++) {
           const token = splitResult.tokensForRecipient[i];
@@ -392,7 +382,6 @@ export const useWallet = () => {
           await nostr.sendTokenTransfer(recipientPubkey, payload);
         }
 
-        // B. Сохраняем сдачу (Remainder) себе в кошелек
         for (const keptToken of splitResult.tokensKeptBySender) {
           saveChangeTokenToWallet(keptToken, params.coinId);
         }
@@ -401,7 +390,6 @@ export const useWallet = () => {
       return true;
     },
     onSuccess: () => {
-      // Ждем немного, чтобы запись на диск прошла
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: KEYS.TOKENS });
         queryClient.invalidateQueries({ queryKey: KEYS.AGGREGATED });
@@ -456,10 +444,7 @@ export const useWallet = () => {
   };
 
   const saveChangeTokenToWallet = (sdkToken: SdkToken<any>, coinId: string) => {
-    // Достаем amount из токена
     let amount = "0";
-    // ... (логика извлечения amount, как в TransferService) ...
-    // Упрощенно, так как мы знаем, что только что создали этот токен с известным amount:
     const coinsOpt = sdkToken.coins;
     const coinData = coinsOpt;
     if (coinData) {
@@ -477,12 +462,11 @@ export const useWallet = () => {
       }
     }
 
-    // Ищем символ в реестре для красоты
     const def = registryService.getCoinDefinition(coinId);
     const iconUrl = def ? registryService.getIconUrl(def) : undefined;
 
     const uiToken = new Token({
-      id: uuidv4(), // Новый UUID
+      id: uuidv4(),
       name: def?.symbol || "Change Token",
       symbol: def?.symbol || "UNK",
       type: "Fungible",
