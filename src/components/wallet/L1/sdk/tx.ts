@@ -6,6 +6,7 @@ import { decodeBech32 } from "./bech32";
 import CryptoJS from "crypto-js";
 import elliptic from "elliptic";
 import type { Wallet, TransactionPlan, Transaction, UTXO } from "./types";
+import { vestingState } from "./vestingState";
 
 const ec = new elliptic.ec("secp256k1");
 
@@ -254,16 +255,32 @@ export function buildSegWitTransaction(
 
 /**
  * Create and sign a transaction
- * Exact copy from index.html createAndSignTransaction()
+ * Uses the private key for the specific address being spent from
  */
 export function createAndSignTransaction(
   wallet: Wallet,
   txPlan: Transaction
 ): { raw: string; txid: string } {
-  // Get the private key - exact logic from index.html
-  const privateKeyHex = wallet.childPrivateKey || wallet.masterPrivateKey;
+  // Find the address entry that matches the input address
+  const fromAddress = txPlan.input.address;
+  const addressEntry = wallet.addresses.find(a => a.address === fromAddress);
+
+  // Use the private key from the address entry, or fall back to childPrivateKey/masterPrivateKey
+  let privateKeyHex: string | undefined;
+
+  if (addressEntry?.privateKey) {
+    // Use the specific private key for this address
+    privateKeyHex = addressEntry.privateKey;
+  } else if (wallet.childPrivateKey) {
+    // Fall back to childPrivateKey (first address)
+    privateKeyHex = wallet.childPrivateKey;
+  } else {
+    // Last resort: use master key
+    privateKeyHex = wallet.masterPrivateKey;
+  }
+
   if (!privateKeyHex) {
-    throw new Error("No private key available");
+    throw new Error("No private key available for address: " + fromAddress);
   }
 
   const keyPair = ec.keyFromPrivate(privateKeyHex, "hex");
@@ -370,36 +387,61 @@ export function collectUtxosForAmount(
 
 /**
  * Create transaction plan from wallet
+ * @param wallet - The wallet
+ * @param toAddress - Recipient address
+ * @param amountAlpha - Amount in ALPHA
+ * @param fromAddress - Optional: specific address to send from (defaults to first address)
  */
 export async function createTransactionPlan(
   wallet: Wallet,
   toAddress: string,
-  amountAlpha: number
+  amountAlpha: number,
+  fromAddress?: string
 ): Promise<TransactionPlan> {
   if (!decodeBech32(toAddress)) {
     throw new Error("Invalid recipient address");
   }
 
-  const fromAddress = wallet.addresses[0].address;
+  // Use specified fromAddress or default to first address
+  const senderAddress = fromAddress || wallet.addresses[0].address;
   const amountSats = Math.floor(amountAlpha * SAT);
 
-  const utxos = await getUtxo(fromAddress);
-  if (!Array.isArray(utxos) || utxos.length === 0) {
-    throw new Error("No UTXOs available");
+  // Check if we have classified UTXOs for vesting mode filtering
+  let utxos: UTXO[];
+  const currentMode = vestingState.getMode();
+
+  if (vestingState.hasClassifiedData(senderAddress)) {
+    // Use vesting-filtered UTXOs based on current mode
+    utxos = vestingState.getFilteredUtxos(senderAddress);
+    console.log(`Using ${utxos.length} vesting-filtered UTXOs (mode: ${currentMode})`);
+  } else {
+    // Fall back to all UTXOs if not yet classified
+    utxos = await getUtxo(senderAddress);
+    console.log(`Using ${utxos.length} UTXOs (vesting not classified yet)`);
   }
 
-  return collectUtxosForAmount(utxos, amountSats, toAddress, fromAddress);
+  if (!Array.isArray(utxos) || utxos.length === 0) {
+    const modeText = currentMode !== 'all' ? ` (${currentMode} mode)` : '';
+    throw new Error(`No UTXOs available for address${modeText}: ` + senderAddress);
+  }
+
+  return collectUtxosForAmount(utxos, amountSats, toAddress, senderAddress);
 }
 
 /**
  * Send ALPHA to address
+ * @param wallet - The wallet
+ * @param toAddress - Recipient address
+ * @param amountAlpha - Amount in ALPHA
+ * @param fromAddress - Optional: specific address to send from
  */
 export async function sendAlpha(
   wallet: Wallet,
   toAddress: string,
-  amountAlpha: number
+  amountAlpha: number,
+  fromAddress?: string
 ) {
-  const plan = await createTransactionPlan(wallet, toAddress, amountAlpha);
+  const plan = await createTransactionPlan(wallet, toAddress, amountAlpha, fromAddress);
 
   if (!plan.success) {
     throw new Error(plan.error || "Transaction planning failed");

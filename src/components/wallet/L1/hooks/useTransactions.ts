@@ -23,7 +23,7 @@ export function useTransactions() {
   const [transactionDetailsCache, setTransactionDetailsCache] = useState<Record<string, TransactionDetail>>({});
 
   const createTxPlan = useCallback(
-    async (wallet: Wallet, destination: string, amount: string) => {
+    async (wallet: Wallet, destination: string, amount: string, fromAddress?: string) => {
       try {
         if (!wallet) return { success: false, error: "No wallet" };
         if (!destination || !amount) {
@@ -35,7 +35,7 @@ export function useTransactions() {
           return { success: false, error: "Invalid amount" };
         }
 
-        const plan = await createTransactionPlan(wallet, destination, amountAlpha);
+        const plan = await createTransactionPlan(wallet, destination, amountAlpha, fromAddress);
 
         if (!plan.success) {
           return { success: false, error: plan.error };
