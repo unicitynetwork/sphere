@@ -6,6 +6,7 @@ import { decodeBech32 } from "./bech32";
 import CryptoJS from "crypto-js";
 import elliptic from "elliptic";
 import type { Wallet, TransactionPlan, Transaction, UTXO } from "./types";
+import { vestingState } from "./vestingState";
 
 const ec = new elliptic.ec("secp256k1");
 
@@ -405,9 +406,23 @@ export async function createTransactionPlan(
   const senderAddress = fromAddress || wallet.addresses[0].address;
   const amountSats = Math.floor(amountAlpha * SAT);
 
-  const utxos = await getUtxo(senderAddress);
+  // Check if we have classified UTXOs for vesting mode filtering
+  let utxos: UTXO[];
+  const currentMode = vestingState.getMode();
+
+  if (vestingState.hasClassifiedData(senderAddress)) {
+    // Use vesting-filtered UTXOs based on current mode
+    utxos = vestingState.getFilteredUtxos(senderAddress);
+    console.log(`Using ${utxos.length} vesting-filtered UTXOs (mode: ${currentMode})`);
+  } else {
+    // Fall back to all UTXOs if not yet classified
+    utxos = await getUtxo(senderAddress);
+    console.log(`Using ${utxos.length} UTXOs (vesting not classified yet)`);
+  }
+
   if (!Array.isArray(utxos) || utxos.length === 0) {
-    throw new Error("No UTXOs available for address: " + senderAddress);
+    const modeText = currentMode !== 'all' ? ` (${currentMode} mode)` : '';
+    throw new Error(`No UTXOs available for address${modeText}: ` + senderAddress);
   }
 
   return collectUtxosForAmount(utxos, amountSats, toAddress, senderAddress);
