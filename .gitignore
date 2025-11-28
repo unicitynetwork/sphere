@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
+agentic-chatbot-main
 
 # Editor directories and files
 .vscode/*
