@@ -1,11 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   connect,
   loadWallet,
   generateAddress,
   exportWallet,
   downloadWalletFile,
+  getUtxo,
+  vestingState,
   type Wallet,
+  type VestingMode,
 } from "../sdk";
 import { useWalletOperations, useTransactions, useBalance } from "../hooks";
 import { NoWalletView, HistoryView, MainWalletView } from ".";
@@ -19,8 +22,40 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const [viewMode, setViewMode] = useState<ViewMode>("main");
   const [showLoadPasswordModal, setShowLoadPasswordModal] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
+  const [vestingProgress, setVestingProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
 
   const { balance, refreshBalance } = useBalance(selectedAddress);
+
+  // Classify UTXOs for vesting when address changes
+  const classifyVesting = useCallback(async (address: string) => {
+    if (!address) return;
+
+    try {
+      const utxos = await getUtxo(address);
+      if (utxos.length === 0) return;
+
+      await vestingState.classifyAddressUtxos(
+        address,
+        utxos,
+        (current, total) => {
+          setVestingProgress({ current, total });
+        }
+      );
+      setVestingProgress(null);
+    } catch (err) {
+      console.error("Vesting classification error:", err);
+      setVestingProgress(null);
+    }
+  }, []);
+
+  // Handle vesting mode change
+  const handleVestingModeChange = useCallback((_mode: VestingMode) => {
+    // Mode is already set in vestingState by the VestingSelector
+    // Could trigger balance recalculation if needed
+  }, []);
 
   const {
     pendingFile,
@@ -32,7 +67,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
   const {
     txPlan,
-    setTxPlan,
     isSending,
     transactions,
     loadingTransactions,
@@ -70,12 +104,13 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     })();
   }, [refreshBalance]);
 
-  // Refresh balance when address changes
+  // Refresh balance and classify vesting when address changes
   useEffect(() => {
     if (selectedAddress) {
       refreshBalance(selectedAddress);
+      classifyVesting(selectedAddress);
     }
-  }, [selectedAddress, refreshBalance]);
+  }, [selectedAddress, refreshBalance, classifyVesting]);
 
   // Create new wallet
   const onCreateWallet = async () => {
@@ -303,7 +338,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   // Main view
   return (
     <MainWalletView
-      wallet={wallet}
       selectedAddress={selectedAddress}
       addresses={addresses}
       balance={balance}
@@ -317,7 +351,8 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       txPlan={txPlan}
       isSending={isSending}
       onConfirmSend={onConfirmSend}
-      onCancelSend={() => setTxPlan(null)}
+      vestingProgress={vestingProgress}
+      onVestingModeChange={handleVestingModeChange}
     />
   );
 }

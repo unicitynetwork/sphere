@@ -12,13 +12,14 @@ import {
   Check,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { Wallet, TransactionPlan } from "../sdk";
+import type { TransactionPlan, VestingMode } from "../sdk";
 import {
   QRModal,
   SaveWalletModal,
   DeleteConfirmationModal,
   TransactionConfirmationModal,
 } from "../components/modals";
+import { VestingSelector } from "../components/VestingSelector";
 
 // Animated balance display component
 function AnimatedBalance({ value, show }: { value: number; show: boolean }) {
@@ -67,7 +68,6 @@ function AnimatedBalance({ value, show }: { value: number; show: boolean }) {
 }
 
 interface MainWalletViewProps {
-  wallet: Wallet;
   selectedAddress: string;
   addresses: string[];
   balance: number;
@@ -81,11 +81,11 @@ interface MainWalletViewProps {
   txPlan: TransactionPlan | null;
   isSending: boolean;
   onConfirmSend: () => Promise<void>;
-  onCancelSend: () => void;
+  vestingProgress?: { current: number; total: number } | null;
+  onVestingModeChange?: (mode: VestingMode) => void;
 }
 
 export function MainWalletView({
-  wallet,
   selectedAddress,
   addresses,
   balance,
@@ -99,7 +99,8 @@ export function MainWalletView({
   txPlan,
   isSending,
   onConfirmSend,
-  onCancelSend,
+  vestingProgress,
+  onVestingModeChange,
 }: MainWalletViewProps) {
   const [showQR, setShowQR] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -133,7 +134,7 @@ export function MainWalletView({
   };
 
   return (
-    <div className="flex flex-col h-full relative">
+    <div className="flex flex-col h-full relative overflow-y-auto">
       <TransactionConfirmationModal
         show={showConfirmation}
         txPlan={txPlan}
@@ -173,6 +174,15 @@ export function MainWalletView({
             <AnimatedBalance value={balance} show={showBalances} />
           </motion.h2>
         </AnimatePresence>
+
+        <div className="mb-4">
+          <VestingSelector
+            address={selectedAddress}
+            onModeChange={onVestingModeChange}
+            classificationProgress={vestingProgress}
+            showBalances={showBalances}
+          />
+        </div>
 
         <div className="grid grid-cols-2 gap-3 mb-4">
           <motion.button
