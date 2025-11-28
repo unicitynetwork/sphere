@@ -57,7 +57,6 @@ export class TokenSplitCalculator {
       }
     }
 
-    // Сортировка по возрастанию суммы
     candidates.sort((a, b) => (a.amount < b.amount ? -1 : 1));
 
     const totalAvailable = candidates.reduce((sum, t) => sum + t.amount, 0n);
@@ -68,21 +67,14 @@ export class TokenSplitCalculator {
       return null;
     }
 
-    // === СТРАТЕГИЯ 1: Точное совпадение (один токен) ===
     const exactMatch = candidates.find((t) => t.amount === targetAmount);
     if (exactMatch) {
       console.log("🎯 Found exact match token");
       return this.createDirectPlan([exactMatch], targetAmount, targetCoinIdHex);
     }
 
-    // === СТРАТЕГИЯ 2: Точная комбинация (Subset Sum) ===
-    // Пытаемся найти комбинацию токенов, которая в сумме дает ровно targetAmount.
-    // Это позволяет избежать сжигания (Burn) и сплита.
-
-    // Ограничиваем глубину поиска до 5 токенов (как в Android), чтобы не зависнуть
     const maxCombinationSize = Math.min(5, candidates.length);
 
-    // Начинаем с 2, так как размер 1 уже проверен в Стратегии 1
     for (let size = 2; size <= maxCombinationSize; size++) {
       const combo = this.findCombinationOfSize(candidates, targetAmount, size);
       if (combo) {
@@ -91,9 +83,6 @@ export class TokenSplitCalculator {
       }
     }
 
-    // === СТРАТЕГИЯ 3: Жадный набор + Сплит ===
-    // Если точной суммы нет, набираем токены, пока не перевалим за сумму,
-    // и последний токен сплитим (делим).
     const toTransfer: TokenWithAmount[] = [];
     let currentSum = 0n;
 
@@ -101,16 +90,12 @@ export class TokenSplitCalculator {
       const newSum = currentSum + candidate.amount;
 
       if (newSum === targetAmount) {
-        // (Теоретически сюда не должны попасть, если Стратегия 2 отработала, но для надежности)
         toTransfer.push(candidate);
         return this.createDirectPlan(toTransfer, targetAmount, targetCoinIdHex);
       } else if (newSum < targetAmount) {
-        // Токен полностью уходит в оплату
         toTransfer.push(candidate);
         currentSum = newSum;
       } else {
-        // newSum > targetAmount
-        // Этот токен переполняет сумму -> его надо СПЛИТИТЬ
         const neededFromThisToken = targetAmount - currentSum;
         const remainderForMe = candidate.amount - neededFromThisToken;
 
@@ -118,7 +103,7 @@ export class TokenSplitCalculator {
 
         return {
           tokensToTransferDirectly: toTransfer,
-          tokenToSplit: candidate, // Этот режем
+          tokenToSplit: candidate,
           splitAmount: neededFromThisToken,
           remainderAmount: remainderForMe,
           totalTransferAmount: targetAmount,
@@ -134,7 +119,6 @@ export class TokenSplitCalculator {
   private getRealAmountFromSdk(sdkToken: SdkToken<any>): bigint {
     try {
       const coinsOpt = sdkToken.coins;
-      // Обработка Optional, если есть
       const coinData = coinsOpt;
 
       if (coinData && coinData.coins) {
@@ -146,7 +130,6 @@ export class TokenSplitCalculator {
           val = firstItem[1];
         }
 
-        // Проверка на баг [Object, amount]
         if (Array.isArray(val)) {
           return BigInt(val[1]?.toString() || "0");
         } else if (val) {
@@ -177,20 +160,14 @@ export class TokenSplitCalculator {
     };
   }
 
-  /**
-   * Ищет комбинацию указанного размера (size), сумма которой равна targetAmount.
-   * Использует генератор для перебора вариантов без аллокации лишней памяти.
-   */
   private findCombinationOfSize(
     tokens: TokenWithAmount[],
     targetAmount: bigint,
     size: Int
   ): TokenWithAmount[] | null {
-    // Запускаем генератор комбинаций
     const generator = this.generateCombinations(tokens, size);
 
     for (const combo of generator) {
-      // Считаем сумму комбинации
       const sum = combo.reduce((acc, t) => acc + t.amount, 0n);
       if (sum === targetAmount) {
         return combo;
@@ -199,10 +176,6 @@ export class TokenSplitCalculator {
     return null;
   }
 
-  /**
-   * Рекурсивный генератор комбинаций (n choose k)
-   * Аналог Kotlin sequence { ... }
-   */
   private *generateCombinations(
     tokens: TokenWithAmount[],
     k: number,
@@ -215,9 +188,6 @@ export class TokenSplitCalculator {
     }
 
     for (let i = start; i < tokens.length; i++) {
-      // Оптимизация: если текущий токен уже больше, чем нам нужно (даже один),
-      // то в отсортированном массиве дальше искать нет смысла (для простых сумм)
-      // Но для точной суммы это сложнее, поэтому просто перебираем.
       yield* this.generateCombinations(tokens, k - 1, i + 1, [
         ...current,
         tokens[i],

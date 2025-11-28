@@ -78,7 +78,6 @@ export class RegistryService {
     private updateMap(definitions: TokenDefinition[]) {
         this.definitionsById.clear();
         definitions.forEach(def => {
-            // Нормализуем ID (нижний регистр) на всякий случай
             this.definitionsById.set(def.id.toLowerCase(), def);
         });
     }
