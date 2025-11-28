@@ -62,7 +62,7 @@ export class ServiceProvider {
         rootNodes: [
           {
             nodeId: "TEST_NODE",
-            sigKey: "0x" + TEST_SIG_KEY, // Префикс 0x важен
+            sigKey: "0x" + TEST_SIG_KEY,
             stake: "1",
           },
         ],
