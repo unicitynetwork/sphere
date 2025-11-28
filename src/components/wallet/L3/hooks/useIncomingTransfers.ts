@@ -30,5 +30,6 @@ export const useIncomingTransfers = () => {
       console.log("🛑 Stopping Nostr background service.");
     };
     
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity?.address]);
 };
