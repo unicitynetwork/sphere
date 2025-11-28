@@ -8,6 +8,7 @@ export interface Wallet {
   childPrivateKey?: string | null;
   isImportedAlphaWallet?: boolean;
   masterChainCode?: string | null;
+  isBIP32?: boolean;
 }
 
 export interface WalletAddress {
@@ -70,4 +71,24 @@ export interface RestoreWalletResult {
 export interface ExportOptions {
   password?: string;
   filename?: string;
+}
+
+// Vesting types
+export type VestingMode = "all" | "vested" | "unvested";
+
+export interface ClassifiedUTXO extends UTXO {
+  vestingStatus?: "vested" | "unvested" | "error";
+  coinbaseHeight?: number | null;
+}
+
+export interface VestingBalances {
+  vested: bigint;
+  unvested: bigint;
+  all: bigint;
+}
+
+export interface ClassificationResult {
+  isVested: boolean;
+  coinbaseHeight: number | null;
+  error?: string;
 }

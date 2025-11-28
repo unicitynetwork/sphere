@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { motion } from "framer-motion";
+import { Shield } from "lucide-react";
 
 interface SaveWalletModalProps {
   show: boolean;
@@ -34,12 +36,45 @@ export function SaveWalletModal({ show, onConfirm, onCancel }: SaveWalletModalPr
   };
 
   return (
-    <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-40 p-6">
-      <div className="bg-neutral-900 p-6 rounded-xl w-full max-w-md border border-neutral-700 shadow-2xl">
-        <h3 className="text-white text-lg font-bold mb-4">Backup Wallet</h3>
-        <p className="text-xs text-neutral-400 mb-4">
-          Export your wallet keys to a file. Keep this safe!
-        </p>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-40 p-6"
+      onClick={onCancel}
+    >
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.9, opacity: 0, y: 20 }}
+        transition={{ type: "spring", duration: 0.4 }}
+        className="bg-neutral-900 p-6 rounded-xl w-full max-w-md border border-neutral-700 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.1 }}
+          className="flex flex-col items-center text-center mb-6"
+        >
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
+            className="w-12 h-12 bg-blue-500/10 rounded-full flex items-center justify-center mb-4"
+          >
+            <motion.div
+              animate={{ y: [0, -2, 0] }}
+              transition={{ delay: 0.3, duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+            >
+              <Shield className="w-6 h-6 text-blue-500" />
+            </motion.div>
+          </motion.div>
+          <h3 className="text-white text-xl font-bold mb-2">Backup Wallet</h3>
+          <p className="text-xs text-neutral-400">
+            Export your wallet keys to a file. Keep this safe!
+          </p>
+        </motion.div>
 
         <label className="text-xs text-neutral-500 mb-1 block">
           Filename
@@ -71,20 +106,24 @@ export function SaveWalletModal({ show, onConfirm, onCancel }: SaveWalletModalPr
         />
 
         <div className="flex gap-3">
-          <button
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             onClick={onCancel}
-            className="flex-1 py-2 bg-neutral-700 rounded text-white hover:bg-neutral-600"
+            className="flex-1 py-2 bg-neutral-700 rounded text-white hover:bg-neutral-600 transition-colors"
           >
             Cancel
-          </button>
-          <button
+          </motion.button>
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             onClick={handleConfirm}
-            className="flex-1 py-2 bg-blue-600 rounded text-white hover:bg-blue-500"
+            className="flex-1 py-2 bg-linear-to-br from-blue-600 to-blue-700 rounded text-white hover:from-blue-500 hover:to-blue-600 transition-all shadow-lg shadow-blue-500/20"
           >
             Save
-          </button>
+          </motion.button>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

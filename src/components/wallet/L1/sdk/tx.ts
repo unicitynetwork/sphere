@@ -1,328 +1,296 @@
-// sdk/l1/tx.ts
+/**
+ * Transaction handling - Strict copy of index.html logic
+ */
 import { getUtxo, broadcast } from "./network";
+import { decodeBech32 } from "./bech32";
 import CryptoJS from "crypto-js";
 import elliptic from "elliptic";
-import { decodeBech32 } from "./bech32";
-import type {
-  Wallet,
-  TransactionPlan,
-  Transaction,
-  UTXO,
-} from "./types";
+import type { Wallet, TransactionPlan, Transaction, UTXO } from "./types";
 
 const ec = new elliptic.ec("secp256k1");
 
-// --------------------------------------------------
-// CONSTANTS
-// --------------------------------------------------
-const FEE = 10_000; // sats
-const DUST = 546; // sats
+// Constants
+const FEE = 10_000; // sats per transaction
+const DUST = 546; // dust threshold
 const SAT = 100_000_000; // sats in 1 ALPHA
-const SEQUENCE = "feffffff"; // default sequence
-const VERSION_LE = "02000000";
-const LOCKTIME_LE = "00000000";
 
-// --------------------------------------------------
-// UTILS
-// --------------------------------------------------
-function alphaToSats(alpha: number) {
-  return Math.floor(alpha * SAT);
-}
-
-function toLE(value: number | bigint, bytes: number) {
-  const hex = BigInt(value)
-    .toString(16)
-    .padStart(bytes * 2, "0");
-  return hex.match(/../g)!.reverse().join("");
-}
-
-function varInt(n: number | bigint) {
-  const v = Number(n);
-  if (v < 0xfd) return v.toString(16).padStart(2, "0");
-  if (v <= 0xffff) return "fd" + toLE(v, 2);
-  if (v <= 0xffffffff) return "fe" + toLE(v, 4);
-  return "ff" + toLE(v, 8);
-}
-
-// P2WPKH scriptPubKey from bech32 address
+/**
+ * Create scriptPubKey for address (P2WPKH for bech32)
+ * Exact copy from index.html
+ */
 export function createScriptPubKey(address: string): string {
-  const decoded = decodeBech32(address);
-  if (!decoded) throw new Error("Invalid bech32 address: " + address);
-  if (decoded.witnessVersion !== 0) throw new Error("Only v0 P2WPKH supported");
+  if (!address || typeof address !== "string") {
+    throw new Error("Invalid address: must be a string");
+  }
 
-  const programHex = Array.from(decoded.data)
-    .map((b) => b.toString(16).padStart(2, "0"))
+  const decoded = decodeBech32(address);
+  if (!decoded) {
+    throw new Error("Invalid bech32 address: " + address);
+  }
+
+  // Convert data array to hex string
+  const dataHex = Array.from(decoded.data)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 
-  // OP_0 (00) + PUSH20 (14) + pubkeyhash(20 bytes)
-  return "0014" + programHex;
+  // P2WPKH scriptPubKey: OP_0 <20-byte-key-hash>
+  return "0014" + dataHex;
 }
 
-function sha256d(hex: string) {
-  const h1 = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(hex));
-  const h2 = CryptoJS.SHA256(h1);
-  return h2.toString();
-}
+/**
+ * Create signature hash for SegWit (BIP143)
+ * Exact copy from index.html createSignatureHash()
+ */
+function createSignatureHash(
+  txPlan: { input: { tx_hash: string; tx_pos: number; value: number }; outputs: Array<{ value: number; address: string }> },
+  publicKey: string
+): string {
+  let preimage = "";
 
-// --------------------------------------------------
-// BIP143 SIG-HASH (single-input P2WPKH)
-// --------------------------------------------------
-function createSignatureHashBIP143(
-  txPlan: {
-    input: { txid: string; vout: number; value: number };
-    outputs: Array<{ value: number; address: string }>;
-  },
-  publicKeyHex: string
-) {
-  // 1) nVersion
-  let preimage = VERSION_LE;
+  // 1. nVersion (4 bytes, little-endian)
+  preimage += "02000000";
 
-  // 2) hashPrevouts (all inputs)
-  const prevouts =
-    txPlan.input.txid.match(/../g)!.reverse().join("") +
-    toLE(txPlan.input.vout, 4);
-
-  const hashPrevouts = sha256d(prevouts);
+  // 2. hashPrevouts (32 bytes)
+  const txidBytes = txPlan.input.tx_hash.match(/../g)!.reverse().join("");
+  const voutBytes = ("00000000" + txPlan.input.tx_pos.toString(16)).slice(-8).match(/../g)!.reverse().join("");
+  const prevouts = txidBytes + voutBytes;
+  const hashPrevouts = CryptoJS.SHA256(CryptoJS.SHA256(CryptoJS.enc.Hex.parse(prevouts))).toString();
   preimage += hashPrevouts;
 
-  // 3) hashSequence
-  const hashSequence = sha256d(SEQUENCE);
+  // 3. hashSequence (32 bytes)
+  const sequence = "feffffff";
+  const hashSequence = CryptoJS.SHA256(CryptoJS.SHA256(CryptoJS.enc.Hex.parse(sequence))).toString();
   preimage += hashSequence;
 
-  // 4) outpoint of current input
-  preimage += txPlan.input.txid.match(/../g)!.reverse().join("");
-  preimage += toLE(txPlan.input.vout, 4);
+  // 4. outpoint (36 bytes)
+  preimage += txPlan.input.tx_hash.match(/../g)!.reverse().join("");
+  preimage += ("00000000" + txPlan.input.tx_pos.toString(16)).slice(-8).match(/../g)!.reverse().join("");
 
-  // 5) scriptCode = 0x19 76 a9 14 <20-byte pubKeyHash> 88 ac
-  const pubKeyHash = CryptoJS.RIPEMD160(
-    CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKeyHex))
-  ).toString();
-  const scriptCode = "19" + "76a914" + pubKeyHash + "88ac";
+  // 5. scriptCode for P2WPKH (includes length prefix)
+  const pubKeyHash = CryptoJS.RIPEMD160(CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKey))).toString();
+  const scriptCode = "1976a914" + pubKeyHash + "88ac";
   preimage += scriptCode;
 
-  // 6) amount (8 bytes LE)
-  preimage += toLE(txPlan.input.value, 8);
+  // 6. amount (8 bytes, little-endian)
+  const amountHex = txPlan.input.value.toString(16).padStart(16, "0");
+  preimage += amountHex.match(/../g)!.reverse().join("");
 
-  // 7) nSequence
-  preimage += SEQUENCE;
+  // 7. nSequence (4 bytes, little-endian)
+  preimage += sequence;
 
-  // 8) hashOutputs
-  let outputsSerial = "";
-  for (const o of txPlan.outputs) {
-    const amountLE = toLE(o.value, 8);
-    const spk = createScriptPubKey(o.address);
-    const spkLen = varInt(spk.length / 2);
-    outputsSerial += amountLE + spkLen + spk;
+  // 8. hashOutputs (32 bytes)
+  let outputs = "";
+  for (const output of txPlan.outputs) {
+    const outAmountHex = output.value.toString(16).padStart(16, "0");
+    outputs += outAmountHex.match(/../g)!.reverse().join("");
+    const scriptPubKey = createScriptPubKey(output.address);
+    const scriptLength = (scriptPubKey.length / 2).toString(16).padStart(2, "0");
+    outputs += scriptLength;
+    outputs += scriptPubKey;
   }
-  const hashOutputs = sha256d(outputsSerial);
+  const hashOutputs = CryptoJS.SHA256(CryptoJS.SHA256(CryptoJS.enc.Hex.parse(outputs))).toString();
   preimage += hashOutputs;
 
-  // 9) nLockTime
-  preimage += LOCKTIME_LE;
+  // 9. nLocktime (4 bytes, little-endian)
+  preimage += "00000000";
 
-  // 10) sighash type (SIGHASH_ALL = 0x01_000000)
-  preimage += "01000000";
+  // 10. sighash type (4 bytes, little-endian)
+  preimage += "01000000"; // SIGHASH_ALL
 
-  // Double SHA256 of preimage
-  return sha256d(preimage);
+  // Double SHA256
+  const hash1 = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(preimage));
+  const hash2 = CryptoJS.SHA256(hash1);
+  return hash2.toString();
 }
 
-// --------------------------------------------------
-// WITNESS (P2WPKH): [signature+hashtype, pubkey]
-// --------------------------------------------------
-function buildWitness(
-  sigHashHex: string,
+/**
+ * Create witness data for the transaction
+ * Exact copy from index.html createWitnessData()
+ */
+function createWitnessData(
+  txPlan: { input: { tx_hash: string; tx_pos: number; value: number }; outputs: Array<{ value: number; address: string }> },
   keyPair: elliptic.ec.KeyPair,
-  publicKeyHex: string
-) {
-  // Der-encode, enforce low-S
-  const sig = keyPair.sign(sigHashHex, { canonical: true });
-  let der = sig.toDER("hex");
+  publicKey: string
+): string {
+  // Create signature hash for witness
+  const sigHash = createSignatureHash(txPlan, publicKey);
 
-  // append sighash type 0x01
-  der = der + "01";
+  // Sign the hash
+  const signature = keyPair.sign(sigHash);
 
-  const derLen = (der.length / 2).toString(16).padStart(2, "0");
-  const pubLen = (publicKeyHex.length / 2).toString(16).padStart(2, "0");
+  // Ensure low-S canonical signature (BIP62)
+  const halfOrder = ec.curve.n!.shrn(1);
+  if (signature.s.cmp(halfOrder) > 0) {
+    signature.s = ec.curve.n!.sub(signature.s);
+  }
 
-  // 02 <len(sig)> <sig+01> <len(pub)> <pub>
-  return "02" + derLen + der + pubLen + publicKeyHex;
+  const derSig = signature.toDER("hex") + "01"; // SIGHASH_ALL
+
+  // Build witness
+  let witness = "";
+  witness += "02"; // 2 stack items
+
+  // Signature
+  const sigLen = (derSig.length / 2).toString(16).padStart(2, "0");
+  witness += sigLen;
+  witness += derSig;
+
+  // Public key
+  const pubKeyLen = (publicKey.length / 2).toString(16).padStart(2, "0");
+  witness += pubKeyLen;
+  witness += publicKey;
+
+  return witness;
 }
 
-// --------------------------------------------------
-// Build SegWit TX (single input, N outputs)
-// --------------------------------------------------
+/**
+ * Build a proper SegWit transaction
+ * Exact copy from index.html buildSegWitTransaction()
+ */
 export function buildSegWitTransaction(
-  txPlan: {
-    input: { txid: string; vout: number; value: number };
-    outputs: Array<{ value: number; address: string }>;
-  },
+  txPlan: { input: { tx_hash: string; tx_pos: number; value: number }; outputs: Array<{ value: number; address: string }> },
   keyPair: elliptic.ec.KeyPair,
-  publicKeyHex: string
-) {
-  // ----- witness signature hash -----
-  const sigHash = createSignatureHashBIP143(txPlan, publicKeyHex);
+  publicKey: string
+): { hex: string; txid: string } {
+  let txHex = "";
 
-  // ----- non-witness serialization (for txid) -----
-  let noWit = "";
-  noWit += VERSION_LE;
-  noWit += varInt(1); // inputs
-  // input
-  noWit += txPlan.input.txid.match(/../g)!.reverse().join("");
-  noWit += toLE(txPlan.input.vout, 4);
-  noWit += "00"; // empty scriptsig
-  noWit += SEQUENCE;
-  // outputs
-  noWit += varInt(txPlan.outputs.length);
-  for (const o of txPlan.outputs) {
-    const amountLE = toLE(o.value, 8);
-    const spk = createScriptPubKey(o.address);
-    const spkLen = varInt(spk.length / 2);
-    noWit += amountLE + spkLen + spk;
+  // Version (4 bytes, little-endian)
+  txHex += "02000000"; // version 2
+
+  // Marker and flag for SegWit
+  txHex += "00"; // marker
+  txHex += "01"; // flag
+
+  // Number of inputs (varint)
+  txHex += "01"; // 1 input
+
+  // Input - Previous tx hash (32 bytes, reversed for little-endian)
+  const prevTxHash = txPlan.input.tx_hash;
+  const reversedHash = prevTxHash.match(/../g)!.reverse().join("");
+  txHex += reversedHash;
+
+  // Previous output index (4 bytes, little-endian)
+  const vout = txPlan.input.tx_pos;
+  txHex += ("00000000" + vout.toString(16)).slice(-8).match(/../g)!.reverse().join("");
+
+  // Script length (varint) - 0 for witness transactions
+  txHex += "00";
+
+  // Sequence (4 bytes)
+  txHex += "feffffff";
+
+  // Number of outputs (varint)
+  const outputCount = txPlan.outputs.length;
+  txHex += ("0" + outputCount.toString(16)).slice(-2);
+
+  // Outputs
+  for (const output of txPlan.outputs) {
+    // Amount (8 bytes, little-endian)
+    const amountHex = output.value.toString(16).padStart(16, "0");
+    txHex += amountHex.match(/../g)!.reverse().join("");
+
+    // Script pubkey
+    const scriptPubKey = createScriptPubKey(output.address);
+    const scriptLength = (scriptPubKey.length / 2).toString(16).padStart(2, "0");
+    txHex += scriptLength;
+    txHex += scriptPubKey;
   }
-  noWit += LOCKTIME_LE;
 
-  const txid = sha256d(noWit).match(/../g)!.reverse().join("");
+  // Witness data
+  const witnessData = createWitnessData(txPlan, keyPair, publicKey);
+  txHex += witnessData;
 
-  // ----- full segwit serialization -----
-  let full = "";
-  full += VERSION_LE;
-  full += "00"; // marker
-  full += "01"; // flag
-  full += varInt(1); // inputs
-  // input
-  full += txPlan.input.txid.match(/../g)!.reverse().join("");
-  full += toLE(txPlan.input.vout, 4);
-  full += "00"; // scriptSig length = 0
-  full += SEQUENCE;
-  // outputs
-  full += varInt(txPlan.outputs.length);
-  for (const o of txPlan.outputs) {
-    const amountLE = toLE(o.value, 8);
-    const spk = createScriptPubKey(o.address);
-    const spkLen = varInt(spk.length / 2);
-    full += amountLE + spkLen + spk;
+  // Locktime (4 bytes)
+  txHex += "00000000";
+
+  // Calculate transaction ID (double SHA256 of tx without witness data)
+  let txForId = "";
+
+  // Version (4 bytes)
+  txForId += "02000000";
+
+  // Input count (1 byte)
+  txForId += "01";
+
+  // Input: txid (32 bytes reversed) + vout (4 bytes)
+  const inputTxidBytes = txPlan.input.tx_hash.match(/../g)!.reverse().join("");
+  txForId += inputTxidBytes;
+  txForId += ("00000000" + txPlan.input.tx_pos.toString(16)).slice(-8).match(/../g)!.reverse().join("");
+
+  // Script sig (empty for P2WPKH)
+  txForId += "00";
+
+  // Sequence (4 bytes)
+  txForId += "feffffff";
+
+  // Output count
+  txForId += ("0" + txPlan.outputs.length.toString(16)).slice(-2);
+
+  // Add all outputs
+  for (const output of txPlan.outputs) {
+    const amountHex = ("0000000000000000" + output.value.toString(16)).slice(-16);
+    const amountLittleEndian = amountHex.match(/../g)!.reverse().join("");
+    txForId += amountLittleEndian;
+
+    const scriptPubKey = createScriptPubKey(output.address);
+    const scriptLength = ("0" + (scriptPubKey.length / 2).toString(16)).slice(-2);
+    txForId += scriptLength;
+    txForId += scriptPubKey;
   }
-  // witness for each input
-  full += buildWitness(sigHash, keyPair, publicKeyHex);
-  // locktime
-  full += LOCKTIME_LE;
 
-  return { raw: full, txid };
+  // Locktime (4 bytes)
+  txForId += "00000000";
+
+  // Calculate the correct txid
+  const hash1 = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(txForId));
+  const hash2 = CryptoJS.SHA256(hash1);
+  const txid = hash2.toString().match(/../g)!.reverse().join("");
+
+  return {
+    hex: txHex,
+    txid: txid,
+  };
 }
 
-// --------------------------------------------------
-// TX PLAN
-// UTXOs come from getUtxo(address) and must be:
-// { txid, vout, value, height, address }
-// --------------------------------------------------
-
-function rebalanceDustOutputs(
-  transactions: Transaction[],
-  recipientAddress: string,
-  senderAddress: string,
-  availableUtxos: UTXO[],
-  feePerTx: number
-): Transaction[] {
-  // First pass: rebalance recipient dust outputs across transactions
-  for (let i = 0; i < transactions.length; i++) {
-    const tx = transactions[i];
-    const recipientOutput = tx.outputs.find((o) => o.address === recipientAddress);
-
-    if (recipientOutput && recipientOutput.value < DUST && transactions.length > 1) {
-      // Find another transaction to rebalance with
-      for (let j = 0; j < transactions.length; j++) {
-        if (i === j) continue;
-
-        const otherTx = transactions[j];
-        const otherRecipientOutput = otherTx.outputs.find((o) => o.address === recipientAddress);
-
-        if (otherRecipientOutput) {
-          // Calculate how much we need to move to make both outputs non-dust
-          const totalAmount = recipientOutput.value + otherRecipientOutput.value;
-          const halfAmount = Math.floor(totalAmount / 2);
-
-          if (halfAmount > DUST) {
-            // Rebalance the outputs
-            recipientOutput.value = halfAmount;
-            otherRecipientOutput.value = totalAmount - halfAmount;
-            break;
-          }
-        }
-      }
-    }
+/**
+ * Create and sign a transaction
+ * Exact copy from index.html createAndSignTransaction()
+ */
+export function createAndSignTransaction(
+  wallet: Wallet,
+  txPlan: Transaction
+): { raw: string; txid: string } {
+  // Get the private key - exact logic from index.html
+  const privateKeyHex = wallet.childPrivateKey || wallet.masterPrivateKey;
+  if (!privateKeyHex) {
+    throw new Error("No private key available");
   }
 
-  // Second pass: handle dust change outputs
-  const finalTransactions: Transaction[] = [];
-  const usedUtxos = new Set(transactions.map((tx) => `${tx.input.txid}:${tx.input.vout}`));
+  const keyPair = ec.keyFromPrivate(privateKeyHex, "hex");
+  const publicKey = keyPair.getPublic(true, "hex"); // compressed
 
-  for (const tx of transactions) {
-    finalTransactions.push(tx);
+  // Convert Transaction to the format expected by buildSegWitTransaction
+  const txPlanForBuild = {
+    input: {
+      tx_hash: txPlan.input.txid,
+      tx_pos: txPlan.input.vout,
+      value: txPlan.input.value,
+    },
+    outputs: txPlan.outputs,
+  };
 
-    // Check if we have dust change that needs to be handled
-    if (tx.changeAmount > 0 && tx.changeAmount <= DUST) {
-      const recipientOutput = tx.outputs.find((o) => o.address === recipientAddress);
+  const tx = buildSegWitTransaction(txPlanForBuild, keyPair, publicKey);
 
-      if (recipientOutput && recipientOutput.value > DUST * 2) {
-        // Find an unused UTXO first
-        const nextUtxo = availableUtxos.find(
-          (utxo) => !usedUtxos.has(`${utxo.txid}:${utxo.vout}`)
-        );
-
-        if (nextUtxo) {
-          // Split the recipient output to create non-dust change
-          const halfRecipientAmount = Math.floor(recipientOutput.value / 2);
-          const remainingRecipientAmount = recipientOutput.value - halfRecipientAmount;
-          recipientOutput.value = halfRecipientAmount;
-
-          // Create proper change output
-          const newChangeAmount = tx.input.value - halfRecipientAmount - tx.fee;
-          if (newChangeAmount > DUST) {
-            tx.outputs.push({
-              address: senderAddress,
-              value: newChangeAmount,
-            });
-            tx.changeAmount = newChangeAmount;
-          } else {
-            // If for some reason new change is invalid, we might have an issue, 
-            // but math suggests it should be > DUST.
-            // We'll proceed with creating follow-up.
-          }
-
-          // Create follow-up transaction
-          const followUpTx: Transaction = {
-            input: {
-              txid: nextUtxo.txid ?? nextUtxo.tx_hash ?? "",
-              vout: nextUtxo.vout ?? nextUtxo.tx_pos ?? 0,
-              value: nextUtxo.value,
-              address: nextUtxo.address ?? senderAddress,
-            },
-            outputs: [
-              { address: recipientAddress, value: remainingRecipientAmount },
-            ],
-            fee: feePerTx,
-            changeAmount: nextUtxo.value - remainingRecipientAmount - feePerTx,
-            changeAddress: senderAddress,
-          };
-
-          if (followUpTx.changeAmount > DUST) {
-            followUpTx.outputs.push({
-              address: senderAddress,
-              value: followUpTx.changeAmount,
-            });
-          }
-
-          finalTransactions.push(followUpTx);
-          usedUtxos.add(`${nextUtxo.txid}:${nextUtxo.vout}`);
-          usedUtxos.add(`${nextUtxo.tx_hash}:${nextUtxo.tx_pos}`);
-        }
-      }
-    }
-  }
-  return finalTransactions;
+  return {
+    raw: tx.hex,
+    txid: tx.txid,
+  };
 }
 
+/**
+ * Collect UTXOs for required amount
+ * Based on index.html collectUtxosForAmount()
+ */
 export function collectUtxosForAmount(
   utxoList: UTXO[],
   amountSats: number,
@@ -372,14 +340,13 @@ export function collectUtxosForAmount(
         value: utxo.value,
         address: utxo.address ?? senderAddress,
       },
-      outputs: [
-        { address: recipientAddress, value: txAmount }
-      ],
+      outputs: [{ address: recipientAddress, value: txAmount }],
       fee: FEE,
       changeAmount: changeAmount,
-      changeAddress: senderAddress
+      changeAddress: senderAddress,
     };
 
+    // Add change output if above dust
     if (changeAmount > DUST) {
       tx.outputs.push({ value: changeAmount, address: senderAddress });
     }
@@ -395,24 +362,26 @@ export function collectUtxosForAmount(
     };
   }
 
-  const rebalanced = rebalanceDustOutputs(transactions, recipientAddress, senderAddress, sortedUtxos, FEE);
-
   return {
     success: true,
-    transactions: rebalanced,
+    transactions,
   };
 }
 
+/**
+ * Create transaction plan from wallet
+ */
 export async function createTransactionPlan(
   wallet: Wallet,
   toAddress: string,
   amountAlpha: number
 ): Promise<TransactionPlan> {
-  // Validate address early
-  if (!decodeBech32(toAddress)) throw new Error("Invalid recipient address");
+  if (!decodeBech32(toAddress)) {
+    throw new Error("Invalid recipient address");
+  }
 
   const fromAddress = wallet.addresses[0].address;
-  const amountSats = alphaToSats(amountAlpha);
+  const amountSats = Math.floor(amountAlpha * SAT);
 
   const utxos = await getUtxo(fromAddress);
   if (!Array.isArray(utxos) || utxos.length === 0) {
@@ -422,30 +391,9 @@ export async function createTransactionPlan(
   return collectUtxosForAmount(utxos, amountSats, toAddress, fromAddress);
 }
 
-// --------------------------------------------------
-// SIGN (uses childPrivateKey or masterPrivateKey)
-// --------------------------------------------------
-export function createAndSignTransaction(wallet: Wallet, txPlan: Transaction) {
-  const inputAddress = txPlan.input.address;
-  const walletAddress = wallet.addresses.find((a) => a.address === inputAddress);
-
-  if (!walletAddress) {
-    throw new Error(`Address ${inputAddress} not found in wallet`);
-  }
-
-  const privHex = walletAddress.privateKey;
-
-  if (!privHex) throw new Error("No private key in wallet address");
-
-  const keyPair = ec.keyFromPrivate(privHex, "hex");
-  const publicKey = keyPair.getPublic(true, "hex");
-
-  return buildSegWitTransaction(txPlan, keyPair, publicKey);
-}
-
-// --------------------------------------------------
-// FINAL SEND
-// --------------------------------------------------
+/**
+ * Send ALPHA to address
+ */
 export async function sendAlpha(
   wallet: Wallet,
   toAddress: string,

@@ -16,7 +16,8 @@ interface HistoryViewProps {
   analyzeTransaction: (
     tx: TransactionHistoryItem,
     detail: TransactionDetail | undefined,
-    wallet: Wallet
+    wallet: Wallet,
+    selectedAddress?: string
   ) => {
     direction: string;
     amount: number;
@@ -67,18 +68,31 @@ export function HistoryView({
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6">
+      <div className="flex-1 overflow-y-auto px-6 custom-scrollbar">
         {loadingTransactions ? (
-          <div className="flex items-center justify-center h-32">
-            <p className="text-neutral-400">Loading transactions...</p>
-          </div>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex flex-col items-center justify-center h-32 gap-3"
+          >
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+              className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full"
+            />
+            <p className="text-neutral-400 text-sm">Loading transactions...</p>
+          </motion.div>
         ) : transactions.length === 0 ? (
-          <div className="flex items-center justify-center h-32">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex items-center justify-center h-32"
+          >
             <p className="text-neutral-400">No transactions found</p>
-          </div>
+          </motion.div>
         ) : (
           <div className="space-y-3">
-            {transactions.map((tx) => {
+            {transactions.map((tx, index) => {
               const confirmations =
                 tx.height > 0 && currentBlockHeight > 0
                   ? Math.max(0, currentBlockHeight - tx.height + 1)
@@ -94,15 +108,19 @@ export function HistoryView({
                 tx.tx_hash.substring(tx.tx_hash.length - 6);
 
               const detail = transactionDetails[tx.tx_hash];
-              const analysis = analyzeTransaction(tx, detail, wallet);
+              const analysis = analyzeTransaction(tx, detail, wallet, selectedAddress);
               const isSent = analysis.direction === "sent";
               const directionText = isSent ? "Sent" : "Received";
               const directionColor = isSent ? "#ef4444" : "#10b981";
 
               return (
-                <div
+                <motion.div
                   key={tx.tx_hash}
-                  className="bg-neutral-900 border border-neutral-800 rounded-xl p-4"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.05, duration: 0.3 }}
+                  whileHover={{ x: 4, backgroundColor: 'rgba(255,255,255,0.02)' }}
+                  className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 transition-all cursor-pointer hover:border-neutral-700"
                 >
                   <div className="flex justify-between items-start mb-3">
                     <div className="flex items-center gap-2">
@@ -188,7 +206,7 @@ export function HistoryView({
                       )}
                     </div>
                   )}
-                </div>
+                </motion.div>
               );
             })}
           </div>
