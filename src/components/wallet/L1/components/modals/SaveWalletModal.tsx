@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Shield } from "lucide-react";
+import { Shield, AlertCircle } from "lucide-react";
 
 interface SaveWalletModalProps {
   show: boolean;
@@ -12,17 +12,19 @@ export function SaveWalletModal({ show, onConfirm, onCancel }: SaveWalletModalPr
   const [filename, setFilename] = useState("alpha_wallet_backup");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [error, setError] = useState("");
 
   if (!show) return null;
 
   const handleConfirm = () => {
+    setError("");
     if (password) {
       if (password !== passwordConfirm) {
-        alert("Passwords do not match!");
+        setError("Passwords do not match!");
         return;
       }
       if (password.length < 4) {
-        alert("Password must be at least 4 characters");
+        setError("Password must be at least 4 characters");
         return;
       }
     }
@@ -33,6 +35,7 @@ export function SaveWalletModal({ show, onConfirm, onCancel }: SaveWalletModalPr
     setFilename("alpha_wallet_backup");
     setPassword("");
     setPasswordConfirm("");
+    setError("");
   };
 
   return (
@@ -102,8 +105,19 @@ export function SaveWalletModal({ show, onConfirm, onCancel }: SaveWalletModalPr
           type="password"
           value={passwordConfirm}
           onChange={(e) => setPasswordConfirm(e.target.value)}
-          className="w-full mb-6 px-3 py-2 bg-neutral-800 rounded text-neutral-200 border border-neutral-700"
+          className="w-full mb-4 px-3 py-2 bg-neutral-800 rounded text-neutral-200 border border-neutral-700"
         />
+
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-4 p-3 bg-red-500/10 border border-red-900/50 rounded-lg flex items-center gap-2"
+          >
+            <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+            <span className="text-red-400 text-sm">{error}</span>
+          </motion.div>
+        )}
 
         <div className="flex gap-3">
           <motion.button
