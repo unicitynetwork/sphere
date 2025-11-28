@@ -1,0 +1,18 @@
+UNICITY WALLET DETAILS
+===========================
+
+ENCRYPTED MASTER KEY (password protected):
+U2FsdGVkX18wLowO6k5zn4zI/KwxAJBdsYc12wA8kiFZyI2gZmi4gn58GaxFgsBNMVowA/BhpL3gUk7iNtQCQpp+frdgVjk9VcPk66FSIdqCrlGX9s17mQmZrIs6r+3S
+
+WALLET TYPE: Standard wallet (HMAC-based)
+
+ENCRYPTION STATUS: Encrypted with password
+To use this key, you will need the password you set in the wallet.
+
+YOUR ADDRESSES:
+Address 1: alpha1qllh2t42ytsgnx8fferxwms6npec7whvnaxta7d (Path: m/44'/0'/0')
+
+Generated on: 9/15/2025, 3:35:44 PM
+
+WARNING: Keep your master private key safe and secure.
+Anyone with your master private key can access all your funds.

@@ -1,11 +1,11 @@
 import { Plus, ArrowUpRight, Sparkles, TrendingUp, Loader2, Coins, Layers } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AssetRow } from '../L3/components/AssetRow';
+import { AssetRow } from '../../shared/components';
 import { useMemo, useState } from 'react';
-import { useWallet } from '../L3/hooks/useWallet';
-import { CreateWalletFlow } from '../L3/onboarding/CreateWalletFlow';
-import { TokenRow } from '../L3/components/TokenRow';
-import { SendModal } from '../L3/modals/SendModal';
+import { useWallet } from '../hooks/useWallet';
+import { CreateWalletFlow } from '../onboarding/CreateWalletFlow';
+import { TokenRow } from '../../shared/components';
+import { SendModal } from '../modals/SendModal';
 
 type Tab = 'assets' | 'tokens';
 

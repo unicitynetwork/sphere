@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Token } from '../data/model';
+import { Token } from '../../L3/data/model';
 import { Box, Copy, CheckCircle2 } from 'lucide-react';
 import { useState } from 'react';
 

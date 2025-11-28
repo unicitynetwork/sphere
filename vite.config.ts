@@ -12,14 +12,15 @@ export default defineConfig({
       protocolImports: true,
     }),
   ],
+  base: '/sphere/',
   server: {
     proxy: {
       '/rpc': {
-        target: 'https://goggregator-test.unicity.network', 
+        target: 'https://goggregator-test.unicity.network',
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path.replace(/^\/rpc/, ''),
       }
     }
   }
-});
+})
