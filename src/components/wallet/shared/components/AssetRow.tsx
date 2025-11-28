@@ -33,7 +33,7 @@ export function AssetRow({ asset, showBalances, delay, onClick }: AssetRowProps)
       <div className="flex items-center justify-between mb-1">
         
         <div className="flex items-center gap-3">
-          <div className="relative w-10 h-10 rounded-xl bg-neutral-800 flex items-center justify-center overflow-hidden border border-white/10">
+          <div className="relative w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
             {asset.iconUrl ? (
                 <img 
                     src={asset.iconUrl} 
