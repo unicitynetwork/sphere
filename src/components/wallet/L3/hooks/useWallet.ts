@@ -1,0 +1,519 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { IdentityManager } from "../services/IdentityManager";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { NostrService } from "../services/NostrService";
+import { AggregatedAsset, Token, TokenStatus } from "../data/model";
+import { ProxyAddress } from "@unicitylabs/state-transition-sdk/lib/address/ProxyAddress";
+import { Token as SdkToken } from "@unicitylabs/state-transition-sdk/lib/token/Token";
+import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
+import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment";
+import { ServiceProvider } from "../services/ServiceProvider";
+import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
+import { ApiService } from "../services/api";
+import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { NametagService } from "../services/NametagService";
+import { RegistryService } from "../services/RegistryService";
+import { useEffect } from "react";
+import { v4 as uuidv4 } from "uuid";
+import { TokenSplitExecutor } from "../services/transfer/TokenSplitExecutor";
+import { TokenSplitCalculator } from "../services/transfer/TokenSplitCalculator";
+import { TokenId } from "@unicitylabs/state-transition-sdk/lib/token/TokenId";
+
+export const KEYS = {
+  IDENTITY: ["wallet", "identity"],
+  TOKENS: ["wallet", "tokens"],
+  PRICES: ["market", "prices"],
+  REGISTRY: ["market", "registry"],
+  AGGREGATED: ["wallet", "aggregated"],
+  NAMETAG: ["wallet", "nametag"],
+};
+
+const TOKENS_STORAGE_KEY = "unicity_wallet_tokens";
+const loadTokensFromStorage = (): Token[] => {
+  const raw = localStorage.getItem(TOKENS_STORAGE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed.map((t: Partial<Token>) => new Token(t));
+  } catch (e) {
+    console.error("Failed to parse tokens", e);
+    return [];
+  }
+};
+
+const saveTokensToStorage = (tokens: Token[]) => {
+  localStorage.setItem(TOKENS_STORAGE_KEY, JSON.stringify(tokens));
+};
+
+const SESSION_KEY = "user-pin-1234";
+const identityManager = new IdentityManager(SESSION_KEY);
+const walletRepo = WalletRepository.getInstance();
+const nametagService = NametagService.getInstance(identityManager);
+const nostrService = NostrService.getInstance(identityManager);
+const registryService = RegistryService.getInstance();
+
+export const useWallet = () => {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const handleWalletUpdate = () => {
+      console.log("♻️ Wallet update detected! Force refreshing...");
+      queryClient.refetchQueries({ queryKey: KEYS.TOKENS });
+      queryClient.refetchQueries({ queryKey: KEYS.AGGREGATED });
+    };
+
+    window.addEventListener("wallet-updated", handleWalletUpdate);
+    return () =>
+      window.removeEventListener("wallet-updated", handleWalletUpdate);
+  }, [queryClient]);
+
+  const identityQuery = useQuery({
+    queryKey: KEYS.IDENTITY,
+    queryFn: () => identityManager.getCurrentIdentity(),
+    staleTime: Infinity,
+  });
+
+  const nametagQuery = useQuery({
+    queryKey: KEYS.NAMETAG,
+    queryFn: () => nametagService.getActiveNametag(),
+  });
+
+  const pricesQuery = useQuery({
+    queryKey: KEYS.PRICES,
+    queryFn: ApiService.fetchPrices,
+    refetchInterval: 60000,
+  });
+
+  const tokensQuery = useQuery({
+    queryKey: KEYS.TOKENS,
+    queryFn: async () => {
+      return walletRepo.getTokens();
+    },
+    enabled: !!identityQuery.data,
+  });
+
+  const aggregatedAssetsQuery = useQuery({
+    queryKey: [
+      ...KEYS.AGGREGATED,
+      tokensQuery.dataUpdatedAt,
+      pricesQuery.dataUpdatedAt,
+    ],
+    queryFn: async () => {
+      const tokens = tokensQuery.data || [];
+      const prices = pricesQuery.data || {};
+      console.log("📊 Starting Aggregation for", tokens.length, "tokens");
+      const groupedTokens: Record<string, Token[]> = {};
+
+      tokens.forEach((token) => {
+        if (
+          token.status === TokenStatus.BURNED ||
+          token.status === TokenStatus.TRANSFERRED
+        ) {
+          console.log(
+            `⚠️ Skipping token ${token.symbol} (${token.id.slice(
+              0,
+              4
+            )}): Status is ${token.status}`
+          );
+          return;
+        }
+
+        const key = token.coinId || token.id;
+        if (!groupedTokens[key]) groupedTokens[key] = [];
+        groupedTokens[key].push(token);
+      });
+
+      console.log("✅ Grouped tokens:", Object.keys(groupedTokens));
+
+      const assets: AggregatedAsset[] = Object.keys(groupedTokens).map(
+        (key) => {
+          const group = groupedTokens[key];
+          const firstToken = group[0];
+
+          console.log(firstToken);
+
+          const def = registryService.getCoinDefinition(key);
+          console.log(def);
+
+          let totalAmount = BigInt(0);
+          group.forEach((t) => {
+            console.log("IM IN");
+            console.log(t);
+            if (t.amount) totalAmount += BigInt(t.amount);
+          });
+
+          console.log(totalAmount);
+
+          const symbol = def?.symbol || firstToken.symbol || "UNK";
+          const name = def?.name || firstToken.name || "Unknown Token";
+          const priceKey =
+            symbol.toLowerCase() === "btc"
+              ? "bitcoin"
+              : symbol.toLowerCase() === "eth"
+              ? "ethereum"
+              : symbol.toLowerCase() === "sol"
+              ? "solana"
+              : "tether";
+
+          const decimals = def?.decimals || 0;
+
+          const priceData = priceKey ? prices[priceKey] : null;
+          const iconUrl = def
+            ? registryService.getIconUrl(def)
+            : firstToken.iconUrl;
+
+          return new AggregatedAsset({
+            coinId: key,
+            symbol: symbol,
+            name: name,
+            totalAmount: totalAmount.toString(),
+            decimals: decimals,
+            tokenCount: group.length,
+            iconUrl: iconUrl,
+            priceUsd: priceData?.priceUsd || 0,
+            priceEur: priceData?.priceEur || 0,
+            change24h: priceData?.change24h || 0,
+          });
+        }
+      );
+
+      console.log(assets);
+
+      return assets.sort((a, b) => {
+        const valA = a.priceUsd * a.getAmountAsDecimal();
+        const valB = b.priceUsd * b.getAmountAsDecimal();
+        return valB - valA;
+      });
+    },
+    enabled: !!tokensQuery.data,
+  });
+
+  const createWalletMutation = useMutation({
+    mutationFn: async () => {
+      const identity = await identityManager.generateNewIdentity();
+      walletRepo.createWallet(identity.address);
+      return identity;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["wallet"] });
+    },
+  });
+
+  const mintNametagMutation = useMutation({
+    mutationFn: async (nametag: string) => {
+      const result = await nametagService.mintNametagAndPublish(nametag);
+
+      if (result.status === "error") {
+        throw new Error(result.message);
+      }
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["wallet"] });
+    },
+  });
+
+  const sendTokenMutation = useMutation({
+    mutationFn: async (params: { recipientNametag: string; token: Token }) => {
+      const { recipientNametag, token } = params;
+      console.log(
+        `Starting transfer of ${token.symbol} to ${recipientNametag}`
+      );
+
+      const identity = await identityManager.getCurrentIdentity();
+      if (!identity) throw new Error("Wallet locked or missing");
+
+      const secret = Buffer.from(identity.privateKey, "hex");
+
+      const recipientPubkey = await nostrService.queryPubkeyByNametag(
+        recipientNametag
+      );
+      if (!recipientPubkey)
+        throw new Error(`Recipient ${recipientNametag} not found on Nostr`);
+
+      const recipientProxyAddress = await ProxyAddress.fromNameTag(
+        recipientNametag
+      );
+
+      if (!token.jsonData) throw new Error("Token data missing");
+      const sourceToken = await SdkToken.fromJSON(token.jsonData);
+
+      const signingService = await SigningService.createFromSecret(secret);
+      const salt = window.crypto.getRandomValues(Buffer.alloc(32));
+
+      const transferCommitment = await TransferCommitment.create(
+        sourceToken,
+        recipientProxyAddress,
+        salt,
+        null,
+        null,
+        signingService
+      );
+
+      const client = ServiceProvider.stateTransitionClient;
+      const response = await client.submitTransferCommitment(
+        transferCommitment
+      );
+
+      if (response.status !== "SUCCESS") {
+        throw new Error(`Transfer failed: ${response.status}`);
+      }
+
+      const inclusionProof = await waitInclusionProof(
+        ServiceProvider.getRootTrustBase(),
+        client,
+        transferCommitment
+      );
+
+      const transferTx = transferCommitment.toTransaction(inclusionProof);
+
+      const payload = JSON.stringify({
+        sourceToken: sourceToken.toJSON(),
+        transferTx: transferTx.toJSON(),
+      });
+
+      const sent = await nostrService.sendTokenTransfer(
+        recipientPubkey,
+        payload
+      );
+
+      if (!sent) throw new Error("Failed to send p2p message via Nostr");
+
+      const currentTokens = loadTokensFromStorage();
+      const updatedTokens = currentTokens.filter((t) => t.id !== token.id);
+      saveTokensToStorage(updatedTokens);
+
+      return true;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: KEYS.TOKENS });
+      queryClient.invalidateQueries({ queryKey: KEYS.AGGREGATED });
+    },
+  });
+
+  const sendAmountMutation = useMutation({
+    mutationFn: async (params: {
+      recipientNametag: string;
+      amount: string;
+      coinId: string;
+    }) => {
+      const targetAmount = BigInt(params.amount);
+      const { recipientNametag } = params;
+
+      console.log(
+        `🚀 Starting SMART SEND: ${params.amount} of ${params.coinId} to ${recipientNametag}`
+      );
+
+      // 1. PREPARE IDENTITY & RECIPIENT
+      const identity = await identityManager.getCurrentIdentity();
+      if (!identity) throw new Error("Wallet locked");
+
+      const secret = Buffer.from(identity.privateKey, "hex");
+      const signingService = await SigningService.createFromSecret(secret);
+
+      const nostr = NostrService.getInstance(identityManager);
+      const recipientPubkey = await nostr.queryPubkeyByNametag(
+        recipientNametag
+      );
+      if (!recipientPubkey)
+        throw new Error(`Recipient @${recipientNametag} not found on Nostr`);
+
+      const recipientTokenId = await TokenId.fromNameTag(recipientNametag);
+      const recipientAddress = await ProxyAddress.fromTokenId(recipientTokenId);
+
+      // 2. CALCULATE PLAN
+      const calculator = new TokenSplitCalculator();
+      const allTokens = walletRepo.getTokens();
+
+      const plan = await calculator.calculateOptimalSplit(
+        allTokens,
+        targetAmount,
+        params.coinId
+      );
+
+      if (!plan)
+        throw new Error("Insufficient funds or no suitable tokens found");
+
+      console.log("📋 Transfer Plan:", {
+        direct: plan.tokensToTransferDirectly.length,
+        split: plan.requiresSplit ? "YES" : "NO",
+        splitAmount: plan.splitAmount?.toString(),
+        remainder: plan.remainderAmount?.toString(),
+      });
+
+      // 3. EXECUTE DIRECT TRANSFERS (Целые токены)
+      // Стратегия 1 и 2, а также часть Стратегии 3
+      for (const item of plan.tokensToTransferDirectly) {
+        console.log(`➡️ Sending whole token ${item.uiToken.id.slice(0, 8)}...`);
+
+        // Используем логику обычного трансфера (можно вызвать мутацию или код напрямую)
+        // Вызываем код напрямую для скорости (чтобы не ре-инициализировать сервисы)
+        await executeDirectTransfer(
+          item.sdkToken,
+          item.uiToken.id,
+          recipientAddress,
+          recipientPubkey,
+          signingService,
+          nostr
+        );
+      }
+
+      // 4. EXECUTE SPLIT (Если нужно)
+      // Стратегия 3 (остаток)
+      if (plan.requiresSplit) {
+        console.log("✂️ Executing split...");
+        const executor = new TokenSplitExecutor();
+
+        const splitResult = await executor.executeSplitPlan(
+          plan,
+          recipientAddress,
+          signingService,
+          (burnedId) => walletRepo.removeToken(burnedId) // Callback удаления старого
+        );
+
+        // A. Отправляем токены получателя через Nostr
+        // У нас есть массив пар: (Token, TransferTx)
+        // В executeSplitPlan мы возвращаем parallel arrays.
+        // Executor возвращает recipientTransferTxs и tokensForRecipient
+
+        for (let i = 0; i < splitResult.tokensForRecipient.length; i++) {
+          const token = splitResult.tokensForRecipient[i];
+          const tx = splitResult.recipientTransferTxs[i];
+
+          const sourceTokenString = JSON.stringify(token.toJSON());
+          const transferTxString = JSON.stringify(tx.toJSON());
+
+          const payload = JSON.stringify({
+            sourceToken: sourceTokenString,
+            transferTx: transferTxString,
+          });
+
+          console.log("📨 Sending split token via Nostr...");
+          await nostr.sendTokenTransfer(recipientPubkey, payload);
+        }
+
+        // B. Сохраняем сдачу (Remainder) себе в кошелек
+        for (const keptToken of splitResult.tokensKeptBySender) {
+          saveChangeTokenToWallet(keptToken, params.coinId);
+        }
+      }
+
+      return true;
+    },
+    onSuccess: () => {
+      // Ждем немного, чтобы запись на диск прошла
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: KEYS.TOKENS });
+        queryClient.invalidateQueries({ queryKey: KEYS.AGGREGATED });
+      }, 200);
+    },
+  });
+
+  const executeDirectTransfer = async (
+    sourceToken: SdkToken<any>,
+    uiId: string,
+    recipientAddress: any,
+    recipientPubkey: string,
+    signingService: any,
+    nostr: NostrService
+  ) => {
+    const salt = Buffer.alloc(32);
+    window.crypto.getRandomValues(salt);
+
+    const transferCommitment = await TransferCommitment.create(
+      sourceToken,
+      recipientAddress,
+      salt,
+      null,
+      null,
+      signingService
+    );
+
+    const client = ServiceProvider.stateTransitionClient;
+    const res = await client.submitTransferCommitment(transferCommitment);
+    if (res.status !== "SUCCESS")
+      throw new Error(`Direct transfer failed: ${res.status}`);
+
+    const proof = await waitInclusionProof(
+      ServiceProvider.getRootTrustBase(),
+      client,
+      transferCommitment
+    );
+
+    const tx = transferCommitment.toTransaction(proof);
+
+    const sourceTokenString = JSON.stringify(sourceToken.toJSON());
+    const transferTxString = JSON.stringify(tx.toJSON());
+
+    const payload = JSON.stringify({
+      sourceToken: sourceTokenString,
+      transferTx: transferTxString,
+    });
+
+    await nostr.sendTokenTransfer(recipientPubkey, payload);
+
+    walletRepo.removeToken(uiId);
+  };
+
+  const saveChangeTokenToWallet = (sdkToken: SdkToken<any>, coinId: string) => {
+    // Достаем amount из токена
+    let amount = "0";
+    // ... (логика извлечения amount, как в TransferService) ...
+    // Упрощенно, так как мы знаем, что только что создали этот токен с известным amount:
+    const coinsOpt = sdkToken.coins;
+    const coinData = coinsOpt;
+    if (coinData) {
+      const rawCoins = coinData.coins;
+      let val: any = null;
+      const firstItem = rawCoins[0];
+      if (Array.isArray(firstItem) && firstItem.length === 2) {
+        val = firstItem[1];
+      }
+
+      if (Array.isArray(val)) {
+        amount = val[1]?.toString() || "0";
+      } else if (val) {
+        amount = val.toString();
+      }
+    }
+
+    // Ищем символ в реестре для красоты
+    const def = registryService.getCoinDefinition(coinId);
+    const iconUrl = def ? registryService.getIconUrl(def) : undefined;
+
+    const uiToken = new Token({
+      id: uuidv4(), // Новый UUID
+      name: def?.symbol || "Change Token",
+      symbol: def?.symbol || "UNK",
+      type: "Fungible",
+      jsonData: JSON.stringify(sdkToken.toJSON()),
+      status: TokenStatus.CONFIRMED,
+      amount: amount,
+      coinId: coinId,
+      iconUrl: iconUrl ? iconUrl : undefined,
+      timestamp: Date.now(),
+    });
+
+    console.log(`💾 Saving change token: ${amount} ${def?.symbol}`);
+    walletRepo.addToken(uiToken);
+  };
+
+  return {
+    identity: identityQuery.data,
+    isLoadingIdentity: identityQuery.isLoading,
+
+    nametag: nametagQuery.data,
+    isLoadingNametag: nametagQuery.isLoading,
+
+    assets: aggregatedAssetsQuery.data || [],
+    isLoadingAssets: aggregatedAssetsQuery.isLoading,
+
+    tokens: tokensQuery.data || [],
+    createWallet: createWalletMutation.mutateAsync,
+    mintNametag: mintNametagMutation.mutateAsync,
+
+    sentToken: sendTokenMutation.mutateAsync,
+    sendAmount: sendAmountMutation.mutateAsync,
+    isSending: sendAmountMutation.isPending || sendTokenMutation.isPending,
+  };
+};

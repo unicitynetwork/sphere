@@ -9,13 +9,11 @@ export function HomePage() {
 
   return (
     <>
-      {/* Agents Grid (Твой существующий код) */}
       <div className="mb-8 relative">
           <div className="absolute -top-20 -left-20 w-96 h-96 bg-orange-500/10 rounded-full blur-3xl" />
           <div className="absolute -top-10 -right-32 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl" />
           
           <div className="relative">
-             {/* ... Header карточек ... */}
              <div className="relative p-8 rounded-2xl bg-neutral-900/40 backdrop-blur-sm border border-neutral-800/50">
                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                  {publicAgents.map((agent) => (
@@ -30,8 +28,6 @@ export function HomePage() {
              </div>
           </div>
       </div>
-
-      {/* Chat & Wallet */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-[600px]">
         <div className="lg:col-span-2 h-full">
           <ChatSection />
