@@ -1,9 +1,9 @@
 import { useParams, Navigate } from 'react-router-dom';
 import { AgentCard } from '../components/agents/AgentCard';
 import { ChatSection } from '../components/chat/ChatSection';
-import { SimpleAIChat } from '../components/agents/SimpleAIChat';
 import { SportChat } from '../components/agents/SportChat';
 import { AIWithSidebarChat } from '../components/agents/AIWithSidebarChat';
+import { UnifiedAgentChat } from '../components/agents/UnifiedAgentChat';
 import { WalletPanel } from '../components/wallet/WalletPanel';
 import { agents, getAgentConfig } from '../config/activities';
 
@@ -18,15 +18,16 @@ export function AgentPage() {
   }
 
   const renderChatComponent = () => {
-    switch (currentAgent.id) {
+    switch (currentAgent.type) {
       case 'chat':
         return <ChatSection />;
-      case 'games':
-        return <SimpleAIChat agent={currentAgent} />;
-      case 'sport':
-        return <SportChat agent={currentAgent} />;
-      case 'p2p':
-      case 'merch':
+      case 'unified':
+        return <UnifiedAgentChat agent={currentAgent} />;
+      case 'ai-with-sidebar':
+        // Sport has different UI, keep separate for now
+        if (currentAgent.id === 'sport') {
+          return <SportChat agent={currentAgent} />;
+        }
         return <AIWithSidebarChat agent={currentAgent} />;
       default:
         return <ChatSection />;
@@ -41,7 +42,7 @@ export function AgentPage() {
 
         <div className="relative">
           <div className="relative p-8 rounded-2xl bg-neutral-900/40 backdrop-blur-sm border border-neutral-800/50">
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
               {agents.map((agent) => (
                 <AgentCard
                   key={agent.id}

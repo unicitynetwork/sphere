@@ -1,6 +1,8 @@
 import { Bell, Settings, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 
+const agentMode = import.meta.env.VITE_AGENT_MODE;
+
 export function Header() {
   return (
     <header className="border-b border-neutral-800/50 bg-neutral-900/80 backdrop-blur-2xl sticky top-0 z-50 overflow-hidden">
@@ -63,6 +65,11 @@ export function Header() {
             <div className="flex items-center gap-2">
               <h1 className="text-xl text-white bg-clip-text">AgentSphere</h1>
               <Sparkles className="w-4 h-4 text-orange-500 animate-pulse" />
+              {agentMode !== 'real' && (
+                <span className="px-2 py-0.5 rounded-full text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
+                  DEMO
+                </span>
+              )}
             </div>
             <p className="text-xs text-neutral-400">AI-Powered Agent Platform</p>
             

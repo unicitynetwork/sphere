@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../config/activities';
 import { v4 as uuidv4 } from 'uuid';
 import { parseMarkdown } from '../../utils/markdown';
+import { mockMatches, type Match } from '../../data/agentsMockData';
 
 // Bet item for sidebar
 interface BetItem {
@@ -15,21 +16,6 @@ interface BetItem {
   amount: number;
 }
 
-// Match data
-interface Match {
-  id: string;
-  team1: string;
-  team2: string;
-  team1Flag: string;
-  team2Flag: string;
-  date: string;
-  time: string;
-  odds1: number;
-  oddsDraw: number;
-  odds2: number;
-  image: string;
-}
-
 // Message types
 interface ChatMessage {
   id: string;
@@ -39,36 +25,6 @@ interface ChatMessage {
   match?: Match;
   showBetButton?: boolean;
 }
-
-// Mock matches data
-const mockMatches: Match[] = [
-  {
-    id: '1',
-    team1: 'Finland',
-    team2: 'Estonia',
-    team1Flag: '🇫🇮',
-    team2Flag: '🇪🇪',
-    date: '28.12.25',
-    time: '19:00',
-    odds1: 1.85,
-    oddsDraw: 3.40,
-    odds2: 4.20,
-    image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=400&h=200&fit=crop',
-  },
-  {
-    id: '2',
-    team1: 'Germany',
-    team2: 'France',
-    team1Flag: '🇩🇪',
-    team2Flag: '🇫🇷',
-    date: '29.12.25',
-    time: '21:00',
-    odds1: 2.10,
-    oddsDraw: 3.20,
-    odds2: 2.90,
-    image: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=400&h=200&fit=crop',
-  },
-];
 
 interface SportChatProps {
   agent: AgentConfig;

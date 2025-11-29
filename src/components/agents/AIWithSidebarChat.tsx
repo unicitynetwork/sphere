@@ -5,12 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import type { AgentConfig } from '../../config/activities';
 import { v4 as uuidv4 } from 'uuid';
 import { parseMarkdown } from '../../utils/markdown';
-
-interface SellerInfo {
-  id: string;
-  name: string;
-  avatar: string;
-}
+import { p2pListings, merchItems, type SellerInfo } from '../../data/agentsMockData';
 
 interface OrderItem {
   id: string;
@@ -41,82 +36,6 @@ interface ChatMessage {
 interface AIWithSidebarChatProps {
   agent: AgentConfig;
 }
-
-// P2P Marketplace listings - realistic images with seller info matching mockUsers
-const p2pListings = [
-  {
-    id: '1',
-    name: 'Leather Sofa',
-    price: 450,
-    seller: { id: '1', name: 'Sarah Williams', avatar: 'SW' },
-    image: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=400&h=200&fit=crop',
-    description: 'Genuine leather 3-seater sofa in excellent condition',
-    location: 'New York'
-  },
-  {
-    id: '2',
-    name: 'iPhone 14 Pro',
-    price: 800,
-    seller: { id: '2', name: 'Mike Johnson', avatar: 'MJ' },
-    image: 'https://images.unsplash.com/photo-1592750475338-74b7b21085ab?w=400&h=200&fit=crop',
-    description: '128GB, Space Black, like new with original box',
-    location: 'Los Angeles'
-  },
-  {
-    id: '3',
-    name: 'Mountain Bike',
-    price: 350,
-    seller: { id: '3', name: 'Alex Chen', avatar: 'AC' },
-    image: 'https://images.unsplash.com/photo-1532298229144-0ec0c57515c7?w=400&h=200&fit=crop',
-    description: '21-speed, aluminum frame, barely used',
-    location: 'Chicago'
-  },
-  {
-    id: '4',
-    name: 'Gaming PC',
-    price: 1200,
-    seller: { id: '4', name: 'Emma Davis', avatar: 'ED' },
-    image: 'https://images.unsplash.com/photo-1587202372775-e229f172b9d7?w=400&h=200&fit=crop',
-    description: 'RTX 3070, Ryzen 7, 32GB RAM, RGB setup',
-    location: 'Miami'
-  },
-];
-
-// Merch store items - realistic images
-const merchItems = [
-  {
-    id: '1',
-    name: 'Unicity Hoodie',
-    price: 59.99,
-    image: 'https://images.unsplash.com/photo-1556821840-3a63f95609a7?w=400&h=200&fit=crop',
-    description: 'Premium black hoodie with embroidered Unicity logo',
-    sizes: ['S', 'M', 'L', 'XL', 'XXL']
-  },
-  {
-    id: '2',
-    name: 'Crypto T-Shirt',
-    price: 29.99,
-    image: 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=400&h=200&fit=crop',
-    description: 'Classic fit cotton t-shirt with blockchain design',
-    sizes: ['S', 'M', 'L', 'XL']
-  },
-  {
-    id: '3',
-    name: 'Dev Cap',
-    price: 24.99,
-    image: 'https://images.unsplash.com/photo-1588850561407-ed78c282e89b?w=400&h=200&fit=crop',
-    description: 'Snapback cap with "Code & Crypto" embroidery',
-    sizes: ['One Size']
-  },
-  {
-    id: '4',
-    name: 'Sphere Mug',
-    price: 14.99,
-    image: 'https://images.unsplash.com/photo-1514228742587-6b1558fcca3d?w=400&h=200&fit=crop',
-    description: 'Ceramic mug with color-changing Sphere logo',
-    sizes: ['Standard']
-  },
-];
 
 export function AIWithSidebarChat({ agent }: AIWithSidebarChatProps) {
   const isP2P = agent.id === 'p2p';
