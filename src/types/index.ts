@@ -21,6 +21,12 @@ export interface IAsset {
   color: string;
 }
 
+export interface IProductCard {
+  title: string;
+  image: string;
+  price?: number;
+}
+
 export interface IMessage {
   id: string;
   sender: string;
@@ -28,6 +34,8 @@ export interface IMessage {
   content: string;
   timestamp: string;
   isOwn: boolean;
+  productCard?: IProductCard;
+  isContextCard?: boolean; // For showing product context at the top
 }
 
 export interface IUserContact {

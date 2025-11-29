@@ -1,9 +1,16 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, Plus, Image as ImageIcon, X, Wallet, CheckCircle, Eye, ShoppingBag, Package } from 'lucide-react';
+import { Send, Sparkles, Plus, Image as ImageIcon, X, Wallet, CheckCircle, Eye, ShoppingBag, Package, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import type { AgentConfig } from '../../config/activities';
 import { v4 as uuidv4 } from 'uuid';
 import { parseMarkdown } from '../../utils/markdown';
+
+interface SellerInfo {
+  id: string;
+  name: string;
+  avatar: string;
+}
 
 interface OrderItem {
   id: string;
@@ -13,6 +20,7 @@ interface OrderItem {
   status: 'pending' | 'completed' | 'cancelled';
   amount?: number;
   description?: string;
+  seller?: SellerInfo;
 }
 
 interface ChatMessage {
@@ -25,6 +33,7 @@ interface ChatMessage {
     image: string;
     price: number;
     description?: string;
+    seller?: SellerInfo;
   };
   showBuyButton?: boolean;
 }
@@ -33,13 +42,13 @@ interface AIWithSidebarChatProps {
   agent: AgentConfig;
 }
 
-// P2P Marketplace listings - realistic images
+// P2P Marketplace listings - realistic images with seller info matching mockUsers
 const p2pListings = [
   {
     id: '1',
     name: 'Leather Sofa',
     price: 450,
-    seller: 'HomeStyle',
+    seller: { id: '1', name: 'Sarah Williams', avatar: 'SW' },
     image: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=400&h=200&fit=crop',
     description: 'Genuine leather 3-seater sofa in excellent condition',
     location: 'New York'
@@ -48,7 +57,7 @@ const p2pListings = [
     id: '2',
     name: 'iPhone 14 Pro',
     price: 800,
-    seller: 'TechDeals',
+    seller: { id: '2', name: 'Mike Johnson', avatar: 'MJ' },
     image: 'https://images.unsplash.com/photo-1592750475338-74b7b21085ab?w=400&h=200&fit=crop',
     description: '128GB, Space Black, like new with original box',
     location: 'Los Angeles'
@@ -57,7 +66,7 @@ const p2pListings = [
     id: '3',
     name: 'Mountain Bike',
     price: 350,
-    seller: 'BikeWorld',
+    seller: { id: '3', name: 'Alex Chen', avatar: 'AC' },
     image: 'https://images.unsplash.com/photo-1532298229144-0ec0c57515c7?w=400&h=200&fit=crop',
     description: '21-speed, aluminum frame, barely used',
     location: 'Chicago'
@@ -66,7 +75,7 @@ const p2pListings = [
     id: '4',
     name: 'Gaming PC',
     price: 1200,
-    seller: 'PCMaster',
+    seller: { id: '4', name: 'Emma Davis', avatar: 'ED' },
     image: 'https://images.unsplash.com/photo-1587202372775-e229f172b9d7?w=400&h=200&fit=crop',
     description: 'RTX 3070, Ryzen 7, 32GB RAM, RGB setup',
     location: 'Miami'
@@ -111,6 +120,7 @@ const merchItems = [
 
 export function AIWithSidebarChat({ agent }: AIWithSidebarChatProps) {
   const isP2P = agent.id === 'p2p';
+  const navigate = useNavigate();
 
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -122,7 +132,7 @@ export function AIWithSidebarChat({ agent }: AIWithSidebarChatProps) {
   const [showTransactionModal, setShowTransactionModal] = useState(false);
   const [showOrderDetails, setShowOrderDetails] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null);
-  const [pendingItem, setPendingItem] = useState<{ title: string; image: string; price: number; description?: string } | null>(null);
+  const [pendingItem, setPendingItem] = useState<{ title: string; image: string; price: number; description?: string; seller?: SellerInfo } | null>(null);
   const [transactionStep, setTransactionStep] = useState<'confirm' | 'processing' | 'success'>('confirm');
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -169,7 +179,7 @@ export function AIWithSidebarChat({ agent }: AIWithSidebarChatProps) {
     scrollToBottom();
   }, [messages, isTyping]);
 
-  const addAssistantMessage = (content: string, itemData?: { title: string; image: string; price: number; description?: string }, showBuyButton?: boolean) => {
+  const addAssistantMessage = (content: string, itemData?: { title: string; image: string; price: number; description?: string; seller?: SellerInfo }, showBuyButton?: boolean) => {
     setMessages(prev => [...prev, {
       id: uuidv4(),
       role: 'assistant',
@@ -200,35 +210,35 @@ export function AIWithSidebarChat({ agent }: AIWithSidebarChatProps) {
       if (userText.includes('sofa') || userText.includes('couch') || userText.includes('furniture')) {
         const item = p2pListings[0];
         addAssistantMessage(
-          `Found a great deal! 🛋️\n\n**${item.name}**\n${item.description}\n\n**Seller:** ${item.seller}\n**Location:** ${item.location}\n**Price:** $${item.price}\n\nInterested?`,
-          { title: item.name, image: item.image, price: item.price, description: item.description },
+          `Found a great deal! 🛋️\n\n**${item.name}**\n${item.description}\n\n**Seller:** ${item.seller.name}\n**Location:** ${item.location}\n**Price:** $${item.price}\n\nInterested?`,
+          { title: item.name, image: item.image, price: item.price, description: item.description, seller: item.seller },
           true
         );
       } else if (userText.includes('phone') || userText.includes('iphone') || userText.includes('mobile')) {
         const item = p2pListings[1];
         addAssistantMessage(
-          `Check this out! 📱\n\n**${item.name}**\n${item.description}\n\n**Seller:** ${item.seller}\n**Location:** ${item.location}\n**Price:** $${item.price}\n\nWant to buy?`,
-          { title: item.name, image: item.image, price: item.price, description: item.description },
+          `Check this out! 📱\n\n**${item.name}**\n${item.description}\n\n**Seller:** ${item.seller.name}\n**Location:** ${item.location}\n**Price:** $${item.price}\n\nWant to buy?`,
+          { title: item.name, image: item.image, price: item.price, description: item.description, seller: item.seller },
           true
         );
       } else if (userText.includes('bike') || userText.includes('bicycle')) {
         const item = p2pListings[2];
         addAssistantMessage(
-          `Perfect for you! 🚴\n\n**${item.name}**\n${item.description}\n\n**Seller:** ${item.seller}\n**Location:** ${item.location}\n**Price:** $${item.price}\n\nReady to ride?`,
-          { title: item.name, image: item.image, price: item.price, description: item.description },
+          `Perfect for you! 🚴\n\n**${item.name}**\n${item.description}\n\n**Seller:** ${item.seller.name}\n**Location:** ${item.location}\n**Price:** $${item.price}\n\nReady to ride?`,
+          { title: item.name, image: item.image, price: item.price, description: item.description, seller: item.seller },
           true
         );
       } else if (userText.includes('pc') || userText.includes('computer') || userText.includes('gaming')) {
         const item = p2pListings[3];
         addAssistantMessage(
-          `Beast machine! 🎮\n\n**${item.name}**\n${item.description}\n\n**Seller:** ${item.seller}\n**Location:** ${item.location}\n**Price:** $${item.price}\n\nLevel up?`,
-          { title: item.name, image: item.image, price: item.price, description: item.description },
+          `Beast machine! 🎮\n\n**${item.name}**\n${item.description}\n\n**Seller:** ${item.seller.name}\n**Location:** ${item.location}\n**Price:** $${item.price}\n\nLevel up?`,
+          { title: item.name, image: item.image, price: item.price, description: item.description, seller: item.seller },
           true
         );
       } else if (userText.includes('available') || userText.includes('show') || userText.includes('what') || userText.includes('list')) {
         addAssistantMessage(
           "Here's what people are selling:\n\n" +
-          p2pListings.map(item => `• **${item.name}** - $${item.price} (${item.seller})`).join('\n') +
+          p2pListings.map(item => `• **${item.name}** - $${item.price} (${item.seller.name})`).join('\n') +
           "\n\nAsk me about any item!"
         );
       } else {
@@ -289,7 +299,7 @@ export function AIWithSidebarChat({ agent }: AIWithSidebarChatProps) {
     }
   };
 
-  const handleBuy = (itemData: { title: string; image: string; price: number; description?: string }) => {
+  const handleBuy = (itemData: { title: string; image: string; price: number; description?: string; seller?: SellerInfo }) => {
     setPendingItem(itemData);
     setTransactionStep('confirm');
     setShowTransactionModal(true);
@@ -309,18 +319,31 @@ export function AIWithSidebarChat({ agent }: AIWithSidebarChatProps) {
         status: 'pending',
         amount: pendingItem.price,
         description: pendingItem.description,
+        seller: pendingItem.seller,
       }, ...prev]);
     }
+  };
 
-    await new Promise(resolve => setTimeout(resolve, 1500));
+  const handleCloseSuccessModal = () => {
     setShowTransactionModal(false);
-
     const successMsg = isP2P
       ? `✅ **Purchase initiated!**\n\nYour order for **${pendingItem?.title}** is being processed. The seller has been notified.\n\n_Click the + button to start a new search._`
       : `✅ **Order confirmed!**\n\nYour **${pendingItem?.title}** is on its way! 📦 You'll receive a tracking number soon.\n\n_Click the + button to place a new order._`;
-
     addAssistantMessage(successMsg);
     setPendingItem(null);
+  };
+
+  const handleChatWithSeller = (seller: SellerInfo, productTitle?: string, productImage?: string, productPrice?: number, purchased?: boolean) => {
+    setShowTransactionModal(false);
+    setShowOrderDetails(false);
+    const params = new URLSearchParams({
+      sellerId: seller.id,
+      ...(productTitle && { product: productTitle }),
+      ...(productImage && { image: productImage }),
+      ...(productPrice && { price: productPrice.toString() }),
+      ...(purchased && { purchased: 'true' }),
+    });
+    navigate(`/agents/chat?${params.toString()}`);
   };
 
   const handleNewChat = () => {
@@ -449,10 +472,23 @@ export function AIWithSidebarChat({ agent }: AIWithSidebarChatProps) {
                       </div>
                     )}
 
+                    {/* Seller contact button for P2P */}
+                    {isP2P && message.itemData?.seller && (
+                      <motion.button
+                        onClick={() => handleChatWithSeller(message.itemData!.seller!, message.itemData!.title, message.itemData!.image, message.itemData!.price)}
+                        className="mt-3 w-full py-2 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 text-sm font-medium flex items-center justify-center gap-2 border border-blue-500/30"
+                        whileHover={{ scale: 1.01 }}
+                        whileTap={{ scale: 0.99 }}
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                        Contact {message.itemData.seller.name}
+                      </motion.button>
+                    )}
+
                     {message.showBuyButton && message.itemData && (
                       <motion.button
                         onClick={() => handleBuy(message.itemData!)}
-                        className={`mt-4 w-full py-3 rounded-xl bg-linear-to-r ${agent.color} text-white font-medium`}
+                        className={`mt-2 w-full py-3 rounded-xl bg-linear-to-r ${agent.color} text-white font-medium`}
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                       >
@@ -561,7 +597,7 @@ export function AIWithSidebarChat({ agent }: AIWithSidebarChatProps) {
               )}
 
               {transactionStep === 'success' && (
-                <div className="py-12 text-center">
+                <div className="py-8 text-center">
                   <motion.div
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
@@ -570,7 +606,29 @@ export function AIWithSidebarChat({ agent }: AIWithSidebarChatProps) {
                     <CheckCircle className="w-8 h-8 text-white" />
                   </motion.div>
                   <h3 className="text-xl font-bold text-white mb-2">Success!</h3>
-                  <p className="text-neutral-400">{isP2P ? 'Seller notified' : 'Order placed'}</p>
+                  <p className="text-neutral-400 mb-6">{isP2P ? 'Seller notified' : 'Order placed'}</p>
+
+                  <div className="space-y-3">
+                    {isP2P && pendingItem?.seller && (
+                      <motion.button
+                        onClick={() => handleChatWithSeller(pendingItem.seller!, pendingItem.title, pendingItem.image, pendingItem.price, true)}
+                        className="w-full py-3 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-medium flex items-center justify-center gap-2"
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        <MessageSquare className="w-5 h-5" />
+                        Chat with {pendingItem.seller.name}
+                      </motion.button>
+                    )}
+                    <motion.button
+                      onClick={handleCloseSuccessModal}
+                      className="w-full py-3 rounded-xl bg-neutral-800 text-white font-medium border border-neutral-700"
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      Continue Shopping
+                    </motion.button>
+                  </div>
                 </div>
               )}
             </motion.div>
@@ -615,6 +673,17 @@ export function AIWithSidebarChat({ agent }: AIWithSidebarChatProps) {
                   {selectedOrder.description && (
                     <p className="text-neutral-400 text-sm mt-2">{selectedOrder.description}</p>
                   )}
+                  {isP2P && selectedOrder.seller && (
+                    <div className="flex items-center gap-2 mt-3 p-2 bg-neutral-700/50 rounded-lg">
+                      <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-medium">
+                        {selectedOrder.seller.avatar}
+                      </div>
+                      <div>
+                        <p className="text-white text-sm font-medium">{selectedOrder.seller.name}</p>
+                        <p className="text-neutral-400 text-xs">Seller</p>
+                      </div>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between mt-4">
                     <p className="text-orange-400 text-xl font-bold">${selectedOrder.amount}</p>
                     <span className={`px-3 py-1 rounded-full text-xs font-medium ${
@@ -631,14 +700,27 @@ export function AIWithSidebarChat({ agent }: AIWithSidebarChatProps) {
                 </div>
               </div>
 
-              <motion.button
-                onClick={() => setShowOrderDetails(false)}
-                className="w-full py-3 rounded-xl bg-neutral-800 text-white font-medium border border-neutral-700"
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                Close
-              </motion.button>
+              <div className="space-y-3">
+                {isP2P && selectedOrder.seller && (
+                  <motion.button
+                    onClick={() => handleChatWithSeller(selectedOrder.seller!, selectedOrder.title, selectedOrder.image, selectedOrder.amount, true)}
+                    className="w-full py-3 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-medium flex items-center justify-center gap-2"
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    <MessageSquare className="w-5 h-5" />
+                    Chat with {selectedOrder.seller.name}
+                  </motion.button>
+                )}
+                <motion.button
+                  onClick={() => setShowOrderDetails(false)}
+                  className="w-full py-3 rounded-xl bg-neutral-800 text-white font-medium border border-neutral-700"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  Close
+                </motion.button>
+              </div>
             </motion.div>
           </motion.div>
         )}
