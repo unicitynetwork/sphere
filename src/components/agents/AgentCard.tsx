@@ -1,17 +1,18 @@
 import { motion } from 'framer-motion';
+import { Link } from 'react-router-dom';
 import type { IAgent } from '../../types';
 
-export function AgentCard({ name, Icon: Icon, category, color, isSelected, onClick }: IAgent) {
+export function AgentCard({ id, name, Icon: Icon, category, color, isSelected }: IAgent) {
   return (
-    <motion.button
-      onClick={onClick}
-      whileHover={{ scale: 1.05, y: -8 }}
-      whileTap={{ scale: 0.95 }}
-      transition={{duration: 0.05}}
-      className={`relative rounded-2xl p-6 h-[180px] flex flex-col items-center justify-center gap-4 transition-all duration-150 overflow-hidden group ${
-        isSelected ? 'ring-2 ring-orange-500 ring-offset-2 ring-offset-neutral-950' : ''
-      }`}
-    >
+    <Link to={`/agents/${id}`}>
+      <motion.div
+        whileHover={{ scale: 1.05, y: -8 }}
+        whileTap={{ scale: 0.95 }}
+        transition={{duration: 0.05}}
+        className={`relative rounded-2xl p-6 h-[180px] flex flex-col items-center justify-center gap-4 transition-all duration-150 overflow-hidden group cursor-pointer ${
+          isSelected ? 'ring-2 ring-orange-500 ring-offset-2 ring-offset-neutral-950' : ''
+        }`}
+      >
       {/* Animated Gradient Background */}
       <div className={`absolute inset-0 bg-linear-to-br ${color} opacity-90 group-hover:opacity-100 transition-all duration-200`} />
       
@@ -68,16 +69,17 @@ export function AgentCard({ name, Icon: Icon, category, color, isSelected, onCli
       <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-bl-full group-hover:w-28 group-hover:h-28 transition-all duration-300" />
       <div className="absolute bottom-0 left-0 w-20 h-20 bg-black/10 rounded-tr-full group-hover:w-24 group-hover:h-24 transition-all duration-300" />
 
-      {/* Selected Indicator */}
-      {isSelected && (
-        <motion.div
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          className="absolute top-4 right-4 w-3 h-3 rounded-full bg-white shadow-lg z-20"
-        >
-          <div className="absolute inset-0 rounded-full bg-white animate-ping" />
-        </motion.div>
-      )}
-    </motion.button>
+        {/* Selected Indicator */}
+        {isSelected && (
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            className="absolute top-4 right-4 w-3 h-3 rounded-full bg-white shadow-lg z-20"
+          >
+            <div className="absolute inset-0 rounded-full bg-white animate-ping" />
+          </motion.div>
+        )}
+      </motion.div>
+    </Link>
   );
 }

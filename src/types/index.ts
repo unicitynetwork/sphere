@@ -9,7 +9,6 @@ export interface IAgent {
   category: string;
   color: string;
   isSelected?: boolean;
-  onClick?: () => void;
 }
 
 export interface IAsset {

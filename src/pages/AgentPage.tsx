@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useParams, Navigate } from 'react-router-dom';
 import { AgentCard } from '../components/agents/AgentCard';
 import { ChatSection } from '../components/chat/ChatSection';
 import { SimpleAIChat } from '../components/agents/SimpleAIChat';
@@ -7,14 +7,17 @@ import { AIWithSidebarChat } from '../components/agents/AIWithSidebarChat';
 import { WalletPanel } from '../components/wallet/WalletPanel';
 import { agents, getAgentConfig } from '../config/activities';
 
-export function HomePage() {
-  const [currentAgentId, setCurrentAgentId] = useState<string>('chat');
+export function AgentPage() {
+  const { agentId } = useParams<{ agentId: string }>();
 
-  const currentAgent = getAgentConfig(currentAgentId);
+  const currentAgent = agentId ? getAgentConfig(agentId) : undefined;
+
+  // Redirect to chat if invalid agent
+  if (!currentAgent) {
+    return <Navigate to="/agents/chat" replace />;
+  }
 
   const renderChatComponent = () => {
-    if (!currentAgent) return null;
-
     switch (currentAgent.id) {
       case 'chat':
         return <ChatSection />;
@@ -47,8 +50,7 @@ export function HomePage() {
                   Icon={agent.Icon}
                   category={agent.category}
                   color={agent.color}
-                  isSelected={currentAgentId === agent.id}
-                  onClick={() => setCurrentAgentId(agent.id)}
+                  isSelected={agentId === agent.id}
                 />
               ))}
             </div>
