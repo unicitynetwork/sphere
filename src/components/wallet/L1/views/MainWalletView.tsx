@@ -12,7 +12,7 @@ import {
   Check,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { TransactionPlan, VestingMode } from "../sdk";
+import type { TransactionPlan, VestingMode, VestingBalances } from "../sdk";
 import { vestingState } from "../sdk/vestingState";
 import {
   QRModal,
@@ -84,6 +84,7 @@ interface MainWalletViewProps {
   onConfirmSend: () => Promise<void>;
   vestingProgress?: { current: number; total: number } | null;
   onVestingModeChange?: (mode: VestingMode) => void;
+  vestingBalances?: VestingBalances;
 }
 
 export function MainWalletView({
@@ -102,6 +103,7 @@ export function MainWalletView({
   onConfirmSend,
   vestingProgress,
   onVestingModeChange,
+  vestingBalances,
 }: MainWalletViewProps) {
   const [showQR, setShowQR] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -182,6 +184,7 @@ export function MainWalletView({
             onModeChange={onVestingModeChange}
             classificationProgress={vestingProgress}
             showBalances={showBalances}
+            balances={vestingBalances}
           />
         </div>
 
