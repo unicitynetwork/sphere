@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
-import { Plus, Eye, X, Wallet, CheckCircle } from 'lucide-react';
+import { Plus, Eye, X, Wallet, CheckCircle, PanelLeftClose } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../../config/activities';
 import { useAgentChat } from '../../../hooks/useAgentChat';
@@ -125,6 +125,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState<TItem | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -364,10 +365,11 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
 
         {/* Sidebar */}
         <div className={`
-          w-72 border-r border-neutral-800/50 flex flex-col z-50
+          w-56 border-r border-neutral-800/50 flex flex-col z-50 overflow-hidden
           fixed lg:relative inset-y-0 left-0
-          transform transition-transform duration-300 ease-in-out
+          transform transition-all duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+          ${sidebarCollapsed ? 'lg:w-0 lg:border-0 lg:min-w-0' : 'lg:w-56'}
           bg-neutral-900/95 lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none
         `}>
           <div className="p-4 border-b border-neutral-800/50">
@@ -382,13 +384,25 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
                 >
                   <Plus className="w-4 h-4" />
                 </motion.button>
+                {/* Collapse button for desktop */}
+                <motion.button
+                  onClick={() => setSidebarCollapsed(true)}
+                  className="hidden lg:flex p-2 rounded-lg bg-neutral-800/50 text-neutral-400 hover:text-white hover:bg-neutral-700/50 transition-colors"
+                  title="Collapse sidebar"
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                >
+                  <PanelLeftClose className="w-4 h-4" />
+                </motion.button>
                 {/* Close button for mobile */}
-                <button
+                <motion.button
                   onClick={() => setSidebarOpen(false)}
                   className="lg:hidden p-2 rounded-lg bg-neutral-800/50 text-neutral-400 hover:text-white hover:bg-neutral-700/50 transition-colors"
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
                 >
                   <X className="w-4 h-4" />
-                </button>
+                </motion.button>
               </div>
             </div>
           </div>
@@ -427,7 +441,9 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
       <ChatHeader
         agent={agent}
         onToggleSidebar={() => setSidebarOpen(true)}
+        onExpandSidebar={() => setSidebarCollapsed(false)}
         showMenuButton={!!sidebarConfig}
+        sidebarCollapsed={sidebarCollapsed}
       />
 
       {/* Messages area */}
