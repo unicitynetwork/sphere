@@ -15,7 +15,6 @@ import { useVisualViewport } from '../hooks/useVisualViewport';
 
 export function AgentPage() {
   const { agentId } = useParams<{ agentId: string }>();
-  const chatContainerRef = useRef<HTMLDivElement>(null);
   const sliderRef = useRef<HTMLDivElement>(null);
   const [activePanel, setActivePanel] = useState<'chat' | 'wallet'>('chat');
 
@@ -54,11 +53,13 @@ export function AgentPage() {
     setActivePanel(panel);
   };
 
-  // Scroll to chat on mobile when agent changes
+  // Reset to chat panel on mobile when agent changes
   useEffect(() => {
     const isMobile = window.innerWidth < 1024;
-    if (isMobile && chatContainerRef.current) {
-      chatContainerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (isMobile && sliderRef.current) {
+      // Instant scroll to chat panel (no animation)
+      sliderRef.current.scrollTo({ left: 0, behavior: 'instant' });
+      setActivePanel('chat');
     }
   }, [agentId]);
 
@@ -156,7 +157,7 @@ export function AgentPage() {
           minHeight: '300px'
         }}
       >
-        <div ref={chatContainerRef} className="w-full shrink-0 snap-center h-full">
+        <div className="w-full shrink-0 snap-center h-full">
           {renderChatComponent()}
         </div>
         <div className="w-full shrink-0 snap-center h-full">
