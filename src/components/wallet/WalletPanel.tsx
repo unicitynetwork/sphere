@@ -18,8 +18,8 @@ export function WalletPanel() {
       <div className={`absolute -bottom-20 -left-20 w-80 h-80 rounded-full blur-3xl transition-colors duration-700 ${activeLayer === 'L3' ? 'bg-purple-500/10' : 'bg-emerald-500/10'}`} />
       
       {/* TOP BAR: Title & Toggle */}
-      <div className="p-6 pb-2 relative z-10 shrink-0">
-        <div className="flex items-center justify-between mb-6">
+      <div className="p-4 md:p-6 pb-2 relative z-10 shrink-0">
+        <div className="flex items-center justify-between mb-4 md:mb-6">
           <div className="flex items-center gap-3">
             <motion.div 
               whileHover={{ scale: 1.05 }}
@@ -66,11 +66,11 @@ export function WalletPanel() {
 
             {/* Sliding Indicator */}
             <motion.div
-                className={`absolute top-1 bottom-1 rounded-lg shadow-lg ${activeLayer === 'L3' ? 'bg-linear-to-r from-orange-500 to-orange-600' : 'bg-linear-to-r from-blue-600 to-blue-700'}`}
+                className={`absolute top-1 bottom-1 left-1 right-1 rounded-lg shadow-lg ${activeLayer === 'L3' ? 'bg-linear-to-r from-orange-500 to-orange-600' : 'bg-linear-to-r from-blue-600 to-blue-700'}`}
                 initial={false}
                 animate={{
-                    x: activeLayer === 'L1' ? '0%' : '100%',
-                    width: '50%'
+                    left: activeLayer === 'L1' ? '4px' : 'calc(50% + 2px)',
+                    right: activeLayer === 'L1' ? 'calc(50% + 2px)' : '4px'
                 }}
                 transition={{ type: "spring", stiffness: 300, damping: 30 }}
             />
