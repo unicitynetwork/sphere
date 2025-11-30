@@ -10,7 +10,7 @@ export function MessageInput({ chatMode, selectedUser, message, setMessage, hand
   const placeholderText = `Message ${chatMode === 'global' ? 'global channel' : selectedUser?.name || 'user'}...`;
   
   return (
-    <div className="border-t border-neutral-800/50 p-6 bg-neutral-900/50 backdrop-blur-sm relative">
+    <div className="border-t border-neutral-800/50 p-4 lg:p-6 bg-neutral-900/80 backdrop-blur-sm">
       {/* Decorative glow */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-1 bg-linear-to-r from-transparent via-orange-500/30 to-transparent" />
       

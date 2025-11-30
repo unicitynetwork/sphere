@@ -50,13 +50,13 @@ export function AgentPage() {
 
   return (
     <>
-      <div className="mb-4 md:mb-8 relative">
+      <div className="mb-2 md:mb-8 relative">
         <div className="absolute -top-20 -left-20 w-96 h-96 bg-orange-500/10 rounded-full blur-3xl" />
         <div className="absolute -top-10 -right-32 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl" />
 
         <div className="relative">
-          <div className="relative p-4 md:p-8 rounded-2xl bg-neutral-900/40 backdrop-blur-sm border border-neutral-800/50">
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="relative p-2 md:p-8 rounded-2xl bg-neutral-900/40 backdrop-blur-sm border border-neutral-800/50">
+            <div className="grid grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-2 md:gap-4">
               {agents.map((agent) => (
                 <AgentCard
                   key={agent.id}
@@ -72,11 +72,11 @@ export function AgentPage() {
           </div>
         </div>
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-8 lg:h-[650px]">
-        <div ref={chatContainerRef} className="lg:col-span-2 h-[calc(100dvh-120px)] lg:h-full overflow-hidden">
+      <div className="lg:grid lg:grid-cols-3 lg:gap-8 lg:h-[650px]">
+        <div ref={chatContainerRef} className="lg:col-span-2 h-[calc(100dvh-180px)] min-h-[500px] lg:h-full">
           {renderChatComponent()}
         </div>
-        <div className="h-[350px] lg:h-full overflow-hidden">
+        <div className="mt-4 lg:mt-0 h-[350px] lg:h-full overflow-hidden">
           <WalletPanel />
         </div>
       </div>

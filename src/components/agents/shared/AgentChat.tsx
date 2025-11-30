@@ -124,6 +124,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
   // Details modal state
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState<TItem | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -347,54 +348,90 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     if (!sidebarConfig) return null;
 
     return (
-      <div className="w-72 border-r border-neutral-800/50 flex flex-col relative z-10">
-        <div className="p-4 border-b border-neutral-800/50">
-          <div className="flex items-center justify-between">
-            <h3 className="text-white font-medium">{sidebarConfig.title}</h3>
-            <motion.button
-              onClick={handleNewChat}
-              className={`p-2 rounded-lg bg-linear-to-br ${agent.color} text-white`}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              <Plus className="w-4 h-4" />
-            </motion.button>
+      <>
+        {/* Mobile overlay */}
+        <AnimatePresence>
+          {sidebarOpen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="lg:hidden fixed inset-0 bg-black/50 z-40"
+              onClick={() => setSidebarOpen(false)}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Sidebar */}
+        <div className={`
+          w-72 border-r border-neutral-800/50 flex flex-col z-50
+          fixed lg:relative inset-y-0 left-0
+          transform transition-transform duration-300 ease-in-out
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+          bg-neutral-900/95 lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none
+        `}>
+          <div className="p-4 border-b border-neutral-800/50">
+            <div className="flex items-center justify-between">
+              <h3 className="text-white font-medium">{sidebarConfig.title}</h3>
+              <div className="flex items-center gap-2">
+                <motion.button
+                  onClick={handleNewChat}
+                  className={`p-2 rounded-lg bg-linear-to-br ${agent.color} text-white`}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <Plus className="w-4 h-4" />
+                </motion.button>
+                {/* Close button for mobile */}
+                <button
+                  onClick={() => setSidebarOpen(false)}
+                  className="lg:hidden p-2 rounded-lg bg-neutral-800/50 text-neutral-400 hover:text-white hover:bg-neutral-700/50 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-2 space-y-2">
+            {sidebarConfig.items.length === 0 ? (
+              <div className="text-center text-neutral-500 py-8">
+                {sidebarConfig.emptyIcon}
+                <p className="text-sm mt-2">{sidebarConfig.emptyText}</p>
+              </div>
+            ) : (
+              sidebarConfig.items.map((item) => (
+                <motion.div
+                  key={item.id}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  onClick={() => handleItemClick(item)}
+                  className="p-3 rounded-xl bg-neutral-800/50 border border-neutral-700/30 cursor-pointer hover:bg-neutral-700/50 transition-colors group"
+                >
+                  <div className="flex items-center gap-3">
+                    {sidebarConfig.renderItem(item)}
+                    <Eye className="w-4 h-4 text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                </motion.div>
+              ))
+            )}
           </div>
         </div>
-
-        <div className="flex-1 overflow-y-auto p-2 space-y-2">
-          {sidebarConfig.items.length === 0 ? (
-            <div className="text-center text-neutral-500 py-8">
-              {sidebarConfig.emptyIcon}
-              <p className="text-sm mt-2">{sidebarConfig.emptyText}</p>
-            </div>
-          ) : (
-            sidebarConfig.items.map((item) => (
-              <motion.div
-                key={item.id}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                onClick={() => handleItemClick(item)}
-                className="p-3 rounded-xl bg-neutral-800/50 border border-neutral-700/30 cursor-pointer hover:bg-neutral-700/50 transition-colors group"
-              >
-                <div className="flex items-center gap-3">
-                  {sidebarConfig.renderItem(item)}
-                  <Eye className="w-4 h-4 text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </div>
-              </motion.div>
-            ))
-          )}
-        </div>
-      </div>
+      </>
     );
   };
 
   // Main chat content
   const renderChat = () => (
-    <div className="flex-1 flex flex-col relative z-10 min-h-0">
-      <ChatHeader agent={agent} />
+    <div className="grid grid-rows-[auto_1fr_auto] z-10 h-full min-h-0">
+      <ChatHeader
+        agent={agent}
+        onToggleSidebar={() => setSidebarOpen(true)}
+        showMenuButton={!!sidebarConfig}
+      />
 
-      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
+      {/* Messages area */}
+      <div ref={messagesContainerRef} className="overflow-y-auto p-4 space-y-4 min-h-0">
         <AnimatePresence initial={false}>
           {extendedMessages.map((message) => (
             <ChatBubble
@@ -443,35 +480,38 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
         })()}
       </div>
 
-      {/* Quick actions */}
-      {agent.quickActions && (
-        <QuickActions
-          actions={agent.quickActions}
-          onAction={handleQuickAction}
-          disabled={isTyping}
-        />
-      )}
+      {/* Bottom section - always at bottom */}
+      <div className="bg-neutral-900/95 backdrop-blur-sm">
+        {/* Quick actions */}
+        {agent.quickActions && (
+          <QuickActions
+            actions={agent.quickActions}
+            onAction={handleQuickAction}
+            disabled={isTyping}
+          />
+        )}
 
-      <ChatInput
-        ref={inputRef}
-        value={input}
-        onChange={setInput}
-        onSend={() => handleSend()}
-        onKeyDown={handleKeyPress}
-        placeholder={agent.placeholder || `Message ${agent.name}...`}
-        disabled={useMockMode ? isMockTyping : false}
-        isStreaming={!useMockMode && isStreaming}
-        onStop={!useMockMode ? stopGeneration : undefined}
-        agentColor={agent.color}
-      />
+        <ChatInput
+          ref={inputRef}
+          value={input}
+          onChange={setInput}
+          onSend={() => handleSend()}
+          onKeyDown={handleKeyPress}
+          placeholder={agent.placeholder || `Message ${agent.name}...`}
+          disabled={useMockMode ? isMockTyping : false}
+          isStreaming={!useMockMode && isStreaming}
+          onStop={!useMockMode ? stopGeneration : undefined}
+          agentColor={agent.color}
+        />
+      </div>
     </div>
   );
 
   return (
     <>
       {sidebarConfig ? (
-        // With sidebar layout
-        <div className="bg-linear-to-br from-neutral-900/60 to-neutral-800/40 backdrop-blur-xl rounded-3xl border border-neutral-800/50 overflow-hidden flex relative shadow-2xl h-full min-h-0">
+        // With sidebar layout - use grid for proper height inheritance
+        <div className="bg-linear-to-br from-neutral-900/60 to-neutral-800/40 backdrop-blur-xl rounded-3xl border border-neutral-800/50 overflow-hidden grid grid-cols-[auto_1fr] relative shadow-2xl h-full min-h-0">
           <div className={`absolute -top-20 -right-20 w-96 h-96 ${bgGradient.from} rounded-full blur-3xl`} />
           <div className={`absolute -bottom-20 -left-20 w-96 h-96 ${bgGradient.to} rounded-full blur-3xl`} />
           {renderSidebar()}
