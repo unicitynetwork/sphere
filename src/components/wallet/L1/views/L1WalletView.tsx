@@ -279,25 +279,9 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   // Show loading state while connecting
   if (isConnecting || isLoadingWallet) {
     return (
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '200px',
-        flexDirection: 'column',
-        gap: '12px'
-      }}>
-        <div style={{
-          fontSize: '32px',
-          animation: 'spin 1s linear infinite'
-        }}>⟳</div>
-        <div style={{ color: '#888' }}>Connecting to network...</div>
-        <style>{`
-          @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
+      <div className="flex items-center justify-center h-full flex-col gap-3">
+        <div className="text-3xl animate-spin">⟳</div>
+        <div className="text-neutral-500">Connecting to network...</div>
       </div>
     );
   }
@@ -305,7 +289,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   // No wallet view
   if (!wallet) {
     return (
-      <>
+      <div className="h-full overflow-y-auto">
         <NoWalletView
           onCreateWallet={onCreateWallet}
           onLoadWallet={onLoadWallet}
@@ -324,14 +308,14 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           txids={messageModal.txids}
           onClose={closeMessage}
         />
-      </>
+      </div>
     );
   }
 
   // History view
   if (viewMode === "history") {
     return (
-      <>
+      <div className="h-full overflow-y-auto">
         <HistoryView
           wallet={wallet}
           selectedAddress={selectedAddress}
@@ -350,13 +334,13 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           txids={messageModal.txids}
           onClose={closeMessage}
         />
-      </>
+      </div>
     );
   }
 
   // Main view
   return (
-    <>
+    <div className="h-full">
       <MainWalletView
         selectedAddress={selectedAddress}
         addresses={addresses}
@@ -383,6 +367,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         txids={messageModal.txids}
         onClose={closeMessage}
       />
-    </>
+    </div>
   );
 }

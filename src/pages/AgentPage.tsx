@@ -76,7 +76,7 @@ export function AgentPage() {
         <div ref={chatContainerRef} className="lg:col-span-2 h-[calc(100dvh-180px)] min-h-[500px] lg:h-full">
           {renderChatComponent()}
         </div>
-        <div className="mt-4 lg:mt-0 h-[350px] lg:h-full overflow-hidden">
+        <div className="mt-4 lg:mt-0 h-[calc(100dvh-200px)] min-h-[450px] lg:h-full overflow-hidden">
           <WalletPanel />
         </div>
       </div>

@@ -49,7 +49,7 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
   return (
     <div className="flex flex-col h-full">
       {/* L2 Specific Header Stats */}
-      <div className="px-6 mb-6">
+      <div className="px-6 mb-6 shrink-0">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <p className="text-xs text-orange-300/70">AgentSphere Balance</p>
@@ -104,7 +104,7 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
         </div>
       </div>
 
-      <div className="px-6 mb-4">
+      <div className="px-6 mb-4 shrink-0">
         <div className="flex p-1 bg-neutral-900/50 rounded-xl border border-neutral-800">
           <button
             onClick={() => setActiveTab('assets')}
