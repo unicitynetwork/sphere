@@ -1,15 +1,17 @@
 // src/components/chat/components/ChatSidebar.tsx
 import { motion, AnimatePresence } from 'framer-motion';
-import { Hash, Sparkles, User, X } from 'lucide-react';
+import { Hash, Sparkles, User, X, PanelLeftClose } from 'lucide-react';
 import type { ChatState } from '../../../hooks/useChatState';
 import { UserContact } from './UserContact';
 
 type SidebarProps = Pick<ChatState, 'chatMode' | 'handleModeChange' | 'users' | 'onlineCount' | 'selectedUser' | 'handleUserSelect'> & {
   isOpen: boolean;
   onClose: () => void;
+  isCollapsed: boolean;
+  onCollapse: () => void;
 };
 
-export function ChatSidebar({ chatMode, handleModeChange, users, onlineCount, selectedUser, handleUserSelect, isOpen, onClose }: SidebarProps) {
+export function ChatSidebar({ chatMode, handleModeChange, users, onlineCount, selectedUser, handleUserSelect, isOpen, onClose, isCollapsed, onCollapse }: SidebarProps) {
 
   const totalOnlineCount = onlineCount + 124;
 
@@ -30,27 +32,43 @@ export function ChatSidebar({ chatMode, handleModeChange, users, onlineCount, se
 
       {/* Sidebar */}
       <div className={`
-        w-80 border-r border-neutral-800/50 flex flex-col z-50
+        w-56 border-r border-neutral-800/50 flex flex-col z-50 overflow-hidden
         fixed lg:relative inset-y-0 left-0
-        transform transition-transform duration-300 ease-in-out
+        transform transition-all duration-300 ease-in-out
         ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+        ${isCollapsed ? 'lg:w-0 lg:border-0 lg:min-w-0' : 'lg:w-56'}
         bg-neutral-900/95 lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none
       `}>
         {/* Mode Toggle Header */}
-        <div className="p-6 border-b border-neutral-800/50 bg-linear-to-br from-neutral-900/80 to-neutral-800/40 backdrop-blur-sm relative">
+        <div className="p-4 border-b border-neutral-800/50 bg-linear-to-br from-neutral-900/80 to-neutral-800/40 backdrop-blur-sm relative">
           <div className="absolute top-0 right-0 w-24 h-24 bg-orange-500/5 rounded-bl-full" />
 
-          {/* Close button for mobile */}
-          <button
-            onClick={onClose}
-            className="lg:hidden absolute top-4 right-4 p-2 rounded-lg bg-neutral-800/50 text-neutral-400 hover:text-white hover:bg-neutral-700/50 transition-colors z-20"
-          >
-            <X className="w-5 h-5" />
-          </button>
-
-          <div className="flex items-center gap-2 mb-4 relative z-10">
-            <h3 className="text-white">Messages</h3>
-            <Sparkles className="w-4 h-4 text-orange-500 animate-pulse" />
+          <div className="flex items-center justify-between mb-3 relative z-10">
+            <div className="flex items-center gap-2">
+              <h3 className="text-white font-medium">Messages</h3>
+              <Sparkles className="w-4 h-4 text-orange-500 animate-pulse" />
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Collapse button for desktop */}
+              <motion.button
+                onClick={onCollapse}
+                className="hidden lg:flex p-2 rounded-lg bg-neutral-800/50 text-neutral-400 hover:text-white hover:bg-neutral-700/50 transition-colors border border-neutral-700/50"
+                title="Collapse sidebar"
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                <PanelLeftClose className="w-4 h-4" />
+              </motion.button>
+              {/* Close button for mobile */}
+              <motion.button
+                onClick={onClose}
+                className="lg:hidden p-2 rounded-lg bg-neutral-800/50 text-neutral-400 hover:text-white hover:bg-neutral-700/50 transition-colors border border-neutral-700/50"
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                <X className="w-4 h-4" />
+              </motion.button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2 relative z-10">

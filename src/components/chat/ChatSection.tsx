@@ -7,6 +7,7 @@ import { ChatMainArea } from './components/ChatMainArea';
 export function ChatSection() {
   const [searchParams] = useSearchParams();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const sellerId = searchParams.get('sellerId');
   const productName = searchParams.get('product');
@@ -31,6 +32,8 @@ export function ChatSection() {
         handleUserSelect={chatState.handleUserSelect}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        isCollapsed={sidebarCollapsed}
+        onCollapse={() => setSidebarCollapsed(true)}
       />
 
       {/* Main Chat Area */}
@@ -38,6 +41,8 @@ export function ChatSection() {
         {...chatState}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         sidebarOpen={sidebarOpen}
+        sidebarCollapsed={sidebarCollapsed}
+        onExpandSidebar={() => setSidebarCollapsed(false)}
       />
     </div>
   );
