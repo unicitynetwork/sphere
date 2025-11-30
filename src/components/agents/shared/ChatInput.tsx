@@ -30,7 +30,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
     ref
   ) {
     return (
-      <div className="p-4 border-t border-neutral-800/50 relative z-10">
+      <div className="p-4 border-t border-neutral-800/50 bg-neutral-900/80 backdrop-blur-sm">
         <div className="flex gap-3">
           <textarea
             ref={ref}

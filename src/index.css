@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+html, body {
+  background-color: #0a0a0a;
+  min-height: 100%;
+}
+
+#root {
+  min-height: 100vh;
+  background: linear-gradient(to bottom right, #0a0a0a, #171717, #0a0a0a);
+}
+
 @theme {
   --color-brand-green: #A3E635;
   --color-brand-green-dark: #4A5A2B;
