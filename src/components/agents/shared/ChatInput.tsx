@@ -34,7 +34,6 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
         <div className="flex gap-3">
           <textarea
             ref={ref}
-            autoFocus
             value={value}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={onKeyDown}

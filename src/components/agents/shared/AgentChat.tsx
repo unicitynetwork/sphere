@@ -138,7 +138,6 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     currentStatus,
     sendMessage,
     stopGeneration,
-    agentMode,
   } = useAgentChat({
     activityId: agent.backendActivityId || agent.id,
   });
@@ -240,7 +239,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
   // Auto-focus input when typing ends
   useEffect(() => {
     if (!isTyping) {
-      inputRef.current?.focus();
+      inputRef.current?.focus({ preventScroll: true });
     }
   }, [isTyping]);
 
@@ -262,10 +261,9 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     const userInput = messageText.toLowerCase();
     setInput('');
 
-    // Focus and scroll
+    // Focus input
     setTimeout(() => {
-      inputRef.current?.focus();
-      inputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      inputRef.current?.focus({ preventScroll: true });
     }, 0);
 
     if (useMockMode && getMockResponse) {
@@ -393,10 +391,10 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
 
   // Main chat content
   const renderChat = () => (
-    <div className="flex-1 flex flex-col relative z-10">
+    <div className="flex-1 flex flex-col relative z-10 min-h-0">
       <ChatHeader agent={agent} />
 
-      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
         <AnimatePresence initial={false}>
           {extendedMessages.map((message) => (
             <ChatBubble
@@ -473,7 +471,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     <>
       {sidebarConfig ? (
         // With sidebar layout
-        <div className="bg-linear-to-br from-neutral-900/60 to-neutral-800/40 backdrop-blur-xl rounded-3xl border border-neutral-800/50 overflow-hidden flex relative shadow-2xl h-full">
+        <div className="bg-linear-to-br from-neutral-900/60 to-neutral-800/40 backdrop-blur-xl rounded-3xl border border-neutral-800/50 overflow-hidden flex relative shadow-2xl h-full min-h-0">
           <div className={`absolute -top-20 -right-20 w-96 h-96 ${bgGradient.from} rounded-full blur-3xl`} />
           <div className={`absolute -bottom-20 -left-20 w-96 h-96 ${bgGradient.to} rounded-full blur-3xl`} />
           {renderSidebar()}

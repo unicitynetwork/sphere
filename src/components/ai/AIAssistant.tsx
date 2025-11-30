@@ -57,10 +57,15 @@ export function AIAssistant() {
     scrollToBottom();
   }, [messages, isStreaming]);
 
+  // Focus input on mount
+  useEffect(() => {
+    inputRef.current?.focus({ preventScroll: true });
+  }, []);
+
   // Focus input when streaming ends
   useEffect(() => {
     if (!isStreaming) {
-      inputRef.current?.focus();
+      inputRef.current?.focus({ preventScroll: true });
     }
   }, [isStreaming]);
 
@@ -68,10 +73,9 @@ export function AIAssistant() {
     if (!input.trim() || isStreaming) return;
     const text = input;
     setInput('');
-    // Focus immediately and keep focus
+    // Focus input
     setTimeout(() => {
-      inputRef.current?.focus();
-      inputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      inputRef.current?.focus({ preventScroll: true });
     }, 0);
     await sendMessage(text);
   };
@@ -244,7 +248,6 @@ export function AIAssistant() {
         <div className="relative flex gap-3 p-4 rounded-2xl bg-linear-to-br from-neutral-900/80 to-neutral-800/60 backdrop-blur-xl border border-neutral-800/50 shadow-2xl group">
           <textarea
             ref={inputRef}
-            autoFocus
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyPress}

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
 import { AgentCard } from '../components/agents/AgentCard';
 import { ChatSection } from '../components/chat/ChatSection';
@@ -11,8 +12,17 @@ import { agents, getAgentConfig } from '../config/activities';
 
 export function AgentPage() {
   const { agentId } = useParams<{ agentId: string }>();
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
   const currentAgent = agentId ? getAgentConfig(agentId) : undefined;
+
+  // Scroll to chat on mobile when agent changes
+  useEffect(() => {
+    const isMobile = window.innerWidth < 1024;
+    if (isMobile && chatContainerRef.current) {
+      chatContainerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [agentId]);
 
   // Redirect to chat if invalid agent
   if (!currentAgent) {
@@ -62,11 +72,11 @@ export function AgentPage() {
           </div>
         </div>
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-8 lg:h-[600px]">
-        <div className="lg:col-span-2 h-[400px] lg:h-full">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-8 lg:h-[650px]">
+        <div ref={chatContainerRef} className="lg:col-span-2 h-[calc(100dvh-120px)] lg:h-full overflow-hidden">
           {renderChatComponent()}
         </div>
-        <div className="h-[500px] lg:h-full">
+        <div className="h-[350px] lg:h-full overflow-hidden">
           <WalletPanel />
         </div>
       </div>
