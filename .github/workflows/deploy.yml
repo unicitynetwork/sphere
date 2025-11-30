@@ -32,6 +32,8 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          VITE_AGGREGATOR_URL: https://goggregator-test.unicity.network
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
