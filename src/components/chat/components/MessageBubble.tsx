@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import { ShoppingBag } from 'lucide-react';
 import type { IMessage } from '../../../types';
 
 interface MessageBubbleProps {
@@ -9,6 +10,40 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ msg, delay }: MessageBubbleProps) {
   const isOwn = msg.isOwn;
+
+  // Render context card (product card) differently
+  if (msg.isContextCard && msg.productCard) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: delay }}
+        className="flex justify-center mb-4"
+      >
+        <div className="bg-neutral-800/80 backdrop-blur-sm rounded-2xl border border-neutral-700/50 overflow-hidden max-w-[280px] w-full">
+          <div className="relative">
+            <img
+              src={msg.productCard.image}
+              alt={msg.productCard.title}
+              className="w-full h-32 object-cover"
+            />
+            <div className="absolute top-2 left-2 px-2 py-1 bg-black/60 backdrop-blur-sm rounded-lg">
+              <div className="flex items-center gap-1.5 text-xs text-white/80">
+                <ShoppingBag className="w-3 h-3" />
+                <span>P2P Trade</span>
+              </div>
+            </div>
+          </div>
+          <div className="p-3">
+            <p className="text-white font-medium">{msg.productCard.title}</p>
+            {msg.productCard.price && (
+              <p className="text-orange-400 font-bold mt-1">${msg.productCard.price}</p>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
@@ -40,6 +75,7 @@ export function MessageBubble({ msg, delay }: MessageBubbleProps) {
           {isOwn && (
             <div className="absolute inset-0 bg-linear-to-tr from-white/0 via-white/10 to-white/0" />
           )}
+
           <div className="text-sm leading-relaxed relative z-10">{msg.content}</div>
         </motion.div>
         <div className="text-xs text-neutral-500 mt-1 px-1">{msg.timestamp}</div>

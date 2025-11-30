@@ -1,9 +1,16 @@
+import { useSearchParams } from 'react-router-dom';
 import { useChatState } from '../../hooks/useChatState';
 import { ChatSidebar } from './components/ChatSidebar';
 import { ChatMainArea } from './components/ChatMainArea';
 
 export function ChatSection() {
-  const chatState = useChatState();
+  const [searchParams] = useSearchParams();
+  const sellerId = searchParams.get('sellerId');
+  const productName = searchParams.get('product');
+  const productImage = searchParams.get('image');
+  const productPrice = searchParams.get('price') ? Number(searchParams.get('price')) : undefined;
+  const purchased = searchParams.get('purchased') === 'true';
+  const chatState = useChatState(sellerId, productName, productImage, productPrice, purchased);
 
   return (
     <div className="bg-linear-to-br from-neutral-900/60 to-neutral-800/40 backdrop-blur-xl rounded-3xl border border-neutral-800/50 overflow-hidden flex relative shadow-2xl h-full">
