@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type ReactNode } from 'react';
+import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
 import { Plus, Eye, X, Wallet, CheckCircle, PanelLeftClose } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../../config/activities';
@@ -228,15 +228,15 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     }
   }, [agent.greetingMessage, extendedMessages.length, setMessages, useMockMode]);
 
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback((instant = false) => {
     const el = messagesContainerRef.current;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-  };
+    el.scrollTo({ top: el.scrollHeight, behavior: instant ? 'instant' : 'smooth' });
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
-  }, [extendedMessages, isTyping]);
+  }, [extendedMessages, isTyping, scrollToBottom]);
 
   // Auto-focus input when typing ends
   useEffect(() => {
@@ -244,6 +244,22 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
       inputRef.current?.focus({ preventScroll: true });
     }
   }, [isTyping]);
+
+  // Handle mobile keyboard - scroll to bottom when input is focused
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+
+    const handleFocus = () => {
+      // Small delay to wait for keyboard to appear
+      setTimeout(() => {
+        scrollToBottom(true);
+      }, 300);
+    };
+
+    input.addEventListener('focus', handleFocus);
+    return () => input.removeEventListener('focus', handleFocus);
+  }, [scrollToBottom]);
 
   const addAssistantMessage = (content: string, cardData?: TCardData, showActionButton?: boolean) => {
     setExtendedMessages(prev => [...prev, {

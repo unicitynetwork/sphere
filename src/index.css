@@ -1,13 +1,62 @@
 @import "tailwindcss";
 
+/* Mobile viewport fix - prevents content jump when keyboard opens */
+:root {
+  --visual-viewport-height: 100dvh;
+  --viewport-offset-top: 0px;
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 html, body {
   background-color: #0a0a0a;
   min-height: 100%;
+  /* Prevent overscroll/bounce on iOS */
+  overscroll-behavior: none;
+}
+
+html {
+  /* Fix for iOS Safari address bar */
+  height: -webkit-fill-available;
+}
+
+body {
+  min-height: 100dvh;
+  min-height: -webkit-fill-available;
+  /* Prevent zoom on input focus on iOS */
+  touch-action: manipulation;
 }
 
 #root {
-  min-height: 100vh;
+  min-height: 100dvh;
+  min-height: -webkit-fill-available;
   background: linear-gradient(to bottom right, #0a0a0a, #171717, #0a0a0a);
+}
+
+/* Mobile chat container - uses visual viewport for keyboard handling */
+@supports (height: 100dvh) {
+  .mobile-chat-container {
+    height: var(--visual-viewport-height, 100dvh);
+    max-height: var(--visual-viewport-height, 100dvh);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+/* Prevent input zoom on iOS (requires 16px font) */
+@media screen and (max-width: 768px) {
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+}
+
+/* Hide scrollbar for swipeable containers */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }
 
 @theme {
