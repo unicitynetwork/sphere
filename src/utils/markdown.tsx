@@ -41,12 +41,17 @@ function CodeBlock({ code, language, keyPrefix }: { code: string; language?: str
   );
 }
 
-// Parse inline markdown (bold, italic, code)
+// Parse inline markdown and HTML (bold, italic, code, br, links)
 function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
   let key = 0;
 
-  const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|_(.+?)_|`(.+?)`)/g;
+  // Combined regex for markdown and HTML:
+  // 1: **bold**, 2: *italic*, 3: _italic_, 4: `code`
+  // 5: <br> or <br/>, 6: <b>text</b>, 7: <strong>text</strong>
+  // 8: <i>text</i>, 9: <em>text</em>, 10: <code>text</code>
+  // 11: <a href="url">text</a>, 12: [text](url) markdown links
+  const regex = /(\*\*(.+?)\*\*|\*([^*]+?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(([^)]+)\))/gi;
   let lastIndex = 0;
   let match;
 
@@ -56,16 +61,56 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
     }
 
     if (match[2]) {
+      // **bold**
       parts.push(<strong key={`${keyPrefix}-strong-${key++}`}>{match[2]}</strong>);
     } else if (match[3]) {
+      // *italic*
       parts.push(<em key={`${keyPrefix}-em-${key++}`}>{match[3]}</em>);
     } else if (match[4]) {
+      // _italic_
       parts.push(<em key={`${keyPrefix}-em2-${key++}`}>{match[4]}</em>);
     } else if (match[5]) {
+      // `code`
       parts.push(
         <code key={`${keyPrefix}-code-${key++}`} className="bg-neutral-700/50 px-1.5 py-0.5 rounded text-sm font-mono">
           {match[5]}
         </code>
+      );
+    } else if (match[0].toLowerCase().startsWith('<br')) {
+      // <br> or <br/>
+      parts.push(<br key={`${keyPrefix}-br-${key++}`} />);
+    } else if (match[6]) {
+      // <b>text</b>
+      parts.push(<strong key={`${keyPrefix}-b-${key++}`}>{match[6]}</strong>);
+    } else if (match[7]) {
+      // <strong>text</strong>
+      parts.push(<strong key={`${keyPrefix}-strong2-${key++}`}>{match[7]}</strong>);
+    } else if (match[8]) {
+      // <i>text</i>
+      parts.push(<em key={`${keyPrefix}-i-${key++}`}>{match[8]}</em>);
+    } else if (match[9]) {
+      // <em>text</em>
+      parts.push(<em key={`${keyPrefix}-em3-${key++}`}>{match[9]}</em>);
+    } else if (match[10]) {
+      // <code>text</code>
+      parts.push(
+        <code key={`${keyPrefix}-code2-${key++}`} className="bg-neutral-700/50 px-1.5 py-0.5 rounded text-sm font-mono">
+          {match[10]}
+        </code>
+      );
+    } else if (match[11] && match[12]) {
+      // <a href="url">text</a>
+      parts.push(
+        <a key={`${keyPrefix}-a-${key++}`} href={match[11]} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline">
+          {match[12]}
+        </a>
+      );
+    } else if (match[13] && match[14]) {
+      // [text](url) markdown link
+      parts.push(
+        <a key={`${keyPrefix}-link-${key++}`} href={match[14]} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline">
+          {match[13]}
+        </a>
       );
     }
 
@@ -160,7 +205,9 @@ function parseHeader(line: string, keyPrefix: string): React.ReactNode {
 }
 
 // Simple markdown parser for chat messages
-// Supports: **bold**, *italic*, _italic_, `code`, ```code blocks```, # headers, tables, and newlines
+// Supports: **bold**, *italic*, _italic_, `code`, ```code blocks```, # headers, tables,
+// HTML tags: <br>, <b>, <strong>, <i>, <em>, <code>, <a href="">
+// Links: [text](url)
 export function parseMarkdown(text: string): React.ReactNode {
   const parts: React.ReactNode[] = [];
   let key = 0;
