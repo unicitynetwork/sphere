@@ -251,10 +251,13 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     if (!input) return;
 
     const handleFocus = () => {
-      // Small delay to wait for keyboard to appear
-      setTimeout(() => {
-        scrollToBottom(true);
-      }, 300);
+      // Only scroll on mobile (< 1024px)
+      if (window.innerWidth < 1024) {
+        // Small delay to wait for keyboard to appear
+        setTimeout(() => {
+          scrollToBottom(true);
+        }, 300);
+      }
     };
 
     input.addEventListener('focus', handleFocus);
