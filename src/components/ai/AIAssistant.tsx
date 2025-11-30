@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, Sparkles, Loader2, Globe, Copy, Check, Square } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useAgentChat, getAgentMode } from '../../hooks/useAgentChat';
+import { useAgentChat } from '../../hooks/useAgentChat';
 import { parseMarkdown } from '../../utils/markdown.tsx';
 
 export function AIAssistant() {

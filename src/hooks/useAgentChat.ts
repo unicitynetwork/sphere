@@ -28,7 +28,7 @@ export function getAgentApiUrl(): string {
   return import.meta.env.VITE_AGENT_API_URL || 'http://localhost:3000';
 }
 
-export function useAgentChat({ activityId, onMessage }: UseAgentChatOptions) {
+export function useAgentChat({ activityId }: UseAgentChatOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStatus, setCurrentStatus] = useState<string | null>(null);

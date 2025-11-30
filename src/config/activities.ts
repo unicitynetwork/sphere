@@ -23,6 +23,8 @@ export interface AgentConfig {
   color: string;
   type: AgentType;
   greetingMessage?: string;
+  // Placeholder for input
+  placeholder?: string;
   // Backend activity ID (for real mode API calls)
   backendActivityId?: string;
   // Quick action buttons
