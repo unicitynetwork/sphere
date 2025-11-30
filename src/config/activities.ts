@@ -1,4 +1,4 @@
-import { MessageSquare, Gamepad2, Trophy, ShoppingBag, Shirt, Brain } from 'lucide-react';
+import { MessageSquare, Gamepad2, Trophy, ShoppingBag, Shirt, Brain, Sparkles } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // Agent types for different UI layouts
@@ -45,6 +45,22 @@ export const agents: AgentConfig[] = [
     category: 'Social',
     color: 'from-blue-500 to-cyan-500',
     type: 'chat',
+  },
+  {
+    id: 'ai',
+    name: 'AI',
+    description: 'AI Assistant with web access',
+    Icon: Sparkles,
+    category: 'Assistant',
+    color: 'from-orange-500 to-amber-500',
+    type: 'simple-ai',
+    greetingMessage: "Hi! I'm your AI Assistant. I can research and analyze information from the web. What would you like to know?",
+    backendActivityId: 'ama',
+    quickActions: [
+      { label: 'Research', message: 'Research the latest news' },
+      { label: 'Explain', message: 'Explain how something works' },
+      { label: 'Help', message: 'Help me with a task' },
+    ],
   },
   {
     id: 'trivia',

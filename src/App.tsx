@@ -7,7 +7,6 @@ import { DashboardLayout } from './components/layout/DashboardLayout';
 // Pages
 import { IntroPage } from './pages/IntroPage';
 import { AgentPage } from './pages/AgentPage';
-import { AIPage } from './pages/AIPage';
 
 export default function App() {
   const location = useLocation();
@@ -19,7 +18,7 @@ export default function App() {
         <Route element={<DashboardLayout />}>
           <Route path="/home" element={<Navigate to="/agents/chat" replace />} />
           <Route path="/agents/:agentId" element={<AgentPage />} />
-          <Route path="/ai" element={<AIPage />} />
+          <Route path="/ai" element={<Navigate to="/agents/ai" replace />} />
         </Route>
       </Routes>
     </AnimatePresence>
