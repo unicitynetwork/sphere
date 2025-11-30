@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import {
   ArrowDownLeft,
-  ArrowUpRight,
   Send,
   Trash2,
   Copy,
@@ -10,6 +9,8 @@ import {
   History,
   ExternalLink,
   Check,
+  Plus,
+  X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { TransactionPlan, VestingMode, VestingBalances } from "../sdk";
@@ -113,6 +114,7 @@ export function MainWalletView({
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showSendForm, setShowSendForm] = useState(false);
 
   const handleSend = async () => {
     await onSendTransaction(destination, amount);
@@ -154,98 +156,29 @@ export function MainWalletView({
         onClose={() => setShowQR(false)}
       />
 
-      <div className="px-6 mb-6">
-        <div className="flex items-center justify-between mb-2">
+      {/* Address Selector */}
+      <div className="px-6 mb-4">
+        <div className="relative">
           <div className="flex items-center gap-2">
-            <p className="text-xs text-blue-300/70">Mainnet Balance</p>
-            <span className="flex h-2 w-2 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-            </span>
-          </div>
-        </div>
-
-        <AnimatePresence mode="wait">
-          <motion.h2
-            key={selectedAddress}
-            initial={{ opacity: 0, y: -20, filter: "blur(10px)" }}
-            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            exit={{ opacity: 0, y: 20, filter: "blur(10px)" }}
-            transition={{ type: "spring", duration: 0.6, bounce: 0.2 }}
-            className="text-3xl text-white font-bold tracking-tight mb-4"
-          >
-            <AnimatedBalance value={balance} show={showBalances} />
-          </motion.h2>
-        </AnimatePresence>
-
-        <div className="mb-4">
-          <VestingSelector
-            address={selectedAddress}
-            onModeChange={onVestingModeChange}
-            classificationProgress={vestingProgress}
-            showBalances={showBalances}
-            balances={vestingBalances}
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <motion.button
-            onClick={() => setShowQR(true)}
-            whileHover={{ scale: 1.02, y: -2 }}
-            whileTap={{ scale: 0.98 }}
-            className="relative px-4 py-3 rounded-xl bg-linear-to-br from-blue-500 to-blue-600 text-white text-sm shadow-xl shadow-blue-500/20 flex items-center justify-center gap-2 overflow-hidden group"
-          >
-            <div className="absolute inset-0 bg-linear-to-r from-transparent via-white/10 to-transparent translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000" />
-            <ArrowDownLeft className="w-4 h-4 relative z-10" />
-            <span className="relative z-10">Receive</span>
-          </motion.button>
-
-          <motion.button
-            onClick={onNewAddress}
-            whileHover={{ scale: 1.02, y: -2 }}
-            whileTap={{ scale: 0.98 }}
-            className="relative px-4 py-3 rounded-xl bg-neutral-800/80 hover:bg-neutral-700/80 text-white text-sm border border-neutral-700/50 flex items-center justify-center gap-2"
-          >
-            <ArrowUpRight className="w-4 h-4" />
-            New Address
-          </motion.button>
-        </div>
-
-        <motion.button
-          onClick={onShowHistory}
-          whileHover={{ scale: 1.01 }}
-          whileTap={{ scale: 0.99 }}
-          className="w-full mb-4 px-4 py-3 rounded-xl bg-neutral-800/50 text-white text-sm border border-neutral-700/50 flex items-center justify-center gap-2 hover:bg-neutral-800"
-        >
-          <History className="w-4 h-4" />
-          Transaction History
-        </motion.button>
-
-        <div className="mb-6 relative">
-          <label className="text-xs text-neutral-400">Addresses</label>
-
-          <div className="mt-2 flex items-center gap-2">
             <button
               onClick={() => setShowDropdown((prev) => !prev)}
-              className="flex-1 bg-neutral-800 text-neutral-200 px-3 py-2 rounded border border-neutral-700 flex items-center justify-between"
+              className="flex-1 bg-neutral-800 text-neutral-200 px-3 py-2 rounded-lg border border-neutral-700 flex items-center justify-between hover:bg-neutral-700/50 transition-colors"
             >
-              <span>
-                {selectedAddress.slice(0, 10) +
-                  "..." +
-                  selectedAddress.slice(-6)}
+              <span className="font-mono text-sm">
+                {selectedAddress.slice(0, 12) + "..." + selectedAddress.slice(-8)}
               </span>
               <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform ${showDropdown ? "rotate-180" : ""}`} />
             </button>
 
-            <a
-              href={`https://www.unicity.network/address/${selectedAddress}`}
-              target="_blank"
-              rel="noopener noreferrer"
+            <motion.button
+              onClick={onNewAddress}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
               className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 hover:bg-neutral-700 text-neutral-300"
-              title="View in explorer"
+              title="Generate new address"
             >
-              <ExternalLink className="w-4 h-4" />
-            </a>
+              <Plus className="w-4 h-4" />
+            </motion.button>
 
             <button
               onClick={() => {
@@ -262,6 +195,16 @@ export function MainWalletView({
             >
               {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
             </button>
+
+            <a
+              href={`https://www.unicity.network/address/${selectedAddress}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 hover:bg-neutral-700 text-neutral-300"
+              title="View in explorer"
+            >
+              <ExternalLink className="w-4 h-4" />
+            </a>
           </div>
 
           <AnimatePresence>
@@ -314,75 +257,163 @@ export function MainWalletView({
         </div>
       </div>
 
-      <div className="px-6">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="flex flex-col gap-3 bg-neutral-900/50 p-4 rounded-xl border border-neutral-800/50 backdrop-blur-sm"
-        >
-          <div className="relative">
-            <input
-              placeholder="Destination Address"
-              className="w-full px-3 py-2 bg-neutral-800/50 rounded-lg text-neutral-200 border border-neutral-700/50 focus:border-blue-500 focus:bg-neutral-800 outline-none transition-all"
-              value={destination}
-              onChange={(e) => setDestination(e.target.value)}
-            />
-          </div>
+      {/* Balance */}
+      <div className="px-6 mb-4">
+        <div className="flex items-center gap-2 mb-1">
+          <p className="text-xs text-blue-300/70">Mainnet Balance</p>
+          <span className="flex h-2 w-2 relative">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+          </span>
+        </div>
 
-          <div className="relative">
-            <input
-              placeholder="Amount (ALPHA)"
-              type="number"
-              step="any"
-              className="w-full px-3 py-2 pr-32 bg-neutral-800/50 rounded-lg text-neutral-200 border border-neutral-700/50 focus:border-blue-500 focus:bg-neutral-800 outline-none transition-all"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => {
-                  const filteredBalance = Number(vestingState.getBalance(selectedAddress)) / 1e8;
-                  setAmount(String(Math.floor(filteredBalance * 0.25 * 1e8) / 1e8));
-                }}
-                className="px-2 py-1 text-[10px] font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-300 rounded transition-colors"
-              >
-                25%
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const filteredBalance = Number(vestingState.getBalance(selectedAddress)) / 1e8;
-                  setAmount(String(Math.floor(filteredBalance * 0.5 * 1e8) / 1e8));
-                }}
-                className="px-2 py-1 text-[10px] font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-300 rounded transition-colors"
-              >
-                50%
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const filteredBalance = Number(vestingState.getBalance(selectedAddress)) / 1e8;
-                  setAmount(String(filteredBalance));
-                }}
-                className="px-2 py-1 text-[10px] font-medium bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
-              >
-                MAX
-              </button>
-            </div>
-          </div>
+        <AnimatePresence mode="wait">
+          <motion.h2
+            key={selectedAddress}
+            initial={{ opacity: 0, y: -20, filter: "blur(10px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: 20, filter: "blur(10px)" }}
+            transition={{ type: "spring", duration: 0.6, bounce: 0.2 }}
+            className="text-3xl text-white font-bold tracking-tight"
+          >
+            <AnimatedBalance value={balance} show={showBalances} />
+          </motion.h2>
+        </AnimatePresence>
+      </div>
+
+      {/* Vesting Selector */}
+      <div className="px-6 mb-4">
+        <VestingSelector
+          address={selectedAddress}
+          onModeChange={onVestingModeChange}
+          classificationProgress={vestingProgress}
+          showBalances={showBalances}
+          balances={vestingBalances}
+        />
+      </div>
+
+      {/* Action Buttons */}
+      <div className="px-6 mb-4">
+        <div className="grid grid-cols-2 gap-3">
+          <motion.button
+            onClick={() => setShowQR(true)}
+            whileHover={{ scale: 1.02, y: -2 }}
+            whileTap={{ scale: 0.98 }}
+            className="relative px-4 py-3 rounded-xl bg-linear-to-br from-blue-500 to-blue-600 text-white text-sm shadow-xl shadow-blue-500/20 flex items-center justify-center gap-2 overflow-hidden group"
+          >
+            <div className="absolute inset-0 bg-linear-to-r from-transparent via-white/10 to-transparent translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000" />
+            <ArrowDownLeft className="w-4 h-4 relative z-10" />
+            <span className="relative z-10">Receive</span>
+          </motion.button>
 
           <motion.button
-            whileHover={{ scale: 1.02 }}
+            whileHover={{ scale: 1.02, y: -2 }}
             whileTap={{ scale: 0.98 }}
-            onClick={handleSend}
-            className="px-4 py-3 bg-linear-to-br from-green-600 to-green-700 rounded-xl text-white font-semibold flex items-center justify-center gap-2 shadow-lg shadow-green-500/20 hover:shadow-green-500/30 transition-shadow"
+            onClick={() => setShowSendForm(!showSendForm)}
+            className="relative px-4 py-3 rounded-xl bg-linear-to-br from-green-600 to-green-700 text-white text-sm shadow-xl shadow-green-500/20 flex items-center justify-center gap-2 overflow-hidden group"
           >
-            <Send className="w-4 h-4" /> Send Transaction
+            <div className="absolute inset-0 bg-linear-to-r from-transparent via-white/10 to-transparent translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000" />
+            {showSendForm ? <X className="w-4 h-4 relative z-10" /> : <Send className="w-4 h-4 relative z-10" />}
+            <span className="relative z-10">{showSendForm ? "Cancel" : "Send"}</span>
           </motion.button>
-        </motion.div>
+        </div>
       </div>
+
+      {/* Send Form */}
+      <AnimatePresence mode="wait">
+        {showSendForm ? (
+          <motion.div
+            key="send-form"
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            transition={{ type: "spring", duration: 0.3, bounce: 0.1 }}
+            className="px-6 mb-4"
+          >
+            <div className="flex flex-col gap-3 bg-neutral-900/50 p-4 rounded-xl border border-neutral-800/50 backdrop-blur-sm">
+              <div className="relative">
+                <input
+                  placeholder="Destination Address"
+                  className="w-full px-3 py-2 bg-neutral-800/50 rounded-lg text-neutral-200 border border-neutral-700/50 focus:border-green-500 focus:bg-neutral-800 outline-none transition-all"
+                  value={destination}
+                  onChange={(e) => setDestination(e.target.value)}
+                />
+              </div>
+
+              <div className="relative">
+                <input
+                  placeholder="Amount (ALPHA)"
+                  type="number"
+                  step="any"
+                  className="w-full px-3 py-2 pr-32 bg-neutral-800/50 rounded-lg text-neutral-200 border border-neutral-700/50 focus:border-green-500 focus:bg-neutral-800 outline-none transition-all"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const filteredBalance = Number(vestingState.getBalance(selectedAddress)) / 1e8;
+                      setAmount(String(Math.floor(filteredBalance * 0.25 * 1e8) / 1e8));
+                    }}
+                    className="px-2 py-1 text-[10px] font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-300 rounded transition-colors"
+                  >
+                    25%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const filteredBalance = Number(vestingState.getBalance(selectedAddress)) / 1e8;
+                      setAmount(String(Math.floor(filteredBalance * 0.5 * 1e8) / 1e8));
+                    }}
+                    className="px-2 py-1 text-[10px] font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-300 rounded transition-colors"
+                  >
+                    50%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const filteredBalance = Number(vestingState.getBalance(selectedAddress)) / 1e8;
+                      setAmount(String(filteredBalance));
+                    }}
+                    className="px-2 py-1 text-[10px] font-medium bg-green-600 hover:bg-green-500 text-white rounded transition-colors"
+                  >
+                    MAX
+                  </button>
+                </div>
+              </div>
+
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={handleSend}
+                className="px-4 py-3 bg-linear-to-br from-green-500 to-green-600 rounded-xl text-white font-semibold flex items-center justify-center gap-2 shadow-lg shadow-green-500/20 hover:shadow-green-500/30 transition-shadow"
+              >
+                <Send className="w-4 h-4" /> Send Transaction
+              </motion.button>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="history-button"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            transition={{ type: "spring", duration: 0.3, bounce: 0.1 }}
+            className="px-6 mb-4"
+          >
+            <motion.button
+              onClick={onShowHistory}
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.99 }}
+              className="w-full px-4 py-2.5 rounded-xl bg-neutral-800/50 text-neutral-300 text-sm border border-neutral-700/50 flex items-center justify-center gap-2 hover:bg-neutral-800 hover:text-white transition-colors"
+            >
+              <History className="w-4 h-4" />
+              Transaction History
+            </motion.button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
