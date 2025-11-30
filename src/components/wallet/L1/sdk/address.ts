@@ -172,6 +172,55 @@ export function generateHDAddressBIP32(
 }
 
 // ============================================
+// Original index.html compatible derivation
+// ============================================
+
+/**
+ * Generate address from master private key using HMAC-SHA512 derivation
+ * This matches exactly the original index.html implementation
+ * @param masterPrivateKey - 32-byte hex private key (64 chars)
+ * @param index - Address index
+ */
+export function generateAddressFromMasterKey(
+  masterPrivateKey: string,
+  index: number
+) {
+  const derivationPath = `m/44'/0'/${index}'`;
+
+  // HMAC-SHA512 with path as key (matching index.html exactly)
+  const hmacInput = CryptoJS.enc.Hex.parse(masterPrivateKey);
+  const hmacKey = CryptoJS.enc.Utf8.parse(derivationPath);
+  const hmacOutput = CryptoJS.HmacSHA512(hmacInput, hmacKey).toString();
+
+  // Use left 32 bytes for private key
+  const childPrivateKey = hmacOutput.substring(0, 64);
+
+  // Generate key pair from the derived key
+  const keyPair = ec.keyFromPrivate(childPrivateKey);
+  const publicKey = keyPair.getPublic(true, "hex");
+
+  // HASH160 (SHA256 -> RIPEMD160)
+  const sha = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKey)).toString();
+  const hash160 = CryptoJS.RIPEMD160(CryptoJS.enc.Hex.parse(sha)).toString();
+
+  // Witness program = 20 bytes of HASH160
+  const programBytes = Uint8Array.from(
+    hash160.match(/../g)!.map((x) => parseInt(x, 16))
+  );
+
+  // Bech32 encode with alpha prefix
+  const address = createBech32("alpha", 0, programBytes);
+
+  return {
+    address,
+    privateKey: childPrivateKey,
+    publicKey,
+    index,
+    path: derivationPath,
+  };
+}
+
+// ============================================
 // Legacy functions for backward compatibility
 // ============================================
 

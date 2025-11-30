@@ -12,6 +12,7 @@ import {
 } from "../sdk";
 import { useWalletOperations, useTransactions, useBalance } from "../hooks";
 import { NoWalletView, HistoryView, MainWalletView } from ".";
+import { MessageModal, type MessageType } from "../components/modals/MessageModal";
 
 type ViewMode = "main" | "history";
 
@@ -26,6 +27,21 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     current: number;
     total: number;
   } | null>(null);
+  const [messageModal, setMessageModal] = useState<{
+    show: boolean;
+    type: MessageType;
+    title: string;
+    message: string;
+    txids?: string[];
+  }>({ show: false, type: "info", title: "", message: "" });
+
+  const showMessage = useCallback((type: MessageType, title: string, message: string, txids?: string[]) => {
+    setMessageModal({ show: true, type, title, message, txids });
+  }, []);
+
+  const closeMessage = useCallback(() => {
+    setMessageModal((prev) => ({ ...prev, show: false }));
+  }, []);
 
   const { balance, refreshBalance } = useBalance(selectedAddress);
 
@@ -141,15 +157,16 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           setAddresses(list);
           setSelectedAddress(list[0]);
           await refreshBalance(list[0]);
-          alert("Wallet loaded successfully!");
+          showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
         } else {
-          alert("Error loading wallet: " + result.error);
+          showMessage("error", "Load Error", "Error loading wallet: " + result.error);
         }
       }
     } catch (err: unknown) {
-      alert(
-        "Error loading wallet: " +
-          (err instanceof Error ? err.message : String(err))
+      showMessage(
+        "error",
+        "Load Error",
+        "Error loading wallet: " + (err instanceof Error ? err.message : String(err))
       );
       console.error(err);
     }
@@ -170,9 +187,9 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
       setShowLoadPasswordModal(false);
       setPendingFile(null);
-      alert("Wallet loaded successfully!");
+      showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
     } else {
-      alert("Error loading wallet: " + result.error);
+      showMessage("error", "Load Error", "Error loading wallet: " + result.error);
     }
   };
 
@@ -202,7 +219,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   // Save wallet
   const onSaveWallet = (filename: string, password?: string) => {
     if (!wallet) {
-      alert("No wallet to save");
+      showMessage("warning", "No Wallet", "No wallet to save");
       return;
     }
 
@@ -213,11 +230,12 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       });
 
       downloadWalletFile(content, filename);
-      alert("Wallet saved successfully!");
+      showMessage("success", "Wallet Saved", "Wallet saved successfully!");
     } catch (err: unknown) {
-      alert(
-        "Error saving wallet: " +
-          (err instanceof Error ? err.message : String(err))
+      showMessage(
+        "error",
+        "Save Error",
+        "Error saving wallet: " + (err instanceof Error ? err.message : String(err))
       );
       console.error(err);
     }
@@ -227,10 +245,11 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const onSendTransaction = async (destination: string, amount: string) => {
     if (!wallet) return;
 
-    const result = await createTxPlan(wallet, destination, amount);
+    // Use selected address as sender
+    const result = await createTxPlan(wallet, destination, amount, selectedAddress);
 
     if (!result.success) {
-      alert("Transaction failed: " + result.error);
+      showMessage("error", "Transaction Failed", "Transaction failed: " + result.error);
     }
   };
 
@@ -241,20 +260,24 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     const result = await sendTransaction(wallet, txPlan);
 
     if (result.success) {
-      alert(
-        `Sent ${result.results?.length} transaction(s)!\n\nTXIDs:\n${result.results
-          ?.map((r) => r.txid)
-          .join("\n")}`
+      const txids = result.results?.map((r) => r.txid) || [];
+      showMessage(
+        "success",
+        "Transaction Sent",
+        `Sent ${result.results?.length} transaction(s)!`,
+        txids
       );
     } else {
       if (result.results && result.results.length > 0) {
-        alert(
-          `${result.error}\n\nSuccessful TXIDs:\n${result.results
-            .map((r) => r.txid)
-            .join("\n")}`
+        const txids = result.results.map((r) => r.txid);
+        showMessage(
+          "warning",
+          "Partial Success",
+          result.error || "Some transactions failed",
+          txids
         );
       } else {
-        alert("Transaction failed: " + result.error);
+        showMessage("error", "Transaction Failed", "Transaction failed: " + result.error);
       }
     }
 
@@ -306,53 +329,83 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   // No wallet view
   if (!wallet) {
     return (
-      <NoWalletView
-        onCreateWallet={onCreateWallet}
-        onLoadWallet={onLoadWallet}
-        showLoadPasswordModal={showLoadPasswordModal}
-        onConfirmLoadWithPassword={onConfirmLoadWithPassword}
-        onCancelLoadPassword={() => {
-          setShowLoadPasswordModal(false);
-          setPendingFile(null);
-        }}
-      />
+      <>
+        <NoWalletView
+          onCreateWallet={onCreateWallet}
+          onLoadWallet={onLoadWallet}
+          showLoadPasswordModal={showLoadPasswordModal}
+          onConfirmLoadWithPassword={onConfirmLoadWithPassword}
+          onCancelLoadPassword={() => {
+            setShowLoadPasswordModal(false);
+            setPendingFile(null);
+          }}
+        />
+        <MessageModal
+          show={messageModal.show}
+          type={messageModal.type}
+          title={messageModal.title}
+          message={messageModal.message}
+          txids={messageModal.txids}
+          onClose={closeMessage}
+        />
+      </>
     );
   }
 
   // History view
   if (viewMode === "history") {
     return (
-      <HistoryView
-        wallet={wallet}
-        selectedAddress={selectedAddress}
-        transactions={transactions}
-        loadingTransactions={loadingTransactions}
-        currentBlockHeight={currentBlockHeight}
-        transactionDetails={transactionDetails}
-        analyzeTransaction={analyzeTransaction}
-        onBackToMain={onBackToMain}
-      />
+      <>
+        <HistoryView
+          wallet={wallet}
+          selectedAddress={selectedAddress}
+          transactions={transactions}
+          loadingTransactions={loadingTransactions}
+          currentBlockHeight={currentBlockHeight}
+          transactionDetails={transactionDetails}
+          analyzeTransaction={analyzeTransaction}
+          onBackToMain={onBackToMain}
+        />
+        <MessageModal
+          show={messageModal.show}
+          type={messageModal.type}
+          title={messageModal.title}
+          message={messageModal.message}
+          txids={messageModal.txids}
+          onClose={closeMessage}
+        />
+      </>
     );
   }
 
   // Main view
   return (
-    <MainWalletView
-      selectedAddress={selectedAddress}
-      addresses={addresses}
-      balance={balance}
-      showBalances={showBalances}
-      onNewAddress={onNewAddress}
-      onSelectAddress={onSelectAddress}
-      onShowHistory={onShowHistory}
-      onSaveWallet={onSaveWallet}
-      onDeleteWallet={onDeleteWallet}
-      onSendTransaction={onSendTransaction}
-      txPlan={txPlan}
-      isSending={isSending}
-      onConfirmSend={onConfirmSend}
-      vestingProgress={vestingProgress}
-      onVestingModeChange={handleVestingModeChange}
-    />
+    <>
+      <MainWalletView
+        selectedAddress={selectedAddress}
+        addresses={addresses}
+        balance={balance}
+        showBalances={showBalances}
+        onNewAddress={onNewAddress}
+        onSelectAddress={onSelectAddress}
+        onShowHistory={onShowHistory}
+        onSaveWallet={onSaveWallet}
+        onDeleteWallet={onDeleteWallet}
+        onSendTransaction={onSendTransaction}
+        txPlan={txPlan}
+        isSending={isSending}
+        onConfirmSend={onConfirmSend}
+        vestingProgress={vestingProgress}
+        onVestingModeChange={handleVestingModeChange}
+      />
+      <MessageModal
+        show={messageModal.show}
+        type={messageModal.type}
+        title={messageModal.title}
+        message={messageModal.message}
+        txids={messageModal.txids}
+        onClose={closeMessage}
+      />
+    </>
   );
 }
