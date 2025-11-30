@@ -6,6 +6,7 @@ import {
   Filter,
   TokenTransferProtocol,
   Event,
+  PaymentRequestProtocol,
 } from "@unicitylabs/nostr-js-sdk";
 import { IdentityManager } from "./IdentityManager";
 import { Buffer } from "buffer";
@@ -21,10 +22,16 @@ import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAl
 import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenState";
 import { ServiceProvider } from "./ServiceProvider";
 import { RegistryService } from "./RegistryService";
-import { TokenStatus, Token as UiToken } from "../data/model";
+import {
+  PaymentRequestStatus,
+  TokenStatus,
+  Token as UiToken,
+  type IncomingPaymentRequest,
+} from "../data/model";
 import { v4 as uuidv4 } from "uuid";
 
 const UNICITY_RELAYS = [
+  "wss://nostr-relay.testnet.unicity.network",
   "ws://unicity-nostr-relay-20250927-alb-1919039002.me-central-1.elb.amazonaws.com:8080",
 ];
 
@@ -35,6 +42,7 @@ export class NostrService {
   private client: NostrClient | null = null;
   private identityManager: IdentityManager;
   private isConnected: boolean = false;
+  private paymentRequests: IncomingPaymentRequest[] = [];
 
   private constructor(identityManager: IdentityManager) {
     this.identityManager = identityManager;
@@ -74,7 +82,11 @@ export class NostrService {
     if (!this.client) return;
     const lastSync = this.getOrInitLastSync();
     const filter = new Filter();
-    filter.kinds = [EventKinds.ENCRYPTED_DM, EventKinds.TOKEN_TRANSFER];
+    filter.kinds = [
+      EventKinds.ENCRYPTED_DM,
+      EventKinds.TOKEN_TRANSFER,
+      EventKinds.PAYMENT_REQUEST,
+    ];
     filter["#p"] = [publicKey];
     filter.since = lastSync;
 
@@ -83,13 +95,13 @@ export class NostrService {
         console.log(`Received event kind=${event.kind}`);
         const currentLastSync = this.getOrInitLastSync();
         if (event.created_at <= currentLastSync) {
-            console.log(`⏭️ Skipping old event (Time: ${event.created_at} <= Sync: ${currentLastSync})`);
-            return;
+          console.log(
+            `⏭️ Skipping old event (Time: ${event.created_at} <= Sync: ${currentLastSync})`
+          );
+          return;
         }
 
-        if (event.kind === EventKinds.TOKEN_TRANSFER) {
-          this.handleIncomingEvent(event);
-        }
+        this.handleIncomingEvent(event);
       },
       onEndOfStoredEvents: () => console.log("End of stored events"),
     });
@@ -104,9 +116,87 @@ export class NostrService {
       this.handleTokenTransfer(event);
     } else if (event.kind === EventKinds.ENCRYPTED_DM) {
       console.log("Received encrypted DM message");
+    } else if (event.kind === EventKinds.PAYMENT_REQUEST) {
+      this.handlePaymentRequest(event);
     } else {
       console.log(`Unhandled event kind - ${event.kind}`);
     }
+  }
+
+  private async handlePaymentRequest(event: Event) {
+    try {
+      const keyManager = await this.getKeyManager();
+      if (!keyManager) return;
+
+      const request = await PaymentRequestProtocol.parsePaymentRequest(
+        event,
+        keyManager
+      );
+
+      const registry = RegistryService.getInstance();
+      const def = registry.getCoinDefinition(request.coinId);
+      const symbol = def?.symbol || "UNKNOWN";
+
+      const incomingRequest: IncomingPaymentRequest = {
+        id: event.id,
+        senderPubkey: event.pubkey,
+        amount: request.amount,
+        coinId: request.coinId,
+        symbol: symbol,
+        message: request.message,
+        recipientNametag: request.recipientNametag,
+        requestId: request.requestId,
+        timestamp: event.created_at * 1000,
+        status: PaymentRequestStatus.PENDING,
+      };
+
+      if (!this.paymentRequests.find((r) => r.id === incomingRequest.id)) {
+        this.paymentRequests.unshift(incomingRequest);
+        this.notifyRequestsUpdated();
+
+        console.log("📬 Payment Request received:", request);
+      }
+    } catch (error) {
+      console.error("Failed to handle payment request", error);
+    }
+  }
+
+  private notifyRequestsUpdated() {
+    window.dispatchEvent(new CustomEvent("payment-requests-updated"));
+  }
+
+  acceptPaymentRequest(request: IncomingPaymentRequest) {
+    this.updateRequestStatus(request.id, PaymentRequestStatus.ACCEPTED);
+  }
+
+  rejectPaymentRequest(request: IncomingPaymentRequest) {
+    this.updateRequestStatus(request.id, PaymentRequestStatus.REJECTED);
+  }
+
+  paidPaymentRequest(request: IncomingPaymentRequest) {
+    this.updateRequestStatus(request.id, PaymentRequestStatus.PAID)
+  }
+
+  clearPaymentRequest(requestId: string) {
+    const currentList = this.paymentRequests.filter((p) => p.id !== requestId);
+    this.paymentRequests = currentList;
+  }
+
+  clearProcessedPaymentRequests() {
+    const currentList = this.paymentRequests.filter((p) => p.status === PaymentRequestStatus.PENDING);
+    this.paymentRequests = currentList;
+  }
+
+  updateRequestStatus(id: string, status: PaymentRequestStatus) {
+    const req = this.paymentRequests.find((r) => r.id === id);
+    if (req) {
+      req.status = status;
+      this.notifyRequestsUpdated();
+    }
+  }
+
+  getPaymentRequests(): IncomingPaymentRequest[] {
+      return this.paymentRequests;
   }
 
   private async handleTokenTransfer(event: Event) {
@@ -150,8 +240,8 @@ export class NostrService {
       let sourceTokenInput = payloadObj["sourceToken"];
       let transferTxInput = payloadObj["transferTx"];
 
-      console.log(sourceTokenInput)
-      console.log(transferTxInput)
+      console.log(sourceTokenInput);
+      console.log(transferTxInput);
 
       if (typeof sourceTokenInput === "string") {
         try {

@@ -32,12 +32,12 @@ export function HomePage() {
 
   return (
     <>
-      <div className="mb-8 relative">
+      <div className="mb-4 md:mb-8 relative">
         <div className="absolute -top-20 -left-20 w-96 h-96 bg-orange-500/10 rounded-full blur-3xl" />
         <div className="absolute -top-10 -right-32 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl" />
 
         <div className="relative">
-          <div className="relative p-8 rounded-2xl bg-neutral-900/40 backdrop-blur-sm border border-neutral-800/50">
+          <div className="relative p-4 md:p-8 rounded-2xl bg-neutral-900/40 backdrop-blur-sm border border-neutral-800/50">
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
               {agents.map((agent) => (
                 <AgentCard
@@ -55,11 +55,11 @@ export function HomePage() {
           </div>
         </div>
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-[600px]">
-        <div className="lg:col-span-2 h-full">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-8 lg:h-[600px]">
+        <div className="lg:col-span-2 h-[400px] lg:h-full">
           {renderChatComponent()}
         </div>
-        <div className="h-full">
+        <div className="h-[500px] lg:h-full">
           <WalletPanel />
         </div>
       </div>

@@ -2,9 +2,19 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { getBalance } from "../sdk";
 import { subscribeBlocks } from "../sdk/network";
 
-export function useBalance(initialAddress?: string) {
+interface UseBalanceOptions {
+  onNewBlock?: (address: string) => void;
+}
+
+export function useBalance(initialAddress?: string, options?: UseBalanceOptions) {
   const [balance, setBalance] = useState<number>(0);
   const selectedAddressRef = useRef<string>(initialAddress || "");
+  const onNewBlockRef = useRef(options?.onNewBlock);
+
+  // Keep onNewBlock ref updated
+  useEffect(() => {
+    onNewBlockRef.current = options?.onNewBlock;
+  }, [options?.onNewBlock]);
 
   const refreshBalance = useCallback(async (addr: string) => {
     if (!addr) return;
@@ -25,6 +35,8 @@ export function useBalance(initialAddress?: string) {
         const unsub = (await subscribeBlocks(() => {
           if (mounted && selectedAddressRef.current) {
             refreshBalance(selectedAddressRef.current);
+            // Call onNewBlock callback if provided
+            onNewBlockRef.current?.(selectedAddressRef.current);
           }
         }) as unknown) as () => void;
 
