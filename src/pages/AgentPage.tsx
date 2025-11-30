@@ -8,6 +8,7 @@ import { P2PChat } from '../components/agents/P2PChat';
 import { MerchChat } from '../components/agents/MerchChat';
 import { TriviaChat } from '../components/agents/TriviaChat';
 import { GamesChat } from '../components/agents/GamesChat';
+import { AIChat } from '../components/agents/AIChat';
 import { WalletPanel } from '../components/wallet/WalletPanel';
 import { agents, getAgentConfig } from '../config/activities';
 import { useVisualViewport } from '../hooks/useVisualViewport';
@@ -70,6 +71,8 @@ export function AgentPage() {
     switch (currentAgent.id) {
       case 'chat':
         return <ChatSection />;
+      case 'ai':
+        return <AIChat agent={currentAgent} />;
       case 'trivia':
         return <TriviaChat agent={currentAgent} />;
       case 'games':
@@ -87,13 +90,14 @@ export function AgentPage() {
 
   return (
     <>
-      <div className="mb-2 md:mb-8 relative">
+      {/* Desktop agent grid - always visible */}
+      <div className="hidden lg:block mb-8 relative">
         <div className="absolute -top-20 -left-20 w-96 h-96 bg-orange-500/10 rounded-full blur-3xl" />
         <div className="absolute -top-10 -right-32 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl" />
 
         <div className="relative">
-          <div className="relative p-2 md:p-8 rounded-2xl bg-neutral-900/40 backdrop-blur-sm border border-neutral-800/50">
-            <div className="grid grid-cols-3 md:grid-cols-3 lg:grid-cols-6 gap-2 md:gap-4">
+          <div className="relative p-8 rounded-2xl bg-neutral-900/40 backdrop-blur-sm border border-neutral-800/50">
+            <div className="grid grid-cols-7 gap-4">
               {agents.map((agent) => (
                 <AgentCard
                   key={agent.id}
@@ -142,14 +146,14 @@ export function AgentPage() {
         </button>
       </div>
 
-      {/* Mobile swipeable container */}
+      {/* Mobile swipeable container - fullscreen */}
       <div
         ref={sliderRef}
         onScroll={handleScroll}
         className="lg:hidden flex overflow-x-auto snap-x snap-mandatory scrollbar-hide"
         style={{
-          height: 'calc(var(--visual-viewport-height, 100dvh) - 220px)',
-          minHeight: '400px'
+          height: 'calc(var(--visual-viewport-height, 100dvh) - 180px)',
+          minHeight: '300px'
         }}
       >
         <div ref={chatContainerRef} className="w-full shrink-0 snap-center h-full">
