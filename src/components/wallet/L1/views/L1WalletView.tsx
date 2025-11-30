@@ -1,32 +1,28 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   connect,
-  loadWallet,
   generateAddress,
-  exportWallet,
-  downloadWalletFile,
-  getUtxo,
-  vestingState,
-  type Wallet,
+  loadWalletFromStorage,
+  createTransactionPlan,
+  createAndSignTransaction,
+  broadcast,
   type VestingMode,
+  type TransactionPlan,
 } from "../sdk";
-import { useWalletOperations, useTransactions, useBalance } from "../hooks";
+import { useL1Wallet } from "../hooks";
 import { NoWalletView, HistoryView, MainWalletView } from ".";
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
 
 type ViewMode = "main" | "history";
 
 export function L1WalletView({ showBalances }: { showBalances: boolean }) {
-  const [wallet, setWallet] = useState<Wallet | null>(null);
-  const [addresses, setAddresses] = useState<string[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<string>("");
   const [viewMode, setViewMode] = useState<ViewMode>("main");
   const [showLoadPasswordModal, setShowLoadPasswordModal] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [isConnecting, setIsConnecting] = useState(true);
-  const [vestingProgress, setVestingProgress] = useState<{
-    current: number;
-    total: number;
-  } | null>(null);
+  const [txPlan, setTxPlan] = useState<TransactionPlan | null>(null);
+  const [isSending, setIsSending] = useState(false);
   const [messageModal, setMessageModal] = useState<{
     show: boolean;
     type: MessageType;
@@ -35,6 +31,30 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     txids?: string[];
   }>({ show: false, type: "info", title: "", message: "" });
 
+  // Use TanStack Query based hook
+  const {
+    wallet,
+    isLoadingWallet,
+    balance,
+    transactions,
+    transactionDetails,
+    isLoadingTransactions,
+    currentBlockHeight,
+    vestingBalances,
+    isClassifyingVesting,
+    createWallet,
+    importWallet,
+    deleteWallet,
+    exportWallet,
+    analyzeTransaction,
+    setVestingMode,
+    invalidateWallet,
+  } = useL1Wallet(selectedAddress);
+
+  // Derive addresses from wallet
+  const addresses = wallet?.addresses.map((a) => a.address) ?? [];
+
+  // Message helpers
   const showMessage = useCallback((type: MessageType, title: string, message: string, txids?: string[]) => {
     setMessageModal({ show: true, type, title, message, txids });
   }, []);
@@ -43,101 +63,45 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     setMessageModal((prev) => ({ ...prev, show: false }));
   }, []);
 
-  const { balance, refreshBalance } = useBalance(selectedAddress);
-
-  // Classify UTXOs for vesting when address changes
-  const classifyVesting = useCallback(async (address: string) => {
-    if (!address) return;
-
-    try {
-      const utxos = await getUtxo(address);
-      if (utxos.length === 0) return;
-
-      await vestingState.classifyAddressUtxos(
-        address,
-        utxos,
-        (current, total) => {
-          setVestingProgress({ current, total });
-        }
-      );
-      setVestingProgress(null);
-    } catch (err) {
-      console.error("Vesting classification error:", err);
-      setVestingProgress(null);
-    }
-  }, []);
-
-  // Handle vesting mode change
-  const handleVestingModeChange = useCallback((_mode: VestingMode) => {
-    // Mode is already set in vestingState by the VestingSelector
-    // Could trigger balance recalculation if needed
-  }, []);
-
-  const {
-    pendingFile,
-    setPendingFile,
-    handleCreateWallet,
-    handleDeleteWallet,
-    handleImportWallet,
-  } = useWalletOperations();
-
-  const {
-    txPlan,
-    isSending,
-    transactions,
-    loadingTransactions,
-    currentBlockHeight,
-    transactionDetails,
-    createTxPlan,
-    sendTransaction,
-    loadTransactionHistory,
-    analyzeTransaction,
-  } = useTransactions();
-
-  // Initialize wallet on mount
+  // Connect on mount
   useEffect(() => {
     (async () => {
       try {
         setIsConnecting(true);
         await connect();
-
-        const w = loadWallet();
-        if (!w) {
-          setIsConnecting(false);
-          return;
-        }
-
-        setWallet(w);
-
-        const list = w.addresses.map((a) => a.address);
-        setAddresses(list);
-        setSelectedAddress(list[0]);
-
-        await refreshBalance(list[0]);
       } finally {
         setIsConnecting(false);
       }
     })();
-  }, [refreshBalance]);
+  }, []);
 
-  // Refresh balance and classify vesting when address changes
+  // Set initial selected address when wallet loads
   useEffect(() => {
-    if (selectedAddress) {
-      refreshBalance(selectedAddress);
-      classifyVesting(selectedAddress);
+    if (wallet && !selectedAddress && wallet.addresses.length > 0) {
+      setSelectedAddress(wallet.addresses[0].address);
     }
-  }, [selectedAddress, refreshBalance, classifyVesting]);
+  }, [wallet, selectedAddress]);
+
+  // Vesting progress for UI
+  const vestingProgress = isClassifyingVesting
+    ? { current: 0, total: 1 } // Simplified progress indicator
+    : null;
+
+  // Handle vesting mode change
+  const handleVestingModeChange = useCallback((mode: VestingMode) => {
+    setVestingMode(mode);
+  }, [setVestingMode]);
 
   // Create new wallet
   const onCreateWallet = async () => {
-    const w = await handleCreateWallet();
-    setWallet(w);
-
-    const list = w.addresses.map((a) => a.address);
-    setAddresses(list);
-    setSelectedAddress(list[0]);
-
-    await refreshBalance(list[0]);
+    try {
+      const newWallet = await createWallet();
+      if (newWallet.addresses.length > 0) {
+        setSelectedAddress(newWallet.addresses[0].address);
+      }
+    } catch (err) {
+      showMessage("error", "Error", "Failed to create wallet: " + (err instanceof Error ? err.message : String(err)));
+    }
   };
 
   // Load wallet from file
@@ -149,18 +113,11 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         setPendingFile(file);
         setShowLoadPasswordModal(true);
       } else {
-        const result = await handleImportWallet(file);
-
-        if (result.success && result.wallet) {
-          setWallet(result.wallet);
-          const list = result.wallet.addresses.map((a) => a.address);
-          setAddresses(list);
-          setSelectedAddress(list[0]);
-          await refreshBalance(list[0]);
-          showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
-        } else {
-          showMessage("error", "Load Error", "Error loading wallet: " + result.error);
+        const newWallet = await importWallet({ file });
+        if (newWallet.addresses.length > 0) {
+          setSelectedAddress(newWallet.addresses[0].address);
         }
+        showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
       }
     } catch (err: unknown) {
       showMessage(
@@ -176,44 +133,45 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const onConfirmLoadWithPassword = async (password: string) => {
     if (!pendingFile) return;
 
-    const result = await handleImportWallet(pendingFile, password);
-
-    if (result.success && result.wallet) {
-      setWallet(result.wallet);
-      const list = result.wallet.addresses.map((a) => a.address);
-      setAddresses(list);
-      setSelectedAddress(list[0]);
-      await refreshBalance(list[0]);
-
+    try {
+      const newWallet = await importWallet({ file: pendingFile, password });
+      if (newWallet.addresses.length > 0) {
+        setSelectedAddress(newWallet.addresses[0].address);
+      }
       setShowLoadPasswordModal(false);
       setPendingFile(null);
       showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
-    } else {
-      showMessage("error", "Load Error", "Error loading wallet: " + result.error);
+    } catch (err) {
+      showMessage("error", "Load Error", "Error loading wallet: " + (err instanceof Error ? err.message : String(err)));
     }
   };
 
   // Delete wallet
-  const onDeleteWallet = () => {
-    handleDeleteWallet();
-    setWallet(null);
-    setAddresses([]);
-    setSelectedAddress("");
+  const onDeleteWallet = async () => {
+    try {
+      await deleteWallet();
+      setSelectedAddress("");
+    } catch {
+      showMessage("error", "Error", "Failed to delete wallet");
+    }
   };
 
   // Generate new address
   const onNewAddress = async () => {
     if (!wallet) return;
 
-    const addr = generateAddress(wallet);
-    const updated = loadWallet();
-    if (!updated) return;
-
-    const list = updated.addresses.map((a) => a.address);
-    setAddresses(list);
-    setSelectedAddress(addr.address);
-
-    await refreshBalance(addr.address);
+    try {
+      const addr = generateAddress(wallet);
+      // Reload wallet from storage to get updated addresses
+      const updated = loadWalletFromStorage("main");
+      if (updated) {
+        // Force refresh wallet query
+        invalidateWallet();
+        setSelectedAddress(addr.address);
+      }
+    } catch {
+      showMessage("error", "Error", "Failed to generate address");
+    }
   };
 
   // Save wallet
@@ -223,71 +181,89 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       return;
     }
 
-    try {
-      const content = exportWallet(wallet, {
-        password: password || undefined,
-        filename: filename,
-      });
-
-      downloadWalletFile(content, filename);
+    const result = exportWallet(wallet, filename, password);
+    if (result.success) {
       showMessage("success", "Wallet Saved", "Wallet saved successfully!");
-    } catch (err: unknown) {
-      showMessage(
-        "error",
-        "Save Error",
-        "Error saving wallet: " + (err instanceof Error ? err.message : String(err))
-      );
-      console.error(err);
+    } else {
+      showMessage("error", "Save Error", "Error saving wallet: " + result.error);
     }
   };
 
-  // Send transaction
+  // Create transaction plan
   const onSendTransaction = async (destination: string, amount: string) => {
     if (!wallet) return;
 
-    // Use selected address as sender
-    const result = await createTxPlan(wallet, destination, amount, selectedAddress);
+    try {
+      const amountAlpha = Number(amount);
+      if (isNaN(amountAlpha) || amountAlpha <= 0) {
+        showMessage("error", "Invalid Amount", "Please enter a valid amount");
+        return;
+      }
 
-    if (!result.success) {
-      showMessage("error", "Transaction Failed", "Transaction failed: " + result.error);
+      const plan = await createTransactionPlan(wallet, destination, amountAlpha, selectedAddress);
+
+      if (!plan.success) {
+        showMessage("error", "Transaction Failed", "Transaction failed: " + plan.error);
+        return;
+      }
+
+      setTxPlan(plan);
+    } catch (err) {
+      showMessage("error", "Transaction Failed", "Transaction failed: " + (err instanceof Error ? err.message : String(err)));
     }
   };
 
-  // Confirm send
+  // Confirm and send transaction
   const onConfirmSend = async () => {
     if (!wallet || !txPlan) return;
 
-    const result = await sendTransaction(wallet, txPlan);
+    setIsSending(true);
+    try {
+      const results = [];
+      const errors = [];
 
-    if (result.success) {
-      const txids = result.results?.map((r) => r.txid) || [];
-      showMessage(
-        "success",
-        "Transaction Sent",
-        `Sent ${result.results?.length} transaction(s)!`,
-        txids
-      );
-    } else {
-      if (result.results && result.results.length > 0) {
-        const txids = result.results.map((r) => r.txid);
+      for (const tx of txPlan.transactions) {
+        try {
+          const signed = createAndSignTransaction(wallet, tx);
+          const result = await broadcast(signed.raw);
+          results.push({ txid: signed.txid, raw: signed.raw, result });
+        } catch (e: unknown) {
+          console.error("Broadcast failed for tx", e);
+          errors.push(e instanceof Error ? e.message : String(e));
+        }
+      }
+
+      setTxPlan(null);
+
+      if (errors.length > 0) {
+        if (results.length > 0) {
+          const txids = results.map((r) => r.txid);
+          showMessage(
+            "warning",
+            "Partial Success",
+            `Some transactions failed:\n${errors.join("\n")}`,
+            txids
+          );
+        } else {
+          showMessage("error", "Transaction Failed", `Transaction failed:\n${errors.join("\n")}`);
+        }
+      } else {
+        const txids = results.map((r) => r.txid);
         showMessage(
-          "warning",
-          "Partial Success",
-          result.error || "Some transactions failed",
+          "success",
+          "Transaction Sent",
+          `Sent ${results.length} transaction(s)!`,
           txids
         );
-      } else {
-        showMessage("error", "Transaction Failed", "Transaction failed: " + result.error);
       }
+    } finally {
+      setIsSending(false);
     }
-
-    refreshBalance(selectedAddress);
   };
 
   // Show history
   const onShowHistory = () => {
     setViewMode("history");
-    loadTransactionHistory(selectedAddress);
   };
 
   // Back to main
@@ -301,7 +277,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   };
 
   // Show loading state while connecting
-  if (isConnecting) {
+  if (isConnecting || isLoadingWallet) {
     return (
       <div style={{
         display: 'flex',
@@ -360,7 +336,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           wallet={wallet}
           selectedAddress={selectedAddress}
           transactions={transactions}
-          loadingTransactions={loadingTransactions}
+          loadingTransactions={isLoadingTransactions}
           currentBlockHeight={currentBlockHeight}
           transactionDetails={transactionDetails}
           analyzeTransaction={analyzeTransaction}
@@ -397,6 +373,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         onConfirmSend={onConfirmSend}
         vestingProgress={vestingProgress}
         onVestingModeChange={handleVestingModeChange}
+        vestingBalances={vestingBalances}
       />
       <MessageModal
         show={messageModal.show}

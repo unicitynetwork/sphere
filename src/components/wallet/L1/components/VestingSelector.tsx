@@ -8,6 +8,7 @@ interface VestingSelectorProps {
   onModeChange?: (mode: VestingMode) => void;
   classificationProgress?: { current: number; total: number } | null;
   showBalances?: boolean;
+  balances?: VestingBalances;
 }
 
 export function VestingSelector({
@@ -15,18 +16,25 @@ export function VestingSelector({
   onModeChange,
   classificationProgress,
   showBalances = true,
+  balances: propBalances,
 }: VestingSelectorProps) {
   const [mode, setMode] = useState<VestingMode>(vestingState.getMode());
-  const [balances, setBalances] = useState<VestingBalances>({
+  const [localBalances, setLocalBalances] = useState<VestingBalances>({
     vested: 0n,
     unvested: 0n,
     all: 0n,
   });
 
+  // Use prop balances if provided, otherwise fall back to local state
+  const balances = propBalances ?? localBalances;
+
   useEffect(() => {
-    const newBalances = vestingState.getAllBalances(address);
-    setBalances(newBalances);
-  }, [address, classificationProgress]);
+    // Only update local balances if prop balances are not provided
+    if (!propBalances) {
+      const newBalances = vestingState.getAllBalances(address);
+      setLocalBalances(newBalances);
+    }
+  }, [address, classificationProgress, propBalances]);
 
   const handleModeChange = (newMode: VestingMode) => {
     vestingState.setMode(newMode);
