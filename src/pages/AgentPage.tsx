@@ -146,13 +146,13 @@ export function AgentPage() {
         </button>
       </div>
 
-      {/* Mobile swipeable container - fullscreen */}
+      {/* Mobile swipeable container - fullscreen, fixed height with overlays-content */}
       <div
         ref={sliderRef}
         onScroll={handleScroll}
         className="lg:hidden flex overflow-x-auto snap-x snap-mandatory scrollbar-hide"
         style={{
-          height: 'calc(var(--visual-viewport-height, 100dvh) - 180px)',
+          height: 'calc(100dvh - 180px)',
           minHeight: '300px'
         }}
       >
