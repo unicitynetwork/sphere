@@ -18,8 +18,7 @@ type NoSidebarItem = SidebarItem;
 export function GamesChat({ agent }: GamesChatProps) {
   // Process messages to attach game cards based on content
   const processMessage = (
-    message: AgentMessage<GamesCardData>,
-    allMessages: AgentMessage<GamesCardData>[]
+    message: AgentMessage<GamesCardData>
   ): AgentMessage<GamesCardData> => {
     // Only process assistant messages without existing card data
     if (message.role !== 'assistant' || message.cardData) {

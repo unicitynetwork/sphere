@@ -19,7 +19,6 @@ interface UseAgentChatOptions {
 // Get agent mode from env
 export function getAgentMode(): 'mock' | 'real' {
   const mode = import.meta.env.VITE_AGENT_MODE;
-  console.log(mode)
   return mode === 'real' ? 'real' : 'mock';
 }
 
