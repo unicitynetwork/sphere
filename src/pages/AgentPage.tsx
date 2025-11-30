@@ -162,10 +162,10 @@ export function AgentPage() {
 
       {/* Desktop grid layout */}
       <div className="hidden lg:grid lg:grid-cols-3 lg:gap-8 lg:h-[650px]">
-        <div className="lg:col-span-2 h-full">
+        <div className="lg:col-span-2 h-full min-h-0">
           {renderChatComponent()}
         </div>
-        <div className="h-full overflow-hidden">
+        <div className="h-full min-h-0 overflow-hidden">
           <WalletPanel />
         </div>
       </div>
