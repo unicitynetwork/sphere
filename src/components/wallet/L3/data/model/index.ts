@@ -284,3 +284,25 @@ export class Wallet {
         this.tokens = tokens;
     }
 }
+
+export const PaymentRequestStatus = {
+    PENDING: 'PENDING',
+    ACCEPTED: 'ACCEPTED',
+    REJECTED: 'REJECTED',
+    PAID: 'PAID'
+} as const
+
+export type PaymentRequestStatus = typeof PaymentRequestStatus[keyof typeof PaymentRequestStatus];
+
+export interface IncomingPaymentRequest {
+    id: string;
+    senderPubkey: string;
+    amount: bigint;
+    coinId: string;
+    symbol: string;
+    message?: string;
+    recipientNametag: string;
+    requestId: string;
+    timestamp: number;
+    status: PaymentRequestStatus;
+}

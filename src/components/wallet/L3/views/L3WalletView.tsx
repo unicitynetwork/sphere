@@ -1,11 +1,13 @@
-import { Plus, ArrowUpRight, Sparkles, TrendingUp, Loader2, Coins, Layers } from 'lucide-react';
+import { Plus, ArrowUpRight, Sparkles, Loader2, Coins, Layers, Bell } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useWallet } from '../hooks/useWallet';
 import { CreateWalletFlow } from '../onboarding/CreateWalletFlow';
 import { TokenRow } from '../../shared/components';
 import { SendModal } from '../modals/SendModal';
+import { useIncomingPaymentRequests } from '../hooks/useIncomingPaymentRequests';
+import { PaymentRequestsModal } from '../modals/PaymentRequestModal';
 
 type Tab = 'assets' | 'tokens';
 
@@ -13,6 +15,19 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
   const { identity, assets, tokens, isLoadingAssets, isLoadingIdentity, nametag } = useWallet();
   const [activeTab, setActiveTab] = useState<Tab>('assets');
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+  const [isRequestsOpen, setIsRequestsOpen] = useState(false);
+
+  const { pendingCount } = useIncomingPaymentRequests();
+
+  const prevPendingCount = useRef(0);
+
+  useEffect(() => {
+    if (pendingCount > prevPendingCount.current) {
+      console.log("🔔 New payment request received! Opening modal...");
+      setIsRequestsOpen(true);
+    }
+    prevPendingCount.current = pendingCount;
+  }, [pendingCount]);
 
   const totalValue = useMemo(() => {
     console.log(assets)
@@ -44,11 +59,20 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
             </span>
           </div>
 
-          {/* Unique L2 Feature: Yield/APY */}
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/20">
-            <TrendingUp className="w-3 h-3 text-emerald-400" />
-            <span className="text-xs text-emerald-400 font-medium">+12.5% APY</span>
-          </div>
+          <div className="flex items-center gap-3">
+                 <button 
+                    onClick={() => setIsRequestsOpen(true)}
+                    className="relative p-1.5 rounded-lg hover:bg-white/10 transition-colors group"
+                 >
+                    <Bell className={`w-5 h-5 ${pendingCount > 0 ? 'text-white' : 'text-neutral-500'}`} />
+                    {pendingCount > 0 && (
+                        <span className="absolute top-0 right-0 flex h-2.5 w-2.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500 border-2 border-[#0a0a0a]"></span>
+                        </span>
+                    )}
+                 </button>
+            </div>
         </div>
 
         <h2 className="text-3xl text-white font-bold tracking-tight mb-4">
@@ -183,20 +207,22 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
         )}
       </div>
       <SendModal isOpen={isSendModalOpen} onClose={() => setIsSendModalOpen(false)} />
+
+      <PaymentRequestsModal isOpen={isRequestsOpen} onClose={() => setIsRequestsOpen(false)} />
     </div>
   );
 }
 
 // Helper Component
 function EmptyState({ text }: { text?: string }) {
-    return (
-        <div className="text-center py-10 flex flex-col items-center gap-3">
-            <div className="w-12 h-12 rounded-full bg-neutral-800 flex items-center justify-center">
-                <Sparkles className="w-6 h-6 text-neutral-600" />
-            </div>
-            <div className="text-neutral-500 text-sm">
-                {text || <>Wallet is empty.<br />Mint some tokens to start!</>}
-            </div>
-        </div>
-    );
+  return (
+    <div className="text-center py-10 flex flex-col items-center gap-3">
+      <div className="w-12 h-12 rounded-full bg-neutral-800 flex items-center justify-center">
+        <Sparkles className="w-6 h-6 text-neutral-600" />
+      </div>
+      <div className="text-neutral-500 text-sm">
+        {text || <>Wallet is empty.<br />Mint some tokens to start!</>}
+      </div>
+    </div>
+  );
 }
