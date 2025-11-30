@@ -3,7 +3,7 @@ import { StateTransitionClient } from "@unicitylabs/state-transition-sdk/lib/Sta
 import { AggregatorClient } from "@unicitylabs/state-transition-sdk/lib/api/AggregatorClient";
 import { RootTrustBase } from "@unicitylabs/state-transition-sdk/lib/bft/RootTrustBase";
 
-const UNICITY_AGGREGATOR_URL = "/rpc";
+const UNICITY_AGGREGATOR_URL = import.meta.env.VITE_AGGREGATOR_URL || "https://goggregator-test.unicity.network";
 const API_KEY = "sk_06365a9c44654841a366068bcfc68986";
 const TEST_SIG_KEY =
   "025f37d20e5b18909361e0ead7ed17c69b417bee70746c9e9c2bcb1394d921d4ae";
