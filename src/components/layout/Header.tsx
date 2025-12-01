@@ -1,7 +1,8 @@
 import { Bell, Settings, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { getAgentMode } from '../../hooks/useAgentChat';
 
-const agentMode = import.meta.env.VITE_AGENT_MODE;
+const agentMode = getAgentMode();
 
 export function Header() {
   return (
