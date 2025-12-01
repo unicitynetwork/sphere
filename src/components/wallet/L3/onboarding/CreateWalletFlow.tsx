@@ -48,8 +48,7 @@ export function CreateWalletFlow() {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center h-full p-8 text-center relative overflow-hidden">
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
+    <div className="flex flex-col items-center justify-center h-full p-8 text-center relative">
 
       <AnimatePresence mode="wait">
 

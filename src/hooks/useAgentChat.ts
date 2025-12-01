@@ -13,6 +13,7 @@ export interface ChatMessage {
 
 interface UseAgentChatOptions {
   activityId: string;
+  userId?: string;
   onMessage?: (message: ChatMessage) => void;
 }
 
@@ -27,11 +28,13 @@ export function getAgentApiUrl(): string {
   return import.meta.env.VITE_AGENT_API_URL || 'http://localhost:3000';
 }
 
-export function useAgentChat({ activityId }: UseAgentChatOptions) {
+export function useAgentChat({ activityId, userId }: UseAgentChatOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStatus, setCurrentStatus] = useState<string | null>(null);
-  const userIdRef = useRef<string>(uuidv4());
+  // Use provided userId (Unicity ID) or fallback to session UUID
+  const fallbackUserIdRef = useRef<string>(uuidv4());
+  const effectiveUserId = userId || fallbackUserIdRef.current;
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const stopGeneration = useCallback(() => {
@@ -102,7 +105,7 @@ export function useAgentChat({ activityId }: UseAgentChatOptions) {
         },
         body: JSON.stringify({
           activityId,
-          userId: userIdRef.current,
+          userId: effectiveUserId,
           messages: allMessages,
         }),
         signal: abortControllerRef.current.signal,
@@ -184,7 +187,7 @@ export function useAgentChat({ activityId }: UseAgentChatOptions) {
       setIsStreaming(false);
       setCurrentStatus(null);
     }
-  }, [activityId, messages]);
+  }, [activityId, messages, effectiveUserId]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);
