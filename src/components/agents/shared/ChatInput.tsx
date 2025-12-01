@@ -31,7 +31,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
   ) {
     return (
       <div
-        className="p-4 border-t border-neutral-800/50 bg-neutral-900/80 backdrop-blur-sm"
+        className="p-4 border-t border-neutral-200 dark:border-neutral-800/50 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-sm theme-transition"
         style={{ paddingBottom: 'calc(1rem + var(--safe-area-bottom, 0px))' }}
       >
         <div className="flex gap-3">
@@ -41,7 +41,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder={placeholder}
-            className="flex-1 bg-neutral-800/50 text-white placeholder-neutral-500 outline-none resize-none rounded-xl p-3 min-h-11 max-h-[120px] border border-neutral-700/50 text-base"
+            className="flex-1 bg-neutral-100 dark:bg-neutral-800/50 text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-500 outline-none resize-none rounded-xl p-3 min-h-11 max-h-[120px] border border-neutral-200 dark:border-neutral-700/50 text-base theme-transition"
             rows={1}
             disabled={disabled || isStreaming}
             enterKeyHint="send"

@@ -37,7 +37,7 @@ export function ChatBubble({
         className={`max-w-[85%] rounded-2xl p-4 ${
           role === 'user'
             ? `bg-linear-to-br ${agentColor} text-white shadow-lg`
-            : 'bg-neutral-800/80 backdrop-blur-xl border border-neutral-700/50 text-neutral-200'
+            : 'bg-neutral-100 dark:bg-neutral-800/80 backdrop-blur-xl border border-neutral-200 dark:border-neutral-700/50 text-neutral-800 dark:text-neutral-200'
         }`}
       >
         <div className="flex items-center gap-2 mb-2">
@@ -46,7 +46,7 @@ export function ChatBubble({
               <Sparkles className="w-2.5 h-2.5 text-white" />
             </div>
           )}
-          <span className={`text-xs ${role === 'user' ? 'text-white/80' : 'text-neutral-400'}`}>
+          <span className={`text-xs ${role === 'user' ? 'text-white/80' : 'text-neutral-500 dark:text-neutral-400'}`}>
             {role === 'user' ? 'You' : agentName}
           </span>
         </div>
@@ -54,8 +54,8 @@ export function ChatBubble({
         {/* Thinking indicator */}
         {thinking && (
           <details className="mb-2">
-            <summary className="text-xs text-neutral-500 cursor-pointer">Thinking...</summary>
-            <p className="text-xs text-neutral-500 mt-1 italic">{thinking}</p>
+            <summary className="text-xs text-neutral-400 dark:text-neutral-500 cursor-pointer">Thinking...</summary>
+            <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1 italic">{thinking}</p>
           </details>
         )}
 
@@ -68,12 +68,12 @@ export function ChatBubble({
         {showCopy && role === 'assistant' && content && onCopy && (
           <button
             onClick={onCopy}
-            className="mt-3 flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
+            className="mt-3 flex items-center gap-1 text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
           >
             {isCopied ? (
               <>
-                <Check className="w-3 h-3 text-green-400" />
-                <span className="text-green-400">Copied!</span>
+                <Check className="w-3 h-3 text-green-500 dark:text-green-400" />
+                <span className="text-green-500 dark:text-green-400">Copied!</span>
               </>
             ) : (
               <>

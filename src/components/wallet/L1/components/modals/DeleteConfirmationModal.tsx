@@ -21,7 +21,7 @@ export function DeleteConfirmationModal({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="absolute inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-6"
+      className="fixed inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
       onClick={onCancel}
     >
       <motion.div
@@ -29,7 +29,7 @@ export function DeleteConfirmationModal({
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.9, opacity: 0, y: 20 }}
         transition={{ type: "spring", duration: 0.4 }}
-        className="bg-neutral-900 p-6 rounded-xl w-full max-w-md border border-red-900/50 shadow-2xl"
+        className="relative w-full max-w-md bg-white dark:bg-[#111] border border-neutral-200 dark:border-white/10 rounded-3xl shadow-2xl p-6 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <motion.div
@@ -51,12 +51,12 @@ export function DeleteConfirmationModal({
               <AlertTriangle className="w-6 h-6 text-red-500" />
             </motion.div>
           </motion.div>
-          <h3 className="text-white text-xl font-bold mb-2">
+          <h3 className="text-neutral-900 dark:text-white text-xl font-bold mb-2">
             Delete Wallet?
           </h3>
-          <p className="text-neutral-400 text-sm">
+          <p className="text-neutral-500 dark:text-neutral-400 text-sm">
             Are you sure you want to delete this wallet? <br />
-            <span className="text-red-400 font-semibold">
+            <span className="text-red-500 dark:text-red-400 font-semibold">
               This action cannot be undone.
             </span>
           </p>
@@ -76,7 +76,7 @@ export function DeleteConfirmationModal({
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={onSaveFirst}
-            className="w-full py-3 bg-neutral-800 rounded-xl text-white font-medium border border-neutral-700 hover:bg-neutral-700 flex items-center justify-center gap-2 transition-colors"
+            className="w-full py-3 bg-neutral-100 dark:bg-neutral-800 rounded-xl text-neutral-700 dark:text-white font-medium border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 flex items-center justify-center gap-2 transition-colors"
           >
             <Download className="w-4 h-4" />
             Save Backup First
@@ -87,7 +87,7 @@ export function DeleteConfirmationModal({
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={onCancel}
-              className="flex-1 py-3 bg-neutral-800 rounded-xl text-white font-medium hover:bg-neutral-700 transition-colors"
+              className="flex-1 py-3 bg-neutral-100 dark:bg-neutral-800 rounded-xl text-neutral-700 dark:text-white font-medium hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors"
             >
               Cancel
             </motion.button>
@@ -95,7 +95,7 @@ export function DeleteConfirmationModal({
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={onConfirmDelete}
-              className="flex-1 py-3 bg-red-600/20 text-red-500 border border-red-900/50 rounded-xl font-medium hover:bg-red-600 hover:text-white transition-all"
+              className="flex-1 py-3 bg-red-600/20 text-red-500 border border-red-200 dark:border-red-900/50 rounded-xl font-medium hover:bg-red-600 hover:text-white transition-all"
             >
               Delete Anyway
             </motion.button>

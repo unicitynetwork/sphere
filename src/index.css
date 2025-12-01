@@ -1,17 +1,66 @@
 @import "tailwindcss";
 
+/* Dark mode variant for Tailwind v4 */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Mobile viewport fix - prevents content jump when keyboard opens */
 :root {
   --visual-viewport-height: 100dvh;
   --viewport-offset-top: 0px;
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* Theme colors - Light mode (default) */
+  --color-bg-primary: #f5f5f5;
+  --color-bg-secondary: #ffffff;
+  --color-bg-tertiary: #e5e5e5;
+  --color-bg-card: #ffffff;
+  --color-bg-input: #f0f0f0;
+
+  --color-border-primary: #e0e0e0;
+  --color-border-secondary: #d0d0d0;
+
+  --color-text-primary: #171717;
+  --color-text-secondary: #525252;
+  --color-text-tertiary: #737373;
+  --color-text-muted: #a3a3a3;
+
+  --color-surface-hover: rgba(0, 0, 0, 0.05);
+  --color-surface-active: rgba(0, 0, 0, 0.1);
+
+  --scrollbar-thumb: #c0c0c0;
+  --scrollbar-track: rgba(0, 0, 0, 0.05);
+}
+
+/* Dark mode colors */
+.dark {
+  --color-bg-primary: #0a0a0a;
+  --color-bg-secondary: #171717;
+  --color-bg-tertiary: #1c1c1c;
+  --color-bg-card: #1a1a1a;
+  --color-bg-input: #262626;
+
+  --color-border-primary: #2a2a2a;
+  --color-border-secondary: #3a3a3a;
+
+  --color-text-primary: #f5f5f5;
+  --color-text-secondary: #a3a3a3;
+  --color-text-tertiary: #737373;
+  --color-text-muted: #525252;
+
+  --color-surface-hover: rgba(255, 255, 255, 0.05);
+  --color-surface-active: rgba(255, 255, 255, 0.1);
+
+  --scrollbar-thumb: #2A2A2F;
+  --scrollbar-track: transparent;
 }
 
 html, body {
-  background-color: #0a0a0a;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
   min-height: 100%;
   /* Prevent overscroll/bounce on iOS */
   overscroll-behavior: none;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 html {
@@ -29,7 +78,16 @@ body {
 #root {
   min-height: 100dvh;
   min-height: -webkit-fill-available;
+}
+
+/* Dark mode root gradient */
+.dark #root {
   background: linear-gradient(to bottom right, #0a0a0a, #171717, #0a0a0a);
+}
+
+/* Light mode root gradient */
+.light #root {
+  background: linear-gradient(to bottom right, #f5f5f5, #ffffff, #f5f5f5);
 }
 
 /* Mobile chat container - uses visual viewport for keyboard handling */
@@ -65,12 +123,26 @@ body {
   --color-brand-green-hover: #92cf30;
 
   --color-brand-bg-dark: #1C1C1C;
-  --color-brand-bg-light: #1C1C1C;
+  --color-brand-bg-light: #f5f5f5;
   --color-brand-bg-border: #2A2A2A;
 
   --color-brand-text-light: #E0E0E0;
   --color-brand-text-dark: #1A1A1A;
   --color-brand-text-dim: #B2B4AE;
+
+  /* Semantic theme colors for components */
+  --color-theme-bg-primary: var(--color-bg-primary);
+  --color-theme-bg-secondary: var(--color-bg-secondary);
+  --color-theme-bg-tertiary: var(--color-bg-tertiary);
+  --color-theme-bg-card: var(--color-bg-card);
+  --color-theme-bg-input: var(--color-bg-input);
+
+  --color-theme-border: var(--color-border-primary);
+  --color-theme-border-secondary: var(--color-border-secondary);
+
+  --color-theme-text: var(--color-text-primary);
+  --color-theme-text-secondary: var(--color-text-secondary);
+  --color-theme-text-muted: var(--color-text-tertiary);
 
   --radius-lg: 0.75rem;
   --radius-xl: 1rem;
@@ -78,16 +150,22 @@ body {
   --container: 500px;
 }
 
-* { scrollbar-width: thin; scrollbar-color: #2A2A2F transparent; }
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
 *::-webkit-scrollbar { height: 8px; width: 8px; }
-*::-webkit-scrollbar-thumb { background: #2A2A2F; border-radius: 9999px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 9999px;
+}
 
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--scrollbar-track);
   border-radius: 10px;
 }
 
@@ -98,4 +176,12 @@ body {
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(180deg, #2563eb, #1d4ed8);
+}
+
+/* Theme transition utility */
+.theme-transition {
+  transition: background-color 0.3s ease,
+              border-color 0.3s ease,
+              color 0.3s ease,
+              box-shadow 0.3s ease;
 }

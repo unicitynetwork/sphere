@@ -37,7 +37,7 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
   if (isLoadingIdentity) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="animate-spin text-neutral-600" />
+        <Loader2 className="animate-spin text-neutral-400 dark:text-neutral-600" />
       </div>
     );
   }
@@ -52,7 +52,7 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
       <div className="px-6 mb-6 shrink-0">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            <p className="text-xs text-orange-300/70">AgentSphere Balance</p>
+            <p className="text-xs text-orange-600/70 dark:text-orange-300/70">AgentSphere Balance</p>
             <span className="flex h-2 w-2 relative">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
@@ -60,22 +60,22 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
           </div>
 
           <div className="flex items-center gap-3">
-                 <button 
+                 <button
                     onClick={() => setIsRequestsOpen(true)}
-                    className="relative p-1.5 rounded-lg hover:bg-white/10 transition-colors group"
+                    className="relative p-1.5 rounded-lg hover:bg-neutral-200/50 dark:hover:bg-white/10 transition-colors group"
                  >
-                    <Bell className={`w-5 h-5 ${pendingCount > 0 ? 'text-white' : 'text-neutral-500'}`} />
+                    <Bell className={`w-5 h-5 ${pendingCount > 0 ? 'text-neutral-900 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`} />
                     {pendingCount > 0 && (
                         <span className="absolute top-0 right-0 flex h-2.5 w-2.5">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500 border-2 border-[#0a0a0a]"></span>
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500 border-2 border-white dark:border-[#0a0a0a]"></span>
                         </span>
                     )}
                  </button>
             </div>
         </div>
 
-        <h2 className="text-3xl text-white font-bold tracking-tight mb-4">
+        <h2 className="text-3xl text-neutral-900 dark:text-white font-bold tracking-tight mb-4">
           {showBalances
             ? `$${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
             : '••••••'}
@@ -96,7 +96,7 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
             whileHover={{ scale: 1.02, y: -2 }}
             whileTap={{ scale: 0.98 }}
             onClick={() => setIsSendModalOpen(true)}
-            className="relative px-4 py-3 rounded-xl bg-neutral-800/80 hover:bg-neutral-700/80 text-white text-sm border border-neutral-700/50 flex items-center justify-center gap-2"
+            className="relative px-4 py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2"
           >
             <ArrowUpRight className="w-4 h-4" />
             <span>Send</span>
@@ -105,15 +105,15 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
       </div>
 
       <div className="px-6 mb-4 shrink-0">
-        <div className="flex p-1 bg-neutral-900/50 rounded-xl border border-neutral-800">
+        <div className="flex p-1 bg-neutral-100 dark:bg-neutral-900/50 rounded-xl border border-neutral-200 dark:border-neutral-800">
           <button
             onClick={() => setActiveTab('assets')}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-lg transition-all relative ${activeTab === 'assets' ? 'text-white' : 'text-neutral-500 hover:text-neutral-400'}`}
+            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-lg transition-all relative ${activeTab === 'assets' ? 'text-neutral-900 dark:text-white' : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-400'}`}
           >
             {activeTab === 'assets' && (
               <motion.div
                 layoutId="activeTab"
-                className="absolute inset-0 bg-neutral-800 rounded-lg shadow-sm"
+                className="absolute inset-0 bg-white dark:bg-neutral-800 rounded-lg shadow-sm"
                 transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
               />
             )}
@@ -123,12 +123,12 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
           </button>
           <button
             onClick={() => setActiveTab('tokens')}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-lg transition-all relative ${activeTab === 'tokens' ? 'text-white' : 'text-neutral-500 hover:text-neutral-400'}`}
+            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium rounded-lg transition-all relative ${activeTab === 'tokens' ? 'text-neutral-900 dark:text-white' : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-400'}`}
           >
             {activeTab === 'tokens' && (
               <motion.div
                 layoutId="activeTab"
-                className="absolute inset-0 bg-neutral-800 rounded-lg shadow-sm"
+                className="absolute inset-0 bg-white dark:bg-neutral-800 rounded-lg shadow-sm"
                 transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
               />
             )}
@@ -144,9 +144,9 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-orange-500" />
-            <h4 className="text-sm text-neutral-400">Network Assets</h4>
+            <h4 className="text-sm text-neutral-500 dark:text-neutral-400">Network Assets</h4>
           </div>
-          <button className="text-xs text-orange-400 hover:text-orange-300">Manage</button>
+          <button className="text-xs text-orange-500 dark:text-orange-400 hover:text-orange-600 dark:hover:text-orange-300">Manage</button>
         </div>
 
         {isLoadingAssets ? (
@@ -217,8 +217,8 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
 function EmptyState({ text }: { text?: string }) {
   return (
     <div className="text-center py-10 flex flex-col items-center gap-3">
-      <div className="w-12 h-12 rounded-full bg-neutral-800 flex items-center justify-center">
-        <Sparkles className="w-6 h-6 text-neutral-600" />
+      <div className="w-12 h-12 rounded-full bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center">
+        <Sparkles className="w-6 h-6 text-neutral-400 dark:text-neutral-600" />
       </div>
       <div className="text-neutral-500 text-sm">
         {text || <>Wallet is empty.<br />Mint some tokens to start!</>}

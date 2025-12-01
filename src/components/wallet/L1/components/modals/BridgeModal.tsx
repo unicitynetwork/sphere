@@ -254,7 +254,7 @@ export function BridgeModal({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        className="fixed inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
         onClick={onClose}
       >
         <motion.div
@@ -262,12 +262,12 @@ export function BridgeModal({
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.9, opacity: 0, y: 20 }}
           transition={{ type: "spring", duration: 0.4 }}
-          className="bg-neutral-900 p-4 sm:p-6 rounded-xl w-full max-w-md border border-purple-900/50 shadow-2xl relative max-h-[85vh] overflow-y-auto"
+          className="relative w-full max-w-md bg-white dark:bg-[#111] border border-neutral-200 dark:border-white/10 rounded-3xl shadow-2xl p-4 sm:p-6 max-h-[85vh] overflow-y-auto"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-white text-xl font-bold flex items-center gap-2">
+            <h3 className="text-neutral-900 dark:text-white text-xl font-bold flex items-center gap-2">
               <div className="w-8 h-8 rounded-full bg-linear-to-br from-purple-500 to-blue-500 flex items-center justify-center">
                 <ArrowLeftRight className="w-4 h-4 text-white" />
               </div>
@@ -275,7 +275,7 @@ export function BridgeModal({
             </h3>
             <button
               onClick={onClose}
-              className="text-neutral-500 hover:text-neutral-300 transition-colors"
+              className="text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -318,11 +318,11 @@ export function BridgeModal({
 
           {/* Address */}
           <div className="mb-4">
-            <label className="block text-neutral-400 text-xs mb-1">
+            <label className="block text-neutral-500 dark:text-neutral-400 text-xs mb-1">
               Source L1 Address
             </label>
-            <div className="bg-neutral-800/50 p-3 rounded-lg border border-neutral-700/50">
-              <span className="text-neutral-200 font-mono text-sm break-all">
+            <div className="bg-neutral-100 dark:bg-neutral-800/50 p-3 rounded-lg border border-neutral-200 dark:border-neutral-700/50">
+              <span className="text-neutral-700 dark:text-neutral-200 font-mono text-sm break-all">
                 {address}
               </span>
             </div>
@@ -330,12 +330,12 @@ export function BridgeModal({
 
           {/* Status / Balance */}
           <div className="mb-4">
-            <label className="block text-neutral-400 text-xs mb-1">
+            <label className="block text-neutral-500 dark:text-neutral-400 text-xs mb-1">
               Mintable Balance
             </label>
-            <div className="bg-neutral-800/50 p-3 rounded-lg border border-neutral-700/50">
+            <div className="bg-neutral-100 dark:bg-neutral-800/50 p-3 rounded-lg border border-neutral-200 dark:border-neutral-700/50">
               {status === "checking" && (
-                <div className="flex items-center gap-2 text-neutral-400">
+                <div className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
                   <Loader2 className="w-4 h-4 animate-spin" />
                   <span>Checking eligibility...</span>
                 </div>
@@ -392,7 +392,7 @@ export function BridgeModal({
               animate={{ opacity: 1, y: 0 }}
               className="mb-4"
             >
-              <label className="block text-neutral-400 text-xs mb-1">
+              <label className="block text-neutral-500 dark:text-neutral-400 text-xs mb-1">
                 Destination L3 Unicity ID
               </label>
               <input
@@ -400,7 +400,7 @@ export function BridgeModal({
                 placeholder="Enter your Unicity ID"
                 value={unicityId}
                 onChange={(e) => setUnicityId(e.target.value)}
-                className="w-full px-3 py-2 bg-neutral-800/50 rounded-lg text-neutral-200 border border-neutral-700/50 focus:border-purple-500 focus:bg-neutral-800 outline-none transition-all font-mono text-sm"
+                className="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-800/50 rounded-lg text-neutral-800 dark:text-neutral-200 placeholder-neutral-400 dark:placeholder-neutral-500 border border-neutral-200 dark:border-neutral-700/50 focus:border-purple-500 focus:bg-neutral-50 dark:focus:bg-neutral-800 outline-none transition-all font-mono text-sm"
               />
             </motion.div>
           )}
@@ -433,10 +433,10 @@ export function BridgeModal({
                   transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
                 />
               </div>
-              <p className="text-purple-400 font-medium mb-1">
+              <p className="text-purple-500 dark:text-purple-400 font-medium mb-1">
                 {status === "signing" ? "Signing transaction..." : "Minting tokens..."}
               </p>
-              <p className="text-neutral-500 text-sm">
+              <p className="text-neutral-500 dark:text-neutral-500 text-sm">
                 Please wait, this may take a moment
               </p>
             </motion.div>
@@ -450,8 +450,8 @@ export function BridgeModal({
               className="mb-4 p-4 bg-green-500/10 border border-green-500/30 rounded-lg text-center"
             >
               <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-2" />
-              <p className="text-green-400 font-bold mb-2">Bridge Successful!</p>
-              <p className="text-neutral-400 text-sm">
+              <p className="text-green-500 dark:text-green-400 font-bold mb-2">Bridge Successful!</p>
+              <p className="text-neutral-500 dark:text-neutral-400 text-sm">
                 {balanceInfo?.amount} ALPHT minted to your L3 address
               </p>
             </motion.div>
@@ -475,7 +475,7 @@ export function BridgeModal({
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={onClose}
-                    className="flex-1 py-3 bg-neutral-700 hover:bg-neutral-600 rounded-xl text-white font-medium transition-colors"
+                    className="flex-1 py-3 bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 rounded-xl text-neutral-700 dark:text-white font-medium transition-colors"
                   >
                     Cancel
                   </motion.button>
@@ -493,7 +493,7 @@ export function BridgeModal({
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={onClose}
-                  className="flex-1 py-3 bg-neutral-700 hover:bg-neutral-600 rounded-xl text-white font-medium transition-colors"
+                  className="flex-1 py-3 bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 rounded-xl text-neutral-700 dark:text-white font-medium transition-colors"
                 >
                   Close
                 </motion.button>

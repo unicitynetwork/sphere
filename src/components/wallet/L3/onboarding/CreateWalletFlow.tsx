@@ -71,9 +71,9 @@ export function CreateWalletFlow() {
               </div>
             </motion.div>
 
-            <h2 className="text-2xl md:text-3xl font-black text-white mb-2 md:mb-3 tracking-tight">No Wallet Found</h2>
-            <p className="text-neutral-400 text-xs md:text-sm mb-6 md:mb-8 mx-auto leading-relaxed">
-              Create a new secure wallet to start using the <span className="text-orange-400 font-semibold">Unicity Network</span>
+            <h2 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white mb-2 md:mb-3 tracking-tight">No Wallet Found</h2>
+            <p className="text-neutral-500 dark:text-neutral-400 text-xs md:text-sm mb-6 md:mb-8 mx-auto leading-relaxed">
+              Create a new secure wallet to start using the <span className="text-orange-500 dark:text-orange-400 font-semibold">Unicity Network</span>
             </p>
 
             <motion.button
@@ -104,7 +104,7 @@ export function CreateWalletFlow() {
               <motion.p
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mt-3 md:mt-4 text-red-400 text-xs md:text-sm bg-red-500/10 border border-red-500/20 p-2 md:p-3 rounded-lg"
+                className="mt-3 md:mt-4 text-red-500 dark:text-red-400 text-xs md:text-sm bg-red-500/10 border border-red-500/20 p-2 md:p-3 rounded-lg"
               >
                 {error}
               </motion.p>
@@ -129,8 +129,8 @@ export function CreateWalletFlow() {
               className="relative w-16 h-16 md:w-18 md:h-18 mx-auto mb-5"
             >
               <div className="absolute inset-0 bg-emerald-500/30 rounded-full blur-xl" />
-              <div className="relative w-full h-full rounded-full bg-neutral-800/80 border-2 border-emerald-500/50 flex items-center justify-center backdrop-blur-sm">
-                <ShieldCheck className="w-8 h-8 md:w-9 md:h-9 text-emerald-400" />
+              <div className="relative w-full h-full rounded-full bg-neutral-100 dark:bg-neutral-800/80 border-2 border-emerald-500/50 flex items-center justify-center backdrop-blur-sm">
+                <ShieldCheck className="w-8 h-8 md:w-9 md:h-9 text-emerald-500 dark:text-emerald-400" />
               </div>
             </motion.div>
 
@@ -138,18 +138,18 @@ export function CreateWalletFlow() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
-              className="text-xl md:text-2xl font-black text-white mb-2 md:mb-3 tracking-tight"
+              className="text-xl md:text-2xl font-black text-neutral-900 dark:text-white mb-2 md:mb-3 tracking-tight"
             >
-              Wallet Created! 🎉
+              Wallet Created!
             </motion.h2>
 
             <motion.p
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
-              className="text-neutral-400 text-xs md:text-sm mb-5 md:mb-6 mx-auto leading-relaxed"
+              className="text-neutral-500 dark:text-neutral-400 text-xs md:text-sm mb-5 md:mb-6 mx-auto leading-relaxed"
             >
-              Now, choose a unique <span className="text-orange-400 font-bold">@nametag</span> to receive tokens easily without long addresses.
+              Now, choose a unique <span className="text-orange-500 dark:text-orange-400 font-bold">@nametag</span> to receive tokens easily without long addresses.
             </motion.p>
 
             {/* Input Field */}
@@ -159,7 +159,7 @@ export function CreateWalletFlow() {
               transition={{ delay: 0.3 }}
               className="relative mb-4 md:mb-5 group"
             >
-              <div className="absolute left-3 md:left-4 top-1/2 -translate-y-1/2 text-neutral-500 group-focus-within:text-orange-400 transition-colors z-10">
+              <div className="absolute left-3 md:left-4 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500 group-focus-within:text-orange-500 dark:group-focus-within:text-orange-400 transition-colors z-10">
                 <AtSign className="w-4 h-4 md:w-5 md:h-5" />
               </div>
               <input
@@ -167,7 +167,7 @@ export function CreateWalletFlow() {
                 value={nametagInput}
                 onChange={(e) => setNametagInput(e.target.value)}
                 placeholder="username"
-                className="w-full bg-neutral-800/50 border-2 border-neutral-700/50 rounded-xl py-3 md:py-3.5 pl-10 md:pl-12 pr-3 md:pr-4 text-sm md:text-base text-white placeholder-neutral-600 focus:outline-none focus:border-orange-500 focus:bg-neutral-800 transition-all backdrop-blur-sm"
+                className="w-full bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 rounded-xl py-3 md:py-3.5 pl-10 md:pl-12 pr-3 md:pr-4 text-sm md:text-base text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-orange-500 focus:bg-white dark:focus:bg-neutral-800 transition-all backdrop-blur-sm"
                 autoFocus
               />
               <div className="absolute inset-0 rounded-xl bg-linear-to-r from-orange-500/0 via-orange-500/5 to-purple-500/0 opacity-0 group-focus-within:opacity-100 transition-opacity pointer-events-none" />
@@ -195,7 +195,7 @@ export function CreateWalletFlow() {
               <motion.p
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mt-3 md:mt-4 text-red-400 text-xs md:text-sm bg-red-500/10 border border-red-500/20 p-2 md:p-3 rounded-lg"
+                className="mt-3 md:mt-4 text-red-500 dark:text-red-400 text-xs md:text-sm bg-red-500/10 border border-red-500/20 p-2 md:p-3 rounded-lg"
               >
                 {error}
               </motion.p>
@@ -215,7 +215,7 @@ export function CreateWalletFlow() {
             <div className="relative mx-auto w-24 h-24 md:w-28 md:h-28 mb-6">
               {/* Outer Ring */}
               <motion.div
-                className="absolute inset-0 border-3 md:border-4 border-neutral-800/50 rounded-full"
+                className="absolute inset-0 border-3 md:border-4 border-neutral-200 dark:border-neutral-800/50 rounded-full"
                 animate={{ rotate: 360 }}
                 transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
               />
@@ -243,7 +243,7 @@ export function CreateWalletFlow() {
                     ease: "easeInOut"
                   }}
                 >
-                  <Loader2 className="w-8 h-8 md:w-9 md:h-9 text-orange-400 animate-spin" />
+                  <Loader2 className="w-8 h-8 md:w-9 md:h-9 text-orange-500 dark:text-orange-400 animate-spin" />
                 </motion.div>
               </div>
             </div>
@@ -252,7 +252,7 @@ export function CreateWalletFlow() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
-              className="text-xl md:text-2xl font-black text-white mb-5 md:mb-6 tracking-tight"
+              className="text-xl md:text-2xl font-black text-neutral-900 dark:text-white mb-5 md:mb-6 tracking-tight"
             >
               Setting up Profile...
             </motion.h3>
@@ -274,7 +274,7 @@ export function CreateWalletFlow() {
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: step.delay }}
-                  className="flex items-center gap-2 md:gap-3 text-neutral-400 bg-neutral-800/30 px-3 md:px-4 py-2 md:py-2.5 rounded-lg backdrop-blur-sm border border-neutral-700/30"
+                  className="flex items-center gap-2 md:gap-3 text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800/30 px-3 md:px-4 py-2 md:py-2.5 rounded-lg backdrop-blur-sm border border-neutral-200 dark:border-neutral-700/30"
                 >
                   <motion.div
                     animate={{
@@ -286,7 +286,7 @@ export function CreateWalletFlow() {
                       repeat: Infinity,
                       delay: step.delay
                     }}
-                    className="w-1.5 h-1.5 md:w-2 md:h-2 rounded-full bg-orange-400 shrink-0"
+                    className="w-1.5 h-1.5 md:w-2 md:h-2 rounded-full bg-orange-500 dark:bg-orange-400 shrink-0"
                   />
                   <span className="text-left">{step.text}</span>
                 </motion.div>
@@ -297,7 +297,7 @@ export function CreateWalletFlow() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 1 }}
-              className="mt-4 md:mt-5 text-[10px] md:text-xs text-neutral-500"
+              className="mt-4 md:mt-5 text-[10px] md:text-xs text-neutral-400 dark:text-neutral-500"
             >
               This may take a few moments...
             </motion.p>

@@ -56,14 +56,14 @@ export function HistoryView({
           <motion.button
             whileTap={{ scale: 0.95 }}
             onClick={onBackToMain}
-            className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 hover:bg-neutral-700 text-white"
+            className="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
           </motion.button>
-          <h2 className="text-xl text-white font-bold">Transaction History</h2>
+          <h2 className="text-xl text-neutral-900 dark:text-white font-bold">Transaction History</h2>
         </div>
 
-        <p className="text-xs text-neutral-400">
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
           {selectedAddress.slice(0, 10)}...{selectedAddress.slice(-6)}
         </p>
       </div>
@@ -80,7 +80,7 @@ export function HistoryView({
               transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
               className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full"
             />
-            <p className="text-neutral-400 text-sm">Loading transactions...</p>
+            <p className="text-neutral-500 dark:text-neutral-400 text-sm">Loading transactions...</p>
           </motion.div>
         ) : transactions.length === 0 ? (
           <motion.div
@@ -88,7 +88,7 @@ export function HistoryView({
             animate={{ opacity: 1, y: 0 }}
             className="flex items-center justify-center h-32"
           >
-            <p className="text-neutral-400">No transactions found</p>
+            <p className="text-neutral-500 dark:text-neutral-400">No transactions found</p>
           </motion.div>
         ) : (
           <div className="space-y-3">
@@ -119,8 +119,8 @@ export function HistoryView({
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.05, duration: 0.3 }}
-                  whileHover={{ x: 4, backgroundColor: 'rgba(255,255,255,0.02)' }}
-                  className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 transition-all cursor-pointer hover:border-neutral-700"
+                  whileHover={{ x: 4 }}
+                  className="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 transition-all cursor-pointer hover:border-neutral-300 dark:hover:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800/50"
                 >
                   <div className="flex justify-between items-start mb-3">
                     <div className="flex items-center gap-2">
@@ -134,7 +134,7 @@ export function HistoryView({
                         href={`https://www.unicity.network/tx/${tx.tx_hash}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="font-mono text-xs text-blue-400 hover:text-blue-300"
+                        className="font-mono text-xs text-blue-500 dark:text-blue-400 hover:text-blue-400 dark:hover:text-blue-300"
                       >
                         {truncatedTxid}
                       </a>
@@ -154,16 +154,16 @@ export function HistoryView({
                     <span style={{ color: statusColor }}>{statusText}</span>
                     {tx.height > 0 && (
                       <>
-                        <span className="text-neutral-600">•</span>
-                        <span className="text-neutral-400">
+                        <span className="text-neutral-400 dark:text-neutral-600">•</span>
+                        <span className="text-neutral-500 dark:text-neutral-400">
                           Block {tx.height}
                         </span>
                       </>
                     )}
                     {detail?.blocktime && (
                       <>
-                        <span className="text-neutral-600">•</span>
-                        <span className="text-neutral-400">
+                        <span className="text-neutral-400 dark:text-neutral-600">•</span>
+                        <span className="text-neutral-500 dark:text-neutral-400">
                           {formatTimestamp(detail.blocktime)}
                         </span>
                       </>
@@ -173,13 +173,13 @@ export function HistoryView({
                   {detail && (
                     <div className="space-y-1">
                       {analysis.fromAddresses.length > 0 && (
-                        <div className="text-xs text-neutral-400">
+                        <div className="text-xs text-neutral-500 dark:text-neutral-400">
                           From:{" "}
                           <a
                             href={`https://www.unicity.network/address/${analysis.fromAddresses[0]}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-blue-400 hover:text-blue-300 font-mono"
+                            className="text-blue-500 dark:text-blue-400 hover:text-blue-400 dark:hover:text-blue-300 font-mono"
                           >
                             {analysis.fromAddresses[0].substring(0, 11)}...
                             {analysis.fromAddresses[0].substring(
@@ -189,13 +189,13 @@ export function HistoryView({
                         </div>
                       )}
                       {analysis.toAddresses.length > 0 && (
-                        <div className="text-xs text-neutral-400">
+                        <div className="text-xs text-neutral-500 dark:text-neutral-400">
                           To:{" "}
                           <a
                             href={`https://www.unicity.network/address/${analysis.toAddresses[0]}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-blue-400 hover:text-blue-300 font-mono"
+                            className="text-blue-500 dark:text-blue-400 hover:text-blue-400 dark:hover:text-blue-300 font-mono"
                           >
                             {analysis.toAddresses[0].substring(0, 11)}...
                             {analysis.toAddresses[0].substring(

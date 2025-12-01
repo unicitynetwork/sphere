@@ -59,12 +59,12 @@ function TxidItem({ txid }: { txid: string }) {
   const explorerUrl = `https://www.unicity.network/tx/${txid}`;
 
   return (
-    <div className="flex items-center gap-2 p-2 bg-neutral-800/50 rounded-lg">
+    <div className="flex items-center gap-2 p-2 bg-neutral-100 dark:bg-neutral-800/50 rounded-lg">
       <a
         href={explorerUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex-1 text-xs text-blue-400 hover:text-blue-300 font-mono truncate"
+        className="flex-1 text-xs text-blue-500 dark:text-blue-400 hover:text-blue-400 dark:hover:text-blue-300 font-mono truncate"
         title={txid}
       >
         {txid.slice(0, 12)}...{txid.slice(-12)}
@@ -73,18 +73,18 @@ function TxidItem({ txid }: { txid: string }) {
         href={explorerUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="p-1.5 text-neutral-400 hover:text-blue-400 transition-colors"
+        className="p-1.5 text-neutral-500 dark:text-neutral-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
         title="Open in explorer"
       >
         <ExternalLink className="w-4 h-4" />
       </a>
       <button
         onClick={handleCopy}
-        className="p-1.5 text-neutral-400 hover:text-emerald-400 transition-colors"
+        className="p-1.5 text-neutral-500 dark:text-neutral-400 hover:text-emerald-500 dark:hover:text-emerald-400 transition-colors"
         title="Copy TXID"
       >
         {copied ? (
-          <Check className="w-4 h-4 text-emerald-400" />
+          <Check className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
         ) : (
           <Copy className="w-4 h-4" />
         )}
@@ -111,7 +111,7 @@ export function MessageModal({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="absolute inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-6"
+      className="fixed inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
       onClick={onClose}
     >
       <motion.div
@@ -119,12 +119,12 @@ export function MessageModal({
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.9, opacity: 0, y: 20 }}
         transition={{ type: "spring", duration: 0.4 }}
-        className={`bg-neutral-900 p-6 rounded-xl w-full max-w-md border ${colors.border} shadow-2xl relative`}
+        className="relative w-full max-w-md bg-white dark:bg-[#111] border border-neutral-200 dark:border-white/10 rounded-3xl shadow-2xl p-6 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-neutral-500 hover:text-neutral-300 transition-colors"
+          className="absolute top-4 right-4 text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
         >
           <X className="w-5 h-5" />
         </button>
@@ -149,8 +149,8 @@ export function MessageModal({
               <Icon className={`w-6 h-6 ${colors.text}`} />
             </motion.div>
           </motion.div>
-          <h3 className="text-white text-xl font-bold mb-2">{title}</h3>
-          <p className="text-neutral-400 text-sm whitespace-pre-wrap">
+          <h3 className="text-neutral-900 dark:text-white text-xl font-bold mb-2">{title}</h3>
+          <p className="text-neutral-500 dark:text-neutral-400 text-sm whitespace-pre-wrap">
             {message}
           </p>
         </motion.div>

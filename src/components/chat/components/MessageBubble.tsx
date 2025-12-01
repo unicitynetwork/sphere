@@ -20,7 +20,7 @@ export function MessageBubble({ msg, delay }: MessageBubbleProps) {
         transition={{ delay: delay }}
         className="flex justify-center mb-4"
       >
-        <div className="bg-neutral-800/80 backdrop-blur-sm rounded-2xl border border-neutral-700/50 overflow-hidden max-w-[280px] w-full">
+        <div className="bg-neutral-100 dark:bg-neutral-800/80 backdrop-blur-sm rounded-2xl border border-neutral-200 dark:border-neutral-700/50 overflow-hidden max-w-[280px] w-full">
           <div className="relative">
             <img
               src={msg.productCard.image}
@@ -35,9 +35,9 @@ export function MessageBubble({ msg, delay }: MessageBubbleProps) {
             </div>
           </div>
           <div className="p-3">
-            <p className="text-white font-medium">{msg.productCard.title}</p>
+            <p className="text-neutral-900 dark:text-white font-medium">{msg.productCard.title}</p>
             {msg.productCard.price && (
-              <p className="text-orange-400 font-bold mt-1">${msg.productCard.price}</p>
+              <p className="text-orange-500 dark:text-orange-400 font-bold mt-1">${msg.productCard.price}</p>
             )}
           </div>
         </div>
@@ -62,14 +62,14 @@ export function MessageBubble({ msg, delay }: MessageBubbleProps) {
 
       <div className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} max-w-[70%]`}>
         {!isOwn && (
-          <div className="text-xs text-neutral-400 mb-1 px-1">{msg.sender}</div>
+          <div className="text-xs text-neutral-500 dark:text-neutral-400 mb-1 px-1">{msg.sender}</div>
         )}
         <motion.div
           whileHover={{ scale: 1.02 }}
           className={`rounded-2xl px-6 py-4 relative overflow-hidden ${
             isOwn
               ? 'bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-xl shadow-orange-500/20'
-              : 'bg-neutral-800/80 backdrop-blur-sm text-neutral-100 border border-neutral-700/50'
+              : 'bg-neutral-100 dark:bg-neutral-800/80 backdrop-blur-sm text-neutral-800 dark:text-neutral-100 border border-neutral-200 dark:border-neutral-700/50'
           }`}
         >
           {isOwn && (

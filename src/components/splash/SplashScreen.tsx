@@ -11,15 +11,15 @@ export function SplashScreen({ onEnter }: SplashScreenProps) {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-linear-to-br from-neutral-950 via-neutral-900 to-neutral-950 cursor-pointer"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-linear-to-br from-neutral-100 via-white to-neutral-100 dark:from-neutral-950 dark:via-neutral-900 dark:to-neutral-950 cursor-pointer"
       onClick={onEnter}
     >
       {/* Simplified background orbs - reduced blur and size on mobile */}
       <motion.div
-        className="absolute top-1/4 left-1/4 w-48 h-48 md:w-96 md:h-96 bg-orange-500/20 rounded-full blur-2xl md:blur-3xl"
+        className="absolute top-1/4 left-1/4 w-48 h-48 md:w-96 md:h-96 bg-orange-500/10 dark:bg-orange-500/20 rounded-full blur-2xl md:blur-3xl"
         animate={{
           scale: [1, 1.2, 1],
-          opacity: [0.2, 0.3, 0.2],
+          opacity: [0.1, 0.2, 0.1],
         }}
         transition={{
           duration: 4,
@@ -28,10 +28,10 @@ export function SplashScreen({ onEnter }: SplashScreenProps) {
         }}
       />
       <motion.div
-        className="absolute bottom-1/4 right-1/4 w-48 h-48 md:w-96 md:h-96 bg-purple-500/20 rounded-full blur-2xl md:blur-3xl "
+        className="absolute bottom-1/4 right-1/4 w-48 h-48 md:w-96 md:h-96 bg-purple-500/10 dark:bg-purple-500/20 rounded-full blur-2xl md:blur-3xl "
         animate={{
           scale: [1, 1.3, 1],
-          opacity: [0.2, 0.3, 0.2],
+          opacity: [0.1, 0.2, 0.1],
         }}
         transition={{
           duration: 5,
@@ -41,7 +41,7 @@ export function SplashScreen({ onEnter }: SplashScreenProps) {
         }}
       />
       <motion.div
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] md:w-[600px] md:h-[600px] bg-orange-500/10 rounded-full blur-3xl will-change-transform"
+        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] md:w-[600px] md:h-[600px] bg-orange-500/5 dark:bg-orange-500/10 rounded-full blur-3xl will-change-transform"
         animate={{
           scale: [1, 1.2, 1],
           rotate: [0, 180, 360],
@@ -66,7 +66,7 @@ export function SplashScreen({ onEnter }: SplashScreenProps) {
           >
             {/* Glow effect behind logo - simplified */}
             <div
-              className="absolute inset-0 bg-linear-to-r from-orange-500/20 to-orange-600/20 blur-2xl md:blur-3xl"
+              className="absolute inset-0 bg-linear-to-r from-orange-500/10 dark:from-orange-500/20 to-orange-600/10 dark:to-orange-600/20 blur-2xl md:blur-3xl"
               style={{ animation: 'pulse-slow 3s ease-in-out infinite' }}
             />
 
@@ -76,9 +76,9 @@ export function SplashScreen({ onEnter }: SplashScreenProps) {
                 className="relative"
                 animate={{
                   textShadow: [
-                    "0 0 20px rgba(255, 255, 255, 0.3)",
-                    "0 0 30px rgba(255, 255, 255, 0.5)",
-                    "0 0 20px rgba(255, 255, 255, 0.3)",
+                    "0 0 20px rgba(0, 0, 0, 0.1)",
+                    "0 0 30px rgba(0, 0, 0, 0.15)",
+                    "0 0 20px rgba(0, 0, 0, 0.1)",
                   ],
                 }}
                 transition={{
@@ -89,7 +89,7 @@ export function SplashScreen({ onEnter }: SplashScreenProps) {
               >
                 {/* AGENT text */}
                 <span
-                  className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl text-white tracking-tight"
+                  className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl text-neutral-900 dark:text-white tracking-tight"
                   style={{ fontFamily: 'system-ui, -apple-system, sans-serif', fontWeight: 900 }}
                 >
                   AGENT
@@ -131,7 +131,7 @@ export function SplashScreen({ onEnter }: SplashScreenProps) {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.5 }}
-            className="text-neutral-400 text-sm sm:text-base md:text-lg lg:text-xl tracking-wide"
+            className="text-neutral-500 dark:text-neutral-400 text-sm sm:text-base md:text-lg lg:text-xl tracking-wide"
           >
             Dive in and feel the difference
           </motion.p>
@@ -142,11 +142,11 @@ export function SplashScreen({ onEnter }: SplashScreenProps) {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.8 }}
-          className="text-neutral-400 flex items-center gap-3 group mt-8"
+          className="text-neutral-500 dark:text-neutral-400 flex items-center gap-3 group mt-8"
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
         >
-          <span className="relative z-10 group-hover:text-orange-400 transition-colors text-sm md:text-base">
+          <span className="relative z-10 group-hover:text-orange-500 dark:group-hover:text-orange-400 transition-colors text-sm md:text-base">
             Tap to join
           </span>
           <motion.div
@@ -157,14 +157,14 @@ export function SplashScreen({ onEnter }: SplashScreenProps) {
               ease: "easeInOut"
             }}
           >
-            <ArrowRight className="w-4 h-4 md:w-5 md:h-5 relative z-10 text-orange-400" />
+            <ArrowRight className="w-4 h-4 md:w-5 md:h-5 relative z-10 text-orange-500 dark:text-orange-400" />
           </motion.div>
         </motion.button>
       </div>
 
       {/* Simplified mesh gradient overlay */}
       <div
-        className="absolute inset-0 opacity-20 md:opacity-30 pointer-events-none"
+        className="absolute inset-0 opacity-10 dark:opacity-20 md:opacity-15 md:dark:opacity-30 pointer-events-none"
         style={{
           backgroundImage: `
             radial-gradient(at 20% 30%, rgba(251, 146, 60, 0.15) 0px, transparent 50%),
