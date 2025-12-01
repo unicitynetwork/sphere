@@ -236,7 +236,7 @@ export function getAmaMockResponse(): string {
 }
 
 export function getDefaultMockResponse(): string {
-  return `This is a mock response. Switch to real mode (VITE_AGENT_MODE=real) to get actual AI responses.`;
+  return `This is a mock response. Remove VITE_USE_MOCK_AGENTS to get actual AI responses.`;
 }
 
 // Games Agent Mock Responses

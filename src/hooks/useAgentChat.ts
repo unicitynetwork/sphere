@@ -17,10 +17,10 @@ interface UseAgentChatOptions {
   onMessage?: (message: ChatMessage) => void;
 }
 
-// Get agent mode from env
+// Get agent mode from env (default: real)
 export function getAgentMode(): 'mock' | 'real' {
-  const mode = import.meta.env.VITE_AGENT_MODE;
-  return mode === 'real' ? 'real' : 'mock';
+  const useMock = import.meta.env.VITE_USE_MOCK_AGENTS;
+  return useMock === 'true' ? 'mock' : 'real';
 }
 
 // Get API URL

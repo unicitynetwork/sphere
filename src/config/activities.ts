@@ -92,7 +92,7 @@ export const agents: AgentConfig[] = [
     color: 'from-purple-500 to-pink-500',
     type: 'unified',
     greetingMessage: "Hey! Looking for some games? I can help you find something fun to play. We have Quake and other exciting games available. What are you in the mood for?",
-    backendActivityId: 'games',
+    backendActivityId: 'gaming',
     quickActions: [
       { label: 'Show games', message: 'Show me games' },
       { label: 'Quake', message: 'Tell me about Quake' },
@@ -109,7 +109,7 @@ export const agents: AgentConfig[] = [
     color: 'from-emerald-500 to-teal-500',
     type: 'ai-with-sidebar',
     greetingMessage: "Welcome to Sports Betting! I can help you place bets on football, basketball, and other sports. What match are you interested in?",
-    backendActivityId: 'sport',
+    backendActivityId: 'sports',
     quickActions: [
       { label: 'Show matches', message: 'Show me matches' },
       { label: 'Football', message: 'Football matches' },
