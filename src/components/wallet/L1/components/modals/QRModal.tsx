@@ -62,7 +62,7 @@ export function QRModal({ show, address, onClose }: QRModalProps) {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-20 p-4"
+      className="fixed inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
       onClick={onClose}
     >
       <motion.div
@@ -70,7 +70,7 @@ export function QRModal({ show, address, onClose }: QRModalProps) {
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.8, opacity: 0, y: 20 }}
         transition={{ type: "spring", duration: 0.5 }}
-        className="bg-linear-to-br from-neutral-900 to-neutral-800 p-8 rounded-2xl shadow-2xl border border-neutral-700/50 max-w-sm w-full"
+        className="relative w-full max-w-sm bg-white dark:bg-[#111] border border-neutral-200 dark:border-white/10 rounded-3xl shadow-2xl p-8 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <motion.div
@@ -79,8 +79,8 @@ export function QRModal({ show, address, onClose }: QRModalProps) {
           transition={{ delay: 0.1 }}
           className="text-center mb-6"
         >
-          <h3 className="text-xl font-bold text-white mb-2">Receive ALPHA</h3>
-          <p className="text-sm text-neutral-400">
+          <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">Receive ALPHA</h3>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">
             Scan QR code to receive payment
           </p>
         </motion.div>
@@ -123,9 +123,9 @@ export function QRModal({ show, address, onClose }: QRModalProps) {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
-          className="bg-neutral-800/50 rounded-xl p-4 mb-6 border border-neutral-700/50 backdrop-blur-sm"
+          className="bg-neutral-100 dark:bg-neutral-800/50 rounded-xl p-4 mb-6 border border-neutral-200 dark:border-neutral-700/50 backdrop-blur-sm"
         >
-          <p className="text-xs text-neutral-400 mb-2 text-center">
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2 text-center">
             Your Address
           </p>
           <div className="flex items-center gap-2">
@@ -133,7 +133,7 @@ export function QRModal({ show, address, onClose }: QRModalProps) {
               href={`https://www.unicity.network/address/${address}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex-1 text-xs font-mono text-blue-400 hover:text-blue-300 break-all text-center transition-colors"
+              className="flex-1 text-xs font-mono text-blue-500 dark:text-blue-400 hover:text-blue-400 dark:hover:text-blue-300 break-all text-center transition-colors"
             >
               {address}
             </a>
@@ -148,8 +148,8 @@ export function QRModal({ show, address, onClose }: QRModalProps) {
               className={`p-2 rounded-lg transition-all ${
                 copied
                   ? "bg-green-600 hover:bg-green-500 shadow-lg shadow-green-500/20"
-                  : "bg-neutral-700 hover:bg-neutral-600"
-              } text-white`}
+                  : "bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600"
+              } text-neutral-800 dark:text-white`}
               title={copied ? "Copied!" : "Copy address"}
             >
               <motion.div
@@ -158,7 +158,7 @@ export function QRModal({ show, address, onClose }: QRModalProps) {
                 transition={{ duration: 0.3 }}
               >
                 {copied ? (
-                  <Check className="w-4 h-4" />
+                  <Check className="w-4 h-4 text-white" />
                 ) : (
                   <Copy className="w-4 h-4" />
                 )}

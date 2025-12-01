@@ -17,7 +17,7 @@ export function ChatSection() {
   const chatState = useChatState(sellerId, productName, productImage, productPrice, purchased);
 
   return (
-    <div className="bg-linear-to-br from-neutral-900/60 to-neutral-800/40 backdrop-blur-xl rounded-3xl border border-neutral-800/50 overflow-hidden grid grid-cols-[auto_1fr] relative shadow-2xl h-full min-h-0">
+    <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden grid grid-cols-[auto_1fr] relative shadow-xl dark:shadow-2xl h-full min-h-0 theme-transition">
       {/* Background decorative elements */}
       <div className="absolute -top-20 -right-20 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl" />
       <div className="absolute -bottom-20 -left-20 w-96 h-96 bg-purple-500/5 rounded-full blur-3xl" />

@@ -59,31 +59,31 @@ export function VestingSelector({
   ): { bg: string; text: string; border: string } => {
     if (color === "green") {
       return {
-        bg: isSelected ? "bg-green-500/20" : "bg-neutral-800/50",
-        text: "text-green-400",
-        border: isSelected ? "border-green-500/50" : "border-neutral-700/50",
+        bg: isSelected ? "bg-green-500/20" : "bg-neutral-100 dark:bg-neutral-800/50",
+        text: "text-green-500 dark:text-green-400",
+        border: isSelected ? "border-green-500/50" : "border-neutral-200 dark:border-neutral-700/50",
       };
     }
     if (color === "orange") {
       return {
-        bg: isSelected ? "bg-orange-500/20" : "bg-neutral-800/50",
-        text: "text-orange-400",
-        border: isSelected ? "border-orange-500/50" : "border-neutral-700/50",
+        bg: isSelected ? "bg-orange-500/20" : "bg-neutral-100 dark:bg-neutral-800/50",
+        text: "text-orange-500 dark:text-orange-400",
+        border: isSelected ? "border-orange-500/50" : "border-neutral-200 dark:border-neutral-700/50",
       };
     }
     return {
-      bg: isSelected ? "bg-blue-500/20" : "bg-neutral-800/50",
-      text: "text-neutral-200",
-      border: isSelected ? "border-blue-500/50" : "border-neutral-700/50",
+      bg: isSelected ? "bg-blue-500/20" : "bg-neutral-100 dark:bg-neutral-800/50",
+      text: "text-neutral-700 dark:text-neutral-200",
+      border: isSelected ? "border-blue-500/50" : "border-neutral-200 dark:border-neutral-700/50",
     };
   };
 
   return (
-    <div className="rounded-xl bg-neutral-900/50 border border-neutral-800/50 p-3">
+    <div className="rounded-xl bg-neutral-100/50 dark:bg-neutral-900/50 border border-neutral-200/50 dark:border-neutral-800/50 p-3">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-neutral-400">Coin Filter</span>
+        <span className="text-xs text-neutral-500 dark:text-neutral-400">Coin Filter</span>
         {classificationProgress && (
-          <span className="text-xs text-blue-400">
+          <span className="text-xs text-blue-500 dark:text-blue-400">
             Classifying {classificationProgress.current}/
             {classificationProgress.total}
           </span>
@@ -111,7 +111,7 @@ export function VestingSelector({
             >
               <div className="flex flex-col items-center">
                 <span
-                  className={`text-xs font-medium ${isSelected ? colors.text : "text-neutral-400"}`}
+                  className={`text-xs font-medium ${isSelected ? colors.text : "text-neutral-500 dark:text-neutral-400"}`}
                 >
                   {option.label}
                 </span>

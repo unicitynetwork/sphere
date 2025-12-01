@@ -134,16 +134,16 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
       <motion.div
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         onClick={handleClose}
-        className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm"
       />
 
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-        className="relative w-full max-w-md bg-[#111] border border-white/10 rounded-3xl shadow-2xl overflow-hidden"
+        className="relative w-full max-w-md bg-white dark:bg-[#111] border border-neutral-200 dark:border-white/10 rounded-3xl shadow-2xl overflow-hidden"
       >
         {/* Header */}
-        <div className="p-6 border-b border-white/5 flex justify-between items-center">
-          <h3 className="text-lg font-semibold text-white">
+        <div className="p-6 border-b border-neutral-200 dark:border-white/5 flex justify-between items-center">
+          <h3 className="text-lg font-semibold text-neutral-900 dark:text-white">
             {step === 'recipient' && 'Send To'}
             {step === 'asset' && 'Select Asset'}
             {step === 'amount' && 'Enter Amount'}
@@ -151,8 +151,8 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
             {step === 'processing' && 'Processing...'}
             {step === 'success' && 'Sent!'}
           </h3>
-          <button onClick={handleClose} className="p-2 hover:bg-white/5 rounded-full transition-colors">
-            <X className="w-5 h-5 text-neutral-400" />
+          <button onClick={handleClose} className="p-2 hover:bg-neutral-100 dark:hover:bg-white/5 rounded-full transition-colors">
+            <X className="w-5 h-5 text-neutral-500 dark:text-neutral-400" />
           </button>
         </div>
 
@@ -163,15 +163,15 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
             {step === 'recipient' && (
               <motion.div key="rec" initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -20, opacity: 0 }}>
                 <div className="mb-6">
-                  <label className="text-sm text-neutral-400 block mb-2">Unicity Nametag</label>
+                  <label className="text-sm text-neutral-500 dark:text-neutral-400 block mb-2">Unicity Nametag</label>
                   <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500">@</span>
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500">@</span>
                     <input
                       autoFocus
                       value={recipient}
                       onChange={(e) => setRecipient(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleRecipientNext()}
-                      className="w-full bg-neutral-900 border border-white/10 rounded-xl py-3 pl-8 pr-4 text-white focus:border-orange-500 outline-none"
+                      className="w-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-xl py-3 pl-8 pr-4 text-neutral-900 dark:text-white focus:border-orange-500 outline-none"
                       placeholder="username"
                     />
                   </div>
@@ -194,14 +194,14 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
                   <button
                     key={asset.coinId}
                     onClick={() => { setSelectedAsset(asset); setStep('amount'); }}
-                    className="w-full p-3 flex items-center gap-3 bg-neutral-900/50 hover:bg-neutral-800 border border-white/5 rounded-xl transition-colors text-left"
+                    className="w-full p-3 flex items-center gap-3 bg-neutral-50 dark:bg-neutral-900/50 hover:bg-neutral-100 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-white/5 rounded-xl transition-colors text-left"
                   >
                     <img src={asset.iconUrl || ''} className="w-8 h-8 rounded-full" alt="" />
                     <div className="flex-1">
-                      <div className="text-white font-medium">{asset.symbol}</div>
-                      <div className="text-xs text-neutral-400">{asset.getFormattedAmount()} available</div>
+                      <div className="text-neutral-900 dark:text-white font-medium">{asset.symbol}</div>
+                      <div className="text-xs text-neutral-500 dark:text-neutral-400">{asset.getFormattedAmount()} available</div>
                     </div>
-                    <ArrowRight className="w-4 h-4 text-neutral-600" />
+                    <ArrowRight className="w-4 h-4 text-neutral-400 dark:text-neutral-600" />
                   </button>
                 ))}
               </motion.div>
@@ -212,9 +212,9 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
               <motion.div key="amt" initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -20, opacity: 0 }}>
                 <div className="mb-6">
                   <div className="flex justify-between text-sm mb-2">
-                    <span className="text-neutral-400">Amount</span>
-                    <span className="text-neutral-400">
-                      Available: <span className="text-white">{selectedAsset.getFormattedAmount()}</span>
+                    <span className="text-neutral-500 dark:text-neutral-400">Amount</span>
+                    <span className="text-neutral-500 dark:text-neutral-400">
+                      Available: <span className="text-neutral-900 dark:text-white">{selectedAsset.getFormattedAmount()}</span>
                     </span>
                   </div>
                   <div className="relative">
@@ -223,12 +223,12 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
                       type="number"
                       value={amountInput}
                       onChange={(e) => setAmountInput(e.target.value)}
-                      className="w-full bg-neutral-900 border border-white/10 rounded-xl py-3 px-4 text-white text-2xl font-mono focus:border-orange-500 outline-none"
+                      className="w-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-xl py-3 px-4 text-neutral-900 dark:text-white text-2xl font-mono focus:border-orange-500 outline-none"
                       placeholder="0.00"
                     />
                     <button
                       onClick={() => setAmountInput(selectedAsset.getFormattedAmount())}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-neutral-800 text-orange-400 px-2 py-1 rounded hover:bg-neutral-700"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-neutral-200 dark:bg-neutral-800 text-orange-500 dark:text-orange-400 px-2 py-1 rounded hover:bg-neutral-300 dark:hover:bg-neutral-700"
                     >
                       MAX
                     </button>
@@ -250,28 +250,28 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
               <motion.div key="conf" initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -20, opacity: 0 }}>
 
                 {/* Summary Card */}
-                <div className="bg-neutral-900 rounded-2xl p-5 mb-6 border border-white/10 text-center">
-                  <div className="text-sm text-neutral-400 mb-1">You are sending</div>
-                  <div className="text-3xl font-bold text-white mb-4">
+                <div className="bg-neutral-100 dark:bg-neutral-900 rounded-2xl p-5 mb-6 border border-neutral-200 dark:border-white/10 text-center">
+                  <div className="text-sm text-neutral-500 dark:text-neutral-400 mb-1">You are sending</div>
+                  <div className="text-3xl font-bold text-neutral-900 dark:text-white mb-4">
                     {amountInput} <span className="text-orange-500">{selectedAsset.symbol}</span>
                   </div>
 
-                  <div className="flex items-center justify-center gap-2 text-sm bg-neutral-800/50 p-2 rounded-lg mx-auto max-w-max">
-                    <User className="w-4 h-4 text-neutral-400" />
-                    <span className="text-neutral-300">@{recipient}</span>
+                  <div className="flex items-center justify-center gap-2 text-sm bg-neutral-200 dark:bg-neutral-800/50 p-2 rounded-lg mx-auto max-w-max">
+                    <User className="w-4 h-4 text-neutral-500 dark:text-neutral-400" />
+                    <span className="text-neutral-700 dark:text-neutral-300">@{recipient}</span>
                   </div>
                 </div>
 
                 {/* Strategy Details */}
                 <div className="mb-6 space-y-2">
-                  <div className="text-xs font-bold text-neutral-500 uppercase tracking-wider ml-1">Strategy</div>
+                  <div className="text-xs font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider ml-1">Strategy</div>
 
                   {splitPlan.requiresSplit ? (
                     <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-start gap-3">
-                      <Scissors className="w-5 h-5 text-blue-400 mt-0.5" />
+                      <Scissors className="w-5 h-5 text-blue-500 dark:text-blue-400 mt-0.5" />
                       <div>
-                        <div className="text-blue-400 text-sm font-medium">Token Split Required</div>
-                        <div className="text-xs text-neutral-400 mt-1">
+                        <div className="text-blue-600 dark:text-blue-400 text-sm font-medium">Token Split Required</div>
+                        <div className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
                           We will take a token of <b>{CurrencyUtils.toHumanReadable(splitPlan.tokenToSplit!.amount, selectedAsset.decimals)} {selectedAsset.symbol}</b>,
                           send exact amount, and keep the change.
                         </div>
@@ -279,10 +279,10 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
                     </div>
                   ) : (
                     <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-start gap-3">
-                      <Coins className="w-5 h-5 text-emerald-400 mt-0.5" />
+                      <Coins className="w-5 h-5 text-emerald-500 dark:text-emerald-400 mt-0.5" />
                       <div>
-                        <div className="text-emerald-400 text-sm font-medium">Direct Transfer</div>
-                        <div className="text-xs text-neutral-400 mt-1">
+                        <div className="text-emerald-600 dark:text-emerald-400 text-sm font-medium">Direct Transfer</div>
+                        <div className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
                           We found {splitPlan.tokensToTransferDirectly.length} token(s) that match the amount exactly. No split needed.
                         </div>
                       </div>
@@ -294,7 +294,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
 
                 <button
                   onClick={handleSend}
-                  className="w-full py-3 bg-white text-black font-bold rounded-xl hover:bg-neutral-200 transition-colors"
+                  className="w-full py-3 bg-neutral-900 dark:bg-white text-white dark:text-black font-bold rounded-xl hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors"
                 >
                   Confirm & Send
                 </button>
@@ -305,7 +305,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
             {step === 'processing' && (
               <motion.div key="proc" className="py-10 text-center">
                 <Loader2 className="w-12 h-12 text-orange-500 animate-spin mx-auto mb-4" />
-                <h3 className="text-white font-medium text-lg">Sending Transaction...</h3>
+                <h3 className="text-neutral-900 dark:text-white font-medium text-lg">Sending Transaction...</h3>
                 <p className="text-neutral-500 text-sm mt-2">Processing proofs and broadcasting via Nostr</p>
               </motion.div>
             )}
@@ -316,11 +316,11 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
                 <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/50">
                   <CheckCircle className="w-8 h-8 text-emerald-500" />
                 </div>
-                <h3 className="text-white font-bold text-2xl mb-2">Success!</h3>
-                <p className="text-neutral-400">
+                <h3 className="text-neutral-900 dark:text-white font-bold text-2xl mb-2">Success!</h3>
+                <p className="text-neutral-500 dark:text-neutral-400">
                   Successfully sent <b>{amountInput} {selectedAsset?.symbol}</b> to <b>@{recipient}</b>
                 </p>
-                <button onClick={handleClose} className="mt-8 px-8 py-2 bg-neutral-800 rounded-lg hover:bg-neutral-700 text-white transition-colors">
+                <button onClick={handleClose} className="mt-8 px-8 py-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white transition-colors">
                   Close
                 </button>
               </motion.div>

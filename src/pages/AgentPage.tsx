@@ -93,11 +93,11 @@ export function AgentPage() {
     <>
       {/* Desktop agent grid - always visible */}
       <div className="hidden lg:block mb-8 relative">
-        <div className="absolute -top-20 -left-20 w-96 h-96 bg-orange-500/10 rounded-full blur-3xl" />
-        <div className="absolute -top-10 -right-32 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl" />
+        <div className="absolute -top-20 -left-20 w-96 h-96 bg-orange-500/5 dark:bg-orange-500/10 rounded-full blur-3xl" />
+        <div className="absolute -top-10 -right-32 w-80 h-80 bg-purple-500/5 dark:bg-purple-500/10 rounded-full blur-3xl" />
 
         <div className="relative">
-          <div className="relative p-8 rounded-2xl bg-neutral-900/40 backdrop-blur-sm border border-neutral-800/50">
+          <div className="relative p-8 rounded-2xl bg-white/40 dark:bg-neutral-900/40 backdrop-blur-sm border border-neutral-200 dark:border-neutral-800/50 theme-transition">
             <div className="grid grid-cols-7 gap-4">
               {agents.map((agent) => (
                 <AgentCard
@@ -115,7 +115,7 @@ export function AgentPage() {
         </div>
       </div>
       {/* Mobile tab switcher with sliding indicator */}
-      <div className="lg:hidden relative flex p-1 mb-3 bg-neutral-800/50 rounded-2xl backdrop-blur-sm border border-neutral-700/30">
+      <div className="lg:hidden relative flex p-1 mb-3 bg-neutral-100 dark:bg-neutral-800/50 rounded-2xl backdrop-blur-sm border border-neutral-200 dark:border-neutral-700/30">
         {/* Sliding background indicator - CSS transition for smoothness */}
         <div
           className="absolute top-1 bottom-1 w-[calc(50%-4px)] bg-linear-to-r from-orange-500 to-orange-600 rounded-xl shadow-lg shadow-orange-500/20 transition-transform duration-300 ease-out"
@@ -128,7 +128,7 @@ export function AgentPage() {
         <button
           onClick={() => scrollToPanel('chat')}
           className={`relative z-10 flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium transition-colors duration-200 ${
-            activePanel === 'chat' ? 'text-white' : 'text-neutral-400'
+            activePanel === 'chat' ? 'text-white' : 'text-neutral-500 dark:text-neutral-400'
           }`}
         >
           <MessageSquare className="w-4 h-4" />
@@ -139,7 +139,7 @@ export function AgentPage() {
         <button
           onClick={() => scrollToPanel('wallet')}
           className={`relative z-10 flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium transition-colors duration-200 ${
-            activePanel === 'wallet' ? 'text-white' : 'text-neutral-400'
+            activePanel === 'wallet' ? 'text-white' : 'text-neutral-500 dark:text-neutral-400'
           }`}
         >
           <Wallet className="w-4 h-4" />
@@ -170,7 +170,7 @@ export function AgentPage() {
         <div className="lg:col-span-2 h-full min-h-0">
           {renderChatComponent()}
         </div>
-        <div className="h-full min-h-0 overflow-hidden">
+        <div className="h-full min-h-0">
           <WalletPanel />
         </div>
       </div>

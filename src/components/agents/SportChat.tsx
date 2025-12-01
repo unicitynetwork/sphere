@@ -107,8 +107,8 @@ export function SportChat({ agent }: SportChatProps) {
           <>
             <img src={bet.image} alt="" className="w-12 h-12 rounded-lg object-cover" />
             <div className="flex-1 min-w-0">
-              <p className="text-white text-sm font-medium truncate">{bet.title}</p>
-              <p className="text-emerald-400 text-xs">{bet.amount} USDT</p>
+              <p className="text-neutral-900 dark:text-white text-sm font-medium truncate">{bet.title}</p>
+              <p className="text-emerald-600 dark:text-emerald-400 text-xs">{bet.amount} USDT</p>
               <p className="text-neutral-500 text-xs">{new Date(bet.timestamp).toLocaleDateString()}</p>
             </div>
           </>
@@ -116,15 +116,15 @@ export function SportChat({ agent }: SportChatProps) {
       }}
       getMockResponse={getMockResponse}
       renderMessageCard={(cardData) => (
-        <div className="mt-4 rounded-xl overflow-hidden border border-neutral-600/50">
+        <div className="mt-4 rounded-xl overflow-hidden border border-neutral-300 dark:border-neutral-600/50">
           <img src={cardData.match.image} alt="Match" className="w-full h-32 object-cover" />
-          <div className="p-3 bg-neutral-900/80">
-            <div className="flex items-center justify-between text-lg font-medium">
+          <div className="p-3 bg-neutral-100 dark:bg-neutral-900/80">
+            <div className="flex items-center justify-between text-lg font-medium text-neutral-900 dark:text-white">
               <span>{cardData.match.team1Flag} {cardData.match.team1}</span>
               <span className="text-neutral-500">vs</span>
               <span>{cardData.match.team2} {cardData.match.team2Flag}</span>
             </div>
-            <p className="text-center text-neutral-400 text-sm mt-1">
+            <p className="text-center text-neutral-500 dark:text-neutral-400 text-sm mt-1">
               {cardData.match.date} - {cardData.match.time}
             </p>
           </div>
@@ -137,12 +137,12 @@ export function SportChat({ agent }: SportChatProps) {
       detailsConfig={{
         title: 'Bet Details',
         renderContent: (bet) => (
-          <div className="rounded-xl overflow-hidden border border-neutral-700">
+          <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700">
             <img src={bet.image} alt="" className="w-full h-40 object-cover" />
-            <div className="p-4 bg-neutral-800">
-              <p className="text-white font-medium text-lg">{bet.title}</p>
+            <div className="p-4 bg-neutral-100 dark:bg-neutral-800">
+              <p className="text-neutral-900 dark:text-white font-medium text-lg">{bet.title}</p>
               <div className="flex items-center justify-between mt-4">
-                <p className="text-emerald-400 text-xl font-bold">{bet.amount} USDT</p>
+                <p className="text-emerald-600 dark:text-emerald-400 text-xl font-bold">{bet.amount} USDT</p>
                 <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                   bet.status === 'won' ? 'bg-green-500/20 text-green-400' :
                   bet.status === 'lost' ? 'bg-red-500/20 text-red-400' :
@@ -166,30 +166,30 @@ export function SportChat({ agent }: SportChatProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+              className="fixed inset-0 bg-black/50 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
               onClick={() => betStep === 'confirm' && setShowBetModal(false)}
             >
               <motion.div
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.9, opacity: 0 }}
-                className="bg-neutral-900 border border-neutral-700 rounded-2xl p-6 max-w-md w-full shadow-2xl"
+                className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl p-6 max-w-md w-full shadow-2xl"
                 onClick={e => e.stopPropagation()}
               >
                 {betStep === 'confirm' && (
                   <>
                     <div className="flex items-center justify-between mb-6">
-                      <h3 className="text-xl font-bold text-white">Confirm Bet</h3>
-                      <button onClick={() => setShowBetModal(false)} className="text-neutral-400 hover:text-white">
+                      <h3 className="text-xl font-bold text-neutral-900 dark:text-white">Confirm Bet</h3>
+                      <button onClick={() => setShowBetModal(false)} className="text-neutral-400 hover:text-neutral-900 dark:hover:text-white">
                         <X className="w-5 h-5" />
                       </button>
                     </div>
 
                     {/* Match Info */}
-                    <div className="rounded-xl overflow-hidden border border-neutral-700 mb-4">
+                    <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700 mb-4">
                       <img src={pendingMatch.image} alt="" className="w-full h-24 object-cover" />
-                      <div className="p-3 bg-neutral-800">
-                        <div className="flex items-center justify-between font-medium">
+                      <div className="p-3 bg-neutral-100 dark:bg-neutral-800">
+                        <div className="flex items-center justify-between font-medium text-neutral-900 dark:text-white">
                           <span>{pendingMatch.team1Flag} {pendingMatch.team1}</span>
                           <span className="text-neutral-500">vs</span>
                           <span>{pendingMatch.team2} {pendingMatch.team2Flag}</span>
@@ -199,14 +199,14 @@ export function SportChat({ agent }: SportChatProps) {
 
                     {/* Bet Choice */}
                     <div className="mb-4">
-                      <label className="text-neutral-400 text-sm mb-2 block">Select your bet:</label>
+                      <label className="text-neutral-500 dark:text-neutral-400 text-sm mb-2 block">Select your bet:</label>
                       <div className="grid grid-cols-3 gap-2">
                         <button
                           onClick={() => selectBetChoice(pendingMatch.team1, pendingMatch.odds1)}
                           className={`p-3 rounded-lg border text-center transition-all ${
                             betChoice.choice === pendingMatch.team1
-                              ? 'border-emerald-500 bg-emerald-500/20 text-emerald-400'
-                              : 'border-neutral-700 text-neutral-300 hover:border-neutral-600'
+                              ? 'border-emerald-500 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                              : 'border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:border-neutral-300 dark:hover:border-neutral-600'
                           }`}
                         >
                           <div className="text-sm">{pendingMatch.team1}</div>
@@ -216,8 +216,8 @@ export function SportChat({ agent }: SportChatProps) {
                           onClick={() => selectBetChoice('Draw', pendingMatch.oddsDraw)}
                           className={`p-3 rounded-lg border text-center transition-all ${
                             betChoice.choice === 'Draw'
-                              ? 'border-emerald-500 bg-emerald-500/20 text-emerald-400'
-                              : 'border-neutral-700 text-neutral-300 hover:border-neutral-600'
+                              ? 'border-emerald-500 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                              : 'border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:border-neutral-300 dark:hover:border-neutral-600'
                           }`}
                         >
                           <div className="text-sm">Draw</div>
@@ -227,8 +227,8 @@ export function SportChat({ agent }: SportChatProps) {
                           onClick={() => selectBetChoice(pendingMatch.team2, pendingMatch.odds2)}
                           className={`p-3 rounded-lg border text-center transition-all ${
                             betChoice.choice === pendingMatch.team2
-                              ? 'border-emerald-500 bg-emerald-500/20 text-emerald-400'
-                              : 'border-neutral-700 text-neutral-300 hover:border-neutral-600'
+                              ? 'border-emerald-500 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                              : 'border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:border-neutral-300 dark:hover:border-neutral-600'
                           }`}
                         >
                           <div className="text-sm">{pendingMatch.team2}</div>
@@ -239,7 +239,7 @@ export function SportChat({ agent }: SportChatProps) {
 
                     {/* Amount */}
                     <div className="mb-6">
-                      <label className="text-neutral-400 text-sm mb-2 block">Bet amount (USDT):</label>
+                      <label className="text-neutral-500 dark:text-neutral-400 text-sm mb-2 block">Bet amount (USDT):</label>
                       <div className="flex gap-2">
                         {['5', '10', '25', '50', '100'].map((amount) => (
                           <button
@@ -247,8 +247,8 @@ export function SportChat({ agent }: SportChatProps) {
                             onClick={() => setBetAmount(amount)}
                             className={`flex-1 py-2 rounded-lg border transition-all ${
                               betAmount === amount
-                                ? 'border-emerald-500 bg-emerald-500/20 text-emerald-400'
-                                : 'border-neutral-700 text-neutral-300 hover:border-neutral-600'
+                                ? 'border-emerald-500 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                                : 'border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:border-neutral-300 dark:hover:border-neutral-600'
                             }`}
                           >
                             {amount}
@@ -258,14 +258,14 @@ export function SportChat({ agent }: SportChatProps) {
                     </div>
 
                     {/* Potential Win */}
-                    <div className="bg-neutral-800 rounded-xl p-4 mb-6">
-                      <div className="flex justify-between text-neutral-400 mb-2">
+                    <div className="bg-neutral-100 dark:bg-neutral-800 rounded-xl p-4 mb-6">
+                      <div className="flex justify-between text-neutral-500 dark:text-neutral-400 mb-2">
                         <span>Your bet:</span>
-                        <span className="text-white">{betAmount} USDT</span>
+                        <span className="text-neutral-900 dark:text-white">{betAmount} USDT</span>
                       </div>
-                      <div className="flex justify-between text-neutral-400">
+                      <div className="flex justify-between text-neutral-500 dark:text-neutral-400">
                         <span>Potential win:</span>
-                        <span className="text-emerald-400 font-bold">
+                        <span className="text-emerald-600 dark:text-emerald-400 font-bold">
                           {(parseFloat(betAmount) * betChoice.odds).toFixed(2)} USDT
                         </span>
                       </div>
@@ -291,11 +291,11 @@ export function SportChat({ agent }: SportChatProps) {
                         animate={{ rotate: 360 }}
                         transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
                       >
-                        <Wallet className="w-8 h-8 text-emerald-500" />
+                        <Wallet className="w-8 h-8 text-emerald-600 dark:text-emerald-500" />
                       </motion.div>
                     </div>
-                    <h3 className="text-xl font-bold text-white mb-2">Processing Transaction</h3>
-                    <p className="text-neutral-400">Please wait while we confirm your bet...</p>
+                    <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">Processing Transaction</h3>
+                    <p className="text-neutral-500 dark:text-neutral-400">Please wait while we confirm your bet...</p>
                   </div>
                 )}
 
@@ -308,8 +308,8 @@ export function SportChat({ agent }: SportChatProps) {
                     >
                       <CheckCircle className="w-8 h-8 text-white" />
                     </motion.div>
-                    <h3 className="text-xl font-bold text-white mb-2">Bet Placed!</h3>
-                    <p className="text-neutral-400">Good luck with your bet!</p>
+                    <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">Bet Placed!</h3>
+                    <p className="text-neutral-500 dark:text-neutral-400">Good luck with your bet!</p>
                   </div>
                 )}
               </motion.div>

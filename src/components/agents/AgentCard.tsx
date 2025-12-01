@@ -10,7 +10,7 @@ export function AgentCard({ id, name, Icon: Icon, category, color, isSelected }:
         whileTap={{ scale: 0.95 }}
         transition={{duration: 0.05}}
         className={`relative rounded-xl md:rounded-2xl p-2 md:p-6 aspect-square md:aspect-auto md:h-[180px] flex flex-col items-center justify-center gap-2 md:gap-4 transition-all duration-150 overflow-hidden group cursor-pointer ${
-          isSelected ? 'ring-2 ring-orange-500 ring-offset-1 md:ring-offset-2 ring-offset-neutral-950' : ''
+          isSelected ? 'ring-2 ring-orange-500 ring-offset-1 md:ring-offset-2 ring-offset-neutral-100 dark:ring-offset-neutral-950' : ''
         }`}
       >
       {/* Animated Gradient Background */}

@@ -167,19 +167,19 @@ export function MainWalletView({
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowDropdown((prev) => !prev)}
-              className="flex-1 bg-neutral-800 text-neutral-200 px-3 py-2 rounded-lg border border-neutral-700 flex items-center justify-between hover:bg-neutral-700/50 transition-colors"
+              className="flex-1 bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 flex items-center justify-between hover:bg-neutral-200/50 dark:hover:bg-neutral-700/50 transition-colors"
             >
               <span className="font-mono text-sm">
                 {selectedAddress.slice(0, 12) + "..." + selectedAddress.slice(-8)}
               </span>
-              <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform ${showDropdown ? "rotate-180" : ""}`} />
+              <ChevronDown className={`w-4 h-4 text-neutral-500 dark:text-neutral-400 transition-transform ${showDropdown ? "rotate-180" : ""}`} />
             </button>
 
             <motion.button
               onClick={onNewAddress}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 hover:bg-neutral-700 text-neutral-300"
+              className="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors"
               title="Generate new address"
             >
               <Plus className="w-4 h-4" />
@@ -194,7 +194,7 @@ export function MainWalletView({
               className={`p-2 rounded-lg border transition-colors ${
                 copied
                   ? "bg-green-600 border-green-500 text-white"
-                  : "bg-neutral-800 border-neutral-700 hover:bg-neutral-700 text-neutral-300"
+                  : "bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
               }`}
               title={copied ? "Copied!" : "Copy address"}
             >
@@ -205,7 +205,7 @@ export function MainWalletView({
               href={`https://www.unicity.network/address/${selectedAddress}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="p-2 rounded-lg bg-neutral-800 border border-neutral-700 hover:bg-neutral-700 text-neutral-300"
+              className="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors"
               title="View in explorer"
             >
               <ExternalLink className="w-4 h-4" />
@@ -227,27 +227,27 @@ export function MainWalletView({
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -10, scale: 0.95 }}
                   transition={{ duration: 0.2 }}
-                  className="absolute z-20 mt-2 w-full bg-neutral-900 border border-neutral-700 rounded-xl shadow-xl max-h-52 overflow-y-auto custom-scrollbar"
+                  className="absolute z-20 mt-2 w-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl max-h-52 overflow-y-auto custom-scrollbar"
                 >
                   {addresses.map((a) => (
                     <div
                       key={a}
-                      className={`flex items-center gap-2 px-3 py-2 hover:bg-neutral-800 transition-colors cursor-pointer ${
-                        a === selectedAddress ? "bg-neutral-800/50" : ""
+                      className={`flex items-center gap-2 px-3 py-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer ${
+                        a === selectedAddress ? "bg-neutral-100 dark:bg-neutral-800/50" : ""
                       }`}
                       onClick={() => {
                         onSelectAddress(a);
                         setShowDropdown(false);
                       }}
                     >
-                      <span className="flex-1 text-left text-xs text-neutral-200 font-mono truncate">
+                      <span className="flex-1 text-left text-xs text-neutral-700 dark:text-neutral-200 font-mono truncate">
                         {a}
                       </span>
                       <a
                         href={`https://www.unicity.network/address/${a}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="p-1 text-blue-400 hover:text-blue-300 transition-colors"
+                        className="p-1 text-blue-500 dark:text-blue-400 hover:text-blue-400 dark:hover:text-blue-300 transition-colors"
                         title="View in explorer"
                         onClick={(e) => e.stopPropagation()}
                       >
@@ -265,7 +265,7 @@ export function MainWalletView({
       {/* Balance */}
       <div className="px-6 mb-4">
         <div className="flex items-center gap-2 mb-1">
-          <p className="text-xs text-blue-300/70">Mainnet Balance</p>
+          <p className="text-xs text-blue-500/70 dark:text-blue-300/70">Mainnet Balance</p>
           <span className="flex h-2 w-2 relative">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
@@ -279,7 +279,7 @@ export function MainWalletView({
             animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
             exit={{ opacity: 0, y: 20, filter: "blur(10px)" }}
             transition={{ type: "spring", duration: 0.6, bounce: 0.2 }}
-            className="text-3xl text-white font-bold tracking-tight"
+            className="text-3xl text-neutral-900 dark:text-white font-bold tracking-tight"
           >
             <AnimatedBalance value={balance} show={showBalances} />
           </motion.h2>
@@ -353,11 +353,11 @@ export function MainWalletView({
             transition={{ type: "spring", duration: 0.3, bounce: 0.1 }}
             className="px-6 mb-4"
           >
-            <div className="flex flex-col gap-3 bg-neutral-900/50 p-4 rounded-xl border border-neutral-800/50 backdrop-blur-sm">
+            <div className="flex flex-col gap-3 bg-neutral-100/50 dark:bg-neutral-900/50 p-4 rounded-xl border border-neutral-200/50 dark:border-neutral-800/50 backdrop-blur-sm">
               <div className="relative">
                 <input
                   placeholder="Destination Address"
-                  className="w-full px-3 py-2 bg-neutral-800/50 rounded-lg text-neutral-200 border border-neutral-700/50 focus:border-green-500 focus:bg-neutral-800 outline-none transition-all"
+                  className="w-full px-3 py-2 bg-neutral-200/50 dark:bg-neutral-800/50 rounded-lg text-neutral-800 dark:text-neutral-200 placeholder-neutral-400 dark:placeholder-neutral-500 border border-neutral-300/50 dark:border-neutral-700/50 focus:border-green-500 focus:bg-neutral-200 dark:focus:bg-neutral-800 outline-none transition-all"
                   value={destination}
                   onChange={(e) => setDestination(e.target.value)}
                 />
@@ -368,7 +368,7 @@ export function MainWalletView({
                   placeholder="Amount (ALPHA)"
                   type="number"
                   step="any"
-                  className="w-full px-3 py-2 pr-32 bg-neutral-800/50 rounded-lg text-neutral-200 border border-neutral-700/50 focus:border-green-500 focus:bg-neutral-800 outline-none transition-all"
+                  className="w-full px-3 py-2 pr-32 bg-neutral-200/50 dark:bg-neutral-800/50 rounded-lg text-neutral-800 dark:text-neutral-200 placeholder-neutral-400 dark:placeholder-neutral-500 border border-neutral-300/50 dark:border-neutral-700/50 focus:border-green-500 focus:bg-neutral-200 dark:focus:bg-neutral-800 outline-none transition-all"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                 />
@@ -379,7 +379,7 @@ export function MainWalletView({
                       const filteredBalance = Number(vestingState.getBalance(selectedAddress)) / 1e8;
                       setAmount(String(Math.floor(filteredBalance * 0.25 * 1e8) / 1e8));
                     }}
-                    className="px-2 py-1 text-[10px] font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-300 rounded transition-colors"
+                    className="px-2 py-1 text-[10px] font-medium bg-neutral-300 dark:bg-neutral-700 hover:bg-neutral-400 dark:hover:bg-neutral-600 text-neutral-600 dark:text-neutral-300 rounded transition-colors"
                   >
                     25%
                   </button>
@@ -389,7 +389,7 @@ export function MainWalletView({
                       const filteredBalance = Number(vestingState.getBalance(selectedAddress)) / 1e8;
                       setAmount(String(Math.floor(filteredBalance * 0.5 * 1e8) / 1e8));
                     }}
-                    className="px-2 py-1 text-[10px] font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-300 rounded transition-colors"
+                    className="px-2 py-1 text-[10px] font-medium bg-neutral-300 dark:bg-neutral-700 hover:bg-neutral-400 dark:hover:bg-neutral-600 text-neutral-600 dark:text-neutral-300 rounded transition-colors"
                   >
                     50%
                   </button>
@@ -429,7 +429,7 @@ export function MainWalletView({
               onClick={onShowHistory}
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.99 }}
-              className="w-full px-4 py-2.5 rounded-xl bg-neutral-800/50 text-neutral-300 text-sm border border-neutral-700/50 flex items-center justify-center gap-2 hover:bg-neutral-800 hover:text-white transition-colors"
+              className="w-full px-4 py-2.5 rounded-xl bg-neutral-100/50 dark:bg-neutral-800/50 text-neutral-600 dark:text-neutral-300 text-sm border border-neutral-200/50 dark:border-neutral-700/50 flex items-center justify-center gap-2 hover:bg-neutral-200 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-white transition-colors"
             >
               <History className="w-4 h-4" />
               Transaction History
@@ -442,7 +442,7 @@ export function MainWalletView({
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3 }}
-        className="mt-auto px-6 pb-6 pt-4 flex items-center justify-between border-t border-neutral-800/50"
+        className="mt-auto px-6 pb-6 pt-4 flex items-center justify-between border-t border-neutral-200/50 dark:border-neutral-800/50"
       >
         <motion.button
           whileHover={{ scale: 1.05, x: 2 }}

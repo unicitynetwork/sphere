@@ -23,7 +23,7 @@ export function TokenRow({ token, delay }: TokenRowProps) {
       initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: delay }}
-      className="p-3 rounded-xl bg-neutral-800/30 border border-white/5 hover:border-white/10 transition-all group"
+      className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/30 border border-neutral-200/50 dark:border-white/5 hover:border-neutral-300 dark:hover:border-white/10 transition-all group"
     >
       <div className="flex items-center justify-between">
 
@@ -33,16 +33,16 @@ export function TokenRow({ token, delay }: TokenRowProps) {
             {token.iconUrl ? (
               <img src={token.iconUrl} alt={token.symbol} className="w-full h-full object-cover" />
             ) : (
-              <Box className="w-5 h-5 text-neutral-500" />
+              <Box className="w-5 h-5 text-neutral-400 dark:text-neutral-500" />
             )}
           </div>
 
           <div>
-            <div className="text-white font-medium text-sm">
+            <div className="text-neutral-900 dark:text-white font-medium text-sm">
               {token.symbol}
             </div>
             <div
-              className="flex items-center gap-1 text-[10px] text-neutral-500 font-mono cursor-pointer hover:text-orange-400 transition-colors"
+              className="flex items-center gap-1 text-[10px] text-neutral-500 font-mono cursor-pointer hover:text-orange-500 dark:hover:text-orange-400 transition-colors"
               onClick={handleCopyId}
             >
               <span>ID: {token.id.slice(0, 8)}...</span>
@@ -53,10 +53,10 @@ export function TokenRow({ token, delay }: TokenRowProps) {
 
         {/* Right: UTXO Badge */}
         <div className="flex flex-col items-end gap-1">
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-neutral-700/50 text-neutral-400 border border-neutral-700">
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-700/50 text-neutral-500 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700">
             Token
           </span>
-          <span className="text-[10px] text-neutral-600">
+          <span className="text-[10px] text-neutral-400 dark:text-neutral-600">
             {new Date(token.timestamp).toLocaleDateString()}
           </span>
         </div>
