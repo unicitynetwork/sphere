@@ -66,11 +66,11 @@ export function WalletPanel() {
 
             {/* Sliding Indicator */}
             <motion.div
-                className={`absolute top-1 bottom-1 left-1 right-1 rounded-lg shadow-lg ${activeLayer === 'L3' ? 'bg-linear-to-r from-orange-500 to-orange-600' : 'bg-linear-to-r from-blue-600 to-blue-700'}`}
+                className={`absolute top-1 bottom-1 rounded-lg shadow-lg ${activeLayer === 'L3' ? 'bg-linear-to-r from-orange-500 to-orange-600' : 'bg-linear-to-r from-blue-600 to-blue-700'}`}
                 initial={false}
                 animate={{
-                    left: activeLayer === 'L1' ? '4px' : 'calc(50% + 2px)',
-                    right: activeLayer === 'L1' ? 'calc(50% + 2px)' : '4px'
+                    x: activeLayer === 'L1' ? '0%' : '100%',
+                    width: '50%'
                 }}
                 transition={{ type: "spring", stiffness: 300, damping: 30 }}
             />

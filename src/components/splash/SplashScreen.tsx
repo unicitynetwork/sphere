@@ -15,13 +15,43 @@ export function SplashScreen({ onEnter }: SplashScreenProps) {
       onClick={onEnter}
     >
       {/* Simplified background orbs - reduced blur and size on mobile */}
-      <div
-        className="absolute top-1/4 left-1/4 w-48 h-48 md:w-96 md:h-96 bg-orange-500/20 rounded-full blur-2xl md:blur-3xl will-change-transform"
-        style={{ animation: 'pulse-slow 4s ease-in-out infinite' }}
+      <motion.div
+        className="absolute top-1/4 left-1/4 w-48 h-48 md:w-96 md:h-96 bg-orange-500/20 rounded-full blur-2xl md:blur-3xl"
+        animate={{
+          scale: [1, 1.2, 1],
+          opacity: [0.2, 0.3, 0.2],
+        }}
+        transition={{
+          duration: 4,
+          repeat: Infinity,
+          ease: "easeInOut"
+        }}
       />
-      <div
-        className="absolute bottom-1/4 right-1/4 w-48 h-48 md:w-96 md:h-96 bg-purple-500/20 rounded-full blur-2xl md:blur-3xl will-change-transform"
-        style={{ animation: 'pulse-slow 5s ease-in-out infinite 1s' }}
+      <motion.div
+        className="absolute bottom-1/4 right-1/4 w-48 h-48 md:w-96 md:h-96 bg-purple-500/20 rounded-full blur-2xl md:blur-3xl "
+        animate={{
+          scale: [1, 1.3, 1],
+          opacity: [0.2, 0.3, 0.2],
+        }}
+        transition={{
+          duration: 5,
+          repeat: Infinity,
+          ease: "easeInOut",
+          delay: 1
+        }}
+      />
+      <motion.div
+        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] md:w-[600px] md:h-[600px] bg-orange-500/10 rounded-full blur-3xl will-change-transform"
+        animate={{
+          scale: [1, 1.2, 1],
+          rotate: [0, 180, 360],
+        }}
+        transition={{
+          duration: 20,
+          repeat: Infinity,
+          ease: "easeInOut"
+        }}
+        style={{ backfaceVisibility: 'hidden', perspective: 1000 }}
       />
 
       {/* Main content container */}
@@ -42,24 +72,57 @@ export function SplashScreen({ onEnter }: SplashScreenProps) {
 
             {/* Logo text */}
             <div className="relative flex items-center justify-center gap-0 flex-wrap">
-              {/* AGENT text */}
-              <span
-                className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl text-white tracking-tight"
-                style={{ fontFamily: 'system-ui, -apple-system, sans-serif', fontWeight: 900 }}
+              <motion.div
+                className="relative"
+                animate={{
+                  textShadow: [
+                    "0 0 20px rgba(255, 255, 255, 0.3)",
+                    "0 0 30px rgba(255, 255, 255, 0.5)",
+                    "0 0 20px rgba(255, 255, 255, 0.3)",
+                  ],
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }}
               >
-                AGENT
-              </span>
+                {/* AGENT text */}
+                <span
+                  className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl text-white tracking-tight"
+                  style={{ fontFamily: 'system-ui, -apple-system, sans-serif', fontWeight: 900 }}
+                >
+                  AGENT
+                </span>
+              </motion.div>
+
 
               {/* SPHERE text with gradient */}
-              <motion.span
-                className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl bg-linear-to-r from-orange-500 via-orange-400 to-orange-600 bg-clip-text text-transparent tracking-tight"
-                style={{ fontFamily: 'system-ui, -apple-system, sans-serif', fontWeight: 900 }}
+              <motion.div
+                className="relative"
                 initial={{ x: -20, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
+                animate={{
+                  x: 0,
+                  opacity: 1,
+                }}
                 transition={{ duration: 0.8, delay: 0.3 }}
               >
-                SPHERE
-              </motion.span>
+                <motion.span
+                  className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl bg-linear-to-r from-orange-500 via-orange-400 to-orange-600 bg-clip-text text-transparent tracking-tight"
+                  style={{
+                    fontFamily: 'system-ui, -apple-system, sans-serif',
+                    fontWeight: 900,
+                  }}
+                  animate={{
+                    backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'],
+                  }}
+                  transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
+
+                >
+                  SPHERE
+                </motion.span>
+              </motion.div>
+
             </div>
           </motion.div>
 

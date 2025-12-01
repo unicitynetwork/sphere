@@ -174,7 +174,7 @@ export class NostrService {
   }
 
   paidPaymentRequest(request: IncomingPaymentRequest) {
-    this.updateRequestStatus(request.id, PaymentRequestStatus.PAID)
+    this.updateRequestStatus(request.id, PaymentRequestStatus.PAID);
   }
 
   clearPaymentRequest(requestId: string) {
@@ -183,7 +183,9 @@ export class NostrService {
   }
 
   clearProcessedPaymentRequests() {
-    const currentList = this.paymentRequests.filter((p) => p.status === PaymentRequestStatus.PENDING);
+    const currentList = this.paymentRequests.filter(
+      (p) => p.status === PaymentRequestStatus.PENDING
+    );
     this.paymentRequests = currentList;
   }
 
@@ -196,7 +198,7 @@ export class NostrService {
   }
 
   getPaymentRequests(): IncomingPaymentRequest[] {
-      return this.paymentRequests;
+    return this.paymentRequests;
   }
 
   private async handleTokenTransfer(event: Event) {
@@ -456,13 +458,20 @@ export class NostrService {
 
   async sendTokenTransfer(
     recipientPubkey: string,
-    payloadJson: string
+    payloadJson: string,
+    amount?: bigint,
+    symbol?: string,
+    replyToEventId?: string
   ): Promise<boolean> {
     if (!this.client) await this.start();
 
     try {
       console.log(`Sending token transfer to ${recipientPubkey}...`);
-      await this.client?.sendTokenTransfer(recipientPubkey, payloadJson);
+      await this.client?.sendTokenTransfer(recipientPubkey, payloadJson, {
+        amount,
+        symbol,
+        replyToEventId,
+      });
       return true;
     } catch (error) {
       console.error("Failed to send token transfer", error);
