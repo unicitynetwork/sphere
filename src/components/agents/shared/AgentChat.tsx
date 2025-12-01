@@ -144,13 +144,14 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     currentStatus,
     sendMessage,
     stopGeneration,
+    agentMode,
   } = useAgentChat({
     activityId: agent.backendActivityId || agent.id,
     userId: identity?.address,
   });
 
-  // Determine if we're in mock mode (sidebar agents use mock, others use real backend)
-  const useMockMode = !!getMockResponse;
+  // Determine if we're in mock mode based on VITE_AGENT_MODE env variable
+  const useMockMode = agentMode === 'mock';
   const isTyping = useMockMode ? isMockTyping : isStreaming;
 
   // Copy message content
