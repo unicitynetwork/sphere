@@ -41,7 +41,7 @@ function CodeBlock({ code, language, keyPrefix }: { code: string; language?: str
   );
 }
 
-// Parse inline markdown and HTML (bold, italic, code, br, links)
+// Parse inline markdown and HTML (bold, italic, code, br, links, images)
 function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
   let key = 0;
@@ -51,7 +51,8 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   // 5: <br> or <br/>, 6: <b>text</b>, 7: <strong>text</strong>
   // 8: <i>text</i>, 9: <em>text</em>, 10: <code>text</code>
   // 11: <a href="url">text</a>, 12: [text](url) markdown links
-  const regex = /(\*\*(.+?)\*\*|\*([^*]+?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(([^)]+)\))/gi;
+  // 15: ![alt](url) markdown images (including base64 data URLs)
+  const regex = /(\*\*(.+?)\*\*|\*([^*]+?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(([^)]+)\)|!\[([^\]]*)\]\(([^)]+)\))/gi;
   let lastIndex = 0;
   let match;
 
@@ -111,6 +112,19 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
         <a key={`${keyPrefix}-link-${key++}`} href={match[14]} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline">
           {match[13]}
         </a>
+      );
+    } else if (match[16]) {
+      // ![alt](url) markdown image (supports base64 data URLs)
+      const alt = match[15] || 'image';
+      const src = match[16];
+      parts.push(
+        <img
+          key={`${keyPrefix}-img-${key++}`}
+          src={src}
+          alt={alt}
+          className="max-w-full h-auto rounded-lg my-2 border border-neutral-700/50"
+          loading="lazy"
+        />
       );
     }
 
