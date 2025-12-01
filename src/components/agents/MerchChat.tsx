@@ -70,6 +70,12 @@ export function MerchChat({ agent }: MerchChatProps) {
         merchItems.map(item => `- **${item.name}** - $${item.price}`).join('\n') +
         "\n\nAsk me about any item for details!"
       );
+    } else if (userInput.includes('test') || userInput.includes('image') || userInput.includes('base64')) {
+      // Demo: base64 image - colorful 100x60 gradient (purple to orange)
+      const base64Demo = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiM4QjVDRjYiLz48c3RvcCBvZmZzZXQ9IjUwJSIgc3RvcC1jb2xvcj0iI0VDNDg5OSIvPjxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iI0Y5NzMxNiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIyMDAiIGhlaWdodD0iMTAwIiBmaWxsPSJ1cmwoI2cpIiByeD0iMTIiLz48dGV4dCB4PSIxMDAiIHk9IjU1IiBmb250LWZhbWlseT0ic3lzdGVtLXVpIiBmb250LXNpemU9IjIwIiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPlNwaGVyZTwvdGV4dD48L3N2Zz4=';
+      addMessage(
+        "**Test: Base64 Image in Markdown**\n\nHere's an image rendered from base64:\n\n![Sphere Logo](" + base64Demo + ")\n\nThis works with any `data:image/...;base64,...` URL!"
+      );
     } else {
       addMessage(
         "I can help you find the perfect merch!\n\nWe have:\n- Clothing (hoodies, t-shirts)\n- Accessories (caps, mugs)\n\nJust tell me what you're looking for!"
