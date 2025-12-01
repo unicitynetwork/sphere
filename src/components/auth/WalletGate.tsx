@@ -11,39 +11,31 @@ interface WalletGateProps {
 function AnimatedBackground() {
   return (
     <>
-      {/* Animated orbs - centered with transform to prevent clipping */}
-      <div
-        className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 md:w-96 md:h-96 bg-orange-500/20 rounded-full blur-2xl md:blur-3xl will-change-transform"
-        style={{ animation: "pulse-slow 4s ease-in-out infinite" }}
-      />
-      <div
-        className="absolute bottom-1/3 left-1/2 -translate-x-1/2 translate-y-1/2 w-64 h-64 md:w-96 md:h-96 bg-purple-500/20 rounded-full blur-2xl md:blur-3xl will-change-transform"
-        style={{ animation: "pulse-slow 5s ease-in-out infinite 1s" }}
-      />
-
-      {/* Mesh gradient overlay */}
-      <div
-        className="absolute inset-0 opacity-20 md:opacity-30 pointer-events-none"
-        style={{
-          backgroundImage: `
-            radial-gradient(at 20% 30%, rgba(251, 146, 60, 0.15) 0px, transparent 50%),
-            radial-gradient(at 80% 70%, rgba(168, 85, 247, 0.15) 0px, transparent 50%)
-          `,
+      <motion.div
+        className="absolute top-1/4 right-1/4 w-64 h-64 bg-orange-500/20 rounded-full blur-3xl pointer-events-none"
+        animate={{
+          scale: [1, 1.2, 1],
+          opacity: [0.2, 0.3, 0.2],
+        }}
+        transition={{
+          duration: 4,
+          repeat: Infinity,
+          ease: "easeInOut"
         }}
       />
-
-      {/* CSS animation */}
-      <style>{`
-        @keyframes pulse-slow {
-          0%, 100% { transform: scale(1); opacity: 0.2; }
-          50% { transform: scale(1.15); opacity: 0.3; }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .will-change-transform {
-            animation: none !important;
-          }
-        }
-      `}</style>
+      <motion.div
+        className="absolute bottom-1/4 left-1/4 w-64 h-64 bg-purple-500/20 rounded-full blur-3xl pointer-events-none"
+        animate={{
+          scale: [1, 1.3, 1],
+          opacity: [0.2, 0.3, 0.2],
+        }}
+        transition={{
+          duration: 5,
+          repeat: Infinity,
+          ease: "easeInOut",
+          delay: 1
+        }}
+      />
     </>
   );
 }

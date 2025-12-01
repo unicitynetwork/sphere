@@ -48,34 +48,7 @@ export function CreateWalletFlow() {
   }
 
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center p-4 md:p-8 text-center overflow-hidden">
-      {/* Animated Background Orbs */}
-      <motion.div
-        className="absolute top-1/4 right-1/4 w-64 h-64 bg-orange-500/20 rounded-full blur-3xl pointer-events-none"
-        animate={{
-          scale: [1, 1.2, 1],
-          opacity: [0.2, 0.3, 0.2],
-        }}
-        transition={{
-          duration: 4,
-          repeat: Infinity,
-          ease: "easeInOut"
-        }}
-      />
-      <motion.div
-        className="absolute bottom-1/4 left-1/4 w-64 h-64 bg-purple-500/20 rounded-full blur-3xl pointer-events-none"
-        animate={{
-          scale: [1, 1.3, 1],
-          opacity: [0.2, 0.3, 0.2],
-        }}
-        transition={{
-          duration: 5,
-          repeat: Infinity,
-          ease: "easeInOut",
-          delay: 1
-        }}
-      />
-
+    <div className="flex flex-col items-center justify-center p-4 md:p-8 text-center relative">
       <AnimatePresence mode="wait">
 
         {step === 'start' && (
