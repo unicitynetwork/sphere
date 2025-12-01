@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowRight,
+  ArrowLeftRight,
   X,
   AlertTriangle,
   CheckCircle,
@@ -257,7 +258,7 @@ export function BridgeModal({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="absolute inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4"
         onClick={onClose}
       >
         <motion.div
@@ -265,13 +266,15 @@ export function BridgeModal({
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.9, opacity: 0, y: 20 }}
           transition={{ type: "spring", duration: 0.4 }}
-          className="bg-neutral-900 p-6 rounded-xl w-full max-w-md border border-purple-900/50 shadow-2xl relative max-h-[90vh] overflow-y-auto"
+          className="bg-neutral-900 p-4 sm:p-6 rounded-xl w-full max-w-md border border-purple-900/50 shadow-2xl relative max-h-[85vh] overflow-y-auto"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-white text-xl font-bold flex items-center gap-2">
-              <span className="text-2xl">🌉</span>
+              <div className="w-8 h-8 rounded-full bg-linear-to-br from-purple-500 to-blue-500 flex items-center justify-center">
+                <ArrowLeftRight className="w-4 h-4 text-white" />
+              </div>
               Bridge to L3
             </h3>
             <button
