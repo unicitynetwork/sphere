@@ -11,10 +11,10 @@ export function ThemeToggle() {
       whileHover={{ scale: 1.05, y: -2 }}
       whileTap={{ scale: 0.95 }}
       transition={{ duration: 0.05 }}
-      className="relative p-3 rounded-xl transition-all group bg-transparent hover:bg-theme-bg-tertiary dark:hover:bg-neutral-800/80"
+      className="relative p-2 sm:p-2.5 lg:p-3 rounded-lg sm:rounded-xl transition-all group bg-transparent hover:bg-theme-bg-tertiary dark:hover:bg-neutral-800/80"
       aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
     >
-      <div className="relative w-5 h-5">
+      <div className="relative w-4 h-4 sm:w-5 sm:h-5">
         <motion.div
           initial={false}
           animate={{
@@ -25,7 +25,7 @@ export function ThemeToggle() {
           transition={{ duration: 0.2 }}
           className="absolute inset-0 flex items-center justify-center"
         >
-          <Moon className="w-5 h-5 text-theme-text-secondary group-hover:text-orange-400 transition-colors" />
+          <Moon className="w-4 h-4 sm:w-5 sm:h-5 text-theme-text-secondary group-hover:text-orange-400 transition-colors" />
         </motion.div>
         <motion.div
           initial={false}
@@ -37,12 +37,12 @@ export function ThemeToggle() {
           transition={{ duration: 0.2 }}
           className="absolute inset-0 flex items-center justify-center"
         >
-          <Sun className="w-5 h-5 text-theme-text-secondary group-hover:text-orange-400 transition-colors" />
+          <Sun className="w-4 h-4 sm:w-5 sm:h-5 text-theme-text-secondary group-hover:text-orange-400 transition-colors" />
         </motion.div>
       </div>
 
       {/* Glow on hover */}
-      <div className="absolute inset-0 rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
+      <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
     </motion.button>
   );
 }

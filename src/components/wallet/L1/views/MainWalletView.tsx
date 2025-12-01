@@ -162,27 +162,27 @@ export function MainWalletView({
       />
 
       {/* Address Selector */}
-      <div className="px-6 mb-4">
+      <div className="px-3 sm:px-4 lg:px-6 mb-2 sm:mb-3">
         <div className="relative">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <button
               onClick={() => setShowDropdown((prev) => !prev)}
-              className="flex-1 bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 flex items-center justify-between hover:bg-neutral-200/50 dark:hover:bg-neutral-700/50 transition-colors"
+              className="flex-1 bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 flex items-center justify-between hover:bg-neutral-200/50 dark:hover:bg-neutral-700/50 transition-colors"
             >
-              <span className="font-mono text-sm">
+              <span className="font-mono text-xs sm:text-sm">
                 {selectedAddress.slice(0, 12) + "..." + selectedAddress.slice(-8)}
               </span>
-              <ChevronDown className={`w-4 h-4 text-neutral-500 dark:text-neutral-400 transition-transform ${showDropdown ? "rotate-180" : ""}`} />
+              <ChevronDown className={`w-3 h-3 sm:w-4 sm:h-4 text-neutral-500 dark:text-neutral-400 transition-transform ${showDropdown ? "rotate-180" : ""}`} />
             </button>
 
             <motion.button
               onClick={onNewAddress}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              className="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors"
+              className="p-1.5 sm:p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors"
               title="Generate new address"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </motion.button>
 
             <button
@@ -191,24 +191,24 @@ export function MainWalletView({
                 setCopied(true);
                 setTimeout(() => setCopied(false), 2000);
               }}
-              className={`p-2 rounded-lg border transition-colors ${
+              className={`p-1.5 sm:p-2 rounded-lg border transition-colors ${
                 copied
                   ? "bg-green-600 border-green-500 text-white"
                   : "bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
               }`}
               title={copied ? "Copied!" : "Copy address"}
             >
-              {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              {copied ? <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Copy className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
             </button>
 
             <a
               href={`https://www.unicity.network/address/${selectedAddress}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors"
+              className="p-1.5 sm:p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors"
               title="View in explorer"
             >
-              <ExternalLink className="w-4 h-4" />
+              <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </a>
           </div>
 
@@ -263,12 +263,12 @@ export function MainWalletView({
       </div>
 
       {/* Balance */}
-      <div className="px-6 mb-4">
-        <div className="flex items-center gap-2 mb-1">
-          <p className="text-xs text-blue-500/70 dark:text-blue-300/70">Mainnet Balance</p>
-          <span className="flex h-2 w-2 relative">
+      <div className="px-3 sm:px-4 lg:px-6 mb-2 sm:mb-3">
+        <div className="flex items-center gap-2 mb-0.5 sm:mb-1">
+          <p className="text-[10px] sm:text-xs text-blue-500/70 dark:text-blue-300/70">Mainnet Balance</p>
+          <span className="flex h-1.5 w-1.5 sm:h-2 sm:w-2 relative">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 sm:h-2 sm:w-2 bg-green-500"></span>
           </span>
         </div>
 
@@ -279,7 +279,7 @@ export function MainWalletView({
             animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
             exit={{ opacity: 0, y: 20, filter: "blur(10px)" }}
             transition={{ type: "spring", duration: 0.6, bounce: 0.2 }}
-            className="text-3xl text-neutral-900 dark:text-white font-bold tracking-tight"
+            className="text-2xl sm:text-3xl text-neutral-900 dark:text-white font-bold tracking-tight"
           >
             <AnimatedBalance value={balance} show={showBalances} />
           </motion.h2>
@@ -287,7 +287,7 @@ export function MainWalletView({
       </div>
 
       {/* Vesting Selector */}
-      <div className="px-6 mb-4">
+      <div className="px-3 sm:px-4 lg:px-6 mb-2 sm:mb-3">
         <VestingSelector
           address={selectedAddress}
           onModeChange={onVestingModeChange}
@@ -298,16 +298,16 @@ export function MainWalletView({
       </div>
 
       {/* Action Buttons */}
-      <div className="px-6 mb-4">
-        <div className="grid grid-cols-2 gap-3">
+      <div className="px-3 sm:px-4 lg:px-6 mb-2 sm:mb-3">
+        <div className="grid grid-cols-2 gap-2 sm:gap-3">
           <motion.button
             onClick={() => setShowQR(true)}
             whileHover={{ scale: 1.02, y: -2 }}
             whileTap={{ scale: 0.98 }}
-            className="relative px-4 py-3 rounded-xl bg-linear-to-br from-blue-500 to-blue-600 text-white text-sm shadow-xl shadow-blue-500/20 flex items-center justify-center gap-2 overflow-hidden group"
+            className="relative px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-linear-to-br from-blue-500 to-blue-600 text-white text-xs sm:text-sm shadow-xl shadow-blue-500/20 flex items-center justify-center gap-1.5 sm:gap-2 overflow-hidden group"
           >
             <div className="absolute inset-0 bg-linear-to-r from-transparent via-white/10 to-transparent translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000" />
-            <ArrowDownLeft className="w-4 h-4 relative z-10" />
+            <ArrowDownLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 relative z-10" />
             <span className="relative z-10">Receive</span>
           </motion.button>
 
@@ -315,29 +315,29 @@ export function MainWalletView({
             whileHover={{ scale: 1.02, y: -2 }}
             whileTap={{ scale: 0.98 }}
             onClick={() => setShowSendForm(!showSendForm)}
-            className="relative px-4 py-3 rounded-xl bg-linear-to-br from-green-600 to-green-700 text-white text-sm shadow-xl shadow-green-500/20 flex items-center justify-center gap-2 overflow-hidden group"
+            className="relative px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-linear-to-br from-green-600 to-green-700 text-white text-xs sm:text-sm shadow-xl shadow-green-500/20 flex items-center justify-center gap-1.5 sm:gap-2 overflow-hidden group"
           >
             <div className="absolute inset-0 bg-linear-to-r from-transparent via-white/10 to-transparent translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000" />
-            {showSendForm ? <X className="w-4 h-4 relative z-10" /> : <Send className="w-4 h-4 relative z-10" />}
+            {showSendForm ? <X className="w-3.5 h-3.5 sm:w-4 sm:h-4 relative z-10" /> : <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4 relative z-10" />}
             <span className="relative z-10">{showSendForm ? "Cancel" : "Send"}</span>
           </motion.button>
         </div>
       </div>
 
       {/* Bridge Button */}
-      <div className="px-6 mb-4">
+      <div className="px-3 sm:px-4 lg:px-6 mb-2 sm:mb-3">
         <motion.button
           onClick={() => setShowBridgeModal(true)}
           whileHover={{ scale: 1.01, y: -1 }}
           whileTap={{ scale: 0.99 }}
-          className="w-full relative px-4 py-3 rounded-xl bg-linear-to-r from-purple-600/80 to-blue-600/80 text-white text-sm border border-purple-500/30 flex items-center justify-center gap-2 overflow-hidden group hover:from-purple-500/80 hover:to-blue-500/80 transition-all"
+          className="w-full relative px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-linear-to-r from-purple-600/80 to-blue-600/80 text-white text-xs sm:text-sm border border-purple-500/30 flex items-center justify-center gap-1.5 sm:gap-2 overflow-hidden group hover:from-purple-500/80 hover:to-blue-500/80 transition-all"
         >
           <div className="absolute inset-0 bg-linear-to-r from-transparent via-white/5 to-transparent translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000" />
-          <ArrowRightLeft className="w-4 h-4 relative z-10" />
+          <ArrowRightLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 relative z-10" />
           <span className="relative z-10 font-medium">Bridge to L3</span>
-          <span className="relative z-10 text-xs text-purple-200/70 ml-1">(Demo)</span>
+          <span className="relative z-10 text-[10px] sm:text-xs text-purple-200/70 ml-1">(Demo)</span>
         </motion.button>
-        <p className="text-xs text-neutral-500 text-center mt-1.5">
+        <p className="text-[10px] sm:text-xs text-neutral-500 text-center mt-1">
           Clone L1 ALPHA tokens to L3 ALPHT for testing
         </p>
       </div>
@@ -423,15 +423,15 @@ export function MainWalletView({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
             transition={{ type: "spring", duration: 0.3, bounce: 0.1 }}
-            className="px-6 mb-4"
+            className="px-3 sm:px-4 lg:px-6 mb-2 sm:mb-3"
           >
             <motion.button
               onClick={onShowHistory}
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.99 }}
-              className="w-full px-4 py-2.5 rounded-xl bg-neutral-100/50 dark:bg-neutral-800/50 text-neutral-600 dark:text-neutral-300 text-sm border border-neutral-200/50 dark:border-neutral-700/50 flex items-center justify-center gap-2 hover:bg-neutral-200 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-white transition-colors"
+              className="w-full px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-neutral-100/50 dark:bg-neutral-800/50 text-neutral-600 dark:text-neutral-300 text-xs sm:text-sm border border-neutral-200/50 dark:border-neutral-700/50 flex items-center justify-center gap-1.5 sm:gap-2 hover:bg-neutral-200 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-white transition-colors"
             >
-              <History className="w-4 h-4" />
+              <History className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               Transaction History
             </motion.button>
           </motion.div>
@@ -442,13 +442,13 @@ export function MainWalletView({
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3 }}
-        className="mt-auto px-6 pb-6 pt-4 flex items-center justify-between border-t border-neutral-200/50 dark:border-neutral-800/50"
+        className="mt-auto px-3 sm:px-4 lg:px-6 pb-3 sm:pb-4 lg:pb-6 pt-2 sm:pt-3 flex items-center justify-between border-t border-neutral-200/50 dark:border-neutral-800/50"
       >
         <motion.button
           whileHover={{ scale: 1.05, x: 2 }}
           whileTap={{ scale: 0.95 }}
           onClick={() => setShowSaveModal(true)}
-          className="flex items-center gap-2 text-xs text-neutral-500 hover:text-blue-400 transition-colors group"
+          className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-neutral-500 hover:text-blue-400 transition-colors group"
         >
           <motion.div
             whileHover={{ y: -1 }}
@@ -463,7 +463,7 @@ export function MainWalletView({
           whileHover={{ scale: 1.05, x: -2 }}
           whileTap={{ scale: 0.95 }}
           onClick={() => setShowDeleteModal(true)}
-          className="flex items-center gap-2 text-xs text-neutral-500 hover:text-red-400 transition-colors group"
+          className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs text-neutral-500 hover:text-red-400 transition-colors group"
         >
           <motion.div
             whileHover={{ rotate: [0, -10, 10, -10, 0] }}
