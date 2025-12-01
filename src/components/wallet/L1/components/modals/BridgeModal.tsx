@@ -141,8 +141,6 @@ export function BridgeModal({
   const [status, setStatus] = useState<BridgeStatus>("idle");
   const [balanceInfo, setBalanceInfo] = useState<BalanceInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [txId, setTxId] = useState<string | null>(null);
-
   // Check balance when modal opens
   useEffect(() => {
     if (show && address) {
@@ -152,7 +150,6 @@ export function BridgeModal({
       setStatus("idle");
       setBalanceInfo(null);
       setError(null);
-      setTxId(null);
       setUnicityId("");
     }
   }, [show, address]);
@@ -234,7 +231,6 @@ export function BridgeModal({
 
       if (result.success) {
         setStatus("success");
-        setTxId(result.txId);
         if (onSuccess) {
           onSuccess(result.txId, result.amount);
         }
