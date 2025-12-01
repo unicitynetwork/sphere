@@ -133,8 +133,8 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
   const hasGreeted = useRef(false);
   const currentAgentId = useRef(agent.id);
 
-  // Get Unicity ID from wallet
-  const { identity } = useWallet();
+  // Get nametag from wallet for user identification
+  const { nametag } = useWallet();
 
   // Use the agent chat hook for streaming support
   const {
@@ -147,7 +147,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     agentMode,
   } = useAgentChat({
     activityId: agent.backendActivityId || agent.id,
-    userId: identity?.address,
+    userId: nametag ?? undefined,
   });
 
   // Determine if we're in mock mode based on VITE_AGENT_MODE env variable
