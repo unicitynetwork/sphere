@@ -2,6 +2,7 @@ import { ExternalLink } from 'lucide-react';
 import type { AgentConfig } from '../../config/activities';
 import { mockGames, type GameInfo } from '../../data/agentsMockData';
 import { AgentChat, type SidebarItem, type AgentMessage } from './shared';
+import { isMock } from '../../hooks/useAgentChat';
 
 interface GamesChatProps {
   agent: AgentConfig;
@@ -16,18 +17,20 @@ interface GamesCardData {
 type NoSidebarItem = SidebarItem;
 
 export function GamesChat({ agent }: GamesChatProps) {
-  // Process messages to attach game cards based on content
+  const isMockMode = isMock();
+
+  // Process messages to attach game cards based on content (only in mock mode)
   const processMessage = (
     message: AgentMessage<GamesCardData>
   ): AgentMessage<GamesCardData> => {
-    // Only process assistant messages without existing card data
-    if (message.role !== 'assistant' || message.cardData) {
+    // Only process assistant messages without existing card data, and only in mock mode
+    if (message.role !== 'assistant' || message.cardData || !isMockMode) {
       return message;
     }
 
     const content = message.content.toLowerCase();
 
-    // Check if we should attach game cards
+    // Check if we should attach game cards (mock mode only)
     if (content.includes('quake') || content.includes('poker') || content.includes('game')) {
       let games: GameInfo[] = [];
 

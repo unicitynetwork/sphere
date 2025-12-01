@@ -1,8 +1,6 @@
 import { Bell, Settings, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { getAgentMode } from '../../hooks/useAgentChat';
-
-const agentMode = getAgentMode();
+import { isMock } from '../../hooks/useAgentChat';
 
 export function Header() {
   return (
@@ -66,7 +64,7 @@ export function Header() {
             <div className="flex items-center gap-2">
               <h1 className="text-xl text-white bg-clip-text">AgentSphere</h1>
               <Sparkles className="w-4 h-4 text-orange-500 animate-pulse" />
-              {agentMode !== 'real' && (
+              {isMock() && (
                 <span className="px-2 py-0.5 rounded-full text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
                   DEMO
                 </span>
