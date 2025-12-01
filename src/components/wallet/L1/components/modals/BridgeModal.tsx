@@ -5,9 +5,8 @@ import {
   X,
   AlertTriangle,
   CheckCircle,
-  Loader2,
-  ExternalLink,
   Info,
+  Loader2,
 } from "lucide-react";
 import CryptoJS from "crypto-js";
 import elliptic from "elliptic";
@@ -418,8 +417,34 @@ export function BridgeModal({
             </motion.div>
           )}
 
+          {/* Loading State */}
+          {(status === "signing" || status === "minting") && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="mb-4 p-6 bg-purple-500/10 border border-purple-500/30 rounded-lg text-center"
+            >
+              <div className="relative w-16 h-16 mx-auto mb-4">
+                <motion.div
+                  className="absolute inset-0 border-4 border-purple-500/30 rounded-full"
+                />
+                <motion.div
+                  className="absolute inset-0 border-4 border-transparent border-t-purple-500 rounded-full"
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                />
+              </div>
+              <p className="text-purple-400 font-medium mb-1">
+                {status === "signing" ? "Signing transaction..." : "Minting tokens..."}
+              </p>
+              <p className="text-neutral-500 text-sm">
+                Please wait, this may take a moment
+              </p>
+            </motion.div>
+          )}
+
           {/* Success State */}
-          {status === "success" && txId && (
+          {status === "success" && (
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -427,78 +452,55 @@ export function BridgeModal({
             >
               <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-2" />
               <p className="text-green-400 font-bold mb-2">Bridge Successful!</p>
-              <p className="text-neutral-400 text-sm mb-3">
+              <p className="text-neutral-400 text-sm">
                 {balanceInfo?.amount} ALPHT minted to your L3 address
               </p>
-              <a
-                href={`https://explorer.unicity.network/tx/${txId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 text-sm"
-              >
-                View Transaction <ExternalLink className="w-3 h-3" />
-              </a>
             </motion.div>
           )}
 
           {/* Action Button */}
-          <div className="flex gap-3">
-            {status === "success" ? (
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={onClose}
-                className="flex-1 py-3 bg-neutral-700 hover:bg-neutral-600 rounded-xl text-white font-medium transition-colors"
-              >
-                Close
-              </motion.button>
-            ) : status === "available" ? (
-              <>
+          {status !== "signing" && status !== "minting" && (
+            <div className="flex gap-3">
+              {status === "success" ? (
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={onClose}
+                  className="flex-1 py-3 bg-green-600 hover:bg-green-500 rounded-xl text-white font-medium transition-colors"
+                >
+                  Done
+                </motion.button>
+              ) : status === "available" ? (
+                <>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={onClose}
+                    className="flex-1 py-3 bg-neutral-700 hover:bg-neutral-600 rounded-xl text-white font-medium transition-colors"
+                  >
+                    Cancel
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleBridge}
+                    className="flex-1 py-3 bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 rounded-xl text-white font-medium transition-colors flex items-center justify-center gap-2"
+                  >
+                    Bridge <ArrowRight className="w-4 h-4" />
+                  </motion.button>
+                </>
+              ) : (
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={onClose}
                   className="flex-1 py-3 bg-neutral-700 hover:bg-neutral-600 rounded-xl text-white font-medium transition-colors"
                 >
-                  Cancel
+                  Close
                 </motion.button>
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={handleBridge}
-                  disabled={status === "signing" || status === "minting"}
-                  className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 rounded-xl text-white font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {status === "signing" && (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Signing...
-                    </>
-                  )}
-                  {status === "minting" && (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Minting...
-                    </>
-                  )}
-                  {status === "available" && (
-                    <>
-                      Bridge <ArrowRight className="w-4 h-4" />
-                    </>
-                  )}
-                </motion.button>
-              </>
-            ) : (
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={onClose}
-                className="flex-1 py-3 bg-neutral-700 hover:bg-neutral-600 rounded-xl text-white font-medium transition-colors"
-              >
-                Close
-              </motion.button>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </motion.div>
       </motion.div>
     </AnimatePresence>
