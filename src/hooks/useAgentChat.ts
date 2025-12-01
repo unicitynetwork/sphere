@@ -17,10 +17,14 @@ interface UseAgentChatOptions {
   onMessage?: (message: ChatMessage) => void;
 }
 
+// Check if mock mode is enabled
+export function isMock(): boolean {
+  return import.meta.env.VITE_USE_MOCK_AGENTS === 'true';
+}
+
 // Get agent mode from env (default: real)
 export function getAgentMode(): 'mock' | 'real' {
-  const useMock = import.meta.env.VITE_USE_MOCK_AGENTS;
-  return useMock === 'true' ? 'mock' : 'real';
+  return isMock() ? 'mock' : 'real';
 }
 
 // Get API URL
