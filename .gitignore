@@ -24,3 +24,4 @@ agentic-chatbot-main
 *.sln
 *.sw?
 .env
+.env.production
