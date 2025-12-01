@@ -35,6 +35,7 @@ export function PaymentRequestsModal({ isOpen, onClose }: PaymentRequestsModalPr
         recipientNametag: req.recipientNametag,
         amount: req.amount.toString(),
         coinId: req.coinId,
+        eventId: req.id
       });
       paid(req);
     } catch (error: unknown) {
@@ -65,61 +66,79 @@ export function PaymentRequestsModal({ isOpen, onClose }: PaymentRequestsModalPr
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={handleSafeClose}
-            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-md"
+            className="fixed inset-0 z-100 bg-black/60 backdrop-blur-md"
           />
 
           {/* Modal Container */}
-          <div className="fixed inset-0 z-100 flex items-center justify-center p-4">
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={handleSafeClose}
-              className="absolute inset-0 bg-black/80 backdrop-blur-xl"
-            />
-
-            {/* Modal Container */}
+          <div className="fixed inset-0 z-100 flex items-center justify-center p-4 sm:p-6 pointer-events-none">
+            {/* Modal with animated background orbs */}
             <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              transition={{ type: "spring", bounce: 0.3, duration: 0.5 }}
-              className="relative w-full max-w-md bg-[#0a0a0a] border border-white/10 rounded-4xl shadow-2xl shadow-black flex flex-col max-h-[85vh] overflow-hidden"
+              transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+              className="relative w-full max-w-md max-h-[600px] bg-linear-to-br from-neutral-900/95 to-neutral-800/95 backdrop-blur-2xl border border-neutral-700/50 rounded-3xl shadow-2xl pointer-events-auto flex flex-col"
             >
-              {/* Header */}
-              <div className="px-6 py-5 border-b border-white/5 flex justify-between items-center bg-[#111]/50 backdrop-blur-md z-20">
+              {/* Background Orbs */}
+              <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
+
+              {/* Header - Fixed */}
+              <div className="relative shrink-0 px-6 py-4 border-b border-neutral-700/50 flex justify-between items-center z-20">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-white/5 border border-white/5 flex items-center justify-center">
+                  <motion.div
+                    whileHover={{ scale: 1.05 }}
+                    className="relative w-11 h-11 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-lg shadow-orange-500/30"
+                  >
                     <Receipt className="w-5 h-5 text-white" />
-                  </div>
+                  </motion.div>
                   <div>
-                    <h3 className="text-lg font-bold text-white leading-tight">Invoices</h3>
-                    <p className="text-xs text-neutral-500 font-medium">
-                      {pendingCount} pending requests
-                    </p>
+                    <h3 className="text-lg font-bold text-white leading-tight">Payment Requests</h3>
+                    {pendingCount > 0 && (
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="flex h-2 w-2 relative">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
+                        </span>
+                        <p className="text-xs text-orange-400 font-semibold">
+                          {pendingCount} pending
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
-                <button
+                <motion.button
+                  whileHover={{ scale: 1.1, rotate: 90 }}
+                  whileTap={{ scale: 0.9 }}
                   onClick={handleSafeClose}
                   disabled={isGlobalProcessing}
-                  className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors ${isGlobalProcessing
-                    ? 'bg-white/5 text-neutral-600 cursor-not-allowed'
-                    : 'bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white'
+                  className={`w-9 h-9 flex items-center justify-center rounded-xl transition-colors ${isGlobalProcessing
+                    ? 'bg-neutral-800/50 text-neutral-600 cursor-not-allowed'
+                    : 'bg-neutral-800/80 hover:bg-neutral-700/80 text-neutral-400 hover:text-white'
                     }`}
                 >
                   <X className="w-4 h-4" />
-                </button>
+                </motion.button>
               </div>
 
-              {/* Content */}
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4 bg-linear-to-b from-[#0a0a0a] to-black">
+              {/* Content - Scrollable */}
+              <div className="relative flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3 z-10 min-h-0">
                 {requests.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-center opacity-40 py-12">
-                    <div className="w-20 h-20 bg-white/5 rounded-3xl rotate-3 flex items-center justify-center mb-6 border border-white/5">
-                      <Sparkles className="w-10 h-10 text-white" />
-                    </div>
-                    <p className="text-white font-medium text-lg">No Invoices</p>
-                    <p className="text-neutral-500 text-sm mt-2 max-w-[200px]">
-                      Incoming payment requests will appear here.
+                  <div className="h-full min-h-[300px] flex flex-col items-center justify-center text-center py-12">
+                    <motion.div
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      transition={{ type: "spring", stiffness: 200, damping: 15 }}
+                      className="relative w-20 h-20 mb-6"
+                    >
+                      <div className="absolute inset-0 bg-orange-500/20 rounded-3xl blur-xl" />
+                      <div className="relative w-full h-full bg-neutral-800/80 rounded-3xl flex items-center justify-center border border-neutral-700/50">
+                        <Sparkles className="w-10 h-10 text-orange-400" />
+                      </div>
+                    </motion.div>
+                    <p className="text-white font-bold text-lg mb-2">No Requests</p>
+                    <p className="text-neutral-400 text-sm max-w-[220px] leading-relaxed">
+                      Incoming payment requests will appear here
                     </p>
                   </div>
                 ) : (
@@ -139,16 +158,18 @@ export function PaymentRequestsModal({ isOpen, onClose }: PaymentRequestsModalPr
                 )}
               </div>
 
-              {/* Footer */}
+              {/* Footer - Fixed */}
               {hasProcessed && (
-                <div className="p-4 border-t border-white/5 bg-[#0a0a0a] z-20">
-                  <button
+                <div className="relative shrink-0 p-4 border-t border-neutral-700/50 backdrop-blur-xl z-20">
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
                     onClick={clearProcessed}
                     disabled={isGlobalProcessing}
-                    className="w-full py-3 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-widest text-neutral-600 hover:text-red-500 hover:bg-red-500/5 rounded-xl transition-all disabled:opacity-50"
+                    className="w-full py-3 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider text-neutral-500 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all disabled:opacity-50 border border-neutral-700/50 hover:border-red-500/30"
                   >
                     <Trash2 className="w-4 h-4" /> Clear History
-                  </button>
+                  </motion.button>
                 </div>
               )}
             </motion.div>
@@ -194,57 +215,61 @@ function RequestCard({ req, error, onPay, onReject, isProcessing, isGlobalDisabl
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
       className={`relative rounded-2xl overflow-hidden border transition-all duration-300 ${isPending
-        ? 'bg-[#141414] border-white/10 shadow-lg shadow-black/50'
-        : 'bg-[#0a0a0a] border-white/5 opacity-60 grayscale-[0.5]'
+        ? 'bg-neutral-800/60 border-neutral-700/60 shadow-xl shadow-black/30 backdrop-blur-xl'
+        : 'bg-neutral-800/40 border-neutral-700/40 opacity-70'
         } ${isDisabled ? 'opacity-50 pointer-events-none' : ''}`}
     >
-      {/* Декоративный градиент сверху */}
+      {/* Decorative gradient top bar */}
       {isPending && (
-        <div className="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-orange-500 via-pink-500 to-purple-600 opacity-80" />
+        <div className="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-orange-500 via-orange-400 to-orange-600" />
       )}
 
       <div className="p-5">
         {/* Top: Info */}
-        <div className="flex justify-between items-start mb-6">
+        <div className="flex justify-between items-start mb-5">
           <div className="flex flex-col">
-            <span className="text-xs text-neutral-500 font-medium uppercase tracking-wider mb-1">Request From</span>
+            <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-1.5">From</span>
             <div className="flex items-center gap-2">
-              <span className="text-white font-medium">@{req.recipientNametag}</span>
+              <span className="text-white font-bold text-base">@{req.recipientNametag}</span>
             </div>
           </div>
-          <div className="bg-white/5 px-2 py-1 rounded-md text-[10px] text-neutral-500 font-mono">
+          <div className="bg-neutral-700/50 px-2.5 py-1 rounded-lg text-[10px] text-neutral-400 font-medium">
             {timeAgo}
           </div>
         </div>
 
         {/* Center: Amount */}
-        <div className="flex flex-col items-center justify-center py-2">
-          <div className="text-3xl font-black text-white tracking-tight flex items-baseline gap-1">
-            {amountDisplay} <span className="text-lg text-neutral-500 font-bold">{req.symbol}</span>
+        <div className="flex flex-col items-center justify-center py-3 mb-4">
+          <div className="text-4xl font-black text-white tracking-tight flex items-baseline gap-2">
+            {amountDisplay} <span className="text-xl text-orange-400 font-bold">{req.symbol}</span>
           </div>
           {req.message && (
-            <div className="mt-3 text-xs text-neutral-400 bg-neutral-900/50 px-3 py-1.5 rounded-lg border border-white/5">
-              "{req.message}"
-            </div>
+            <motion.div
+              initial={{ opacity: 0, y: -5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 text-xs text-neutral-300 bg-neutral-700/50 px-4 py-2 rounded-xl border border-neutral-600/50 backdrop-blur-sm max-w-full"
+            >
+              <span className="text-neutral-500">"</span>{req.message}<span className="text-neutral-500">"</span>
+            </motion.div>
           )}
         </div>
       </div>
 
       {/* Bottom: Actions */}
-      <div className="p-3 bg-[#0f0f0f]">
+      <div className="p-4 bg-neutral-900/50 border-t border-neutral-700/50 backdrop-blur-sm">
         {isPending ? (
           <div className="flex flex-col gap-3">
 
-            {/* ВЫВОД ОШИБКИ */}
+            {/* ERROR DISPLAY */}
             <AnimatePresence>
               {error && (
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
-                  className="flex items-center justify-center gap-2 text-red-500 text-xs bg-red-500/10 py-2 rounded-lg border border-red-500/20"
+                  className="flex items-center justify-center gap-2 text-red-400 text-xs font-semibold bg-red-500/10 py-2.5 rounded-xl border border-red-500/30"
                 >
-                  <AlertCircle className="w-3 h-3" />
+                  <AlertCircle className="w-3.5 h-3.5" />
                   {error}
                 </motion.div>
               )}
@@ -252,38 +277,40 @@ function RequestCard({ req, error, onPay, onReject, isProcessing, isGlobalDisabl
 
             <div className="grid grid-cols-[1fr_2fr] gap-3">
               <motion.button
-                whileHover={{ scale: 1.02, backgroundColor: "#222" }}
+                whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
                 onClick={onReject}
                 disabled={isGlobalDisabled}
-                className="py-3.5 rounded-xl font-bold text-xs bg-[#1a1a1a] text-neutral-400 hover:text-white border border-white/5 hover:border-white/10 transition-all"
+                className="py-3 rounded-xl font-bold text-xs bg-neutral-800/80 text-neutral-400 hover:text-white hover:bg-neutral-700/80 border border-neutral-700/60 hover:border-neutral-600 transition-all"
               >
                 Decline
               </motion.button>
 
               <motion.button
-                whileHover={{ scale: 1.02, filter: "brightness(1.1)" }}
+                whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
                 onClick={onPay}
                 disabled={isGlobalDisabled}
-                className="relative py-3.5 rounded-xl font-bold text-sm text-white bg-linear-to-r from-orange-500 to-orange-600 shadow-lg shadow-orange-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-70 disabled:shadow-none"
+                className="relative py-3 rounded-xl font-bold text-sm text-white bg-linear-to-r from-orange-500 to-orange-600 shadow-xl shadow-orange-500/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:shadow-none overflow-hidden group"
               >
-                {isProcessing ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" /> Processing
-                  </>
-                ) : (
-                  <>
-                    Pay Now <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
+                <div className="absolute inset-0 bg-linear-to-r from-orange-400 to-orange-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <span className="relative z-10 flex items-center gap-2">
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" /> Processing
+                    </>
+                  ) : (
+                    <>
+                      Pay Now <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </span>
               </motion.button>
             </div>
           </div>
         ) : (
           /* STATUS BADGE */
-          <div className={`flex items-center justify-center gap-2 py-2 text-xs font-bold uppercase tracking-wider ${currentStatus.color
-            }`}>
+          <div className={`flex items-center justify-center gap-2 py-2.5 text-xs font-bold uppercase tracking-wider rounded-lg ${currentStatus.bg} ${currentStatus.color} border ${currentStatus.border}`}>
             <StatusIcon className="w-4 h-4" />
             {currentStatus.label}
           </div>

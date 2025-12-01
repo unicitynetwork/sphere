@@ -33,6 +33,8 @@ jobs:
       - name: Build
         run: npm run build
         env:
+          VITE_AGENT_API_URL: https://sphere.unicity.network/api
+          VITE_AGENT_MODE: real
           VITE_AGGREGATOR_URL: https://goggregator-test.unicity.network
 
       - name: Setup Pages
