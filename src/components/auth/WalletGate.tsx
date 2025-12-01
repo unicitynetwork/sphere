@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import type { ReactNode } from "react";
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
 import { useWallet } from "../wallet/L3/hooks/useWallet";
