@@ -338,11 +338,17 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     );
   }
 
+  // Get private key for selected address
+  const selectedPrivateKey = wallet?.addresses.find(
+    (a) => a.address === selectedAddress
+  )?.privateKey ?? "";
+
   // Main view
   return (
     <div className="h-full">
       <MainWalletView
         selectedAddress={selectedAddress}
+        selectedPrivateKey={selectedPrivateKey}
         addresses={addresses}
         balance={balance}
         showBalances={showBalances}
