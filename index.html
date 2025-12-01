@@ -4,9 +4,21 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=overlays-content" />
+    <meta name="theme-color" content="#0a0a0a" />
     <title>unicity-agentsphere</title>
+    <script>
+      // Prevent FOUC by applying theme before React loads
+      (function() {
+        const stored = localStorage.getItem('sphere-theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = stored || (prefersDark ? 'dark' : 'light');
+        document.documentElement.classList.add(theme);
+        // Update body background immediately
+        document.body.style.backgroundColor = theme === 'dark' ? '#0a0a0a' : '#f5f5f5';
+      })();
+    </script>
   </head>
-  <body style="background-color: #0a0a0a; margin: 0;">
+  <body style="margin: 0;">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -390,16 +390,16 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
 
         {/* Sidebar */}
         <div className={`
-          w-56 border-r border-neutral-800/50 flex flex-col z-50 overflow-hidden
+          w-56 border-r border-neutral-200 dark:border-neutral-800/50 flex flex-col z-50 overflow-hidden
           fixed lg:relative inset-y-0 left-0
           transform transition-all duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
           ${sidebarCollapsed ? 'lg:w-0 lg:border-0 lg:min-w-0' : 'lg:w-56'}
-          bg-neutral-900/95 lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none
+          bg-white/95 dark:bg-neutral-900/95 lg:bg-transparent dark:lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none
         `}>
-          <div className="p-4 border-b border-neutral-800/50">
+          <div className="p-4 border-b border-neutral-200 dark:border-neutral-800/50">
             <div className="flex items-center justify-between">
-              <h3 className="text-white font-medium">{sidebarConfig.title}</h3>
+              <h3 className="text-neutral-900 dark:text-white font-medium">{sidebarConfig.title}</h3>
               <div className="flex items-center gap-2">
                 <motion.button
                   onClick={handleNewChat}
@@ -412,7 +412,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
                 {/* Collapse button for desktop */}
                 <motion.button
                   onClick={() => setSidebarCollapsed(true)}
-                  className="hidden lg:flex p-2 rounded-lg bg-neutral-800/50 text-neutral-400 hover:text-white hover:bg-neutral-700/50 transition-colors"
+                  className="hidden lg:flex p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
                   title="Collapse sidebar"
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
@@ -422,7 +422,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
                 {/* Close button for mobile */}
                 <motion.button
                   onClick={() => setSidebarOpen(false)}
-                  className="lg:hidden p-2 rounded-lg bg-neutral-800/50 text-neutral-400 hover:text-white hover:bg-neutral-700/50 transition-colors"
+                  className="lg:hidden p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
                 >
@@ -445,11 +445,11 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   onClick={() => handleItemClick(item)}
-                  className="p-3 rounded-xl bg-neutral-800/50 border border-neutral-700/30 cursor-pointer hover:bg-neutral-700/50 transition-colors group"
+                  className="p-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700/30 cursor-pointer hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors group"
                 >
                   <div className="flex items-center gap-3">
                     {sidebarConfig.renderItem(item)}
-                    <Eye className="w-4 h-4 text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <Eye className="w-4 h-4 text-neutral-400 dark:text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                 </motion.div>
               ))
@@ -522,7 +522,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
       </div>
 
       {/* Bottom section - always at bottom */}
-      <div className="bg-neutral-900/95 backdrop-blur-sm">
+      <div className="bg-white/95 dark:bg-neutral-900/95 backdrop-blur-sm theme-transition">
         {/* Quick actions */}
         {agent.quickActions && (
           <QuickActions
@@ -552,7 +552,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     <>
       {sidebarConfig ? (
         // With sidebar layout - use grid for proper height inheritance
-        <div className="bg-linear-to-br from-neutral-900/60 to-neutral-800/40 backdrop-blur-xl rounded-3xl border border-neutral-800/50 overflow-hidden grid grid-cols-[auto_1fr] relative shadow-2xl h-full min-h-0">
+        <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden grid grid-cols-[auto_1fr] relative shadow-xl dark:shadow-2xl h-full min-h-0 theme-transition">
           <div className={`absolute -top-20 -right-20 w-96 h-96 ${bgGradient.from} rounded-full blur-3xl`} />
           <div className={`absolute -bottom-20 -left-20 w-96 h-96 ${bgGradient.to} rounded-full blur-3xl`} />
           {renderSidebar()}
@@ -579,14 +579,14 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-neutral-900 border border-neutral-700 rounded-2xl p-6 max-w-md w-full"
+              className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl p-6 max-w-md w-full"
               onClick={e => e.stopPropagation()}
             >
               {transactionStep === 'confirm' && (
                 <>
                   <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-xl font-bold text-white">{transactionConfig.confirmTitle}</h3>
-                    <button onClick={() => setShowTransactionModal(false)} className="text-neutral-400 hover:text-white">
+                    <h3 className="text-xl font-bold text-neutral-900 dark:text-white">{transactionConfig.confirmTitle}</h3>
+                    <button onClick={() => setShowTransactionModal(false)} className="text-neutral-400 hover:text-neutral-900 dark:hover:text-white">
                       <X className="w-5 h-5" />
                     </button>
                   </div>
@@ -615,8 +615,8 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
                       <Wallet className="w-8 h-8 text-orange-500" />
                     </motion.div>
                   </div>
-                  <h3 className="text-xl font-bold text-white mb-2">Processing...</h3>
-                  <p className="text-neutral-400">{transactionConfig.processingText}</p>
+                  <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">Processing...</h3>
+                  <p className="text-neutral-500 dark:text-neutral-400">{transactionConfig.processingText}</p>
                 </div>
               )}
 
@@ -629,12 +629,12 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
                   >
                     <CheckCircle className="w-8 h-8 text-white" />
                   </motion.div>
-                  <h3 className="text-xl font-bold text-white mb-2">Success!</h3>
-                  <p className="text-neutral-400 mb-6">{transactionConfig.successText}</p>
+                  <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">Success!</h3>
+                  <p className="text-neutral-500 dark:text-neutral-400 mb-6">{transactionConfig.successText}</p>
 
                   <motion.button
                     onClick={handleCloseSuccessModal}
-                    className="w-full py-3 rounded-xl bg-neutral-800 text-white font-medium border border-neutral-700"
+                    className="w-full py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white font-medium border border-neutral-200 dark:border-neutral-700"
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                   >
@@ -661,12 +661,12 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-neutral-900 border border-neutral-700 rounded-2xl p-6 max-w-md w-full"
+              className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl p-6 max-w-md w-full"
               onClick={e => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-white">{detailsConfig.title}</h3>
-                <button onClick={() => setShowDetailsModal(false)} className="text-neutral-400 hover:text-white">
+                <h3 className="text-xl font-bold text-neutral-900 dark:text-white">{detailsConfig.title}</h3>
+                <button onClick={() => setShowDetailsModal(false)} className="text-neutral-400 hover:text-neutral-900 dark:hover:text-white">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -677,7 +677,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
                 {detailsConfig.renderActions && detailsConfig.renderActions(selectedItem, () => setShowDetailsModal(false))}
                 <motion.button
                   onClick={() => setShowDetailsModal(false)}
-                  className="w-full py-3 rounded-xl bg-neutral-800 text-white font-medium border border-neutral-700"
+                  className="w-full py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white font-medium border border-neutral-200 dark:border-neutral-700"
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                 >

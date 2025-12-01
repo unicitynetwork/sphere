@@ -43,7 +43,7 @@ export function SaveWalletModal({ show, onConfirm, onCancel }: SaveWalletModalPr
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-40 p-6"
+      className="fixed inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
       onClick={onCancel}
     >
       <motion.div
@@ -51,7 +51,7 @@ export function SaveWalletModal({ show, onConfirm, onCancel }: SaveWalletModalPr
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.9, opacity: 0, y: 20 }}
         transition={{ type: "spring", duration: 0.4 }}
-        className="bg-neutral-900 p-6 rounded-xl w-full max-w-md border border-neutral-700 shadow-2xl"
+        className="relative w-full max-w-md bg-white dark:bg-[#111] border border-neutral-200 dark:border-white/10 rounded-3xl shadow-2xl p-6 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <motion.div
@@ -73,8 +73,8 @@ export function SaveWalletModal({ show, onConfirm, onCancel }: SaveWalletModalPr
               <Shield className="w-6 h-6 text-blue-500" />
             </motion.div>
           </motion.div>
-          <h3 className="text-white text-xl font-bold mb-2">Backup Wallet</h3>
-          <p className="text-xs text-neutral-400">
+          <h3 className="text-neutral-900 dark:text-white text-xl font-bold mb-2">Backup Wallet</h3>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
             Export your wallet keys to a file. Keep this safe!
           </p>
         </motion.div>
@@ -86,7 +86,7 @@ export function SaveWalletModal({ show, onConfirm, onCancel }: SaveWalletModalPr
           placeholder="Filename"
           value={filename}
           onChange={(e) => setFilename(e.target.value)}
-          className="w-full mb-3 px-3 py-2 bg-neutral-800 rounded text-neutral-200 border border-neutral-700"
+          className="w-full mb-3 px-3 py-2 bg-neutral-100 dark:bg-neutral-800 rounded text-neutral-800 dark:text-neutral-200 placeholder-neutral-400 border border-neutral-200 dark:border-neutral-700 focus:border-blue-500 outline-none transition-colors"
         />
 
         <label className="text-xs text-neutral-500 mb-1 block">
@@ -97,7 +97,7 @@ export function SaveWalletModal({ show, onConfirm, onCancel }: SaveWalletModalPr
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full mb-3 px-3 py-2 bg-neutral-800 rounded text-neutral-200 border border-neutral-700"
+          className="w-full mb-3 px-3 py-2 bg-neutral-100 dark:bg-neutral-800 rounded text-neutral-800 dark:text-neutral-200 placeholder-neutral-400 border border-neutral-200 dark:border-neutral-700 focus:border-blue-500 outline-none transition-colors"
         />
 
         <input
@@ -105,7 +105,7 @@ export function SaveWalletModal({ show, onConfirm, onCancel }: SaveWalletModalPr
           type="password"
           value={passwordConfirm}
           onChange={(e) => setPasswordConfirm(e.target.value)}
-          className="w-full mb-4 px-3 py-2 bg-neutral-800 rounded text-neutral-200 border border-neutral-700"
+          className="w-full mb-4 px-3 py-2 bg-neutral-100 dark:bg-neutral-800 rounded text-neutral-800 dark:text-neutral-200 placeholder-neutral-400 border border-neutral-200 dark:border-neutral-700 focus:border-blue-500 outline-none transition-colors"
         />
 
         {error && (
@@ -124,7 +124,7 @@ export function SaveWalletModal({ show, onConfirm, onCancel }: SaveWalletModalPr
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={onCancel}
-            className="flex-1 py-2 bg-neutral-700 rounded text-white hover:bg-neutral-600 transition-colors"
+            className="flex-1 py-2 bg-neutral-200 dark:bg-neutral-700 rounded text-neutral-700 dark:text-white hover:bg-neutral-300 dark:hover:bg-neutral-600 transition-colors"
           >
             Cancel
           </motion.button>

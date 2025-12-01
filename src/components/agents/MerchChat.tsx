@@ -103,8 +103,8 @@ export function MerchChat({ agent }: MerchChatProps) {
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <p className="text-white text-sm font-medium truncate">{order.title}</p>
-              {order.amount && <p className="text-purple-400 text-xs">${order.amount}</p>}
+              <p className="text-neutral-900 dark:text-white text-sm font-medium truncate">{order.title}</p>
+              {order.amount && <p className="text-purple-600 dark:text-purple-400 text-xs">${order.amount}</p>}
               <p className="text-neutral-500 text-xs">{new Date(order.timestamp).toLocaleDateString()}</p>
             </div>
           </>
@@ -112,7 +112,7 @@ export function MerchChat({ agent }: MerchChatProps) {
       }}
       getMockResponse={getMockResponse}
       renderMessageCard={(cardData) => (
-        <div className="mt-4 rounded-xl overflow-hidden border border-neutral-600/50">
+        <div className="mt-4 rounded-xl overflow-hidden border border-neutral-300 dark:border-neutral-600/50">
           <img src={cardData.image} alt="" className="w-full h-28 object-cover" />
         </div>
       )}
@@ -126,11 +126,11 @@ export function MerchChat({ agent }: MerchChatProps) {
         successText: 'Order placed',
         renderConfirmContent: (cardData, onConfirm) => (
           <>
-            <div className="rounded-xl overflow-hidden border border-neutral-700 mb-4">
+            <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700 mb-4">
               <img src={cardData.image} alt="" className="w-full h-32 object-cover" />
-              <div className="p-4 bg-neutral-800">
-                <p className="text-white font-medium">{cardData.title}</p>
-                <p className="text-purple-400 text-lg font-bold mt-1">${cardData.price}</p>
+              <div className="p-4 bg-neutral-100 dark:bg-neutral-800">
+                <p className="text-neutral-900 dark:text-white font-medium">{cardData.title}</p>
+                <p className="text-purple-600 dark:text-purple-400 text-lg font-bold mt-1">${cardData.price}</p>
               </div>
             </div>
 
@@ -161,7 +161,7 @@ export function MerchChat({ agent }: MerchChatProps) {
       detailsConfig={{
         title: 'Order Details',
         renderContent: (order) => (
-          <div className="rounded-xl overflow-hidden border border-neutral-700">
+          <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700">
             {order.image ? (
               <img src={order.image} alt="" className="w-full h-40 object-cover" />
             ) : (
@@ -169,13 +169,13 @@ export function MerchChat({ agent }: MerchChatProps) {
                 <ImageIcon className="w-12 h-12 text-white/50" />
               </div>
             )}
-            <div className="p-4 bg-neutral-800">
-              <p className="text-white font-medium text-lg">{order.title}</p>
+            <div className="p-4 bg-neutral-100 dark:bg-neutral-800">
+              <p className="text-neutral-900 dark:text-white font-medium text-lg">{order.title}</p>
               {order.description && (
-                <p className="text-neutral-400 text-sm mt-2">{order.description}</p>
+                <p className="text-neutral-500 dark:text-neutral-400 text-sm mt-2">{order.description}</p>
               )}
               <div className="flex items-center justify-between mt-4">
-                <p className="text-purple-400 text-xl font-bold">${order.amount}</p>
+                <p className="text-purple-600 dark:text-purple-400 text-xl font-bold">${order.amount}</p>
                 <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                   order.status === 'completed' ? 'bg-green-500/20 text-green-400' :
                   order.status === 'cancelled' ? 'bg-red-500/20 text-red-400' :

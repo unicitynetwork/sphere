@@ -113,8 +113,8 @@ export function P2PChat({ agent }: P2PChatProps) {
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <p className="text-white text-sm font-medium truncate">{trade.title}</p>
-              {trade.amount && <p className="text-orange-400 text-xs">${trade.amount}</p>}
+              <p className="text-neutral-900 dark:text-white text-sm font-medium truncate">{trade.title}</p>
+              {trade.amount && <p className="text-orange-600 dark:text-orange-400 text-xs">${trade.amount}</p>}
               <p className="text-neutral-500 text-xs">{new Date(trade.timestamp).toLocaleDateString()}</p>
             </div>
           </>
@@ -122,7 +122,7 @@ export function P2PChat({ agent }: P2PChatProps) {
       }}
       getMockResponse={getMockResponse}
       renderMessageCard={(cardData) => (
-        <div className="mt-4 rounded-xl overflow-hidden border border-neutral-600/50">
+        <div className="mt-4 rounded-xl overflow-hidden border border-neutral-300 dark:border-neutral-600/50">
           <img src={cardData.image} alt="" className="w-full h-28 object-cover" />
         </div>
       )}
@@ -149,11 +149,11 @@ export function P2PChat({ agent }: P2PChatProps) {
         successText: 'Seller notified',
         renderConfirmContent: (cardData, onConfirm) => (
           <>
-            <div className="rounded-xl overflow-hidden border border-neutral-700 mb-4">
+            <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700 mb-4">
               <img src={cardData.image} alt="" className="w-full h-32 object-cover" />
-              <div className="p-4 bg-neutral-800">
-                <p className="text-white font-medium">{cardData.title}</p>
-                <p className="text-orange-400 text-lg font-bold mt-1">${cardData.price}</p>
+              <div className="p-4 bg-neutral-100 dark:bg-neutral-800">
+                <p className="text-neutral-900 dark:text-white font-medium">{cardData.title}</p>
+                <p className="text-orange-600 dark:text-orange-400 text-lg font-bold mt-1">${cardData.price}</p>
               </div>
             </div>
 
@@ -185,7 +185,7 @@ export function P2PChat({ agent }: P2PChatProps) {
       detailsConfig={{
         title: 'Trade Details',
         renderContent: (trade) => (
-          <div className="rounded-xl overflow-hidden border border-neutral-700">
+          <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700">
             {trade.image ? (
               <img src={trade.image} alt="" className="w-full h-40 object-cover" />
             ) : (
@@ -193,24 +193,24 @@ export function P2PChat({ agent }: P2PChatProps) {
                 <ImageIcon className="w-12 h-12 text-white/50" />
               </div>
             )}
-            <div className="p-4 bg-neutral-800">
-              <p className="text-white font-medium text-lg">{trade.title}</p>
+            <div className="p-4 bg-neutral-100 dark:bg-neutral-800">
+              <p className="text-neutral-900 dark:text-white font-medium text-lg">{trade.title}</p>
               {trade.description && (
-                <p className="text-neutral-400 text-sm mt-2">{trade.description}</p>
+                <p className="text-neutral-500 dark:text-neutral-400 text-sm mt-2">{trade.description}</p>
               )}
               {trade.seller && (
-                <div className="flex items-center gap-2 mt-3 p-2 bg-neutral-700/50 rounded-lg">
+                <div className="flex items-center gap-2 mt-3 p-2 bg-neutral-200 dark:bg-neutral-700/50 rounded-lg">
                   <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-medium">
                     {trade.seller.avatar}
                   </div>
                   <div>
-                    <p className="text-white text-sm font-medium">{trade.seller.name}</p>
-                    <p className="text-neutral-400 text-xs">Seller</p>
+                    <p className="text-neutral-900 dark:text-white text-sm font-medium">{trade.seller.name}</p>
+                    <p className="text-neutral-500 dark:text-neutral-400 text-xs">Seller</p>
                   </div>
                 </div>
               )}
               <div className="flex items-center justify-between mt-4">
-                <p className="text-orange-400 text-xl font-bold">${trade.amount}</p>
+                <p className="text-orange-600 dark:text-orange-400 text-xl font-bold">${trade.amount}</p>
                 <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                   trade.status === 'completed' ? 'bg-green-500/20 text-green-400' :
                   trade.status === 'cancelled' ? 'bg-red-500/20 text-red-400' :

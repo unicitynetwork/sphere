@@ -32,27 +32,27 @@ export function ChatSidebar({ chatMode, handleModeChange, users, onlineCount, se
 
       {/* Sidebar */}
       <div className={`
-        w-56 border-r border-neutral-800/50 flex flex-col z-50 overflow-hidden
+        w-56 border-r border-neutral-200 dark:border-neutral-800/50 flex flex-col z-50 overflow-hidden
         fixed lg:relative inset-y-0 left-0
         transform transition-all duration-300 ease-in-out
         ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         ${isCollapsed ? 'lg:w-0 lg:border-0 lg:min-w-0' : 'lg:w-56'}
-        bg-neutral-900/95 lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none
+        bg-white/95 dark:bg-neutral-900/95 lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none
       `}>
         {/* Mode Toggle Header */}
-        <div className="p-4 border-b border-neutral-800/50 bg-linear-to-br from-neutral-900/80 to-neutral-800/40 backdrop-blur-sm relative">
+        <div className="p-4 border-b border-neutral-200 dark:border-neutral-800/50 bg-linear-to-br from-white/80 dark:from-neutral-900/80 to-neutral-50/40 dark:to-neutral-800/40 backdrop-blur-sm relative">
           <div className="absolute top-0 right-0 w-24 h-24 bg-orange-500/5 rounded-bl-full" />
 
           <div className="flex items-center justify-between mb-3 relative z-10">
             <div className="flex items-center gap-2">
-              <h3 className="text-white font-medium">Messages</h3>
+              <h3 className="text-neutral-900 dark:text-white font-medium">Messages</h3>
               <Sparkles className="w-4 h-4 text-orange-500 animate-pulse" />
             </div>
             <div className="flex items-center gap-2">
               {/* Collapse button for desktop */}
               <motion.button
                 onClick={onCollapse}
-                className="hidden lg:flex p-2 rounded-lg bg-neutral-800/50 text-neutral-400 hover:text-white hover:bg-neutral-700/50 transition-colors border border-neutral-700/50"
+                className="hidden lg:flex p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
                 title="Collapse sidebar"
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
@@ -62,7 +62,7 @@ export function ChatSidebar({ chatMode, handleModeChange, users, onlineCount, se
               {/* Close button for mobile */}
               <motion.button
                 onClick={onClose}
-                className="lg:hidden p-2 rounded-lg bg-neutral-800/50 text-neutral-400 hover:text-white hover:bg-neutral-700/50 transition-colors border border-neutral-700/50"
+                className="lg:hidden p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
               >
@@ -76,7 +76,7 @@ export function ChatSidebar({ chatMode, handleModeChange, users, onlineCount, se
             <motion.button
               onClick={() => handleModeChange('global')}
               className={`px-4 py-3 rounded-xl text-sm transition-all relative overflow-hidden ${
-                chatMode === 'global' ? 'bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30' : 'bg-neutral-800/50 text-neutral-400 hover:bg-neutral-800 border border-neutral-700/50'
+                chatMode === 'global' ? 'bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30' : 'bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-700/50'
               }`}
             >
               {chatMode === 'global' && (<div className="absolute inset-0 bg-linear-to-tr from-white/0 via-white/20 to-white/0" />)}
@@ -88,7 +88,7 @@ export function ChatSidebar({ chatMode, handleModeChange, users, onlineCount, se
             <motion.button
               onClick={() => handleModeChange('dm')}
               className={`px-4 py-3 rounded-xl text-sm transition-all relative overflow-hidden ${
-                chatMode === 'dm' ? 'bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30' : 'bg-neutral-800/50 text-neutral-400 hover:bg-neutral-800 border border-neutral-700/50'
+                chatMode === 'dm' ? 'bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30' : 'bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-700/50'
               }`}
             >
               {chatMode === 'dm' && (<div className="absolute inset-0 bg-linear-to-tr from-white/0 via-white/20 to-white/0" />)}
@@ -107,13 +107,13 @@ export function ChatSidebar({ chatMode, handleModeChange, users, onlineCount, se
                   <div className="w-2 h-2 rounded-full bg-emerald-400">
                     <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                   </div>
-                  <span className="text-sm text-neutral-400">{totalOnlineCount} online</span>
+                  <span className="text-sm text-neutral-500 dark:text-neutral-400">{totalOnlineCount} online</span>
                 </div>
               </div>
               {/* Global Channel Card */}
               <motion.div
                 whileHover={{ scale: 1.02 }}
-                className="p-4 rounded-xl bg-linear-to-br from-neutral-800/60 to-neutral-900/60 backdrop-blur-sm border border-neutral-700/50 relative overflow-hidden group"
+                className="p-4 rounded-xl bg-linear-to-br from-neutral-50/60 dark:from-neutral-800/60 to-neutral-100/60 dark:to-neutral-900/60 backdrop-blur-sm border border-neutral-200/50 dark:border-neutral-700/50 relative overflow-hidden group"
                 onClick={() => handleModeChange('global')}
               >
                 {/* Hover glow */}
@@ -122,9 +122,9 @@ export function ChatSidebar({ chatMode, handleModeChange, users, onlineCount, se
                   <div className="w-10 h-10 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-lg">
                     <Hash className="w-5 h-5 text-white" />
                   </div>
-                  <span className="text-white">Global Channel</span>
+                  <span className="text-neutral-900 dark:text-white">Global Channel</span>
                 </div>
-                <p className="text-xs text-neutral-400 relative z-10">Community discussion and support</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 relative z-10">Community discussion and support</p>
               </motion.div>
             </div>
           ) : (
