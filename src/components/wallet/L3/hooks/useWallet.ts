@@ -296,6 +296,7 @@ export const useWallet = () => {
       recipientNametag: string;
       amount: string;
       coinId: string;
+      eventId?: string;
     }) => {
       const targetAmount = BigInt(params.amount);
       const { recipientNametag } = params;
@@ -379,7 +380,7 @@ export const useWallet = () => {
           });
 
           console.log("📨 Sending split token via Nostr...");
-          await nostr.sendTokenTransfer(recipientPubkey, payload);
+          await nostr.sendTokenTransfer(recipientPubkey, payload, undefined, undefined, params.eventId);
         }
 
         for (const keptToken of splitResult.tokensKeptBySender) {

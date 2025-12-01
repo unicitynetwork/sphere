@@ -54,7 +54,7 @@ export function TokenRow({ token, delay }: TokenRowProps) {
         {/* Right: UTXO Badge */}
         <div className="flex flex-col items-end gap-1">
           <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-neutral-700/50 text-neutral-400 border border-neutral-700">
-            UTXO
+            Token
           </span>
           <span className="text-[10px] text-neutral-600">
             {new Date(token.timestamp).toLocaleDateString()}

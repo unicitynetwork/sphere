@@ -133,7 +133,7 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
               />
             )}
             <span className="relative z-10 flex items-center gap-2">
-              <Coins className="w-3 h-3" /> UTXOs
+              <Coins className="w-3 h-3" /> Tokens
             </span>
           </button>
         </div>
