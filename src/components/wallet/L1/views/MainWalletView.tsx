@@ -11,6 +11,7 @@ import {
   Check,
   Plus,
   X,
+  ArrowRightLeft,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { TransactionPlan, VestingMode, VestingBalances } from "../sdk";
@@ -20,6 +21,7 @@ import {
   SaveWalletModal,
   DeleteConfirmationModal,
   TransactionConfirmationModal,
+  BridgeModal,
 } from "../components/modals";
 import { VestingSelector } from "../components/VestingSelector";
 
@@ -71,6 +73,7 @@ function AnimatedBalance({ value, show }: { value: number; show: boolean }) {
 
 interface MainWalletViewProps {
   selectedAddress: string;
+  selectedPrivateKey: string;
   addresses: string[];
   balance: number;
   showBalances: boolean;
@@ -90,6 +93,7 @@ interface MainWalletViewProps {
 
 export function MainWalletView({
   selectedAddress,
+  selectedPrivateKey,
   addresses,
   balance,
   showBalances,
@@ -115,6 +119,7 @@ export function MainWalletView({
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showSendForm, setShowSendForm] = useState(false);
+  const [showBridgeModal, setShowBridgeModal] = useState(false);
 
   const handleSend = async () => {
     await onSendTransaction(destination, amount);
@@ -319,6 +324,24 @@ export function MainWalletView({
         </div>
       </div>
 
+      {/* Bridge Button */}
+      <div className="px-6 mb-4">
+        <motion.button
+          onClick={() => setShowBridgeModal(true)}
+          whileHover={{ scale: 1.01, y: -1 }}
+          whileTap={{ scale: 0.99 }}
+          className="w-full relative px-4 py-3 rounded-xl bg-linear-to-r from-purple-600/80 to-blue-600/80 text-white text-sm border border-purple-500/30 flex items-center justify-center gap-2 overflow-hidden group hover:from-purple-500/80 hover:to-blue-500/80 transition-all"
+        >
+          <div className="absolute inset-0 bg-linear-to-r from-transparent via-white/5 to-transparent translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000" />
+          <ArrowRightLeft className="w-4 h-4 relative z-10" />
+          <span className="relative z-10 font-medium">Bridge to L3</span>
+          <span className="relative z-10 text-xs text-purple-200/70 ml-1">(Demo)</span>
+        </motion.button>
+        <p className="text-xs text-neutral-500 text-center mt-1.5">
+          Clone L1 ALPHA tokens to L3 ALPHT for testing
+        </p>
+      </div>
+
       {/* Send Form */}
       <AnimatePresence mode="wait">
         {showSendForm ? (
@@ -466,6 +489,13 @@ export function MainWalletView({
           setShowSaveModal(true);
         }}
         onCancel={() => setShowDeleteModal(false)}
+      />
+
+      <BridgeModal
+        show={showBridgeModal}
+        address={selectedAddress}
+        privateKey={selectedPrivateKey}
+        onClose={() => setShowBridgeModal(false)}
       />
     </div>
   );
