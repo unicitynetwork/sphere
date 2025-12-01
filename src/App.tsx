@@ -4,6 +4,9 @@ import { AnimatePresence } from 'framer-motion';
 // Layout
 import { DashboardLayout } from './components/layout/DashboardLayout';
 
+// Auth
+import { WalletGate } from './components/auth/WalletGate';
+
 // Pages
 import { IntroPage } from './pages/IntroPage';
 import { AgentPage } from './pages/AgentPage';
@@ -15,7 +18,13 @@ export default function App() {
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
         <Route path="/" element={<IntroPage />} />
-        <Route element={<DashboardLayout />}>
+        <Route
+          element={
+            <WalletGate>
+              <DashboardLayout />
+            </WalletGate>
+          }
+        >
           <Route path="/home" element={<Navigate to="/agents/chat" replace />} />
           <Route path="/agents/:agentId" element={<AgentPage />} />
           <Route path="/ai" element={<Navigate to="/agents/ai" replace />} />

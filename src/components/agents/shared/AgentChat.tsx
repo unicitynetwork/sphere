@@ -3,6 +3,7 @@ import { Plus, Eye, X, Wallet, CheckCircle, PanelLeftClose } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../../config/activities';
 import { useAgentChat } from '../../../hooks/useAgentChat';
+import { useWallet } from '../../wallet/L3/hooks/useWallet';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatContainer, ChatHeader, ChatBubble, ChatInput, TypingIndicator, QuickActions } from './index';
 
@@ -132,6 +133,9 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
   const hasGreeted = useRef(false);
   const currentAgentId = useRef(agent.id);
 
+  // Get Unicity ID from wallet
+  const { identity } = useWallet();
+
   // Use the agent chat hook for streaming support
   const {
     messages,
@@ -142,6 +146,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     stopGeneration,
   } = useAgentChat({
     activityId: agent.backendActivityId || agent.id,
+    userId: identity?.address,
   });
 
   // Determine if we're in mock mode (sidebar agents use mock, others use real backend)
