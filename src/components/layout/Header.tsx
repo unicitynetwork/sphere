@@ -1,4 +1,4 @@
-import { Bell, Settings, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { isMock } from '../../hooks/useAgentChat';
 import { ThemeToggle } from '../theme';
@@ -20,45 +20,11 @@ export function Header() {
             whileHover={{ scale: 1.05, rotate: 5 }}
             className="relative"
           >
-            {/* Glow effect */}
-            <div className="absolute inset-0 bg-linear-to-br from-orange-500 to-orange-600 rounded-lg sm:rounded-xl blur-xl opacity-50" />
-
-            <div className="relative w-9 h-9 sm:w-10 sm:h-10 lg:w-12 lg:h-12 rounded-lg sm:rounded-xl bg-linear-to-br from-orange-500 via-orange-600 to-red-600 flex items-center justify-center shadow-2xl border border-orange-400/30">
-              {/* Shine overlay */}
-              <div className="absolute inset-0 bg-linear-to-tr from-white/0 via-white/30 to-white/0 rounded-lg sm:rounded-xl" />
-
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-                className="relative z-10 drop-shadow-lg sm:w-6 sm:h-6 lg:w-7 lg:h-7"
-              >
-                <path
-                  d="M12 2L2 7L12 12L22 7L12 2Z"
-                  fill="white"
-                  stroke="white"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M2 17L12 22L22 17"
-                  stroke="white"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M2 12L12 17L22 12"
-                  stroke="white"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </div>
+              <img
+                src="/Union.svg"
+                alt="Logo"
+                className="relative z-10 w-7 h-7 sm:w-9 sm:h-9 lg:w-11 lg:h-11"
+              />
           </motion.div>
 
           <div className="relative">
@@ -83,7 +49,7 @@ export function Header() {
           <ThemeToggle />
 
           {/* Notification Button */}
-          <motion.button
+          {/* <motion.button
             whileHover={{ scale: 1.05, y: -2 }}
             whileTap={{ scale: 0.95 }}
             transition={{duration: 0.05}}
@@ -91,17 +57,15 @@ export function Header() {
           >
             <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-neutral-500 dark:text-neutral-400 group-hover:text-orange-400 transition-colors" />
 
-            {/* Notification badge */}
             <span className="absolute top-1.5 sm:top-2 right-1.5 sm:right-2 w-1.5 sm:w-2 h-1.5 sm:h-2 bg-orange-500 rounded-full">
               <span className="absolute inset-0 bg-orange-500 rounded-full animate-ping" />
             </span>
 
-            {/* Glow on hover */}
             <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
-          </motion.button>
+          </motion.button> */}
 
           {/* Settings Button */}
-          <motion.button
+          {/* <motion.button
             whileHover={{ scale: 1.05, y: -2 }}
             whileTap={{ scale: 0.95 }}
             transition={{duration: 0.05}}
@@ -109,7 +73,7 @@ export function Header() {
           >
             <Settings className="w-4 h-4 sm:w-5 sm:h-5 text-neutral-500 dark:text-neutral-400 group-hover:text-orange-400 transition-colors" />
             <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
-          </motion.button>
+          </motion.button> */}
 
         </div>
       </div>

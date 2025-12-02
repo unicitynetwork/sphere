@@ -46,7 +46,7 @@ export function WalletPanel() {
             </motion.div>
 
             <div className="flex flex-col">
-                 <span className="text-sm sm:text-base text-neutral-900 dark:text-white font-medium tracking-wide">My Wallet</span>
+                 <span className="text-sm sm:text-base text-neutral-900 dark:text-white font-medium tracking-wide">Wallet</span>
                  <div className="flex items-center gap-1.5">
                    <span className="text-[10px] sm:text-xs text-neutral-500">
                      {nametag ? `@${nametag}` : 'AgentSphere'}
