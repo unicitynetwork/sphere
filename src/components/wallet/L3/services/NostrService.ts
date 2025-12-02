@@ -606,7 +606,7 @@ export class NostrService {
       this.chatRepository.updateConversationNametag(conversation.id, senderNametag);
     }
 
-    // Create and save message (with unwrapped content)
+    // Create and save message (with unwrapped content and sender nametag)
     const message = new ChatMessage({
       id: privateMessage.eventId,
       conversationId: conversation.id,
@@ -616,6 +616,7 @@ export class NostrService {
       status: MessageStatus.DELIVERED,
       type: MessageType.TEXT,
       senderPubkey: senderPubkey,
+      senderNametag: senderNametag || undefined,
     });
 
     this.chatRepository.saveMessage(message);

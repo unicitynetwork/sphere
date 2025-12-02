@@ -33,14 +33,12 @@ export function DMMessageBubble({ message, delay = 0 }: DMMessageBubbleProps) {
       transition={{ delay }}
       className={`flex gap-3 ${isOwn ? 'flex-row-reverse' : ''}`}
     >
-      {/* Avatar for received messages */}
+      {/* Sender nametag for received messages */}
       {!isOwn && (
-        <div className="relative shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center text-white text-xs font-medium shadow-md">
-            {message.senderNametag?.slice(0, 2).toUpperCase() ||
-              message.senderPubkey?.slice(0, 2).toUpperCase() ||
-              '??'}
-          </div>
+        <div className="shrink-0 px-2 py-1 rounded-lg bg-linear-to-br from-orange-500 to-orange-600 text-white text-xs font-medium shadow-md self-start">
+          {message.senderNametag
+            ? `@${message.senderNametag.replace('@', '')}`
+            : message.senderPubkey?.slice(0, 8) || '??'}
         </div>
       )}
 
