@@ -172,7 +172,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
                       onChange={(e) => setRecipient(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleRecipientNext()}
                       className="w-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-xl py-3 pl-8 pr-4 text-neutral-900 dark:text-white focus:border-orange-500 outline-none"
-                      placeholder="username"
+                      placeholder="Unicity ID"
                     />
                   </div>
                   {recipientError && <p className="text-red-500 text-sm mt-2">{recipientError}</p>}

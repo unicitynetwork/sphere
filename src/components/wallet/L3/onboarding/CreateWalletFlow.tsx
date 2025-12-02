@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, ArrowRight, Loader2, AtSign, ShieldCheck } from 'lucide-react';
+import { Wallet, ArrowRight, Loader2, ShieldCheck } from 'lucide-react';
 import { useWallet } from '../hooks/useWallet';
 
 export function CreateWalletFlow() {
@@ -149,7 +149,7 @@ export function CreateWalletFlow() {
               transition={{ delay: 0.2 }}
               className="text-neutral-500 dark:text-neutral-400 text-xs md:text-sm mb-5 md:mb-6 mx-auto leading-relaxed"
             >
-              Now, choose a unique <span className="text-orange-500 dark:text-orange-400 font-bold">@nametag</span> to receive tokens easily without long addresses.
+              Now, choose a unique <span className="text-orange-500 dark:text-orange-400 font-bold">Unicity ID</span> to receive tokens easily without long addresses.
             </motion.p>
 
             {/* Input Field */}
@@ -159,15 +159,15 @@ export function CreateWalletFlow() {
               transition={{ delay: 0.3 }}
               className="relative mb-4 md:mb-5 group"
             >
-              <div className="absolute left-3 md:left-4 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500 group-focus-within:text-orange-500 dark:group-focus-within:text-orange-400 transition-colors z-10">
-                <AtSign className="w-4 h-4 md:w-5 md:h-5" />
+              <div className="absolute right-3 md:right-4 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500 group-focus-within:text-orange-500 dark:group-focus-within:text-orange-400 transition-colors z-10 text-xs md:text-sm font-medium">
+                @unicity
               </div>
               <input
                 type="text"
                 value={nametagInput}
                 onChange={(e) => setNametagInput(e.target.value)}
-                placeholder="username"
-                className="w-full bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 rounded-xl py-3 md:py-3.5 pl-10 md:pl-12 pr-3 md:pr-4 text-sm md:text-base text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-orange-500 focus:bg-white dark:focus:bg-neutral-800 transition-all backdrop-blur-sm"
+                placeholder="id"
+                className="w-full bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 rounded-xl py-3 md:py-3.5 pl-3 md:pl-4 pr-24 md:pr-28 text-sm md:text-base text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-orange-500 focus:bg-white dark:focus:bg-neutral-800 transition-all backdrop-blur-sm"
                 autoFocus
               />
               <div className="absolute inset-0 rounded-xl bg-linear-to-r from-orange-500/0 via-orange-500/5 to-purple-500/0 opacity-0 group-focus-within:opacity-100 transition-opacity pointer-events-none" />
