@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Hash, User, Sparkles, PanelLeftClose, PanelLeft, Menu, Globe } from 'lucide-react';
+import { Hash, User, Sparkles, PanelLeftClose, PanelLeft, Menu, Globe, X } from 'lucide-react';
 import { DMChatSection } from './dm/DMChatSection';
 import type { ChatMode } from '../../types';
 
@@ -24,7 +24,7 @@ export function ChatSection() {
 
   // Global chat mode - Coming Soon with same sidebar design
   return (
-    <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden grid grid-cols-[auto_1fr] relative shadow-xl dark:shadow-2xl h-full min-h-0 theme-transition">
+    <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden grid grid-cols-1 lg:grid-cols-[auto_1fr] relative shadow-xl dark:shadow-2xl h-full min-h-0 theme-transition">
       {/* Background decorative elements */}
       <div className="absolute -top-20 -right-20 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl" />
       <div className="absolute -bottom-20 -left-20 w-96 h-96 bg-purple-500/5 rounded-full blur-3xl" />
@@ -35,7 +35,7 @@ export function ChatSection() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="lg:hidden fixed inset-0 bg-black/50 z-40"
+          className="lg:hidden absolute inset-0 bg-black/50 z-40 rounded-3xl"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -44,11 +44,11 @@ export function ChatSection() {
       <div
         className={`
           w-72 border-r border-neutral-200 dark:border-neutral-800/50 flex flex-col z-50 overflow-hidden
-          fixed lg:relative inset-y-0 left-0 h-full min-h-0
+          absolute lg:relative inset-y-0 left-0 min-h-0
           transform transition-all duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
           ${sidebarCollapsed ? 'lg:w-0 lg:border-0 lg:min-w-0' : 'lg:w-72'}
-          bg-white/95 dark:bg-neutral-900/95 lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none
+          bg-white/95 dark:bg-neutral-900/95 lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none rounded-l-3xl lg:rounded-none
         `}
       >
         {/* Header */}
@@ -70,6 +70,15 @@ export function ChatSection() {
                 whileTap={{ scale: 0.9 }}
               >
                 <PanelLeftClose className="w-4 h-4" />
+              </motion.button>
+              {/* Close button for mobile */}
+              <motion.button
+                onClick={() => setSidebarOpen(false)}
+                className="lg:hidden p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                <X className="w-4 h-4" />
               </motion.button>
             </div>
           </div>
