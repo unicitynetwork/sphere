@@ -48,7 +48,7 @@ export const agents: AgentConfig[] = [
   },
   {
     id: 'ai',
-    name: 'AI',
+    name: 'Uncensored LLM',
     description: 'AI Assistant with web access',
     Icon: Sparkles,
     category: 'Assistant',
@@ -64,7 +64,7 @@ export const agents: AgentConfig[] = [
   },
   {
     id: 'trivia',
-    name: 'Trivia',
+    name: 'Unicity Trivia',
     description: 'Test your knowledge!',
     Icon: Brain,
     category: 'Entertainment',
@@ -85,7 +85,7 @@ export const agents: AgentConfig[] = [
   },
   {
     id: 'games',
-    name: 'Games',
+    name: 'P2P Gaming',
     description: 'Discover and play games',
     Icon: Gamepad2,
     category: 'Entertainment',
@@ -101,10 +101,10 @@ export const agents: AgentConfig[] = [
   },
   {
     id: 'sport',
-    name: 'Sport',
+    name: 'P2P Prediction',
     description: 'Sports betting',
     Icon: Trophy,
-    category: 'Betting',
+    category: 'Prediction',
     color: 'from-emerald-500 to-teal-500',
     type: 'ai-with-sidebar',
     greetingMessage: "Welcome to the Betting Floor! 🏟️ I'm connected to the live markets. I can check odds, show your active slips, or help you place a wager. What are we looking at today?",
@@ -118,7 +118,7 @@ export const agents: AgentConfig[] = [
   },
   {
     id: 'p2p',
-    name: 'P2P',
+    name: 'OTC',
     description: 'Peer-to-peer trading',
     Icon: ShoppingBag,
     category: 'Trading',
@@ -136,7 +136,7 @@ export const agents: AgentConfig[] = [
   },
   {
     id: 'merch',
-    name: 'Merch',
+    name: 'Unicity Merch',
     description: 'Merchandise store',
     Icon: Shirt,
     category: 'Shopping',

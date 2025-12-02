@@ -92,12 +92,11 @@ export function AgentPage() {
   return (
     <>
       {/* Desktop agent grid - always visible */}
-      <div className="hidden lg:block mb-8 relative">
-        <div className="absolute -top-20 -left-20 w-96 h-96 bg-orange-500/5 dark:bg-orange-500/10 rounded-full blur-3xl" />
-        <div className="absolute -top-10 -right-32 w-80 h-80 bg-purple-500/5 dark:bg-purple-500/10 rounded-full blur-3xl" />
+      <div className="hidden lg:block mb-8 relative p-8 rounded-2xl dark:bg-linear-to-br dark:from-neutral-900/40 dark:to-neutral-800/20 backdrop-blur-sm border border-neutral-200 dark:border-neutral-800/50">
+        <div className="absolute top-0 left-0 w-32 h-32 border-l-2 border-t-2 border-orange-500/50 rounded-tl-2xl" />
+        <div className="absolute bottom-0 right-0 w-32 h-32 border-r-2 border-b-2 border-orange-500/50 rounded-br-2xl" />
 
         <div className="relative">
-          <div className="relative p-8 rounded-2xl bg-white/40 dark:bg-neutral-900/40 backdrop-blur-sm border border-neutral-200 dark:border-neutral-800/50 theme-transition">
             <div className="grid grid-cols-7 gap-4">
               {agents.map((agent) => (
                 <AgentCard
@@ -111,7 +110,6 @@ export function AgentPage() {
                 />
               ))}
             </div>
-          </div>
         </div>
       </div>
       {/* Mobile tab switcher with sliding indicator */}
