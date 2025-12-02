@@ -8,6 +8,23 @@ import {
   Event,
   PaymentRequestProtocol,
 } from "@unicitylabs/nostr-js-sdk";
+
+// NIP-17 Private Message interface (from SDK)
+interface PrivateMessage {
+  eventId: string;
+  senderPubkey: string;
+  recipientPubkey: string;
+  content: string;
+  timestamp: number;
+  kind: number;
+  replyToEventId?: string;
+}
+import { ChatRepository } from "../../../chat/data/ChatRepository";
+import {
+  ChatMessage,
+  MessageStatus,
+  MessageType,
+} from "../../../chat/data/models";
 import { IdentityManager } from "./IdentityManager";
 import { Buffer } from "buffer";
 import { Token } from "@unicitylabs/state-transition-sdk/lib/token/Token";
@@ -35,17 +52,20 @@ const UNICITY_RELAYS = [
   "ws://unicity-nostr-relay-20250927-alb-1919039002.me-central-1.elb.amazonaws.com:8080",
 ];
 
-const STORAGE_KEY_LAST_SYNC = "unicity_nostr_last_sync";
-
 export class NostrService {
   private static instance: NostrService;
   private client: NostrClient | null = null;
   private identityManager: IdentityManager;
   private isConnected: boolean = false;
   private paymentRequests: IncomingPaymentRequest[] = [];
+  private chatRepository: ChatRepository;
+  private dmListeners: ((message: ChatMessage) => void)[] = [];
+
+  private processedEventIds: Set<string> = new Set();
 
   private constructor(identityManager: IdentityManager) {
     this.identityManager = identityManager;
+    this.chatRepository = ChatRepository.getInstance();
   }
 
   static getInstance(identityManager: IdentityManager): NostrService {
@@ -82,30 +102,35 @@ export class NostrService {
 
   private subscribeToPrivateEvents(publicKey: string) {
     if (!this.client) return;
-    const lastSync = this.getOrInitLastSync();
     const filter = new Filter();
     filter.kinds = [
-      EventKinds.ENCRYPTED_DM,
+      EventKinds.GIFT_WRAP, // NIP-17 private messages
       EventKinds.TOKEN_TRANSFER,
       EventKinds.PAYMENT_REQUEST,
     ];
     filter["#p"] = [publicKey];
-    filter.since = lastSync;
+    // Don't use since filter - always fetch all events and dedupe by ID
 
     this.client.subscribe(filter, {
       onEvent: (event) => {
-        console.log(`Received event kind=${event.kind}`);
-        const currentLastSync = this.getOrInitLastSync();
-        if (event.created_at <= currentLastSync) {
-          console.log(
-            `⏭️ Skipping old event (Time: ${event.created_at} <= Sync: ${currentLastSync})`
-          );
-          return;
+        // Deduplicate by event ID
+        if (this.processedEventIds.has(event.id)) {
+          return; // Already processed this session
+        }
+        this.processedEventIds.add(event.id);
+
+        // Keep set size manageable (max 1000 entries)
+        if (this.processedEventIds.size > 1000) {
+          const firstId = this.processedEventIds.values().next().value;
+          if (firstId) this.processedEventIds.delete(firstId);
         }
 
+        console.log(`Received event kind=${event.kind}`);
         this.handleIncomingEvent(event);
       },
-      onEndOfStoredEvents: () => console.log("End of stored events"),
+      onEndOfStoredEvents: () => {
+        console.log("End of stored events");
+      },
     });
   }
 
@@ -113,11 +138,11 @@ export class NostrService {
     console.log(
       `Received event kind=${event.kind} from=${event.pubkey.slice(0, 16)}`
     );
-    this.updateLastSync(event.created_at);
     if (event.kind === EventKinds.TOKEN_TRANSFER) {
       this.handleTokenTransfer(event);
-    } else if (event.kind === EventKinds.ENCRYPTED_DM) {
-      console.log("Received encrypted DM message");
+    } else if (event.kind === EventKinds.GIFT_WRAP) {
+      console.log("Received NIP-17 gift-wrapped message");
+      this.handleGiftWrappedMessage(event);
     } else if (event.kind === EventKinds.PAYMENT_REQUEST) {
       this.handlePaymentRequest(event);
     } else {
@@ -496,29 +521,291 @@ export class NostrService {
     }
   }
 
-  private getOrInitLastSync(): number {
-    const saved = localStorage.getItem(STORAGE_KEY_LAST_SYNC);
-    if (saved) {
-      return saved ? parseInt(saved) : 0;
-    } else {
-      const now = Math.floor(Date.now() / 1000);
-      localStorage.setItem(STORAGE_KEY_LAST_SYNC, now.toString());
-      return now;
-    }
-  }
-
-  private updateLastSync(timestamp: number) {
-    const current = this.getOrInitLastSync();
-    if (timestamp > current) {
-      localStorage.setItem(STORAGE_KEY_LAST_SYNC, timestamp.toString());
-    }
-  }
-
   private async getKeyManager(): Promise<NostrKeyManager | undefined> {
     const identity = await this.identityManager.getCurrentIdentity();
     if (!identity || !this.client) return;
 
     const secretKey = Buffer.from(identity.privateKey, "hex");
     return NostrKeyManager.fromPrivateKey(secretKey);
+  }
+
+  // ==========================================
+  // DM Chat Methods (NIP-17)
+  // ==========================================
+
+  /**
+   * Wrapper format for messages that includes sender's nametag.
+   * Messages are sent as JSON: {"senderNametag": "name", "text": "message"}
+   */
+  private wrapMessageContent(content: string, senderNametag: string | null): string {
+    if (senderNametag) {
+      return JSON.stringify({
+        senderNametag: senderNametag,
+        text: content,
+      });
+    }
+    return content;
+  }
+
+  /**
+   * Unwrap message content and extract sender's nametag if present.
+   */
+  private unwrapMessageContent(content: string): { text: string; senderNametag: string | null } {
+    try {
+      const parsed = JSON.parse(content);
+      if (typeof parsed === "object" && parsed.text !== undefined) {
+        return {
+          text: parsed.text,
+          senderNametag: parsed.senderNametag || null,
+        };
+      }
+    } catch {
+      // Not JSON, return original content
+    }
+    return { text: content, senderNametag: null };
+  }
+
+  private async handleGiftWrappedMessage(event: Event) {
+    try {
+      if (!this.client) {
+        console.error("No client for unwrapping message");
+        return;
+      }
+
+      // Unwrap NIP-17 gift-wrapped message
+      const privateMessage: PrivateMessage = this.client.unwrapPrivateMessage(event);
+
+      // Check if it's a chat message (kind 14) or read receipt (kind 15)
+      if (privateMessage.kind === 14) {
+        // Chat message
+        this.handleIncomingChatMessage(privateMessage);
+      } else if (privateMessage.kind === 15) {
+        // Read receipt
+        this.handleIncomingReadReceipt(privateMessage);
+      } else {
+        console.log(`Unknown NIP-17 message kind: ${privateMessage.kind}`);
+      }
+    } catch (error) {
+      console.error("Failed to handle gift-wrapped message", error);
+    }
+  }
+
+  private handleIncomingChatMessage(privateMessage: PrivateMessage) {
+    const senderPubkey = privateMessage.senderPubkey;
+    const rawContent = privateMessage.content;
+
+    // Unwrap message content to extract sender's nametag if present
+    const { text: content, senderNametag } = this.unwrapMessageContent(rawContent);
+
+    // Check if this message already exists (e.g., after page reload)
+    const existingMessage = this.chatRepository.getMessage(privateMessage.eventId);
+    if (existingMessage) {
+      console.log(`📩 Skipping already saved message ${privateMessage.eventId.slice(0, 8)}`);
+      return;
+    }
+
+    console.log(`📩 NIP-17 DM from ${senderNametag || senderPubkey.slice(0, 8)}: ${content.slice(0, 50)}...`);
+
+    // Get or create conversation with sender's nametag if available
+    const conversation = this.chatRepository.getOrCreateConversation(senderPubkey, senderNametag || undefined);
+
+    // If we received a nametag and the conversation didn't have one, update it
+    if (senderNametag && !conversation.participantNametag) {
+      conversation.participantNametag = senderNametag;
+      this.chatRepository.updateConversationNametag(conversation.id, senderNametag);
+    }
+
+    // Create and save message (with unwrapped content and sender nametag)
+    const message = new ChatMessage({
+      id: privateMessage.eventId,
+      conversationId: conversation.id,
+      content: content,
+      timestamp: privateMessage.timestamp * 1000,
+      isFromMe: false,
+      status: MessageStatus.DELIVERED,
+      type: MessageType.TEXT,
+      senderPubkey: senderPubkey,
+      senderNametag: senderNametag || undefined,
+    });
+
+    this.chatRepository.saveMessage(message);
+    this.chatRepository.incrementUnreadCount(conversation.id);
+
+    // Notify listeners
+    this.notifyDMListeners(message);
+
+    // Send read receipt
+    this.sendReadReceipt(senderPubkey, privateMessage.eventId).catch(console.error);
+  }
+
+  private handleIncomingReadReceipt(privateMessage: PrivateMessage) {
+    const replyToEventId = privateMessage.replyToEventId;
+    if (replyToEventId) {
+      console.log(`📬 Read receipt for message: ${replyToEventId.slice(0, 8)}`);
+      this.chatRepository.updateMessageStatus(replyToEventId, MessageStatus.READ);
+    }
+  }
+
+  async sendReadReceipt(recipientPubkey: string, messageEventId: string): Promise<void> {
+    if (!this.client) await this.start();
+    try {
+      await this.client?.sendReadReceipt(recipientPubkey, messageEventId);
+      console.log(`✅ Read receipt sent for ${messageEventId.slice(0, 8)}`);
+    } catch (error) {
+      console.error("Failed to send read receipt", error);
+    }
+  }
+
+  async sendDirectMessage(
+    recipientPubkey: string,
+    content: string,
+    recipientNametag?: string
+  ): Promise<ChatMessage | null> {
+    if (!this.client) await this.start();
+
+    try {
+      const identity = await this.identityManager.getCurrentIdentity();
+      if (!identity) throw new Error("No identity for sending DM");
+
+      // Get sender's nametag to include in message
+      const senderNametag = await this.getMyNametag();
+
+      // Get or create conversation
+      const conversation = this.chatRepository.getOrCreateConversation(
+        recipientPubkey,
+        recipientNametag
+      );
+
+      // Create message with pending status
+      const message = new ChatMessage({
+        conversationId: conversation.id,
+        content: content,
+        timestamp: Date.now(),
+        isFromMe: true,
+        status: MessageStatus.PENDING,
+        type: MessageType.TEXT,
+        senderPubkey: identity.publicKey,
+      });
+
+      // Save immediately (optimistic update)
+      this.chatRepository.saveMessage(message);
+
+      // Wrap content with sender's nametag for recipient to see who sent it
+      const wrappedContent = this.wrapMessageContent(content, senderNametag);
+
+      // Send via Nostr using NIP-17 private messaging
+      const eventId = await this.client?.sendPrivateMessage(
+        recipientPubkey,
+        wrappedContent
+      );
+
+      if (eventId) {
+        // Update message: replace with new ID (for read receipt tracking) and status
+        const originalId = message.id;
+        message.id = eventId;
+        message.status = MessageStatus.SENT;
+        // Delete old message and save updated one
+        this.chatRepository.deleteMessage(originalId);
+        this.chatRepository.saveMessage(message);
+        console.log(`📤 NIP-17 DM sent to ${recipientPubkey.slice(0, 8)} from @${senderNametag || 'unknown'}`);
+        return message;
+      } else {
+        // Update status to failed
+        this.chatRepository.updateMessageStatus(message.id, MessageStatus.FAILED);
+        return null;
+      }
+    } catch (error) {
+      console.error("Failed to send DM", error);
+      return null;
+    }
+  }
+
+  async sendDirectMessageByNametag(
+    nametag: string,
+    content: string
+  ): Promise<ChatMessage | null> {
+    if (!this.client) await this.start();
+
+    try {
+      const identity = await this.identityManager.getCurrentIdentity();
+      if (!identity) throw new Error("No identity for sending DM");
+
+      // Get sender's nametag to include in message
+      const senderNametag = await this.getMyNametag();
+
+      // Resolve nametag to pubkey first for conversation tracking
+      const pubkey = await this.queryPubkeyByNametag(nametag);
+      if (!pubkey) {
+        console.error(`Could not resolve nametag: ${nametag}`);
+        return null;
+      }
+
+      // Get or create conversation
+      const conversation = this.chatRepository.getOrCreateConversation(pubkey, nametag);
+
+      // Create message with pending status
+      const message = new ChatMessage({
+        conversationId: conversation.id,
+        content: content,
+        timestamp: Date.now(),
+        isFromMe: true,
+        status: MessageStatus.PENDING,
+        type: MessageType.TEXT,
+        senderPubkey: identity.publicKey,
+      });
+
+      // Save immediately (optimistic update)
+      this.chatRepository.saveMessage(message);
+
+      // Wrap content with sender's nametag for recipient to see who sent it
+      const wrappedContent = this.wrapMessageContent(content, senderNametag);
+
+      // Send via Nostr using NIP-17 with nametag (SDK auto-resolves)
+      const eventId = await this.client?.sendPrivateMessageToNametag(
+        nametag.replace("@", ""),
+        wrappedContent
+      );
+
+      if (eventId) {
+        // Update message: replace with new ID (for read receipt tracking) and status
+        const originalId = message.id;
+        message.id = eventId;
+        message.status = MessageStatus.SENT;
+        // Delete old message and save updated one
+        this.chatRepository.deleteMessage(originalId);
+        this.chatRepository.saveMessage(message);
+        console.log(`📤 NIP-17 DM sent to @${nametag} from @${senderNametag || 'unknown'}`);
+        return message;
+      } else {
+        this.chatRepository.updateMessageStatus(message.id, MessageStatus.FAILED);
+        return null;
+      }
+    } catch (error) {
+      console.error("Failed to send DM by nametag", error);
+      return null;
+    }
+  }
+
+  addDMListener(listener: (message: ChatMessage) => void): void {
+    this.dmListeners.push(listener);
+  }
+
+  removeDMListener(listener: (message: ChatMessage) => void): void {
+    this.dmListeners = this.dmListeners.filter((l) => l !== listener);
+  }
+
+  private notifyDMListeners(message: ChatMessage): void {
+    this.dmListeners.forEach((listener) => listener(message));
+    window.dispatchEvent(new CustomEvent("dm-received", { detail: message }));
+  }
+
+  getMyPublicKey(): string | null {
+    const keyManager = this.client?.getKeyManager();
+    return keyManager?.getPublicKeyHex() || null;
+  }
+
+  async getMyNametag(): Promise<string | null> {
+    const nametagService = NametagService.getInstance(this.identityManager);
+    return nametagService.getActiveNametag();
   }
 }
