@@ -134,7 +134,7 @@ export function AgentPage() {
           }`}
         >
           <MessageSquare className="w-4 h-4" />
-          <span>Chat</span>
+          <span>Agents</span>
         </button>
 
         {/* Wallet tab */}
