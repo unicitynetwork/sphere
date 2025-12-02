@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { MessageCircle, Menu, PanelLeft, Hash, User } from 'lucide-react';
+import { MessageCircle, Menu, PanelLeft } from 'lucide-react';
 import { useChat } from '../hooks/useChat';
 import { DMConversationList } from './DMConversationList';
 import { DMMessageList } from './DMMessageList';
@@ -111,14 +111,9 @@ export function DMChatSection({ chatMode, onModeChange }: DMChatSectionProps) {
                     {selectedConversation.getAvatar()}
                   </div>
                 </motion.div>
-                <div>
-                  <h3 className="text-neutral-900 dark:text-white font-medium">
-                    {selectedConversation.getDisplayName()}
-                  </h3>
-                  <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                    {selectedConversation.participantPubkey.slice(0, 16)}...
-                  </p>
-                </div>
+                <h3 className="text-neutral-900 dark:text-white font-medium">
+                  {selectedConversation.getDisplayName()}
+                </h3>
               </div>
             ) : (
               <div className="flex items-center gap-3">
@@ -137,26 +132,6 @@ export function DMChatSection({ chatMode, onModeChange }: DMChatSectionProps) {
             )}
           </div>
 
-          {/* Mode Toggle - Desktop */}
-          <div className="hidden lg:flex items-center gap-2 relative z-10">
-            <motion.button
-              onClick={() => onModeChange('global')}
-              className="px-3 py-1.5 rounded-lg text-sm transition-all bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700/50 border border-neutral-200 dark:border-neutral-700/50"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Hash className="w-4 h-4 inline mr-1" />
-              Global
-            </motion.button>
-            <motion.button
-              className="px-3 py-1.5 rounded-lg text-sm transition-all bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <User className="w-4 h-4 inline mr-1" />
-              DM
-            </motion.button>
-          </div>
         </div>
 
         {/* Messages */}
