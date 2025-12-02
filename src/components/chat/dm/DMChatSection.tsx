@@ -1,11 +1,13 @@
-import { useState } from 'react';
-import { motion } from 'framer-motion';
-import { MessageCircle, Menu, PanelLeft } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { MessageCircle, Menu, PanelLeft, ChevronDown } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useChat } from '../hooks/useChat';
 import { DMConversationList } from './DMConversationList';
 import { DMMessageList } from './DMMessageList';
 import { DMChatInput } from './DMChatInput';
 import { NewConversationModal } from './NewConversationModal';
+import { agents } from '../../../config/activities';
 import type { ChatMode } from '../../../types';
 
 interface DMChatSectionProps {
@@ -13,6 +15,7 @@ interface DMChatSectionProps {
 }
 
 export function DMChatSection({ onModeChange }: DMChatSectionProps) {
+  const navigate = useNavigate();
   const {
     selectedConversation,
     selectConversation,
@@ -33,6 +36,27 @@ export function DMChatSection({ onModeChange }: DMChatSectionProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNewConversation, setShowNewConversation] = useState(false);
+  const [showAgentPicker, setShowAgentPicker] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  // Close picker when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
+        setShowAgentPicker(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleAgentSelect = (agentId: string) => {
+    navigate(`/agents/${agentId}`);
+    setShowAgentPicker(false);
+  };
+
+  // Get current chat agent config
+  const chatAgent = agents.find(a => a.id === 'chat')!;
 
   const handleSend = () => {
     if (messageInput.trim()) {
@@ -46,7 +70,7 @@ export function DMChatSection({ onModeChange }: DMChatSectionProps) {
   };
 
   return (
-    <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden grid grid-cols-[auto_1fr] relative shadow-xl dark:shadow-2xl h-full min-h-0 theme-transition">
+    <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden grid grid-cols-1 lg:grid-cols-[auto_1fr] relative shadow-xl dark:shadow-2xl h-full min-h-0 theme-transition">
       {/* Background decorative elements */}
       <div className="absolute -top-20 -right-20 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl" />
       <div className="absolute -bottom-20 -left-20 w-96 h-96 bg-purple-500/5 rounded-full blur-3xl" />
@@ -100,33 +124,76 @@ export function DMChatSection({ onModeChange }: DMChatSectionProps) {
               <Menu className="w-5 h-5" />
             </motion.button>
 
-            {selectedConversation ? (
-              <div className="flex items-center gap-3">
-                <motion.div whileHover={{ scale: 1.05 }} className="relative">
-                  <div className="absolute inset-0 bg-orange-500 rounded-xl blur-lg opacity-50" />
-                  <div className="relative w-12 h-12 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-xl text-white font-medium">
-                    {selectedConversation.getAvatar()}
-                  </div>
-                </motion.div>
-                <h3 className="text-neutral-900 dark:text-white font-medium">
-                  {selectedConversation.getDisplayName()}
-                </h3>
-              </div>
-            ) : (
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 flex items-center justify-center border border-neutral-200 dark:border-neutral-700/50">
-                  <MessageCircle className="w-6 h-6 text-neutral-400" />
+            {/* Mobile: Agent picker dropdown */}
+            <div ref={pickerRef} className="relative lg:hidden">
+              <button
+                onClick={() => setShowAgentPicker(!showAgentPicker)}
+                className="flex items-center gap-2 active:scale-95 transition-transform"
+              >
+                <div className={`p-2.5 rounded-xl bg-linear-to-br ${chatAgent.color}`}>
+                  <chatAgent.Icon className="w-5 h-5 text-white" />
                 </div>
-                <div>
+                <span className="text-lg text-neutral-900 dark:text-white font-medium">{chatAgent.name}</span>
+                <ChevronDown className={`w-4 h-4 text-neutral-500 dark:text-neutral-400 transition-transform ${showAgentPicker ? 'rotate-180' : ''}`} />
+              </button>
+
+              <AnimatePresence>
+                {showAgentPicker && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="absolute top-full left-0 mt-2 w-56 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700/50 rounded-xl shadow-xl overflow-hidden z-50"
+                  >
+                    {agents.map((a) => (
+                      <button
+                        key={a.id}
+                        onClick={() => handleAgentSelect(a.id)}
+                        className={`w-full flex items-center gap-3 p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/50 transition-colors ${
+                          a.id === 'chat' ? 'bg-neutral-100 dark:bg-neutral-800/80' : ''
+                        }`}
+                      >
+                        <div className={`p-2 rounded-lg bg-linear-to-br ${a.color}`}>
+                          <a.Icon className="w-4 h-4 text-white" />
+                        </div>
+                        <span className="text-neutral-900 dark:text-white text-sm">{a.name}</span>
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Desktop: Show conversation or default header */}
+            <div className="hidden lg:flex items-center gap-3">
+              {selectedConversation ? (
+                <>
+                  <motion.div whileHover={{ scale: 1.05 }} className="relative">
+                    <div className="absolute inset-0 bg-orange-500 rounded-xl blur-lg opacity-50" />
+                    <div className="relative w-12 h-12 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-xl text-white font-medium">
+                      {selectedConversation.getAvatar()}
+                    </div>
+                  </motion.div>
                   <h3 className="text-neutral-900 dark:text-white font-medium">
-                    Direct Messages
+                    {selectedConversation.getDisplayName()}
                   </h3>
-                  <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                    Select a conversation to start
-                  </p>
-                </div>
-              </div>
-            )}
+                </>
+              ) : (
+                <>
+                  <div className="w-12 h-12 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 flex items-center justify-center border border-neutral-200 dark:border-neutral-700/50">
+                    <MessageCircle className="w-6 h-6 text-neutral-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-neutral-900 dark:text-white font-medium">
+                      Direct Messages
+                    </h3>
+                    <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                      Select a conversation to start
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
         </div>

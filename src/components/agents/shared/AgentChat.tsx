@@ -382,7 +382,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="lg:hidden fixed inset-0 bg-black/50 z-40"
+              className="lg:hidden absolute inset-0 bg-black/50 z-40 rounded-3xl"
               onClick={() => setSidebarOpen(false)}
             />
           )}
@@ -391,11 +391,11 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
         {/* Sidebar */}
         <div className={`
           w-56 border-r border-neutral-200 dark:border-neutral-800/50 flex flex-col z-50 overflow-hidden
-          fixed lg:relative inset-y-0 left-0
+          absolute lg:relative inset-y-0 left-0
           transform transition-all duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
           ${sidebarCollapsed ? 'lg:w-0 lg:border-0 lg:min-w-0' : 'lg:w-56'}
-          bg-white/95 dark:bg-neutral-900/95 lg:bg-transparent dark:lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none
+          bg-white/95 dark:bg-neutral-900/95 lg:bg-transparent dark:lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none rounded-l-3xl lg:rounded-none
         `}>
           <div className="p-4 border-b border-neutral-200 dark:border-neutral-800/50">
             <div className="flex items-center justify-between">

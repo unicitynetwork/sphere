@@ -44,7 +44,7 @@ export function DMConversationList({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="lg:hidden fixed inset-0 bg-black/50 z-40"
+            className="lg:hidden absolute inset-0 bg-black/50 z-40 rounded-3xl"
             onClick={onClose}
           />
         )}
@@ -54,11 +54,11 @@ export function DMConversationList({
       <div
         className={`
         w-72 border-r border-neutral-200 dark:border-neutral-800/50 flex flex-col z-50 overflow-hidden
-        fixed lg:relative inset-y-0 left-0 h-full min-h-0
+        absolute lg:relative inset-y-0 left-0 min-h-0
         transform transition-all duration-300 ease-in-out
         ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         ${isCollapsed ? 'lg:w-0 lg:border-0 lg:min-w-0' : 'lg:w-72'}
-        bg-white/95 dark:bg-neutral-900/95 lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none
+        bg-white/95 dark:bg-neutral-900/95 lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none rounded-l-3xl lg:rounded-none
       `}
       >
         {/* Header */}
