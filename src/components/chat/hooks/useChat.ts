@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChatRepository } from '../data/ChatRepository';
-import { ChatConversation, ChatMessage, MessageStatus } from '../data/models';
+import { ChatConversation, ChatMessage } from '../data/models';
 import { NostrService } from '../../wallet/L3/services/NostrService';
 import { IdentityManager } from '../../wallet/L3/services/IdentityManager';
 

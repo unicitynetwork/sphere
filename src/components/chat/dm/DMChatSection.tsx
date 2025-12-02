@@ -9,13 +9,11 @@ import { NewConversationModal } from './NewConversationModal';
 import type { ChatMode } from '../../../types';
 
 interface DMChatSectionProps {
-  chatMode: ChatMode;
   onModeChange: (mode: ChatMode) => void;
 }
 
-export function DMChatSection({ chatMode, onModeChange }: DMChatSectionProps) {
+export function DMChatSection({ onModeChange }: DMChatSectionProps) {
   const {
-    conversations,
     selectedConversation,
     selectConversation,
     deleteConversation,
@@ -70,7 +68,6 @@ export function DMChatSection({ chatMode, onModeChange }: DMChatSectionProps) {
         isCollapsed={sidebarCollapsed}
         onCollapse={() => setSidebarCollapsed(true)}
         totalUnreadCount={totalUnreadCount}
-        chatMode={chatMode}
         onModeChange={onModeChange}
       />
 
