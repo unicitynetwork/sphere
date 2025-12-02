@@ -17,7 +17,6 @@ interface DMConversationListProps {
   isCollapsed: boolean;
   onCollapse: () => void;
   totalUnreadCount: number;
-  chatMode: ChatMode;
   onModeChange: (mode: ChatMode) => void;
 }
 
@@ -34,7 +33,6 @@ export function DMConversationList({
   isCollapsed,
   onCollapse,
   totalUnreadCount,
-  chatMode,
   onModeChange,
 }: DMConversationListProps) {
   return (

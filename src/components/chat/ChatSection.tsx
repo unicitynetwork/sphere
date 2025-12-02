@@ -17,7 +17,6 @@ export function ChatSection() {
   if (chatMode === 'dm') {
     return (
       <DMChatSection
-        chatMode={chatMode}
         onModeChange={handleModeChange}
       />
     );
