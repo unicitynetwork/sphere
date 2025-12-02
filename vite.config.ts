@@ -12,7 +12,7 @@ export default defineConfig({
       protocolImports: true,
     }),
   ],
-  base: '/sphere/',
+  base: process.env.BASE_PATH || '/',
   server: {
     proxy: {
       '/rpc': {
