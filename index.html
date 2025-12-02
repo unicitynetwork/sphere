@@ -13,8 +13,6 @@
         const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         const theme = stored || (prefersDark ? 'dark' : 'light');
         document.documentElement.classList.add(theme);
-        // Update body background immediately
-        document.body.style.backgroundColor = theme === 'dark' ? '#0a0a0a' : '#f5f5f5';
       })();
     </script>
   </head>
