@@ -1,0 +1,8 @@
+services:
+  nginx:
+    build: .
+    image: sphere-frontend
+    container_name: sphere-frontend
+    restart: unless-stopped
+    ports:
+      - "3010:80"

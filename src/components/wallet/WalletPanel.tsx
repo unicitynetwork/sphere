@@ -1,14 +1,28 @@
-import { Wallet, Eye, EyeOff, Layers, Network } from 'lucide-react';
+import { Wallet, Eye, EyeOff, Layers, Network, Copy, Check } from 'lucide-react';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { L1WalletView } from './L1/views/L1WalletView';
 import { L3WalletView } from './L3/views/L3WalletView';
+import { useWallet } from './L3/hooks/useWallet';
 
 type LayerType = 'L1' | 'L3';
 
 export function WalletPanel() {
   const [showBalances, setShowBalances] = useState(true);
   const [activeLayer, setActiveLayer] = useState<LayerType>('L3');
+  const [copied, setCopied] = useState(false);
+  const { nametag } = useWallet();
+
+  const handleCopyNametag = async () => {
+    if (!nametag) return;
+    try {
+      await navigator.clipboard.writeText(`${nametag}`);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy nametag:', err);
+    }
+  };
 
   return (
     <div className="bg-white/60 dark:bg-neutral-900/90 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden h-full relative shadow-xl dark:shadow-2xl flex flex-col transition-all duration-500 theme-transition">
@@ -33,7 +47,26 @@ export function WalletPanel() {
 
             <div className="flex flex-col">
                  <span className="text-sm sm:text-base text-neutral-900 dark:text-white font-medium tracking-wide">My Wallet</span>
-                 <span className="text-[10px] sm:text-xs text-neutral-500">{activeLayer === 'L3' ? 'AgentSphere' : 'Ethereum'}</span>
+                 <div className="flex items-center gap-1.5">
+                   <span className="text-[10px] sm:text-xs text-neutral-500">
+                     {nametag ? `@${nametag}` : 'AgentSphere'}
+                   </span>
+                   {nametag && (
+                     <motion.button
+                       whileHover={{ scale: 1.1 }}
+                       whileTap={{ scale: 0.9 }}
+                       onClick={handleCopyNametag}
+                       className="p-1 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded transition-colors"
+                       title="Copy nametag"
+                     >
+                       {copied ? (
+                         <Check className="w-3 h-3 text-emerald-500" />
+                       ) : (
+                         <Copy className="w-3 h-3 text-neutral-500 " />
+                       )}
+                     </motion.button>
+                   )}
+                 </div>
             </div>
           </div>
 
@@ -66,11 +99,11 @@ export function WalletPanel() {
 
             {/* Sliding Indicator */}
             <motion.div
-                className={`absolute top-1 bottom-1 rounded-md sm:rounded-lg shadow-lg ${activeLayer === 'L3' ? 'bg-linear-to-r from-orange-500 to-orange-600' : 'bg-linear-to-r from-blue-600 to-blue-700'}`}
+                className={`absolute top-1 bottom-1 left-1 rounded-md sm:rounded-lg shadow-lg ${activeLayer === 'L3' ? 'bg-linear-to-r from-orange-500 to-orange-600' : 'bg-linear-to-r from-blue-600 to-blue-700'}`}
                 initial={false}
                 animate={{
                     x: activeLayer === 'L1' ? '0%' : '100%',
-                    width: '50%'
+                    width: 'calc(50% - 0.25rem)'
                 }}
                 transition={{ type: "spring", stiffness: 300, damping: 30 }}
             />
