@@ -181,6 +181,17 @@ export const useWallet = () => {
     },
   });
 
+  const restoreWalletMutation = useMutation({
+    mutationFn: async (mnemonic: string) => {
+      const identity = await identityManager.deriveIdentityFromMnemonic(mnemonic);
+      walletRepo.createWallet(identity.address);
+      return identity;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["wallet"] });
+    },
+  });
+
   const mintNametagMutation = useMutation({
     mutationFn: async (nametag: string) => {
       const result = await nametagService.mintNametagAndPublish(nametag);
@@ -465,6 +476,12 @@ export const useWallet = () => {
     walletRepo.addToken(uiToken);
   };
 
+  const getSeedPhrase = async (): Promise<string[] | null> => {
+    const identity = await identityManager.getCurrentIdentity();
+    if (!identity?.mnemonic) return null;
+    return identity.mnemonic.split(' ');
+  };
+
   return {
     identity: identityQuery.data,
     isLoadingIdentity: identityQuery.isLoading,
@@ -477,10 +494,13 @@ export const useWallet = () => {
 
     tokens: tokensQuery.data || [],
     createWallet: createWalletMutation.mutateAsync,
+    restoreWallet: restoreWalletMutation.mutateAsync,
     mintNametag: mintNametagMutation.mutateAsync,
 
     sentToken: sendTokenMutation.mutateAsync,
     sendAmount: sendAmountMutation.mutateAsync,
     isSending: sendAmountMutation.isPending || sendTokenMutation.isPending,
+
+    getSeedPhrase,
   };
 };

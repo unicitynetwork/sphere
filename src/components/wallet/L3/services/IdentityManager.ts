@@ -33,6 +33,12 @@ export class IdentityManager {
   }
 
   async deriveIdentityFromMnemonic(mnemonic: string): Promise<UserIdentity> {
+    // Validate mnemonic phrase
+    const isValid = bip39.validateMnemonic(mnemonic);
+    if (!isValid) {
+      throw new Error("Invalid recovery phrase. Please check your words and try again.");
+    }
+
     const seed = await bip39.mnemonicToSeed(mnemonic);
 
     const seedBuffer = Buffer.from(seed);

@@ -1,4 +1,4 @@
-import { Plus, ArrowUpRight, Sparkles, Loader2, Coins, Layers, Bell, CheckCircle, XCircle } from 'lucide-react';
+import { Plus, ArrowUpRight, Sparkles, Loader2, Coins, Layers, Bell, CheckCircle, XCircle, Key } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -9,14 +9,17 @@ import { SendModal } from '../modals/SendModal';
 import { useIncomingPaymentRequests } from '../hooks/useIncomingPaymentRequests';
 import { PaymentRequestsModal } from '../modals/PaymentRequestModal';
 import { FaucetService } from '../services/FaucetService';
+import { SeedPhraseModal } from '../modals/SeedPhraseModal';
 
 type Tab = 'assets' | 'tokens';
 
 export function L3WalletView({ showBalances }: { showBalances: boolean }) {
-  const { identity, assets, tokens, isLoadingAssets, isLoadingIdentity, nametag } = useWallet();
+  const { identity, assets, tokens, isLoadingAssets, isLoadingIdentity, nametag, getSeedPhrase } = useWallet();
   const [activeTab, setActiveTab] = useState<Tab>('assets');
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const [isRequestsOpen, setIsRequestsOpen] = useState(false);
+  const [isSeedPhraseOpen, setIsSeedPhraseOpen] = useState(false);
+  const [seedPhrase, setSeedPhrase] = useState<string[]>([]);
   const [isFaucetLoading, setIsFaucetLoading] = useState(false);
   const [faucetSuccess, setFaucetSuccess] = useState(false);
   const [faucetError, setFaucetError] = useState<string | null>(null);
@@ -34,7 +37,6 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
   }, [pendingCount]);
 
   const totalValue = useMemo(() => {
-    console.log(assets)
     return assets.reduce((sum, asset) => sum + asset.getTotalFiatValue('USD'), 0);
   }, [assets]);
 
@@ -66,6 +68,14 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
     }
   };
 
+  const handleShowSeedPhrase = async () => {
+    const phrase = await getSeedPhrase();
+    if (phrase) {
+      setSeedPhrase(phrase);
+      setIsSeedPhraseOpen(true);
+    }
+  };
+
   if (isLoadingIdentity) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -91,7 +101,14 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+                 <button
+                    onClick={handleShowSeedPhrase}
+                    className="p-1.5 rounded-lg hover:bg-neutral-200/50 dark:hover:bg-white/10 transition-colors group"
+                    title="View recovery phrase"
+                 >
+                    <Key className="w-5 h-5 text-neutral-400 dark:text-neutral-500 group-hover:text-neutral-900 dark:group-hover:text-white transition-colors" />
+                 </button>
                  <button
                     onClick={() => setIsRequestsOpen(true)}
                     className="relative p-1.5 rounded-lg hover:bg-neutral-200/50 dark:hover:bg-white/10 transition-colors group"
@@ -272,6 +289,12 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
       <SendModal isOpen={isSendModalOpen} onClose={() => setIsSendModalOpen(false)} />
 
       <PaymentRequestsModal isOpen={isRequestsOpen} onClose={() => setIsRequestsOpen(false)} />
+
+      <SeedPhraseModal
+        isOpen={isSeedPhraseOpen}
+        onClose={() => setIsSeedPhraseOpen(false)}
+        seedPhrase={seedPhrase}
+      />
     </div>
   );
 }
