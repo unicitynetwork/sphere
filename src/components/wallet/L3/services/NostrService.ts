@@ -52,6 +52,8 @@ const UNICITY_RELAYS = [
   "ws://unicity-nostr-relay-20250927-alb-1919039002.me-central-1.elb.amazonaws.com:8080",
 ];
 
+const STORAGE_KEY_LAST_SYNC = "unicity_nostr_last_sync";
+
 export class NostrService {
   private static instance: NostrService;
   private client: NostrClient | null = null;
@@ -102,20 +104,54 @@ export class NostrService {
 
   private subscribeToPrivateEvents(publicKey: string) {
     if (!this.client) return;
-    const filter = new Filter();
-    filter.kinds = [
-      EventKinds.GIFT_WRAP, // NIP-17 private messages
+
+    // Subscribe to wallet events (token transfers, payment requests) with since filter
+    const lastSync = this.getOrInitLastSync();
+    const walletFilter = new Filter();
+    walletFilter.kinds = [
       EventKinds.TOKEN_TRANSFER,
       EventKinds.PAYMENT_REQUEST,
     ];
-    filter["#p"] = [publicKey];
-    // Don't use since filter - always fetch all events and dedupe by ID
+    walletFilter["#p"] = [publicKey];
+    walletFilter.since = lastSync;
 
-    this.client.subscribe(filter, {
+    this.client.subscribe(walletFilter, {
       onEvent: (event) => {
-        // Deduplicate by event ID
+        // Deduplicate by event ID (in-session)
         if (this.processedEventIds.has(event.id)) {
-          return; // Already processed this session
+          return;
+        }
+        this.processedEventIds.add(event.id);
+
+        // Skip old events
+        const currentLastSync = this.getOrInitLastSync();
+        if (event.created_at <= currentLastSync) {
+          console.log(
+            `⏭️ Skipping old event (Time: ${event.created_at} <= Sync: ${currentLastSync})`
+          );
+          return;
+        }
+
+        console.log(`Received wallet event kind=${event.kind}`);
+        this.handleIncomingEvent(event);
+        this.updateLastSync(event.created_at);
+      },
+      onEndOfStoredEvents: () => {
+        console.log("End of stored wallet events");
+      },
+    });
+
+    // Subscribe to chat events (NIP-17 gift wrap) without since filter
+    // Chat messages are deduplicated via ChatRepository (localStorage)
+    const chatFilter = new Filter();
+    chatFilter.kinds = [EventKinds.GIFT_WRAP];
+    chatFilter["#p"] = [publicKey];
+
+    this.client.subscribe(chatFilter, {
+      onEvent: (event) => {
+        // In-session deduplication only
+        if (this.processedEventIds.has(event.id)) {
+          return;
         }
         this.processedEventIds.add(event.id);
 
@@ -125,13 +161,31 @@ export class NostrService {
           if (firstId) this.processedEventIds.delete(firstId);
         }
 
-        console.log(`Received event kind=${event.kind}`);
+        console.log(`Received chat event kind=${event.kind}`);
         this.handleIncomingEvent(event);
       },
       onEndOfStoredEvents: () => {
-        console.log("End of stored events");
+        console.log("End of stored chat events");
       },
     });
+  }
+
+  private getOrInitLastSync(): number {
+    const saved = localStorage.getItem(STORAGE_KEY_LAST_SYNC);
+    if (saved) {
+      return parseInt(saved);
+    } else {
+      const now = Math.floor(Date.now() / 1000);
+      localStorage.setItem(STORAGE_KEY_LAST_SYNC, now.toString());
+      return now;
+    }
+  }
+
+  private updateLastSync(timestamp: number) {
+    const current = this.getOrInitLastSync();
+    if (timestamp > current) {
+      localStorage.setItem(STORAGE_KEY_LAST_SYNC, timestamp.toString());
+    }
   }
 
   private async handleIncomingEvent(event: Event) {
