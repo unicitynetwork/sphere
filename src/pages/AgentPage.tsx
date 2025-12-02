@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
 import { MessageSquare, Wallet } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { AgentCard } from '../components/agents/AgentCard';
 import { ChatSection } from '../components/chat/ChatSection';
 import { SportChat } from '../components/agents/SportChat';
@@ -115,13 +116,16 @@ export function AgentPage() {
         </div>
       </div>
       {/* Mobile tab switcher with sliding indicator */}
-      <div className="lg:hidden relative flex p-1 mb-3 bg-neutral-100 dark:bg-neutral-800/50 rounded-2xl backdrop-blur-sm border border-neutral-200 dark:border-neutral-700/30">
-        {/* Sliding background indicator - CSS transition for smoothness */}
-        <div
-          className="absolute top-1 bottom-1 w-[calc(50%-4px)] bg-linear-to-r from-orange-500 to-orange-600 rounded-xl shadow-lg shadow-orange-500/20 transition-transform duration-300 ease-out"
-          style={{
-            transform: `translateX(${activePanel === 'chat' ? '0' : 'calc(100% + 8px)'})`,
+      <div className="lg:hidden relative flex p-1 mb-3 bg-neutral-100 dark:bg-neutral-800/50 rounded-2xl backdrop-blur-sm border border-neutral-200 dark:border-neutral-700/30 overflow-hidden">
+        {/* Sliding background indicator */}
+        <motion.div
+          className="absolute top-1 bottom-1 left-1 bg-linear-to-r from-orange-500 to-orange-600 rounded-xl shadow-lg shadow-orange-500/20"
+          initial={false}
+          animate={{
+            x: activePanel === 'chat' ? '0%' : '100%',
+            width: 'calc(50% - 0.25rem)',
           }}
+          transition={{ type: "spring", stiffness: 300, damping: 30 }}
         />
 
         {/* Chat tab */}
