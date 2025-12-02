@@ -595,6 +595,13 @@ export class NostrService {
     // Unwrap message content to extract sender's nametag if present
     const { text: content, senderNametag } = this.unwrapMessageContent(rawContent);
 
+    // Check if this message already exists (e.g., after page reload)
+    const existingMessage = this.chatRepository.getMessage(privateMessage.eventId);
+    if (existingMessage) {
+      console.log(`📩 Skipping already saved message ${privateMessage.eventId.slice(0, 8)}`);
+      return;
+    }
+
     console.log(`📩 NIP-17 DM from ${senderNametag || senderPubkey.slice(0, 8)}: ${content.slice(0, 50)}...`);
 
     // Get or create conversation with sender's nametag if available
@@ -691,15 +698,17 @@ export class NostrService {
       );
 
       if (eventId) {
-        // Update message ID to match the event ID for read receipt tracking
+        // Update message: replace with new ID (for read receipt tracking) and status
+        const originalId = message.id;
         message.id = eventId;
         message.status = MessageStatus.SENT;
-        this.chatRepository.updateMessageStatus(message.id, MessageStatus.SENT);
+        // Delete old message and save updated one
+        this.chatRepository.deleteMessage(originalId);
+        this.chatRepository.saveMessage(message);
         console.log(`📤 NIP-17 DM sent to ${recipientPubkey.slice(0, 8)} from @${senderNametag || 'unknown'}`);
         return message;
       } else {
         // Update status to failed
-        message.status = MessageStatus.FAILED;
         this.chatRepository.updateMessageStatus(message.id, MessageStatus.FAILED);
         return null;
       }
@@ -756,13 +765,16 @@ export class NostrService {
       );
 
       if (eventId) {
+        // Update message: replace with new ID (for read receipt tracking) and status
+        const originalId = message.id;
         message.id = eventId;
         message.status = MessageStatus.SENT;
-        this.chatRepository.updateMessageStatus(message.id, MessageStatus.SENT);
+        // Delete old message and save updated one
+        this.chatRepository.deleteMessage(originalId);
+        this.chatRepository.saveMessage(message);
         console.log(`📤 NIP-17 DM sent to @${nametag} from @${senderNametag || 'unknown'}`);
         return message;
       } else {
-        message.status = MessageStatus.FAILED;
         this.chatRepository.updateMessageStatus(message.id, MessageStatus.FAILED);
         return null;
       }

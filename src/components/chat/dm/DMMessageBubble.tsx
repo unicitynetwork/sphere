@@ -17,12 +17,13 @@ export function DMMessageBubble({ message, delay = 0 }: DMMessageBubbleProps) {
       case MessageStatus.SENT:
         return <Check className="w-3 h-3 text-white/60" />;
       case MessageStatus.DELIVERED:
-      case MessageStatus.READ:
         return <CheckCheck className="w-3 h-3 text-white/60" />;
+      case MessageStatus.READ:
+        return <CheckCheck className="w-3 h-3 text-blue-300" />;
       case MessageStatus.FAILED:
         return <AlertCircle className="w-3 h-3 text-red-300" />;
       default:
-        return null;
+        return <Check className="w-3 h-3 text-white/60" />;
     }
   };
 
