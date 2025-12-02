@@ -101,7 +101,6 @@ export const useWallet = () => {
     queryFn: async () => {
       const tokens = tokensQuery.data || [];
       const prices = pricesQuery.data || {};
-      console.log("📊 Starting Aggregation for", tokens.length, "tokens");
       const groupedTokens: Record<string, Token[]> = {};
 
       tokens.forEach((token) => {
@@ -109,12 +108,6 @@ export const useWallet = () => {
           token.status === TokenStatus.BURNED ||
           token.status === TokenStatus.TRANSFERRED
         ) {
-          console.log(
-            `⚠️ Skipping token ${token.symbol} (${token.id.slice(
-              0,
-              4
-            )}): Status is ${token.status}`
-          );
           return;
         }
 
@@ -123,26 +116,17 @@ export const useWallet = () => {
         groupedTokens[key].push(token);
       });
 
-      console.log("✅ Grouped tokens:", Object.keys(groupedTokens));
-
       const assets: AggregatedAsset[] = Object.keys(groupedTokens).map(
         (key) => {
           const group = groupedTokens[key];
           const firstToken = group[0];
 
-          console.log(firstToken);
-
           const def = registryService.getCoinDefinition(key);
-          console.log(def);
 
           let totalAmount = BigInt(0);
           group.forEach((t) => {
-            console.log("IM IN");
-            console.log(t);
             if (t.amount) totalAmount += BigInt(t.amount);
           });
-
-          console.log(totalAmount);
 
           const symbol = def?.symbol || firstToken.symbol || "UNK";
           const name = def?.name || firstToken.name || "Unknown Token";
@@ -176,8 +160,6 @@ export const useWallet = () => {
           });
         }
       );
-
-      console.log(assets);
 
       return assets.sort((a, b) => {
         const valA = a.priceUsd * a.getAmountAsDecimal();

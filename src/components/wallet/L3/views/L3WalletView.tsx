@@ -1,4 +1,4 @@
-import { Plus, ArrowUpRight, Sparkles, Loader2, Coins, Layers, Bell } from 'lucide-react';
+import { Plus, ArrowUpRight, Sparkles, Loader2, Coins, Layers, Bell, CheckCircle, XCircle } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -8,6 +8,7 @@ import { TokenRow } from '../../shared/components';
 import { SendModal } from '../modals/SendModal';
 import { useIncomingPaymentRequests } from '../hooks/useIncomingPaymentRequests';
 import { PaymentRequestsModal } from '../modals/PaymentRequestModal';
+import { FaucetService } from '../services/FaucetService';
 
 type Tab = 'assets' | 'tokens';
 
@@ -16,6 +17,9 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
   const [activeTab, setActiveTab] = useState<Tab>('assets');
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const [isRequestsOpen, setIsRequestsOpen] = useState(false);
+  const [isFaucetLoading, setIsFaucetLoading] = useState(false);
+  const [faucetSuccess, setFaucetSuccess] = useState(false);
+  const [faucetError, setFaucetError] = useState<string | null>(null);
 
   const { pendingCount } = useIncomingPaymentRequests();
 
@@ -33,6 +37,34 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
     console.log(assets)
     return assets.reduce((sum, asset) => sum + asset.getTotalFiatValue('USD'), 0);
   }, [assets]);
+
+  const handleTopUp = async () => {
+    if (!nametag) {
+      setFaucetError('Nametag is required to request tokens');
+      return;
+    }
+
+    setIsFaucetLoading(true);
+    setFaucetError(null);
+    setFaucetSuccess(false);
+
+    try {
+      const results = await FaucetService.requestAllCoins(nametag);
+      const failedRequests = results.filter(r => !r.success);
+
+      if (failedRequests.length > 0) {
+        const failedCoins = failedRequests.map(r => r.coin).join(', ');
+        setFaucetError(`Failed to request: ${failedCoins}`);
+      } else {
+        setFaucetSuccess(true);
+        setTimeout(() => setFaucetSuccess(false), 3000);
+      }
+    } catch (error) {
+      setFaucetError(error instanceof Error ? error.message : 'Failed to request tokens');
+    } finally {
+      setIsFaucetLoading(false);
+    }
+  };
 
   if (isLoadingIdentity) {
     return (
@@ -84,12 +116,28 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
         {/* L2 Actions - Speed focused */}
         <div className="grid grid-cols-2 gap-3">
           <motion.button
-            whileHover={{ scale: 1.02, y: -2 }}
-            whileTap={{ scale: 0.98 }}
-            className="relative px-4 py-3 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 text-white text-sm shadow-xl shadow-orange-500/20 flex items-center justify-center gap-2 overflow-hidden"
+            whileHover={{ scale: isFaucetLoading ? 1 : 1.02, y: isFaucetLoading ? 0 : -2 }}
+            whileTap={{ scale: isFaucetLoading ? 1 : 0.98 }}
+            onClick={handleTopUp}
+            disabled={isFaucetLoading || !nametag}
+            className="relative px-4 py-3 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 text-white text-sm shadow-xl shadow-orange-500/20 flex items-center justify-center gap-2 overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Plus className="w-4 h-4" />
-            <span>Top Up</span>
+            {isFaucetLoading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Requesting...</span>
+              </>
+            ) : faucetSuccess ? (
+              <>
+                <CheckCircle className="w-4 h-4" />
+                <span>Success!</span>
+              </>
+            ) : (
+              <>
+                <Plus className="w-4 h-4" />
+                <span>Top Up</span>
+              </>
+            )}
           </motion.button>
 
           <motion.button
@@ -102,6 +150,21 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
             <span>Send</span>
           </motion.button>
         </div>
+
+        {/* Error feedback */}
+        <AnimatePresence>
+          {faucetError && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="mt-3 flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl"
+            >
+              <XCircle className="w-4 h-4 text-red-500 dark:text-red-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-red-600 dark:text-red-400">{faucetError}</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       <div className="px-6 mb-4 shrink-0">
