@@ -4,6 +4,7 @@ import { type IncomingPaymentRequest, PaymentRequestStatus } from '../data/model
 import { useWallet } from '../hooks/useWallet';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useState } from 'react';
+import { RegistryService } from '../services/RegistryService';
 
 interface PaymentRequestsModalProps {
   isOpen: boolean;
@@ -192,7 +193,7 @@ interface RequestCardProps {
 
 function RequestCard({ req, error, onPay, onReject, isProcessing, isGlobalDisabled }: RequestCardProps) {
   const isPending = req.status === PaymentRequestStatus.PENDING;
-  const amountDisplay = formatDisplayAmount(req.amount.toString(), req.symbol);
+  const amountDisplay = formatDisplayAmount(req);
   const timeAgo = getTimeAgo(req.timestamp);
 
   // Стиль статуса
@@ -331,16 +332,23 @@ const getTimeAgo = (timestamp: number) => {
   return new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
-const formatDisplayAmount = (amountStr: string, symbol: string): string => {
+const formatDisplayAmount = (req: IncomingPaymentRequest): string => {
   try {
-    const amount = parseFloat(amountStr);
-    let divisor = 1_000_000.0;
-    const sym = symbol.toUpperCase();
-    if (sym === "SOL") divisor = 1_000_000_000.0;
-    else if (sym === "BTC") divisor = 100_000_000.0;
-    else if (sym === "ETH") divisor = 1_000_000_000_000_000_000.0;
+    const amount = parseFloat(req.amount.toString());
+
+    const registryService = RegistryService.getInstance();
+    const def = registryService.getCoinDefinition(req.coinId);
+
+    const decimals = def?.decimals ?? 6;
+    const divisor = Math.pow(10, decimals);
 
     const val = amount / divisor;
-    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 }).format(val);
-  } catch { return amountStr; }
+
+    return new Intl.NumberFormat('en-US', {
+      maximumFractionDigits: 6
+    }).format(val);
+  } catch (error) { 
+    console.warn("Error formatting amount", error);
+    return req.amount.toString(); 
+  }
 };
