@@ -106,6 +106,14 @@ export class ChatRepository {
     }
   }
 
+  updateConversationNametag(conversationId: string, nametag: string): void {
+    const conversation = this.getConversation(conversationId);
+    if (conversation) {
+      conversation.participantNametag = nametag;
+      this.saveConversation(conversation);
+    }
+  }
+
   getTotalUnreadCount(): number {
     return this.getConversations().reduce((sum, c) => sum + c.unreadCount, 0);
   }

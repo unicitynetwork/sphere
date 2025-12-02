@@ -531,6 +531,38 @@ export class NostrService {
   // DM Chat Methods (NIP-17)
   // ==========================================
 
+  /**
+   * Wrapper format for messages that includes sender's nametag.
+   * Messages are sent as JSON: {"senderNametag": "name", "text": "message"}
+   */
+  private wrapMessageContent(content: string, senderNametag: string | null): string {
+    if (senderNametag) {
+      return JSON.stringify({
+        senderNametag: senderNametag,
+        text: content,
+      });
+    }
+    return content;
+  }
+
+  /**
+   * Unwrap message content and extract sender's nametag if present.
+   */
+  private unwrapMessageContent(content: string): { text: string; senderNametag: string | null } {
+    try {
+      const parsed = JSON.parse(content);
+      if (typeof parsed === "object" && parsed.text !== undefined) {
+        return {
+          text: parsed.text,
+          senderNametag: parsed.senderNametag || null,
+        };
+      }
+    } catch {
+      // Not JSON, return original content
+    }
+    return { text: content, senderNametag: null };
+  }
+
   private async handleGiftWrappedMessage(event: Event) {
     try {
       if (!this.client) {
@@ -558,14 +590,23 @@ export class NostrService {
 
   private handleIncomingChatMessage(privateMessage: PrivateMessage) {
     const senderPubkey = privateMessage.senderPubkey;
-    const content = privateMessage.content;
+    const rawContent = privateMessage.content;
 
-    console.log(`📩 NIP-17 DM from ${senderPubkey.slice(0, 8)}: ${content.slice(0, 50)}...`);
+    // Unwrap message content to extract sender's nametag if present
+    const { text: content, senderNametag } = this.unwrapMessageContent(rawContent);
 
-    // Get or create conversation
-    const conversation = this.chatRepository.getOrCreateConversation(senderPubkey);
+    console.log(`📩 NIP-17 DM from ${senderNametag || senderPubkey.slice(0, 8)}: ${content.slice(0, 50)}...`);
 
-    // Create and save message
+    // Get or create conversation with sender's nametag if available
+    const conversation = this.chatRepository.getOrCreateConversation(senderPubkey, senderNametag || undefined);
+
+    // If we received a nametag and the conversation didn't have one, update it
+    if (senderNametag && !conversation.participantNametag) {
+      conversation.participantNametag = senderNametag;
+      this.chatRepository.updateConversationNametag(conversation.id, senderNametag);
+    }
+
+    // Create and save message (with unwrapped content)
     const message = new ChatMessage({
       id: privateMessage.eventId,
       conversationId: conversation.id,
@@ -616,6 +657,9 @@ export class NostrService {
       const identity = await this.identityManager.getCurrentIdentity();
       if (!identity) throw new Error("No identity for sending DM");
 
+      // Get sender's nametag to include in message
+      const senderNametag = await this.getMyNametag();
+
       // Get or create conversation
       const conversation = this.chatRepository.getOrCreateConversation(
         recipientPubkey,
@@ -636,10 +680,13 @@ export class NostrService {
       // Save immediately (optimistic update)
       this.chatRepository.saveMessage(message);
 
+      // Wrap content with sender's nametag for recipient to see who sent it
+      const wrappedContent = this.wrapMessageContent(content, senderNametag);
+
       // Send via Nostr using NIP-17 private messaging
       const eventId = await this.client?.sendPrivateMessage(
         recipientPubkey,
-        content
+        wrappedContent
       );
 
       if (eventId) {
@@ -647,7 +694,7 @@ export class NostrService {
         message.id = eventId;
         message.status = MessageStatus.SENT;
         this.chatRepository.updateMessageStatus(message.id, MessageStatus.SENT);
-        console.log(`📤 NIP-17 DM sent to ${recipientPubkey.slice(0, 8)}`);
+        console.log(`📤 NIP-17 DM sent to ${recipientPubkey.slice(0, 8)} from @${senderNametag || 'unknown'}`);
         return message;
       } else {
         // Update status to failed
@@ -670,6 +717,9 @@ export class NostrService {
     try {
       const identity = await this.identityManager.getCurrentIdentity();
       if (!identity) throw new Error("No identity for sending DM");
+
+      // Get sender's nametag to include in message
+      const senderNametag = await this.getMyNametag();
 
       // Resolve nametag to pubkey first for conversation tracking
       const pubkey = await this.queryPubkeyByNametag(nametag);
@@ -695,17 +745,20 @@ export class NostrService {
       // Save immediately (optimistic update)
       this.chatRepository.saveMessage(message);
 
+      // Wrap content with sender's nametag for recipient to see who sent it
+      const wrappedContent = this.wrapMessageContent(content, senderNametag);
+
       // Send via Nostr using NIP-17 with nametag (SDK auto-resolves)
       const eventId = await this.client?.sendPrivateMessageToNametag(
         nametag.replace("@", ""),
-        content
+        wrappedContent
       );
 
       if (eventId) {
         message.id = eventId;
         message.status = MessageStatus.SENT;
         this.chatRepository.updateMessageStatus(message.id, MessageStatus.SENT);
-        console.log(`📤 NIP-17 DM sent to @${nametag}`);
+        console.log(`📤 NIP-17 DM sent to @${nametag} from @${senderNametag || 'unknown'}`);
         return message;
       } else {
         message.status = MessageStatus.FAILED;
