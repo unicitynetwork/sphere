@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
+import { Loader2 } from "lucide-react";
 import {
   connect,
+  isWebSocketConnected,
   generateAddress,
   loadWalletFromStorage,
   createTransactionPlan,
@@ -20,7 +22,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const [viewMode, setViewMode] = useState<ViewMode>("main");
   const [showLoadPasswordModal, setShowLoadPasswordModal] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [isConnecting, setIsConnecting] = useState(true);
+  const [isConnecting, setIsConnecting] = useState(() => !isWebSocketConnected());
   const [txPlan, setTxPlan] = useState<TransactionPlan | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [messageModal, setMessageModal] = useState<{
@@ -63,8 +65,12 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     setMessageModal((prev) => ({ ...prev, show: false }));
   }, []);
 
-  // Connect on mount
+  // Connect on mount (skip if already connected)
   useEffect(() => {
+    if (isWebSocketConnected()) {
+      setIsConnecting(false);
+      return;
+    }
     (async () => {
       try {
         setIsConnecting(true);
@@ -279,9 +285,8 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   // Show loading state while connecting
   if (isConnecting || isLoadingWallet) {
     return (
-      <div className="flex items-center justify-center h-full flex-col gap-3">
-        <div className="text-3xl animate-spin text-neutral-900 dark:text-white">⟳</div>
-        <div className="text-neutral-500 dark:text-neutral-400">Connecting to network...</div>
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="animate-spin text-neutral-400 dark:text-neutral-600" />
       </div>
     );
   }
