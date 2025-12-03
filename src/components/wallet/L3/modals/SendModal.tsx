@@ -9,6 +9,7 @@ import { IdentityManager } from '../services/IdentityManager';
 import { CurrencyUtils } from '../utils/currency';
 import { TokenSplitCalculator, type SplitPlan } from '../services/transfer/TokenSplitCalculator';
 import { WalletRepository } from '../../../../repositories/WalletRepository';
+import { AssetListSkeleton } from '../../../ui';
 
 type Step = 'recipient' | 'asset' | 'amount' | 'confirm' | 'processing' | 'success';
 
@@ -18,7 +19,7 @@ interface SendModalProps {
 }
 
 export function SendModal({ isOpen, onClose }: SendModalProps) {
-  const { assets, sendAmount } = useWallet();
+  const { assets, sendAmount, isLoadingAssets } = useWallet();
 
   // State
   const [step, setStep] = useState<Step>('recipient');
@@ -190,20 +191,24 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
             {/* 2. ASSET */}
             {step === 'asset' && (
               <motion.div key="asset" initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -20, opacity: 0 }} className="space-y-2">
-                {assets.map(asset => (
-                  <button
-                    key={asset.coinId}
-                    onClick={() => { setSelectedAsset(asset); setStep('amount'); }}
-                    className="w-full p-3 flex items-center gap-3 bg-neutral-50 dark:bg-neutral-900/50 hover:bg-neutral-100 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-white/5 rounded-xl transition-colors text-left"
-                  >
-                    <img src={asset.iconUrl || ''} className="w-8 h-8 rounded-full" alt="" />
-                    <div className="flex-1">
-                      <div className="text-neutral-900 dark:text-white font-medium">{asset.symbol}</div>
-                      <div className="text-xs text-neutral-500 dark:text-neutral-400">{asset.getFormattedAmount()} available</div>
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-neutral-400 dark:text-neutral-600" />
-                  </button>
-                ))}
+                {isLoadingAssets ? (
+                  <AssetListSkeleton count={3} />
+                ) : (
+                  assets.map(asset => (
+                    <button
+                      key={asset.coinId}
+                      onClick={() => { setSelectedAsset(asset); setStep('amount'); }}
+                      className="w-full p-3 flex items-center gap-3 bg-neutral-50 dark:bg-neutral-900/50 hover:bg-neutral-100 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-white/5 rounded-xl transition-colors text-left"
+                    >
+                      <img src={asset.iconUrl || ''} className="w-8 h-8 rounded-full" alt="" />
+                      <div className="flex-1">
+                        <div className="text-neutral-900 dark:text-white font-medium">{asset.symbol}</div>
+                        <div className="text-xs text-neutral-500 dark:text-neutral-400">{asset.getFormattedAmount()} available</div>
+                      </div>
+                      <ArrowRight className="w-4 h-4 text-neutral-400 dark:text-neutral-600" />
+                    </button>
+                  ))
+                )}
               </motion.div>
             )}
 

@@ -23,6 +23,7 @@ export function DMChatSection({ onModeChange }: DMChatSectionProps) {
     startNewConversation,
     messages,
     isLoadingMessages,
+    isLoadingConversations,
     sendMessage,
     isSending,
     messageInput,
@@ -111,6 +112,7 @@ export function DMChatSection({ onModeChange }: DMChatSectionProps) {
         onCollapse={() => setSidebarCollapsed(true)}
         totalUnreadCount={totalUnreadCount}
         onModeChange={onModeChange}
+        isLoading={isLoadingConversations}
       />
 
       {/* Main Chat Area */}

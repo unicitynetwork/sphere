@@ -5,6 +5,7 @@ import type {
   TransactionDetail,
   Wallet,
 } from "../sdk";
+import { TransactionListSkeleton } from "../../../ui";
 
 interface HistoryViewProps {
   wallet: Wallet;
@@ -70,18 +71,7 @@ export function HistoryView({
 
       <div className="flex-1 overflow-y-auto px-6 custom-scrollbar">
         {loadingTransactions ? (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex flex-col items-center justify-center h-32 gap-3"
-          >
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-              className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full"
-            />
-            <p className="text-neutral-500 dark:text-neutral-400 text-sm">Loading transactions...</p>
-          </motion.div>
+          <TransactionListSkeleton count={5} />
         ) : transactions.length === 0 ? (
           <motion.div
             initial={{ opacity: 0, y: 20 }}

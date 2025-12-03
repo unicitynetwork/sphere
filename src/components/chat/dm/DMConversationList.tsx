@@ -3,6 +3,7 @@ import { MessageSquarePlus, Search, X, PanelLeftClose, Sparkles, Hash, User } fr
 import { ChatConversation } from '../data/models';
 import { DMConversationItem } from './DMConversationItem';
 import type { ChatMode } from '../../../types';
+import { ConversationListSkeleton } from '../../ui';
 
 interface DMConversationListProps {
   conversations: ChatConversation[];
@@ -18,6 +19,7 @@ interface DMConversationListProps {
   onCollapse: () => void;
   totalUnreadCount: number;
   onModeChange: (mode: ChatMode) => void;
+  isLoading?: boolean;
 }
 
 export function DMConversationList({
@@ -34,6 +36,7 @@ export function DMConversationList({
   onCollapse,
   totalUnreadCount,
   onModeChange,
+  isLoading = false,
 }: DMConversationListProps) {
   return (
     <>
@@ -145,7 +148,9 @@ export function DMConversationList({
 
         {/* Conversation List */}
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
-          {conversations.length === 0 ? (
+          {isLoading ? (
+            <ConversationListSkeleton count={5} />
+          ) : conversations.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center p-4">
               <div className="w-16 h-16 rounded-2xl bg-neutral-100 dark:bg-neutral-800/50 flex items-center justify-center mb-4">
                 <MessageSquarePlus className="w-8 h-8 text-neutral-400" />

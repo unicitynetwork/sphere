@@ -10,6 +10,7 @@ import { useIncomingPaymentRequests } from '../hooks/useIncomingPaymentRequests'
 import { PaymentRequestsModal } from '../modals/PaymentRequestModal';
 import { FaucetService } from '../services/FaucetService';
 import { SeedPhraseModal } from '../modals/SeedPhraseModal';
+import { AssetListSkeleton, WalletLoadingSkeleton } from '../../../ui';
 
 type Tab = 'assets' | 'tokens';
 
@@ -77,11 +78,7 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
   };
 
   if (isLoadingIdentity) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="animate-spin text-neutral-400 dark:text-neutral-600" />
-      </div>
-    );
+    return <WalletLoadingSkeleton />;
   }
 
   if (!identity || !nametag) {
@@ -230,9 +227,7 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
         </div>
 
         {isLoadingAssets ? (
-          <div className="py-10 text-center">
-            <Loader2 className="w-6 h-6 text-orange-500 animate-spin mx-auto" />
-          </div>
+          <AssetListSkeleton count={4} />
         ) : (
           <AnimatePresence mode="wait">
             {activeTab === 'assets' ? (

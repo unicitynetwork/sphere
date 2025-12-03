@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MessageCircle } from 'lucide-react';
 import { ChatMessage } from '../data/models';
 import { DMMessageBubble } from './DMMessageBubble';
+import { MessageListSkeleton } from '../../ui';
 
 interface DMMessageListProps {
   messages: ChatMessage[];
@@ -31,11 +32,7 @@ export function DMMessageList({ messages, isLoading }: DMMessageListProps) {
   }, {} as Record<string, ChatMessage[]>);
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-0">
-        <div className="animate-spin w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full" />
-      </div>
-    );
+    return <MessageListSkeleton count={5} />;
   }
 
   if (messages.length === 0) {
