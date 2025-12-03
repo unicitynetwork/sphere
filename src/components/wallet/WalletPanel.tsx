@@ -1,6 +1,6 @@
 import { Wallet, Eye, EyeOff, Layers, Network, Copy, Check } from 'lucide-react';
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { L1WalletView } from './L1/views/L1WalletView';
 import { L3WalletView } from './L3/views/L3WalletView';
 import { useWallet } from './L3/hooks/useWallet';
@@ -110,33 +110,24 @@ export function WalletPanel() {
         </div>
       </div>
 
-      {/* DYNAMIC CONTENT AREA */}
+      {/* DYNAMIC CONTENT AREA - Both components stay mounted */}
       <div className="flex-1 relative overflow-hidden">
-        <AnimatePresence mode="wait">
-            {activeLayer === 'L1' ? (
-                <motion.div
-                    key="L1"
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 20 }}
-                    transition={{ duration: 0.3 }}
-                    className="absolute inset-0"
-                >
-                    <L1WalletView showBalances={showBalances} />
-                </motion.div>
-            ) : (
-                <motion.div
-                    key="L3"
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -20 }}
-                    transition={{ duration: 0.3 }}
-                    className="absolute inset-0"
-                >
-                    <L3WalletView showBalances={showBalances} />
-                </motion.div>
-            )}
-        </AnimatePresence>
+        <motion.div
+          animate={{ x: activeLayer === 'L1' ? '0%' : '-100%' }}
+          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          className="absolute inset-0"
+          style={{ pointerEvents: activeLayer === 'L1' ? 'auto' : 'none' }}
+        >
+          <L1WalletView showBalances={showBalances} />
+        </motion.div>
+        <motion.div
+          animate={{ x: activeLayer === 'L3' ? '0%' : '100%' }}
+          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          className="absolute inset-0"
+          style={{ pointerEvents: activeLayer === 'L3' ? 'auto' : 'none' }}
+        >
+          <L3WalletView showBalances={showBalances} />
+        </motion.div>
       </div>
     </div>
   );
