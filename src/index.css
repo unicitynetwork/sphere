@@ -122,6 +122,9 @@ body {
 }
 
 @theme {
+  /* Custom breakpoint for 4K monitors */
+  --breakpoint-3xl: 1920px;
+
   --color-brand-green: #A3E635;
   --color-brand-green-dark: #4A5A2B;
   --color-brand-green-hover: #92cf30;

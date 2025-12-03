@@ -160,7 +160,7 @@ export function AgentPage() {
       </div>
 
       {/* Desktop grid layout */}
-      <div className="hidden lg:grid lg:grid-cols-3 lg:gap-8 lg:h-[650px] lg:py-2">
+      <div className="hidden lg:grid lg:grid-cols-3 lg:gap-8 lg:h-[650px] xl:h-[750px] 2xl:h-[850px] 3xl:h-[1000px] lg:py-2">
         <div className="lg:col-span-2 h-full min-h-0">
           {renderChatComponent()}
         </div>
