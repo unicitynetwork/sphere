@@ -86,6 +86,8 @@ export class NostrService {
     const secretKey = Buffer.from(identity.privateKey, "hex");
     const keyManager = NostrKeyManager.fromPrivateKey(secretKey);
 
+    console.log(secretKey)
+
     this.client = new NostrClient(keyManager);
 
     console.log("Connecting to Nostr relays...");

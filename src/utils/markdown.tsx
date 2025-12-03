@@ -41,18 +41,19 @@ function CodeBlock({ code, language, keyPrefix }: { code: string; language?: str
   );
 }
 
-// Parse inline markdown and HTML (bold, italic, code, br, links, images)
+// Parse inline markdown and HTML (bold, italic, code, br, links, images, plain URLs)
 function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
   let key = 0;
 
   // Combined regex for markdown and HTML:
-  // 1: **bold**, 2: *italic*, 3: _italic_, 4: `code`
+  // 1: **bold**, 2: *italic* (strict - no spaces after/before asterisks), 3: _italic_, 4: `code`
   // 5: <br> or <br/>, 6: <b>text</b>, 7: <strong>text</strong>
   // 8: <i>text</i>, 9: <em>text</em>, 10: <code>text</code>
   // 11: <a href="url">text</a>, 12: [text](url) markdown links
   // 15: ![alt](url) markdown images (including base64 data URLs)
-  const regex = /(\*\*(.+?)\*\*|\*([^*]+?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(([^)]+)\)|!\[([^\]]*)\]\(([^)]+)\))/gi;
+  // 17: plain URLs (https://... or http://...)
+  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(([^)]+)\)|!\[([^\]]*)\]\(([^)]+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"]))/gi;
   let lastIndex = 0;
   let match;
 
@@ -125,6 +126,20 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
           className="max-w-full h-auto rounded-lg my-2 border border-neutral-300 dark:border-neutral-700/50"
           loading="lazy"
         />
+      );
+    } else if (match[17]) {
+      // Plain URL (https://... or http://...)
+      const url = match[17];
+      parts.push(
+        <a
+          key={`${keyPrefix}-url-${key++}`}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 underline break-all"
+        >
+          {url}
+        </a>
       );
     }
 
@@ -220,8 +235,8 @@ function parseHeader(line: string, keyPrefix: string): React.ReactNode {
 
 // Simple markdown parser for chat messages
 // Supports: **bold**, *italic*, _italic_, `code`, ```code blocks```, # headers, tables,
-// HTML tags: <br>, <b>, <strong>, <i>, <em>, <code>, <a href="">
-// Links: [text](url)
+// unordered lists (* or - followed by space), HTML tags: <br>, <b>, <strong>, <i>, <em>, <code>, <a href="">
+// Links: [text](url), plain URLs (https://... http://...)
 export function parseMarkdown(text: string): React.ReactNode {
   const parts: React.ReactNode[] = [];
   let key = 0;
@@ -269,6 +284,36 @@ export function parseMarkdown(text: string): React.ReactNode {
       }
       if (tableLines.length >= 2) {
         parts.push(parseTable(tableLines, `table-${key++}`));
+      }
+      continue;
+    }
+
+    // Check if this is the start of an unordered list (* or - followed by space)
+    const listMatch = line.match(/^(\s*)([*-])\s+(.*)$/);
+    if (listMatch) {
+      const listItems: { content: string }[] = [];
+
+      // Collect consecutive list items
+      while (i < lines.length) {
+        const itemMatch = lines[i].match(/^(\s*)([*-])\s+(.*)$/);
+        if (itemMatch) {
+          listItems.push({ content: itemMatch[3] });
+          i++;
+        } else {
+          break;
+        }
+      }
+
+      if (listItems.length > 0) {
+        parts.push(
+          <ul key={`ul-${key++}`} className="list-disc list-inside space-y-1 ml-1">
+            {listItems.map((item, idx) => (
+              <li key={idx} className="text-neutral-800 dark:text-neutral-200">
+                {parseInline(item.content, `li-${key}-${idx}`)}
+              </li>
+            ))}
+          </ul>
+        );
       }
       continue;
     }
