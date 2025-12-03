@@ -149,7 +149,7 @@ export function AgentPage() {
       <div
         ref={sliderRef}
         onScroll={handleScroll}
-        className="lg:hidden flex-1 min-h-0 flex overflow-x-auto snap-x snap-mandatory scrollbar-hide"
+        className="lg:hidden flex-1 min-h-0 flex overflow-x-auto snap-x snap-mandatory scrollbar-hide py-1"
       >
         <div className="w-full shrink-0 snap-center h-full">
           {renderChatComponent()}
@@ -160,7 +160,7 @@ export function AgentPage() {
       </div>
 
       {/* Desktop grid layout */}
-      <div className="hidden lg:grid lg:grid-cols-3 lg:gap-8 lg:h-[650px]">
+      <div className="hidden lg:grid lg:grid-cols-3 lg:gap-8 lg:h-[650px] lg:py-2">
         <div className="lg:col-span-2 h-full min-h-0">
           {renderChatComponent()}
         </div>
