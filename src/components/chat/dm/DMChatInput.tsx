@@ -1,3 +1,4 @@
+import { forwardRef } from 'react';
 import { Send, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -10,30 +11,35 @@ interface DMChatInputProps {
   disabled?: boolean;
 }
 
-export function DMChatInput({
-  value,
-  onChange,
-  onSend,
-  isSending = false,
-  placeholder = 'Type a message...',
-  disabled = false,
-}: DMChatInputProps) {
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      if (value.trim() && !isSending && !disabled) {
-        onSend();
+export const DMChatInput = forwardRef<HTMLTextAreaElement, DMChatInputProps>(
+  function DMChatInput(
+    {
+      value,
+      onChange,
+      onSend,
+      isSending = false,
+      placeholder = 'Type a message...',
+      disabled = false,
+    },
+    ref
+  ) {
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (value.trim() && !isSending && !disabled) {
+          onSend();
+        }
       }
-    }
-  };
+    };
 
-  return (
+    return (
     <div
       className="p-4 border-t border-neutral-200 dark:border-neutral-800/50 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-sm theme-transition"
       style={{ paddingBottom: 'calc(1rem + var(--safe-area-bottom, 0px))' }}
     >
       <div className="flex gap-3">
         <textarea
+          ref={ref}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -58,5 +64,6 @@ export function DMChatInput({
         </motion.button>
       </div>
     </div>
-  );
-}
+    );
+  }
+);

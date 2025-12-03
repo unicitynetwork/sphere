@@ -38,6 +38,7 @@ export function DMChatSection({ onModeChange }: DMChatSectionProps) {
   const [showNewConversation, setShowNewConversation] = useState(false);
   const [showAgentPicker, setShowAgentPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Close picker when clicking outside
   useEffect(() => {
@@ -49,6 +50,23 @@ export function DMChatSection({ onModeChange }: DMChatSectionProps) {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Auto-focus input when message is sent (desktop only)
+  useEffect(() => {
+    if (!isSending && selectedConversation && window.innerWidth >= 1024) {
+      inputRef.current?.focus({ preventScroll: true });
+    }
+  }, [isSending, selectedConversation]);
+
+  // Auto-focus input when conversation is selected (desktop only)
+  useEffect(() => {
+    if (selectedConversation && window.innerWidth >= 1024) {
+      // Small delay to ensure the input is rendered
+      setTimeout(() => {
+        inputRef.current?.focus({ preventScroll: true });
+      }, 100);
+    }
+  }, [selectedConversation]);
 
   const handleAgentSelect = (agentId: string) => {
     navigate(`/agents/${agentId}`);
@@ -231,6 +249,7 @@ export function DMChatSection({ onModeChange }: DMChatSectionProps) {
         {selectedConversation && (
           <div className="shrink-0 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-sm theme-transition">
             <DMChatInput
+              ref={inputRef}
               value={messageInput}
               onChange={setMessageInput}
               onSend={handleSend}
