@@ -25,7 +25,7 @@ export function WalletPanel() {
   };
 
   return (
-    <div className="bg-white/60 dark:bg-neutral-900/90 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden h-full relative shadow-xl dark:shadow-2xl flex flex-col transition-all duration-500 theme-transition">
+    <div className="bg-white/60 dark:bg-neutral-900/90 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden h-full relative lg:shadow-xl dark:lg:shadow-2xl flex flex-col transition-all duration-500 theme-transition">
 
       {/* Dynamic Background Gradients */}
       <div className={`absolute -top-20 -right-20 w-80 h-80 rounded-full blur-3xl transition-colors duration-700 ${activeLayer === 'L3' ? 'bg-orange-500/5 dark:bg-orange-500/10' : 'bg-blue-500/5 dark:bg-blue-500/10'}`} />
