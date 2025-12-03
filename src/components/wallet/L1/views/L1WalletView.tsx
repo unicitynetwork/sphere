@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { Loader2, Layers } from "lucide-react";
 import {
   connect,
   generateAddress,
@@ -42,6 +43,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     currentBlockHeight,
     vestingBalances,
     isClassifyingVesting,
+    isLoadingVesting,
     createWallet,
     importWallet,
     deleteWallet,
@@ -279,9 +281,20 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   // Show loading state while connecting
   if (isConnecting || isLoadingWallet) {
     return (
-      <div className="flex items-center justify-center h-full flex-col gap-3">
-        <div className="text-3xl animate-spin text-neutral-900 dark:text-white">⟳</div>
-        <div className="text-neutral-500 dark:text-neutral-400">Connecting to network...</div>
+      <div className="flex items-center justify-center h-full flex-col gap-4">
+        <div className="relative">
+          <div className="absolute inset-0 rounded-full bg-blue-500/20 blur-xl animate-pulse" />
+          <div className="relative w-16 h-16 rounded-full bg-linear-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-xl shadow-blue-500/30">
+            <Loader2 className="w-8 h-8 text-white animate-spin" />
+          </div>
+        </div>
+        <div className="flex flex-col items-center gap-1">
+          <div className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-blue-500" />
+            <span className="text-sm font-medium text-neutral-900 dark:text-white">Layer 1</span>
+          </div>
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">Connecting to network...</span>
+        </div>
       </div>
     );
   }
@@ -364,6 +377,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         vestingProgress={vestingProgress}
         onVestingModeChange={handleVestingModeChange}
         vestingBalances={vestingBalances}
+        isLoadingVesting={isLoadingVesting}
       />
       <MessageModal
         show={messageModal.show}

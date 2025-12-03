@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import { Loader2 } from "lucide-react";
 import { vestingState } from "../sdk/vestingState";
 import type { VestingMode, VestingBalances } from "../sdk/types";
 
@@ -9,6 +10,7 @@ interface VestingSelectorProps {
   classificationProgress?: { current: number; total: number } | null;
   showBalances?: boolean;
   balances?: VestingBalances;
+  isLoading?: boolean;
 }
 
 export function VestingSelector({
@@ -17,6 +19,7 @@ export function VestingSelector({
   classificationProgress,
   showBalances = true,
   balances: propBalances,
+  isLoading = false,
 }: VestingSelectorProps) {
   const [mode, setMode] = useState<VestingMode>(vestingState.getMode());
   const [localBalances, setLocalBalances] = useState<VestingBalances>({
@@ -82,12 +85,17 @@ export function VestingSelector({
     <div className="rounded-lg sm:rounded-xl bg-neutral-100/50 dark:bg-neutral-900/50 border border-neutral-200/50 dark:border-neutral-800/50 p-2 sm:p-3">
       <div className="flex items-center justify-between mb-1.5 sm:mb-2">
         <span className="text-[10px] sm:text-xs text-neutral-500 dark:text-neutral-400">Coin Filter</span>
-        {classificationProgress && (
+        {isLoading ? (
+          <span className="text-[10px] sm:text-xs text-blue-500 dark:text-blue-400 flex items-center gap-1">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Loading...
+          </span>
+        ) : classificationProgress ? (
           <span className="text-[10px] sm:text-xs text-blue-500 dark:text-blue-400">
             Classifying {classificationProgress.current}/
             {classificationProgress.total}
           </span>
-        )}
+        ) : null}
       </div>
 
       <div className="flex gap-1.5 sm:gap-2">
@@ -119,7 +127,11 @@ export function VestingSelector({
                   <span
                     className={`text-[10px] sm:text-xs mt-0.5 sm:mt-1 font-mono ${isSelected ? colors.text : "text-neutral-500"}`}
                   >
-                    {formatBalance(balance).split(" ")[0]}
+                    {isLoading ? (
+                      <span className="inline-block w-12 h-3 rounded bg-neutral-300/50 dark:bg-neutral-700/50 animate-pulse" />
+                    ) : (
+                      formatBalance(balance).split(" ")[0]
+                    )}
                   </span>
                 )}
               </div>

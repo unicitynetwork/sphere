@@ -89,6 +89,7 @@ interface MainWalletViewProps {
   vestingProgress?: { current: number; total: number } | null;
   onVestingModeChange?: (mode: VestingMode) => void;
   vestingBalances?: VestingBalances;
+  isLoadingVesting?: boolean;
 }
 
 export function MainWalletView({
@@ -109,6 +110,7 @@ export function MainWalletView({
   vestingProgress,
   onVestingModeChange,
   vestingBalances,
+  isLoadingVesting,
 }: MainWalletViewProps) {
   const [showQR, setShowQR] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -294,6 +296,7 @@ export function MainWalletView({
           classificationProgress={vestingProgress}
           showBalances={showBalances}
           balances={vestingBalances}
+          isLoading={isLoadingVesting}
         />
       </div>
 
