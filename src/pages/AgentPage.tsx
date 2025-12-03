@@ -149,14 +149,14 @@ export function AgentPage() {
         </button>
       </div>
 
-      {/* Mobile swipeable container - fullscreen, fixed height with overlays-content */}
+      {/* Mobile swipeable container - uses visual viewport height for keyboard handling */}
       <div
         ref={sliderRef}
         onScroll={handleScroll}
-        className="lg:hidden flex overflow-x-auto snap-x snap-mandatory scrollbar-hide"
+        className="lg:hidden flex overflow-x-auto snap-x snap-mandatory scrollbar-hide keyboard-aware"
         style={{
-          height: 'calc(100dvh - 180px)',
-          minHeight: '300px'
+          height: 'calc(var(--visual-viewport-height, 100dvh) - 180px)',
+          minHeight: '300px',
         }}
       >
         <div className="w-full shrink-0 snap-center h-full">

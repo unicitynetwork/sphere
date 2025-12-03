@@ -101,6 +101,14 @@ body {
   }
 }
 
+/* Smooth keyboard animation for mobile viewport */
+@media screen and (max-width: 1023px) {
+  .keyboard-aware {
+    transition: height 0.15s ease-out;
+    will-change: height;
+  }
+}
+
 /* Prevent input zoom on iOS (requires 16px font) */
 @media screen and (max-width: 768px) {
   input, textarea, select {

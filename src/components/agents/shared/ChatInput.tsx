@@ -1,6 +1,7 @@
-import { forwardRef } from 'react';
+import { forwardRef, useRef, useImperativeHandle } from 'react';
 import { Send, Square } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useKeyboardScrollIntoView } from '../../../hooks/useKeyboardScrollIntoView';
 
 interface ChatInputProps {
   value: string;
@@ -29,6 +30,14 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
     },
     ref
   ) {
+    const internalRef = useRef<HTMLTextAreaElement>(null);
+
+    // Expose the internal ref to parent components
+    useImperativeHandle(ref, () => internalRef.current!, []);
+
+    // Use Visual Viewport API to scroll input into view when keyboard opens
+    useKeyboardScrollIntoView(internalRef);
+
     return (
       <div
         className="p-4 border-t border-neutral-200 dark:border-neutral-800/50 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-sm theme-transition"
@@ -36,7 +45,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
       >
         <div className="flex gap-3">
           <textarea
-            ref={ref}
+            ref={internalRef}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={onKeyDown}
