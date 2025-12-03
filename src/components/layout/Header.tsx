@@ -2,6 +2,7 @@ import { Sparkles, Github } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { isMock } from '../../hooks/useAgentChat';
 import { ThemeToggle } from '../theme';
+import logoUrl from '/Union.svg';
 
 const DiscordIcon = ({ className }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24" fill="currentColor">
@@ -27,7 +28,7 @@ export function Header() {
             className="relative"
           >
               <img
-                src="/Union.svg"
+                src={logoUrl}
                 alt="Logo"
                 className="relative z-10 w-7 h-7 sm:w-9 sm:h-9 lg:w-11 lg:h-11"
               />
