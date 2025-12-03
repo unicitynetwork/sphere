@@ -87,9 +87,9 @@ export function AgentPage() {
   };
 
   return (
-    <div className="h-full flex flex-col lg:block">
+    <div className="h-full flex flex-col">
       {/* Desktop agent grid - always visible */}
-      <div className="hidden lg:block mb-8 relative p-8 rounded-2xl dark:bg-linear-to-br dark:from-neutral-900/40 dark:to-neutral-800/20 backdrop-blur-sm border border-neutral-200 dark:border-neutral-800/50">
+      <div className="hidden lg:block shrink-0 mb-8 relative p-8 rounded-2xl dark:bg-linear-to-br dark:from-neutral-900/40 dark:to-neutral-800/20 backdrop-blur-sm border border-neutral-200 dark:border-neutral-800/50">
         <div className="absolute top-0 left-0 w-32 h-32 border-l-2 border-t-2 border-orange-500/50 rounded-tl-2xl" />
         <div className="absolute bottom-0 right-0 w-32 h-32 border-r-2 border-b-2 border-orange-500/50 rounded-br-2xl" />
 
@@ -159,8 +159,8 @@ export function AgentPage() {
         </div>
       </div>
 
-      {/* Desktop grid layout */}
-      <div className="hidden lg:grid lg:grid-cols-3 lg:gap-8 lg:h-[650px] xl:h-[750px] 2xl:h-[850px] 3xl:h-[1000px] lg:py-2">
+      {/* Desktop grid layout - flex-1 to fill available height */}
+      <div className="hidden lg:grid lg:grid-cols-3 lg:gap-8 lg:flex-1 lg:min-h-[650px] lg:py-2">
         <div className="lg:col-span-2 h-full min-h-0">
           {renderChatComponent()}
         </div>

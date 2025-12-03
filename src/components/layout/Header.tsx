@@ -20,7 +20,7 @@ export function Header() {
       {/* Animated gradient line on top */}
       <div className="absolute top-0 left-0 right-0 h-0.5 bg-linear-to-r from-transparent via-orange-500 to-transparent opacity-50" />
 
-      <div className="max-w-[1800px] 2xl:max-w-[2200px] 3xl:max-w-[2800px] mx-auto px-3 sm:px-6 lg:px-8 2xl:px-12 3xl:px-16 h-14 sm:h-16 lg:h-20 flex items-center justify-between relative z-10">
+      <div className="max-w-[1800px] 2xl:max-w-[2200px] 3xl:max-w-[2800px] mx-auto px-3 sm:px-6 lg:px-8 2xl:px-12 3xl:px-16 h-14 sm:h-16 lg:h-16 flex items-center justify-between relative z-10">
         <div className="flex items-center gap-2 sm:gap-3 lg:gap-4">
           {/* Logo with enhanced effects */}
           <motion.div
