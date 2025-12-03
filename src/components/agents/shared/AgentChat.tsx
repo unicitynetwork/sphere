@@ -244,9 +244,9 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     scrollToBottom();
   }, [extendedMessages, isTyping, scrollToBottom]);
 
-  // Auto-focus input when typing ends
+  // Auto-focus input when typing ends (desktop only to prevent keyboard auto-open on mobile)
   useEffect(() => {
-    if (!isTyping) {
+    if (!isTyping && window.innerWidth >= 1024) {
       inputRef.current?.focus({ preventScroll: true });
     }
   }, [isTyping]);
@@ -288,10 +288,12 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     const userInput = messageText.toLowerCase();
     setInput('');
 
-    // Focus input
-    setTimeout(() => {
-      inputRef.current?.focus({ preventScroll: true });
-    }, 0);
+    // Focus input (desktop only to prevent keyboard auto-open on mobile)
+    if (window.innerWidth >= 1024) {
+      setTimeout(() => {
+        inputRef.current?.focus({ preventScroll: true });
+      }, 0);
+    }
 
     if (useMockMode && getMockResponse) {
       // Mock mode - add user message and get mock response
