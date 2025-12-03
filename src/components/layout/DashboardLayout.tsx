@@ -7,14 +7,9 @@ export function DashboardLayout() {
   useIncomingTransfers();
 
   return (
-    <div
-      className="min-h-screen lg:min-h-screen bg-neutral-100 dark:bg-linear-to-br dark:from-neutral-950 dark:via-neutral-900 dark:to-neutral-950 overflow-x-hidden overflow-y-hidden lg:overflow-y-visible overscroll-none theme-transition"
-      style={{
-        height: 'var(--visual-viewport-height, 100dvh)',
-      }}
-    >
+    <div className="h-full flex flex-col bg-neutral-100 dark:bg-linear-to-br dark:from-neutral-950 dark:via-neutral-900 dark:to-neutral-950 theme-transition lg:overflow-auto">
       <Header />
-      <div className="max-w-[1800px] mx-auto p-4 md:p-8 h-[calc(100%-64px)] lg:h-auto">
+      <div className="flex-1 min-h-0 max-w-[1800px] w-full mx-auto px-4 pt-4 pb-0 md:p-8 lg:pb-8">
         <Outlet />
       </div>
     </div>

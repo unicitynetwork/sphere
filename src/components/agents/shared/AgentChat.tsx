@@ -156,9 +156,25 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
 
   // Copy message content
   const handleCopy = async (text: string, id: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // Fallback for non-HTTPS environments
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      console.warn('Failed to copy text');
+    }
   };
 
   // Get typing indicator color based on agent

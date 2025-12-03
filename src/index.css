@@ -54,30 +54,26 @@
   --scrollbar-track: transparent;
 }
 
-html, body {
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
-  min-height: 100%;
-  /* Prevent overscroll/bounce on iOS */
-  overscroll-behavior: none;
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-html {
-  /* Fix for iOS Safari address bar */
-  height: -webkit-fill-available;
-}
-
 body {
-  min-height: 100dvh;
-  min-height: -webkit-fill-available;
+  overscroll-behavior: none;
   /* Prevent zoom on input focus on iOS */
   touch-action: manipulation;
 }
 
-#root {
-  min-height: 100dvh;
-  min-height: -webkit-fill-available;
+/* Mobile: prevent page scroll, only content should scroll */
+@media screen and (max-width: 1023px) {
+  html, body, #root {
+    overflow: hidden;
+  }
 }
 
 /* Dark mode root gradient */

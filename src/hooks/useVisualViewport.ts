@@ -9,7 +9,9 @@ interface ViewportState {
 /**
  * Hook to track visual viewport changes (especially for mobile keyboard)
  * Uses the Visual Viewport API for accurate mobile viewport tracking
- * Similar approach to OpenAI ChatGPT mobile handling
+ *
+ * NOTE: With interactive-widget=resizes-content, the browser handles layout
+ * automatically. This hook is kept for components that need to know if keyboard is open.
  */
 export function useVisualViewport() {
   const [viewport, setViewport] = useState<ViewportState>(() => ({
@@ -28,50 +30,28 @@ export function useVisualViewport() {
       const isKeyboardOpen = window.innerHeight - height > 150;
 
       setViewport({ height, offsetTop, isKeyboardOpen });
-
-      // Set CSS custom property for use in styles
-      document.documentElement.style.setProperty(
-        '--visual-viewport-height',
-        `${height}px`
-      );
-      document.documentElement.style.setProperty(
-        '--viewport-offset-top',
-        `${offsetTop}px`
-      );
     } else {
-      // Fallback for browsers without Visual Viewport API
       setViewport({
         height: window.innerHeight,
         offsetTop: 0,
         isKeyboardOpen: false,
       });
-      document.documentElement.style.setProperty(
-        '--visual-viewport-height',
-        `${window.innerHeight}px`
-      );
     }
   }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // Initial update
     updateViewport();
 
     const visualViewport = window.visualViewport;
     if (visualViewport) {
       visualViewport.addEventListener('resize', updateViewport);
-      visualViewport.addEventListener('scroll', updateViewport);
     }
-
-    // Also listen to window resize as fallback
     window.addEventListener('resize', updateViewport);
 
     return () => {
-      if (visualViewport) {
-        visualViewport.removeEventListener('resize', updateViewport);
-        visualViewport.removeEventListener('scroll', updateViewport);
-      }
+      visualViewport?.removeEventListener('resize', updateViewport);
       window.removeEventListener('resize', updateViewport);
     };
   }, [updateViewport]);
