@@ -150,11 +150,29 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         setPendingFile(file);
         setShowLoadPasswordModal(true);
       } else {
-        const newWallet = await importWallet({ file });
-        if (newWallet.addresses.length > 0) {
-          setSelectedAddress(newWallet.addresses[0].address);
+        // Check if this is a BIP32 wallet that needs scanning
+        const isBIP32 = content.includes("MASTER CHAIN CODE") ||
+                        content.includes("WALLET TYPE: BIP32") ||
+                        content.includes("WALLET TYPE: Alpha descriptor");
+
+        if (isBIP32) {
+          // For BIP32 .txt files, import and show scan modal like .dat files
+          const result = await importWalletFromFile(file);
+          if (!result.success || !result.wallet) {
+            throw new Error(result.error || "Import failed");
+          }
+          // Show scan modal - don't save wallet yet
+          setPendingWallet(result.wallet);
+          setInitialScanCount(scanCount || 100);
+          setShowScanModal(true);
+        } else {
+          // Standard wallet - import directly
+          const newWallet = await importWallet({ file });
+          if (newWallet.addresses.length > 0) {
+            setSelectedAddress(newWallet.addresses[0].address);
+          }
+          showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
         }
-        showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
       }
     } catch (err: unknown) {
       showMessage(
@@ -196,7 +214,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const onSelectAllScannedAddresses = (scannedAddresses: ScannedAddress[]) => {
     if (!pendingWallet || scannedAddresses.length === 0) return;
 
-    // Add all scanned addresses to wallet
+    // Add all scanned addresses to wallet (preserving isChange flag)
     const walletWithAddresses: Wallet = {
       ...pendingWallet,
       addresses: scannedAddresses.map((addr) => ({
@@ -206,6 +224,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         publicKey: addr.publicKey,
         path: addr.path,
         createdAt: new Date().toISOString(),
+        isChange: addr.isChange,
       })),
     };
 
@@ -232,13 +251,28 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     if (!pendingFile) return;
 
     try {
-      const newWallet = await importWallet({ file: pendingFile, password });
-      if (newWallet.addresses.length > 0) {
-        setSelectedAddress(newWallet.addresses[0].address);
+      // First, import without saving to check if it's BIP32
+      const result = await importWalletFromFile(pendingFile, password);
+      if (!result.success || !result.wallet) {
+        throw new Error(result.error || "Import failed");
       }
+
       setShowLoadPasswordModal(false);
       setPendingFile(null);
-      showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
+
+      // Check if BIP32 wallet - show scan modal
+      if (result.wallet.masterChainCode || result.wallet.isImportedAlphaWallet) {
+        setPendingWallet(result.wallet);
+        setInitialScanCount(100);
+        setShowScanModal(true);
+      } else {
+        // Standard wallet - save directly
+        const newWallet = await importWallet({ file: pendingFile, password });
+        if (newWallet.addresses.length > 0) {
+          setSelectedAddress(newWallet.addresses[0].address);
+        }
+        showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
+      }
     } catch (err) {
       showMessage("error", "Load Error", "Error loading wallet: " + (err instanceof Error ? err.message : String(err)));
     }

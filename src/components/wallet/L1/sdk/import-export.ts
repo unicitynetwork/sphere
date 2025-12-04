@@ -4,6 +4,7 @@
 import CryptoJS from "crypto-js";
 import { hexToWIF } from "./crypto";
 import { createBech32 } from "./bech32";
+import { deriveKeyAtPath } from "./address";
 import type { Wallet, WalletAddress, RestoreWalletResult, ExportOptions } from "./types";
 
 // Re-export types
@@ -561,7 +562,119 @@ export async function importWallet(
         }
 
         if (!recovered) {
-          console.warn(`Could not recover private key for address ${addrIdx + 1}: ${addr.address}`);
+          // CRITICAL: Address verification failed - abort import for security
+          // This indicates the wallet file may be corrupted or from a different wallet
+          console.error('WALLET INTEGRITY CHECK FAILED');
+          console.error('Address from file:', addr.address);
+          console.error('Recovery scan (0-99) failed to find matching key');
+          return {
+            success: false,
+            wallet: {} as Wallet,
+            error: `Wallet integrity check failed: Address ${addr.address} does not match any key derived from the master private key. This wallet file may be corrupted or from a different wallet.`,
+          };
+        }
+      }
+    }
+
+    // For BIP32 wallets (Alpha wallet), recover private keys using path info
+    if (isImportedAlphaWallet && masterChainCode && parsedAddresses.length > 0) {
+      const witnessVersion = 0;
+
+      for (let addrIdx = 0; addrIdx < wallet.addresses.length; addrIdx++) {
+        const addr = wallet.addresses[addrIdx];
+
+        // If address has path info, derive the key directly
+        if (addr.path && addr.path.startsWith("m/")) {
+          try {
+            const derived = deriveKeyAtPath(masterKey, masterChainCode, addr.path);
+            const keyPair = ec.keyFromPrivate(derived.privateKey);
+            const publicKey = keyPair.getPublic(true, "hex");
+
+            // Verify the derived address matches
+            const sha256 = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKey));
+            const ripemd = CryptoJS.RIPEMD160(sha256);
+            const derivedAddress = createBech32(
+              "alpha",
+              witnessVersion,
+              hexToBytes(ripemd.toString())
+            );
+
+            if (derivedAddress === addr.address) {
+              console.log(`✓ BIP32: Recovered key for address ${addrIdx + 1} at path ${addr.path}`);
+              addr.privateKey = derived.privateKey;
+              addr.publicKey = publicKey;
+
+              // Check if this is a change address (chain 1)
+              const pathParts = addr.path.split("/");
+              if (pathParts.length >= 5) {
+                const chain = parseInt(pathParts[pathParts.length - 2], 10);
+                addr.isChange = chain === 1;
+              }
+            } else {
+              console.error(`BIP32: Address mismatch at path ${addr.path}`);
+              console.error(`  Expected: ${addr.address}`);
+              console.error(`  Derived:  ${derivedAddress}`);
+              return {
+                success: false,
+                wallet: {} as Wallet,
+                error: `Wallet integrity check failed: Address ${addr.address} does not match derived address at path ${addr.path}`,
+              };
+            }
+          } catch (e) {
+            console.error(`Error deriving key at path ${addr.path}:`, e);
+            return {
+              success: false,
+              wallet: {} as Wallet,
+              error: `Failed to derive key at path ${addr.path}: ${e instanceof Error ? e.message : String(e)}`,
+            };
+          }
+        } else {
+          // No path info - need to scan to find the correct derivation
+          console.warn(`BIP32: Address ${addrIdx + 1} has no path info, scanning...`);
+          const basePath = descriptorPath || "84'/1'/0'";
+          let recovered = false;
+
+          // Scan both chains (0=external, 1=change) and first 100 indices
+          for (const chain of [0, 1]) {
+            if (recovered) break;
+            for (let i = 0; i < 100; i++) {
+              const testPath = `m/${basePath}/${chain}/${i}`;
+              try {
+                const derived = deriveKeyAtPath(masterKey, masterChainCode, testPath);
+                const keyPair = ec.keyFromPrivate(derived.privateKey);
+                const publicKey = keyPair.getPublic(true, "hex");
+                const sha256 = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKey));
+                const ripemd = CryptoJS.RIPEMD160(sha256);
+                const testAddress = createBech32(
+                  "alpha",
+                  witnessVersion,
+                  hexToBytes(ripemd.toString())
+                );
+
+                if (testAddress === addr.address) {
+                  console.log(`✓ BIP32: Found address ${addrIdx + 1} at ${testPath}`);
+                  addr.privateKey = derived.privateKey;
+                  addr.publicKey = publicKey;
+                  addr.path = testPath;
+                  addr.index = i;
+                  addr.isChange = chain === 1;
+                  recovered = true;
+                  break;
+                }
+              } catch {
+                // Continue on derivation errors
+              }
+            }
+          }
+
+          if (!recovered) {
+            console.error(`BIP32: Could not find derivation for address ${addr.address}`);
+            return {
+              success: false,
+              wallet: {} as Wallet,
+              error: `Could not find BIP32 derivation path for address ${addr.address}`,
+            };
+          }
         }
       }
     }
@@ -613,7 +726,10 @@ export function exportWallet(wallet: Wallet, options: ExportOptions = {}): strin
     let addressesText: string;
     if (wallet.isImportedAlphaWallet) {
       addressesText = wallet.addresses
-        .map((addr, index) => `Address ${index + 1}: ${addr.address}`)
+        .map((addr, index) => {
+          const path = addr.path || `m/84'/1'/0'/${addr.isChange ? 1 : 0}/${addr.index}`;
+          return `Address ${index + 1}: ${addr.address} (Path: ${path})`;
+        })
         .join("\n");
     } else {
       addressesText = wallet.addresses
@@ -679,7 +795,10 @@ ENCRYPTION STATUS: Not encrypted
 This key is in plaintext and not protected. Anyone with this file can access your wallet.`;
 
       addressesText = wallet.addresses
-        .map((addr, index) => `Address ${index + 1}: ${addr.address}`)
+        .map((addr, index) => {
+          const path = addr.path || `m/84'/1'/0'/${addr.isChange ? 1 : 0}/${addr.index}`;
+          return `Address ${index + 1}: ${addr.address} (Path: ${path})`;
+        })
         .join("\n");
     } else {
       addressesText = wallet.addresses
