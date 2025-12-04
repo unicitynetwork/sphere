@@ -40,7 +40,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const [showScanModal, setShowScanModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [pendingWallet, setPendingWallet] = useState<Wallet | null>(null);
-  const [initialScanCount, setInitialScanCount] = useState(100);
+  const [initialScanCount, setInitialScanCount] = useState(10);
 
   // Use TanStack Query based hook
   const {

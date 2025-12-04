@@ -239,11 +239,10 @@ export function WalletScanModal({ show, wallet, initialScanCount = 100, onSelect
             <input
               type="number"
               value={scanCount}
-              onChange={(e) => setScanCount(Math.min(1000, Math.max(1, parseInt(e.target.value) || 100)))}
+              onChange={(e) => setScanCount(Math.max(1, parseInt(e.target.value) || 10))}
               disabled={isScanning}
-              className="w-16 px-2 py-1 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded text-xs text-neutral-900 dark:text-white disabled:opacity-50"
+              className="w-20 px-2 py-1 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded text-xs text-neutral-900 dark:text-white disabled:opacity-50"
               min={1}
-              max={1000}
             />
             {!isScanning && (
               <button

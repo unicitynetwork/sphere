@@ -11,7 +11,7 @@ interface ImportWalletModalProps {
 export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModalProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [scanCount, setScanCount] = useState(100);
+  const [scanCount, setScanCount] = useState(10);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isDatFile = selectedFile?.name.endsWith(".dat");
@@ -50,7 +50,7 @@ export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModa
 
   const handleCancel = () => {
     setSelectedFile(null);
-    setScanCount(100);
+    setScanCount(10);
     onCancel();
   };
 
@@ -146,17 +146,13 @@ export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModa
                 <p className="text-xs text-blue-700 dark:text-blue-300 mb-2">
                   How many addresses to scan?
                 </p>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    value={scanCount}
-                    onChange={(e) => setScanCount(Math.min(1000, Math.max(1, parseInt(e.target.value) || 100)))}
-                    className="flex-1 px-2 py-1.5 bg-white dark:bg-neutral-800 border border-blue-300 dark:border-blue-700 rounded text-sm text-neutral-900 dark:text-white"
-                    min={1}
-                    max={1000}
-                  />
-                  <span className="text-xs text-neutral-500">max 1000</span>
-                </div>
+                <input
+                  type="number"
+                  value={scanCount}
+                  onChange={(e) => setScanCount(Math.max(1, parseInt(e.target.value) || 10))}
+                  className="w-full px-2 py-1.5 bg-white dark:bg-neutral-800 border border-blue-300 dark:border-blue-700 rounded text-sm text-neutral-900 dark:text-white"
+                  min={1}
+                />
               </div>
             )}
 
