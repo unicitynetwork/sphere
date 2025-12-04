@@ -379,6 +379,7 @@ async function restoreFromWalletDat(file: File): Promise<RestoreWalletResult> {
       isImportedAlphaWallet: true, // Mark as imported from Alpha wallet.dat
       masterChainCode: masterChainCode,
       chainCode: masterChainCode || undefined,
+      descriptorPath: descriptorPath || "84'/1'/0'", // Default to BIP84 for Alpha network if not found
     };
 
     return {
@@ -509,6 +510,13 @@ export async function importWallet(
       isImportedAlphaWallet = true;
     }
 
+    // Parse descriptor path for BIP32 wallets
+    let descriptorPath: string | null = null;
+    const descriptorPathMatch = fileContent.match(/DESCRIPTOR PATH:\s*([^\n]+)/);
+    if (descriptorPathMatch && descriptorPathMatch[1]) {
+      descriptorPath = descriptorPathMatch[1].trim();
+    }
+
     // Parse addresses - exact regex from index.html
     const parsedAddresses: WalletAddress[] = [];
     const addressSection = fileContent.match(
@@ -546,6 +554,7 @@ export async function importWallet(
       isImportedAlphaWallet: isImportedAlphaWallet,
       masterChainCode: masterChainCode,
       chainCode: masterChainCode || undefined,
+      descriptorPath: descriptorPath || (isImportedAlphaWallet ? "84'/1'/0'" : null),
     };
 
     // For standard wallets, recover private keys for all addresses
@@ -661,6 +670,8 @@ ${encryptedMasterKey}`;
 MASTER CHAIN CODE (for BIP32 HD wallet compatibility):
 ${wallet.masterChainCode}
 
+DESCRIPTOR PATH: ${wallet.descriptorPath || "84'/1'/0'"}
+
 WALLET TYPE: BIP32 hierarchical deterministic wallet`;
     } else {
       encryptedContent += `
@@ -699,6 +710,8 @@ ${masterKeyWIF}
 
 MASTER CHAIN CODE (for BIP32 HD wallet compatibility):
 ${wallet.masterChainCode}
+
+DESCRIPTOR PATH: ${wallet.descriptorPath || "84'/1'/0'"}
 
 WALLET TYPE: BIP32 hierarchical deterministic wallet
 

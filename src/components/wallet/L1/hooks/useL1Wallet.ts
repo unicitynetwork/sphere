@@ -7,6 +7,7 @@ import {
   exportWallet,
   downloadWalletFile,
   generateHDAddress,
+  generateHDAddressBIP32,
   saveWalletToStorage,
   loadWalletFromStorage,
   deleteWalletFromStorage,
@@ -238,11 +239,19 @@ export function useL1Wallet(selectedAddress?: string) {
       // Regenerate addresses for BIP32 wallets
       if (wallet.isImportedAlphaWallet && wallet.chainCode) {
         const addresses = [];
-        for (let i = 0; i < (wallet.addresses.length || 1); i++) {
-          const addr = generateHDAddress(
+        const numAddresses = wallet.addresses.length || 1;
+
+        // Use descriptorPath if available, otherwise default to BIP84 for Alpha
+        const basePath = wallet.descriptorPath
+          ? `m/${wallet.descriptorPath}`
+          : "m/84'/1'/0'";
+
+        for (let i = 0; i < numAddresses; i++) {
+          const addr = generateHDAddressBIP32(
             wallet.masterPrivateKey,
             wallet.chainCode,
-            i
+            i,
+            basePath
           );
           addresses.push(addr);
         }
@@ -376,13 +385,33 @@ export function useL1Wallet(selectedAddress?: string) {
 
     // Include potential change addresses
     if (wallet.masterPrivateKey && wallet.chainCode) {
+      // Use descriptorPath if available for BIP32 wallets
+      const basePath = wallet.descriptorPath
+        ? `m/${wallet.descriptorPath}`
+        : wallet.isImportedAlphaWallet
+          ? "m/84'/1'/0'"
+          : null;
+
       for (let i = 0; i < 20; i++) {
         try {
-          const changeAddr = generateHDAddress(
-            wallet.masterPrivateKey,
-            wallet.chainCode,
-            1000000 + i
-          );
+          let changeAddr;
+          if (basePath) {
+            // BIP32 change addresses use chain 1
+            changeAddr = generateHDAddressBIP32(
+              wallet.masterPrivateKey,
+              wallet.chainCode,
+              i,
+              basePath,
+              true // isChange = true
+            );
+          } else {
+            // Legacy derivation
+            changeAddr = generateHDAddress(
+              wallet.masterPrivateKey,
+              wallet.chainCode,
+              1000000 + i
+            );
+          }
           walletAddresses.add(changeAddr.address.toLowerCase());
         } catch (err) {
           console.error(`Failed to generate change address ${i}:`, err);
