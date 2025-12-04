@@ -9,6 +9,7 @@ export interface Wallet {
   isImportedAlphaWallet?: boolean;
   masterChainCode?: string | null;
   isBIP32?: boolean;
+  descriptorPath?: string | null;
 }
 
 export interface WalletAddress {

@@ -7,6 +7,7 @@ import {
   exportWallet,
   downloadWalletFile,
   generateHDAddress,
+  generateHDAddressBIP32,
   saveWalletToStorage,
   loadWalletFromStorage,
   deleteWalletFromStorage,
@@ -31,6 +32,7 @@ import { subscribeBlocks } from "../sdk/network";
 export const L1_KEYS = {
   WALLET: ["l1", "wallet"],
   BALANCE: (address: string) => ["l1", "balance", address],
+  TOTAL_BALANCE: ["l1", "totalBalance"],
   TRANSACTIONS: (address: string) => ["l1", "transactions", address],
   BLOCK_HEIGHT: ["l1", "blockHeight"],
   VESTING: (address: string) => ["l1", "vesting", address],
@@ -69,6 +71,9 @@ export function useL1Wallet(selectedAddress?: string) {
             // Invalidate balance, transactions and vesting on new block
             queryClient.invalidateQueries({
               queryKey: L1_KEYS.BALANCE(selectedAddressRef.current),
+            });
+            queryClient.invalidateQueries({
+              queryKey: L1_KEYS.TOTAL_BALANCE,
             });
             queryClient.invalidateQueries({
               queryKey: L1_KEYS.TRANSACTIONS(selectedAddressRef.current),
@@ -112,6 +117,22 @@ export function useL1Wallet(selectedAddress?: string) {
     queryKey: L1_KEYS.BALANCE(selectedAddress || ""),
     queryFn: () => getBalance(selectedAddress!),
     enabled: !!selectedAddress,
+    staleTime: 30000, // 30 seconds
+  });
+
+  // Query: Total balance for all addresses
+  const totalBalanceQuery = useQuery({
+    queryKey: [...L1_KEYS.TOTAL_BALANCE, walletQuery.data?.addresses.map(a => a.address).join(",")],
+    queryFn: async () => {
+      const wallet = walletQuery.data;
+      if (!wallet || wallet.addresses.length === 0) return 0;
+
+      const balances = await Promise.all(
+        wallet.addresses.map(addr => getBalance(addr.address))
+      );
+      return balances.reduce((sum, bal) => sum + bal, 0);
+    },
+    enabled: !!walletQuery.data && walletQuery.data.addresses.length > 0,
     staleTime: 30000, // 30 seconds
   });
 
@@ -218,11 +239,19 @@ export function useL1Wallet(selectedAddress?: string) {
       // Regenerate addresses for BIP32 wallets
       if (wallet.isImportedAlphaWallet && wallet.chainCode) {
         const addresses = [];
-        for (let i = 0; i < (wallet.addresses.length || 1); i++) {
-          const addr = generateHDAddress(
+        const numAddresses = wallet.addresses.length || 1;
+
+        // Use descriptorPath if available, otherwise default to BIP84 for Alpha
+        const basePath = wallet.descriptorPath
+          ? `m/${wallet.descriptorPath}`
+          : "m/84'/1'/0'";
+
+        for (let i = 0; i < numAddresses; i++) {
+          const addr = generateHDAddressBIP32(
             wallet.masterPrivateKey,
             wallet.chainCode,
-            i
+            i,
+            basePath
           );
           addresses.push(addr);
         }
@@ -356,13 +385,33 @@ export function useL1Wallet(selectedAddress?: string) {
 
     // Include potential change addresses
     if (wallet.masterPrivateKey && wallet.chainCode) {
+      // Use descriptorPath if available for BIP32 wallets
+      const basePath = wallet.descriptorPath
+        ? `m/${wallet.descriptorPath}`
+        : wallet.isImportedAlphaWallet
+          ? "m/84'/1'/0'"
+          : null;
+
       for (let i = 0; i < 20; i++) {
         try {
-          const changeAddr = generateHDAddress(
-            wallet.masterPrivateKey,
-            wallet.chainCode,
-            1000000 + i
-          );
+          let changeAddr;
+          if (basePath) {
+            // BIP32 change addresses use chain 1
+            changeAddr = generateHDAddressBIP32(
+              wallet.masterPrivateKey,
+              wallet.chainCode,
+              i,
+              basePath,
+              true // isChange = true
+            );
+          } else {
+            // Legacy derivation
+            changeAddr = generateHDAddress(
+              wallet.masterPrivateKey,
+              wallet.chainCode,
+              1000000 + i
+            );
+          }
           walletAddresses.add(changeAddr.address.toLowerCase());
         } catch (err) {
           console.error(`Failed to generate change address ${i}:`, err);
@@ -498,6 +547,7 @@ export function useL1Wallet(selectedAddress?: string) {
 
     // Balance state
     balance: balanceQuery.data ?? 0,
+    totalBalance: totalBalanceQuery.data ?? 0,
     isLoadingBalance: balanceQuery.isLoading,
 
     // Transaction state
