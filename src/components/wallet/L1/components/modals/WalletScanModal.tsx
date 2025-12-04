@@ -6,43 +6,47 @@ import { scanWalletAddresses, type ScannedAddress, type ScanProgress, type Walle
 interface WalletScanModalProps {
   show: boolean;
   wallet: WalletType | null;
+  initialScanCount?: number;
   onSelectAddress: (address: ScannedAddress) => void;
   onCancel: () => void;
 }
 
-export function WalletScanModal({ show, wallet, onSelectAddress, onCancel }: WalletScanModalProps) {
+export function WalletScanModal({ show, wallet, initialScanCount = 100, onSelectAddress, onCancel }: WalletScanModalProps) {
   const [isScanning, setIsScanning] = useState(false);
-  const [progress, setProgress] = useState<ScanProgress>({ current: 0, total: 200, found: 0, totalBalance: 0, foundAddresses: [] });
+  const [progress, setProgress] = useState<ScanProgress>({ current: 0, total: initialScanCount, found: 0, totalBalance: 0, foundAddresses: [] });
   const [foundAddresses, setFoundAddresses] = useState<ScannedAddress[]>([]);
-  const [scanCount, setScanCount] = useState(200);
+  const [scanCount, setScanCount] = useState(initialScanCount);
   const stopScanRef = useRef(false);
 
   // Reset state when modal opens
   useEffect(() => {
     if (show && wallet) {
+      setScanCount(initialScanCount);
       setFoundAddresses([]);
-      setProgress({ current: 0, total: scanCount, found: 0, totalBalance: 0, foundAddresses: [] });
+      setProgress({ current: 0, total: initialScanCount, found: 0, totalBalance: 0, foundAddresses: [] });
       stopScanRef.current = false;
-      // Auto-start scanning
-      startScan();
+      // Auto-start scanning with initial count
+      startScan(initialScanCount);
     }
     return () => {
       stopScanRef.current = true;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [show, wallet]);
+  }, [show, wallet, initialScanCount]);
 
-  const startScan = async () => {
+  const startScan = async (count?: number) => {
     if (!wallet) return;
 
+    const scanLimit = count ?? scanCount;
     setIsScanning(true);
     setFoundAddresses([]);
+    setProgress({ current: 0, total: scanLimit, found: 0, totalBalance: 0, foundAddresses: [] });
     stopScanRef.current = false;
 
     try {
       const result = await scanWalletAddresses(
         wallet,
-        scanCount,
+        scanLimit,
         (p) => {
           setProgress(p);
           // Update found addresses in real-time from progress callback
@@ -204,7 +208,7 @@ export function WalletScanModal({ show, wallet, onSelectAddress, onCancel }: Wal
             />
             {!isScanning && (
               <button
-                onClick={startScan}
+                onClick={() => startScan()}
                 className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-500 transition-colors"
               >
                 Rescan

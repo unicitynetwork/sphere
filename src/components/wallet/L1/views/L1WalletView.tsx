@@ -18,7 +18,7 @@ import {
 import { useL1Wallet } from "../hooks";
 import { NoWalletView, HistoryView, MainWalletView } from ".";
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
-import { WalletScanModal } from "../components/modals";
+import { WalletScanModal, ImportWalletModal } from "../components/modals";
 
 type ViewMode = "main" | "history";
 
@@ -38,7 +38,9 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     txids?: string[];
   }>({ show: false, type: "info", title: "", message: "" });
   const [showScanModal, setShowScanModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [pendingWallet, setPendingWallet] = useState<Wallet | null>(null);
+  const [initialScanCount, setInitialScanCount] = useState(100);
 
   // Use TanStack Query based hook
   const {
@@ -117,8 +119,15 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     }
   };
 
-  // Load wallet from file
-  const onLoadWallet = async (file: File) => {
+  // Show import modal
+  const onShowImportModal = () => {
+    setShowImportModal(true);
+  };
+
+  // Handle import from modal
+  const onImportFromModal = async (file: File, scanCount?: number) => {
+    setShowImportModal(false);
+
     try {
       // For .dat files, use direct SDK import (not hook) to avoid auto-save
       // Then show scan modal to find addresses with balances
@@ -129,6 +138,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         }
         // Show scan modal - don't save wallet yet
         setPendingWallet(result.wallet);
+        setInitialScanCount(scanCount || 100);
         setShowScanModal(true);
         return;
       }
@@ -349,7 +359,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       <div className="h-full overflow-y-auto">
         <NoWalletView
           onCreateWallet={onCreateWallet}
-          onLoadWallet={onLoadWallet}
+          onImportWallet={onShowImportModal}
           showLoadPasswordModal={showLoadPasswordModal}
           onConfirmLoadWithPassword={onConfirmLoadWithPassword}
           onCancelLoadPassword={() => {
@@ -365,9 +375,15 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           txids={messageModal.txids}
           onClose={closeMessage}
         />
+        <ImportWalletModal
+          show={showImportModal}
+          onImport={onImportFromModal}
+          onCancel={() => setShowImportModal(false)}
+        />
         <WalletScanModal
           show={showScanModal}
           wallet={pendingWallet}
+          initialScanCount={initialScanCount}
           onSelectAddress={onSelectScannedAddress}
           onCancel={onCancelScan}
         />
