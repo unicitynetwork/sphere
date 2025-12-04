@@ -191,6 +191,35 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     showMessage("success", "Wallet Loaded", `Loaded address with ${scannedAddr.balance.toFixed(8)} ALPHA`);
   };
 
+  // Handle loading all scanned addresses
+  const onSelectAllScannedAddresses = (scannedAddresses: ScannedAddress[]) => {
+    if (!pendingWallet || scannedAddresses.length === 0) return;
+
+    // Add all scanned addresses to wallet
+    const walletWithAddresses: Wallet = {
+      ...pendingWallet,
+      addresses: scannedAddresses.map((addr) => ({
+        index: addr.index,
+        address: addr.address,
+        privateKey: addr.privateKey,
+        publicKey: addr.publicKey,
+        path: addr.path,
+        createdAt: new Date().toISOString(),
+      })),
+    };
+
+    // Calculate total balance
+    const totalBalance = scannedAddresses.reduce((sum, addr) => sum + addr.balance, 0);
+
+    // Save to storage
+    saveWalletToStorage("main", walletWithAddresses);
+    invalidateWallet();
+    setSelectedAddress(scannedAddresses[0].address);
+    setShowScanModal(false);
+    setPendingWallet(null);
+    showMessage("success", "Wallet Loaded", `Loaded ${scannedAddresses.length} addresses with ${totalBalance.toFixed(8)} ALPHA total`);
+  };
+
   // Cancel scan modal
   const onCancelScan = () => {
     setShowScanModal(false);
@@ -385,6 +414,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           wallet={pendingWallet}
           initialScanCount={initialScanCount}
           onSelectAddress={onSelectScannedAddress}
+          onSelectAll={onSelectAllScannedAddresses}
           onCancel={onCancelScan}
         />
       </div>
