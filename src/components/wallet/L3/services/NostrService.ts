@@ -59,6 +59,8 @@ export class NostrService {
   private client: NostrClient | null = null;
   private identityManager: IdentityManager;
   private isConnected: boolean = false;
+  private isConnecting: boolean = false;
+  private connectionPromise: Promise<void> | null = null;
   private paymentRequests: IncomingPaymentRequest[] = [];
   private chatRepository: ChatRepository;
   private dmListeners: ((message: ChatMessage) => void)[] = [];
@@ -70,16 +72,40 @@ export class NostrService {
     this.chatRepository = ChatRepository.getInstance();
   }
 
-  static getInstance(identityManager: IdentityManager): NostrService {
+  static getInstance(identityManager?: IdentityManager): NostrService {
     if (!NostrService.instance) {
-      NostrService.instance = new NostrService(identityManager);
+      const manager = identityManager || IdentityManager.getInstance();
+      NostrService.instance = new NostrService(manager);
     }
     return NostrService.instance;
   }
 
   async start() {
-    if (this.isConnected) return;
+    // If already connected, return immediately
+    if (this.isConnected) {
+      console.log("Nostr already connected, skipping start");
+      return;
+    }
 
+    // If connection is in progress, wait for it
+    if (this.isConnecting && this.connectionPromise) {
+      console.log("Nostr connection in progress, waiting...");
+      return this.connectionPromise;
+    }
+
+    // Start new connection
+    this.isConnecting = true;
+    this.connectionPromise = this._performStart();
+
+    try {
+      await this.connectionPromise;
+    } finally {
+      this.isConnecting = false;
+      this.connectionPromise = null;
+    }
+  }
+
+  private async _performStart() {
     const identity = await this.identityManager.getCurrentIdentity();
     if (!identity) throw new Error("No identity found for Nostr");
 

@@ -32,7 +32,8 @@ export class WalletRepository {
           tokens
         );
 
-        this.refreshWallet();
+        this.refreshWallet(); // Trigger wallet-updated for UI
+        // Note: No wallet-loaded event here - ServicesProvider handles existing wallet via initializeNostr() on mount
       }
     } catch (error) {
       console.error("Failed to load wallet", error);
@@ -43,6 +44,8 @@ export class WalletRepository {
   createWallet(address: string, name: string = "My Wallet"): Wallet {
     const newWallet = new Wallet(uuidv4(), name, address, []);
     this.saveWallet(newWallet);
+    this.refreshWallet(); // Trigger wallet-updated for UI updates
+    window.dispatchEvent(new Event("wallet-loaded")); // Signal wallet creation for Nostr initialization
     return newWallet;
   }
 

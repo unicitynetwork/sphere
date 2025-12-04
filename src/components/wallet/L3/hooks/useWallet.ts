@@ -1,7 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { IdentityManager } from "../services/IdentityManager";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { NostrService } from "../services/NostrService";
 import { AggregatedAsset, Token, TokenStatus } from "../data/model";
 import { ProxyAddress } from "@unicitylabs/state-transition-sdk/lib/address/ProxyAddress";
 import { Token as SdkToken } from "@unicitylabs/state-transition-sdk/lib/token/Token";
@@ -18,6 +16,8 @@ import { v4 as uuidv4 } from "uuid";
 import { TokenSplitExecutor } from "../services/transfer/TokenSplitExecutor";
 import { TokenSplitCalculator } from "../services/transfer/TokenSplitCalculator";
 import { TokenId } from "@unicitylabs/state-transition-sdk/lib/token/TokenId";
+import { useServices } from "../../../../contexts/useServices";
+import type { NostrService } from "../services/NostrService";
 
 export const KEYS = {
   IDENTITY: ["wallet", "identity"],
@@ -45,15 +45,13 @@ const saveTokensToStorage = (tokens: Token[]) => {
   localStorage.setItem(TOKENS_STORAGE_KEY, JSON.stringify(tokens));
 };
 
-const SESSION_KEY = "user-pin-1234";
-const identityManager = new IdentityManager(SESSION_KEY);
 const walletRepo = WalletRepository.getInstance();
-const nametagService = NametagService.getInstance(identityManager);
-const nostrService = NostrService.getInstance(identityManager);
 const registryService = RegistryService.getInstance();
 
 export const useWallet = () => {
   const queryClient = useQueryClient();
+  const { identityManager, nostrService } = useServices();
+  const nametagService = NametagService.getInstance(identityManager);
 
   useEffect(() => {
     const handleWalletUpdate = () => {
@@ -82,6 +80,7 @@ export const useWallet = () => {
     queryKey: KEYS.PRICES,
     queryFn: ApiService.fetchPrices,
     refetchInterval: 60000,
+    staleTime: 30000, // Consider data fresh for 30 seconds
   });
 
   const tokensQuery = useQuery({
@@ -96,7 +95,6 @@ export const useWallet = () => {
     queryKey: [
       ...KEYS.AGGREGATED,
       tokensQuery.dataUpdatedAt,
-      pricesQuery.dataUpdatedAt,
     ],
     queryFn: async () => {
       const tokens = tokensQuery.data || [];
@@ -305,8 +303,7 @@ export const useWallet = () => {
       const secret = Buffer.from(identity.privateKey, "hex");
       const signingService = await SigningService.createFromSecret(secret);
 
-      const nostr = NostrService.getInstance(identityManager);
-      const recipientPubkey = await nostr.queryPubkeyByNametag(
+      const recipientPubkey = await nostrService.queryPubkeyByNametag(
         recipientNametag
       );
       if (!recipientPubkey)
@@ -344,7 +341,7 @@ export const useWallet = () => {
           recipientAddress,
           recipientPubkey,
           signingService,
-          nostr
+          nostrService
         );
       }
 
@@ -373,7 +370,7 @@ export const useWallet = () => {
           });
 
           console.log("📨 Sending split token via Nostr...");
-          await nostr.sendTokenTransfer(recipientPubkey, payload, undefined, undefined, params.eventId);
+          await nostrService.sendTokenTransfer(recipientPubkey, payload, undefined, undefined, params.eventId);
         }
 
         for (const keptToken of splitResult.tokensKeptBySender) {
