@@ -43,7 +43,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     isLoadingTransactions,
     currentBlockHeight,
     vestingBalances,
-    isClassifyingVesting,
+    isLoadingVesting,
     createWallet,
     importWallet,
     deleteWallet,
@@ -88,9 +88,9 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     }
   }, [wallet, selectedAddress]);
 
-  // Vesting progress for UI
-  const vestingProgress = isClassifyingVesting
-    ? { current: 0, total: 1 } // Simplified progress indicator
+  // Vesting progress for UI - show loading only on initial load, not on refetch
+  const vestingProgress = isLoadingVesting
+    ? { current: 0, total: 1 }
     : null;
 
   // Handle vesting mode change
