@@ -47,6 +47,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     wallet,
     isLoadingWallet,
     balance,
+    totalBalance,
     transactions,
     transactionDetails,
     isLoadingTransactions,
@@ -460,6 +461,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         selectedPrivateKey={selectedPrivateKey}
         addresses={addresses}
         balance={balance}
+        totalBalance={totalBalance}
         showBalances={showBalances}
         onNewAddress={onNewAddress}
         onSelectAddress={onSelectAddress}

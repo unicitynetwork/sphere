@@ -31,6 +31,7 @@ import { subscribeBlocks } from "../sdk/network";
 export const L1_KEYS = {
   WALLET: ["l1", "wallet"],
   BALANCE: (address: string) => ["l1", "balance", address],
+  TOTAL_BALANCE: ["l1", "totalBalance"],
   TRANSACTIONS: (address: string) => ["l1", "transactions", address],
   BLOCK_HEIGHT: ["l1", "blockHeight"],
   VESTING: (address: string) => ["l1", "vesting", address],
@@ -69,6 +70,9 @@ export function useL1Wallet(selectedAddress?: string) {
             // Invalidate balance, transactions and vesting on new block
             queryClient.invalidateQueries({
               queryKey: L1_KEYS.BALANCE(selectedAddressRef.current),
+            });
+            queryClient.invalidateQueries({
+              queryKey: L1_KEYS.TOTAL_BALANCE,
             });
             queryClient.invalidateQueries({
               queryKey: L1_KEYS.TRANSACTIONS(selectedAddressRef.current),
@@ -112,6 +116,22 @@ export function useL1Wallet(selectedAddress?: string) {
     queryKey: L1_KEYS.BALANCE(selectedAddress || ""),
     queryFn: () => getBalance(selectedAddress!),
     enabled: !!selectedAddress,
+    staleTime: 30000, // 30 seconds
+  });
+
+  // Query: Total balance for all addresses
+  const totalBalanceQuery = useQuery({
+    queryKey: [...L1_KEYS.TOTAL_BALANCE, walletQuery.data?.addresses.map(a => a.address).join(",")],
+    queryFn: async () => {
+      const wallet = walletQuery.data;
+      if (!wallet || wallet.addresses.length === 0) return 0;
+
+      const balances = await Promise.all(
+        wallet.addresses.map(addr => getBalance(addr.address))
+      );
+      return balances.reduce((sum, bal) => sum + bal, 0);
+    },
+    enabled: !!walletQuery.data && walletQuery.data.addresses.length > 0,
     staleTime: 30000, // 30 seconds
   });
 
@@ -498,6 +518,7 @@ export function useL1Wallet(selectedAddress?: string) {
 
     // Balance state
     balance: balanceQuery.data ?? 0,
+    totalBalance: totalBalanceQuery.data ?? 0,
     isLoadingBalance: balanceQuery.isLoading,
 
     // Transaction state
