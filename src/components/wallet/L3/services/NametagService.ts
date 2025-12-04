@@ -14,6 +14,7 @@ import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/I
 import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
 import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
 import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenState";
+import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
 
 const UNICITY_TOKEN_TYPE_HEX =
   "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9ef0efbe397867509";
@@ -22,8 +23,6 @@ export type MintResult =
   | { status: "success"; token: Token<any> }
   | { status: "warning"; token: Token<any>; message: string }
   | { status: "error"; message: string };
-
-const STORAGE_KEY_NAMETAGS = "unicity_nametags_registry";
 
 export class NametagService {
   private static instance: NametagService;
@@ -45,6 +44,16 @@ export class NametagService {
     try {
       const cleanTag = nametag.replace("@unicity", "").replace("@", "").trim();
       console.log(`Starting mint process for: ${cleanTag}`);
+
+      // Check if identity already has a nametag (prevent duplicates)
+      const walletRepo = WalletRepository.getInstance();
+      const existingNametag = walletRepo.getNametag();
+      if (existingNametag) {
+        return {
+          status: "error",
+          message: `Identity already has a nametag: ${existingNametag.name}`,
+        };
+      }
 
       const identity = await this.identityManager.getCurrentIdentity();
       if (!identity)
@@ -68,7 +77,7 @@ export class NametagService {
         };
       }
 
-      this.saveNametagToStorage(cleanTag, sdkToken);
+      await this.saveNametagToStorage(cleanTag, sdkToken);
 
       try {
         const nostr = NostrService.getInstance(this.identityManager);
@@ -194,50 +203,70 @@ export class NametagService {
     }
   }
 
-  private saveNametagToStorage(nametag: string, token: Token<any>) {
-    const nametagData = {
-      nametag: nametag,
+  private async saveNametagToStorage(nametag: string, token: Token<any>) {
+    const nametagData: NametagData = {
+      name: nametag,
       token: token.toJSON(),
-      timeStamp: Date.now(),
+      timestamp: Date.now(),
       format: "txf",
       version: "2.0",
     };
 
-    const raw = localStorage.getItem(STORAGE_KEY_NAMETAGS);
-    const registry = raw ? JSON.parse(raw) : {};
+    // Ensure wallet is initialized for this identity
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (!identity) {
+      console.error("Cannot save nametag: no identity available");
+      return;
+    }
 
-    registry[nametag] = nametagData;
+    const walletRepo = WalletRepository.getInstance();
 
-    localStorage.setItem(STORAGE_KEY_NAMETAGS, JSON.stringify(registry));
+    // Load or create wallet for this identity's address
+    let wallet = walletRepo.getWallet();
+    if (!wallet || wallet.address !== identity.address) {
+      wallet = walletRepo.loadWalletForAddress(identity.address);
+      if (!wallet) {
+        wallet = walletRepo.createWallet(identity.address, "My Wallet");
+      }
+    }
+
+    // Store nametag via WalletRepository (per-identity, not global)
+    walletRepo.setNametag(nametagData);
   }
 
-  setActiveNametag(nametag: string) {
-    localStorage.setItem("unicity_active_nametag", nametag);
+  setActiveNametag(_nametag: string) {
+    // No-op: nametag is now stored per-identity in WalletRepository
+    // The active nametag is simply the identity's nametag
   }
 
   getActiveNametag(): string | null {
-    return localStorage.getItem("unicity_active_nametag");
+    // Get nametag from WalletRepository (per-identity)
+    const nametag = WalletRepository.getInstance().getNametag();
+    return nametag?.name || null;
   }
 
+  /**
+   * Get the nametag token for the current identity
+   * Returns at most one token (one nametag per identity)
+   */
+  async getNametagToken(): Promise<Token<any> | null> {
+    const nametagData = WalletRepository.getInstance().getNametag();
+    if (!nametagData) return null;
+
+    try {
+      return await Token.fromJSON(nametagData.token);
+    } catch (e) {
+      console.error("Failed to parse nametag token", e);
+      return null;
+    }
+  }
+
+  /**
+   * Get all nametag tokens for the current identity
+   * @deprecated Use getNametagToken() instead - each identity has only one nametag
+   */
   async getAllNametagTokens(): Promise<Token<any>[]> {
-    const raw = localStorage.getItem(STORAGE_KEY_NAMETAGS);
-    if (!raw) return [];
-
-    const registry = JSON.parse(raw);
-    
-    const promises = Object.values(registry).map(async (entry: any) => {
-      try {
-        const tokenData = entry.token || entry;
-        
-        return await Token.fromJSON(tokenData);
-      } catch (e) {
-        console.error("Failed to parse nametag token", e);
-        return null;
-      }
-    });
-
-    const results = await Promise.all(promises);
-
-    return results.filter((t): t is Token<any> => t !== null);
+    const token = await this.getNametagToken();
+    return token ? [token] : [];
   }
 }

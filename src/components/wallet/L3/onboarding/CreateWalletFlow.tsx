@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft } from 'lucide-react';
+import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft, Upload } from 'lucide-react';
 import { useWallet } from '../hooks/useWallet';
 
 export function CreateWalletFlow() {
@@ -12,6 +12,7 @@ export function CreateWalletFlow() {
   const [seedWords, setSeedWords] = useState<string[]>(Array(12).fill(''));
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleCreateKeys = async () => {
     setIsBusy(true);
@@ -67,9 +68,60 @@ export function CreateWalletFlow() {
     }
   };
 
-  if (identity && !nametag && step === 'start') {
-    setStep('nametag');
-  }
+  const handleFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsBusy(true);
+    setError(null);
+
+    try {
+      const content = await file.text();
+      let mnemonic: string | null = null;
+
+      // Try to parse as JSON first (wallet backup file)
+      try {
+        const json = JSON.parse(content);
+        // Support various wallet file formats
+        if (json.mnemonic) {
+          mnemonic = json.mnemonic;
+        } else if (json.seed) {
+          mnemonic = json.seed;
+        } else if (json.recoveryPhrase) {
+          mnemonic = json.recoveryPhrase;
+        } else if (json.words && Array.isArray(json.words)) {
+          mnemonic = json.words.join(' ');
+        }
+      } catch {
+        // Not JSON, try as plain text mnemonic
+        const trimmed = content.trim();
+        const words = trimmed.split(/\s+/);
+        if (words.length === 12 || words.length === 24) {
+          mnemonic = trimmed;
+        }
+      }
+
+      if (!mnemonic) {
+        throw new Error("Could not find recovery phrase in file. Expected 12 or 24 words.");
+      }
+
+      await restoreWallet(mnemonic);
+      setStep('nametag');
+    } catch (e: any) {
+      setError(e.message || "Failed to import wallet from file");
+    } finally {
+      setIsBusy(false);
+      // Reset file input
+      event.target.value = "";
+    }
+  };
+
+  // Go back to start screen (e.g., from restore step)
+  const goToStart = () => {
+    setStep('start');
+    setSeedWords(Array(12).fill(''));
+    setError(null);
+  };
 
   return (
     <div className="flex flex-col items-center justify-center p-4 md:p-8 text-center relative">
@@ -95,10 +147,42 @@ export function CreateWalletFlow() {
               </div>
             </motion.div>
 
-            <h2 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white mb-2 md:mb-3 tracking-tight">No Wallet Found</h2>
+            <h2 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white mb-2 md:mb-3 tracking-tight">
+              {identity && !nametag ? 'Complete Setup' : 'No Wallet Found'}
+            </h2>
             <p className="text-neutral-500 dark:text-neutral-400 text-xs md:text-sm mb-6 md:mb-8 mx-auto leading-relaxed">
-              Create a new secure wallet to start using the <span className="text-orange-500 dark:text-orange-400 font-semibold">Unicity Network</span>
+              {identity && !nametag
+                ? <>Your wallet is ready. Create a <span className="text-orange-500 dark:text-orange-400 font-semibold">Unicity ID</span> to complete setup.</>
+                : <>Create a new secure wallet to start using the <span className="text-orange-500 dark:text-orange-400 font-semibold">Unicity Network</span></>
+              }
             </p>
+
+            {/* Show "Continue Setup" if identity exists but no nametag */}
+            {identity && !nametag && (
+              <motion.button
+                onClick={() => setStep('nametag')}
+                disabled={isBusy}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                transition={{ duration: 0.1 }}
+                className="relative w-full py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-linear-to-r from-emerald-500 to-emerald-600 text-white text-sm md:text-base font-bold shadow-xl shadow-emerald-500/30 flex items-center justify-center gap-2 md:gap-3 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden group mb-3"
+              >
+                <div className="absolute inset-0 bg-linear-to-r from-emerald-400 to-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <span className="relative z-10 flex items-center gap-2 md:gap-3">
+                  <ShieldCheck className="w-4 h-4 md:w-5 md:h-5" />
+                  Continue Setup
+                </span>
+              </motion.button>
+            )}
+
+            {/* Divider when showing continue option */}
+            {identity && !nametag && (
+              <div className="flex items-center gap-3 my-4">
+                <div className="flex-1 h-px bg-neutral-200 dark:bg-neutral-700" />
+                <span className="text-xs text-neutral-400 dark:text-neutral-500">or start fresh</span>
+                <div className="flex-1 h-px bg-neutral-200 dark:bg-neutral-700" />
+              </div>
+            )}
 
             <motion.button
               onClick={handleCreateKeys}
@@ -135,6 +219,26 @@ export function CreateWalletFlow() {
               <KeyRound className="w-4 h-4 md:w-5 md:h-5" />
               Restore Wallet
             </motion.button>
+
+            <motion.button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isBusy}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              transition={{ duration: 0.1 }}
+              className="relative w-full py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 text-sm md:text-base font-bold border-2 border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 md:gap-3 disabled:opacity-50 disabled:cursor-not-allowed mt-3 hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
+            >
+              <Upload className="w-4 h-4 md:w-5 md:h-5" />
+              Import from File
+            </motion.button>
+
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              accept=".json,.txt"
+              onChange={handleFileImport}
+            />
 
             {error && (
               <motion.p
@@ -207,11 +311,7 @@ export function CreateWalletFlow() {
             {/* Buttons */}
             <div className="flex gap-3">
               <motion.button
-                onClick={() => {
-                  setStep('start');
-                  setSeedWords(Array(12).fill(''));
-                  setError(null);
-                }}
+                onClick={goToStart}
                 disabled={isBusy}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}

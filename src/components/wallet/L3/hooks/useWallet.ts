@@ -29,23 +29,6 @@ export const KEYS = {
   NAMETAG: ["wallet", "nametag"],
 };
 
-const TOKENS_STORAGE_KEY = "unicity_wallet_tokens";
-const loadTokensFromStorage = (): Token[] => {
-  const raw = localStorage.getItem(TOKENS_STORAGE_KEY);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed.map((t: Partial<Token>) => new Token(t));
-  } catch (e) {
-    console.error("Failed to parse tokens", e);
-    return [];
-  }
-};
-
-const saveTokensToStorage = (tokens: Token[]) => {
-  localStorage.setItem(TOKENS_STORAGE_KEY, JSON.stringify(tokens));
-};
-
 const SESSION_KEY = "user-pin-1234";
 const identityManager = new IdentityManager(SESSION_KEY);
 const walletRepo = WalletRepository.getInstance();
@@ -92,11 +75,32 @@ export const useWallet = () => {
   });
 
   const tokensQuery = useQuery({
-    queryKey: KEYS.TOKENS,
+    // Include identity address in query key to prevent race conditions when switching identities
+    queryKey: [...KEYS.TOKENS, identityQuery.data?.address],
     queryFn: async () => {
+      const identity = identityQuery.data;
+      if (!identity?.address) return [];
+
+      // Load wallet for current address if not already loaded
+      const currentWallet = walletRepo.getWallet();
+      if (!currentWallet || currentWallet.address !== identity.address) {
+        const loaded = walletRepo.loadWalletForAddress(identity.address);
+        if (!loaded) {
+          // No existing wallet, create one
+          walletRepo.createWallet(identity.address);
+        }
+      }
+
+      // Verify wallet still matches identity after load
+      const wallet = walletRepo.getWallet();
+      if (!wallet || wallet.address !== identity.address) {
+        console.warn(`Wallet address mismatch after load: wallet=${wallet?.address}, identity=${identity.address}`);
+        return [];
+      }
+
       return walletRepo.getTokens();
     },
-    enabled: !!identityQuery.data,
+    enabled: !!identityQuery.data?.address,
   });
 
   const aggregatedAssetsQuery = useQuery({
@@ -279,9 +283,8 @@ export const useWallet = () => {
 
       if (!sent) throw new Error("Failed to send p2p message via Nostr");
 
-      const currentTokens = loadTokensFromStorage();
-      const updatedTokens = currentTokens.filter((t) => t.id !== token.id);
-      saveTokensToStorage(updatedTokens);
+      // Remove the token from the wallet repository
+      walletRepo.removeToken(token.id);
 
       return true;
     },

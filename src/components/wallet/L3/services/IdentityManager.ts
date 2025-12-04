@@ -125,10 +125,9 @@ export class IdentityManager {
   }
 
   /**
-   * @deprecated Use deriveIdentityFromUnifiedWallet for new wallets
-   * Legacy method: derive identity directly from mnemonic (non-BIP32)
+   * Derive identity from mnemonic using UnifiedKeyManager
+   * This always uses BIP32 derivation for consistency with L1
    */
-
   async deriveIdentityFromMnemonic(mnemonic: string): Promise<UserIdentity> {
     // Validate mnemonic phrase
     const isValid = bip39.validateMnemonic(mnemonic);
@@ -136,46 +135,10 @@ export class IdentityManager {
       throw new Error("Invalid recovery phrase. Please check your words and try again.");
     }
 
-    // Try to use UnifiedKeyManager for standard BIP32 derivation
-    try {
-      const keyManager = this.getUnifiedKeyManager();
-      await keyManager.createFromMnemonic(mnemonic);
-      return this.deriveIdentityFromUnifiedWallet(0, mnemonic);
-    } catch (error) {
-      console.warn("Failed to use UnifiedKeyManager, falling back to legacy derivation:", error);
-    }
-
-    // Legacy fallback: direct seed-based derivation
-    const seed = await bip39.mnemonicToSeed(mnemonic);
-
-    const seedBuffer = Buffer.from(seed);
-    const secret = seedBuffer.subarray(0, 32);
-
-    let nonce: Buffer;
-    if (seedBuffer.length >= 64) {
-      nonce = seedBuffer.subarray(32, 64);
-    } else {
-      nonce = Buffer.from(
-        CryptoJS.SHA256(CryptoJS.lib.WordArray.create(seed)).toString(),
-        "hex"
-      );
-    }
-
-    const address = await this.deriveL3Address(secret, nonce);
-
-    const signingService = await SigningService.createFromSecret(secret);
-    const publicKey = Buffer.from(signingService.publicKey).toString("hex");
-
-    const identity: UserIdentity = {
-      privateKey: secret.toString("hex"),
-      nonce: nonce.toString("hex"),
-      publicKey: publicKey,
-      address: address,
-      mnemonic: mnemonic,
-    };
-
-    this.saveSeed(mnemonic);
-    return identity;
+    // Use UnifiedKeyManager for BIP32 derivation - no legacy fallback
+    const keyManager = this.getUnifiedKeyManager();
+    await keyManager.createFromMnemonic(mnemonic);
+    return this.deriveIdentityFromUnifiedWallet(0, mnemonic);
   }
 
   /**
@@ -214,31 +177,17 @@ export class IdentityManager {
   }
 
   async getCurrentIdentity(): Promise<UserIdentity | null> {
-    // Try unified wallet first
-    try {
-      const keyManager = this.getUnifiedKeyManager();
-      const initialized = await keyManager.initialize();
-      if (initialized) {
-        return this.deriveIdentityFromUnifiedWallet(0);
-      }
-    } catch (error) {
-      console.warn("UnifiedKeyManager not available, trying legacy:", error);
+    // ONLY use UnifiedKeyManager - L1 and L3 share the same keys
+    // Legacy mnemonic-only wallets are no longer supported
+    const keyManager = this.getUnifiedKeyManager();
+    const initialized = await keyManager.initialize();
+
+    if (initialized) {
+      return this.deriveIdentityFromUnifiedWallet(0);
     }
 
-    // Fall back to legacy encrypted seed
-    const encrypted = localStorage.getItem(STORAGE_KEY_ENC_SEED);
-    if (!encrypted) return null;
-
-    try {
-      const bytes = CryptoJS.AES.decrypt(encrypted, this.sessionKey);
-      const mnemonic = bytes.toString(CryptoJS.enc.Utf8);
-      if (!mnemonic) return null;
-
-      return this.deriveIdentityFromMnemonic(mnemonic);
-    } catch (error) {
-      console.error("Failed to decrypt identity", error);
-      return null;
-    }
+    // No wallet initialized - user must create or import a wallet
+    return null;
   }
 
   /**

@@ -2,10 +2,15 @@ import { createHelia, type Helia } from "helia";
 import { json } from "@helia/json";
 import { hkdf } from "@noble/hashes/hkdf";
 import { sha256 } from "@noble/hashes/sha256";
+import { sha512 } from "@noble/hashes/sha512";
 import * as ed from "@noble/ed25519";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
 import type { IdentityManager } from "./IdentityManager";
 import type { Token } from "../data/model";
+
+// Configure @noble/ed25519 to use sync sha512 (required for getPublicKey without WebCrypto)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(ed.hashes as any).sha512 = (message: Uint8Array) => sha512(message);
 
 // ==========================================
 // Types
@@ -50,6 +55,7 @@ export interface StorageStatus {
   isSyncing: boolean;
   lastSync: StorageResult | null;
   ipnsName: string | null;
+  webCryptoAvailable: boolean;
 }
 
 interface StorageData {
@@ -57,6 +63,7 @@ interface StorageData {
   timestamp: number;
   address: string;
   tokens: SerializedToken[];
+  nametag?: NametagData;  // One nametag per identity (synced with tokens)
 }
 
 interface SerializedToken {
@@ -174,6 +181,19 @@ export class IpfsStorageService {
   // ==========================================
 
   /**
+   * Check if WebCrypto is available (required by Helia/libp2p)
+   */
+  private isWebCryptoAvailable(): boolean {
+    try {
+      return typeof crypto !== "undefined" &&
+             crypto.subtle !== undefined &&
+             typeof crypto.subtle.digest === "function";
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Lazy initialization of Helia and key derivation
    */
   private async ensureInitialized(): Promise<boolean> {
@@ -190,6 +210,14 @@ export class IpfsStorageService {
     this.isInitializing = true;
 
     try {
+      // 0. Check WebCrypto availability (required by Helia/libp2p)
+      if (!this.isWebCryptoAvailable()) {
+        console.warn("📦 WebCrypto (crypto.subtle) not available - IPFS sync disabled");
+        console.warn("📦 This typically happens in non-secure contexts (HTTP instead of HTTPS)");
+        console.warn("📦 Wallet will continue to work, but IPFS backup/sync is unavailable");
+        return false;
+      }
+
       // 1. Get wallet identity
       const identity = await this.identityManager.getCurrentIdentity();
       if (!identity) {
@@ -207,7 +235,7 @@ export class IpfsStorageService {
         32
       );
       this.ed25519PrivateKey = derivedKey;
-      this.ed25519PublicKey = await ed.getPublicKeyAsync(derivedKey);
+      this.ed25519PublicKey = ed.getPublicKey(derivedKey);
 
       // 3. Compute IPNS name from public key
       this.cachedIpnsName = this.computeIpnsName(this.ed25519PublicKey);
@@ -221,6 +249,11 @@ export class IpfsStorageService {
       return true;
     } catch (error) {
       console.error("📦 Failed to initialize IPFS storage:", error);
+      // Provide helpful context for WebCrypto-related errors
+      if (error instanceof Error && error.message.includes("crypto")) {
+        console.warn("📦 This error is likely due to missing WebCrypto support");
+        console.warn("📦 Consider using HTTPS or a secure development environment");
+      }
       return false;
     } finally {
       this.isInitializing = false;
@@ -307,8 +340,19 @@ export class IpfsStorageService {
         throw new Error("No wallet found");
       }
 
+      // Validate wallet belongs to current identity
+      const currentIdentity = await this.identityManager.getCurrentIdentity();
+      if (currentIdentity && wallet.address !== currentIdentity.address) {
+        throw new Error(
+          `Cannot sync: wallet address mismatch (wallet=${wallet.address}, identity=${currentIdentity.address})`
+        );
+      }
+
       const tokens = wallet.tokens;
-      console.log(`📦 Syncing ${tokens.length} tokens to IPFS...`);
+      const walletRepo = WalletRepository.getInstance();
+      const nametag = walletRepo.getNametag();
+
+      console.log(`📦 Syncing ${tokens.length} tokens${nametag ? ` + nametag "${nametag.name}"` : ""} to IPFS...`);
 
       // 2. Serialize to storage format
       const storageData: StorageData = {
@@ -327,6 +371,7 @@ export class IpfsStorageService {
           type: t.type,
           iconUrl: t.iconUrl,
         })),
+        nametag: nametag || undefined,  // Include nametag in IPFS sync
       };
 
       // 3. Store to IPFS
@@ -422,7 +467,18 @@ export class IpfsStorageService {
         throw new Error("Invalid or incompatible storage data");
       }
 
-      console.log(`📦 Restored ${storageData.tokens.length} tokens from IPFS`);
+      // Validate that the restored data belongs to the current identity
+      const currentIdentity = await this.identityManager.getCurrentIdentity();
+      if (currentIdentity && storageData.address !== currentIdentity.address) {
+        console.warn(
+          `📦 Address mismatch: stored=${storageData.address}, current=${currentIdentity.address}`
+        );
+        throw new Error(
+          "Cannot restore tokens: address mismatch. This data belongs to a different identity."
+        );
+      }
+
+      console.log(`📦 Restored ${storageData.tokens.length} tokens${storageData.nametag ? ` + nametag "${storageData.nametag.name}"` : ""} from IPFS`);
 
       // Convert serialized tokens back to Token objects
       const { Token: TokenClass, TokenStatus } = await import("../data/model");
@@ -443,6 +499,13 @@ export class IpfsStorageService {
             iconUrl: t.iconUrl,
           })
       ) as Token[];
+
+      // Restore nametag to WalletRepository
+      if (storageData.nametag) {
+        const walletRepo = WalletRepository.getInstance();
+        walletRepo.setNametag(storageData.nametag);
+        console.log(`📦 Nametag "${storageData.nametag.name}" restored from IPFS`);
+      }
 
       return {
         success: true,
@@ -480,12 +543,17 @@ export class IpfsStorageService {
       return null;
     }
 
-    const walletSecret = this.hexToBytes(identity.privateKey);
-    const derivedKey = hkdf(sha256, walletSecret, undefined, HKDF_INFO, 32);
-    const publicKey = await ed.getPublicKeyAsync(derivedKey);
+    try {
+      const walletSecret = this.hexToBytes(identity.privateKey);
+      const derivedKey = hkdf(sha256, walletSecret, undefined, HKDF_INFO, 32);
+      const publicKey = ed.getPublicKey(derivedKey);
 
-    this.cachedIpnsName = this.computeIpnsName(publicKey);
-    return this.cachedIpnsName;
+      this.cachedIpnsName = this.computeIpnsName(publicKey);
+      return this.cachedIpnsName;
+    } catch (error) {
+      console.warn("📦 Failed to compute IPNS name:", error);
+      return null;
+    }
   }
 
   /**
@@ -497,6 +565,7 @@ export class IpfsStorageService {
       isSyncing: this.isSyncing,
       lastSync: this.lastSync,
       ipnsName: this.cachedIpnsName,
+      webCryptoAvailable: this.isWebCryptoAvailable(),
     };
   }
 
