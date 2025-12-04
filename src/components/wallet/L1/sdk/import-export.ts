@@ -61,49 +61,6 @@ function findPattern(data: Uint8Array, pattern: Uint8Array, startIndex: number =
 }
 
 /**
- * Parse DER-encoded EC private key
- */
-function parseDERPrivateKey(derData: Uint8Array): Uint8Array | null {
-  // DER structure for EC private key:
-  // SEQUENCE {
-  //   version INTEGER (1)
-  //   privateKey OCTET STRING (32 bytes)
-  //   parameters [0] (optional)
-  //   publicKey [1] (optional)
-  // }
-
-  let offset = 0;
-
-  // Check SEQUENCE tag (0x30)
-  if (derData[offset] !== 0x30) return null;
-  offset++;
-
-  // Skip length
-  if (derData[offset] & 0x80) {
-    const lengthBytes = derData[offset] & 0x7f;
-    offset += lengthBytes + 1;
-  } else {
-    offset++;
-  }
-
-  // Check version (0x02 0x01 0x01)
-  if (derData[offset] === 0x02 && derData[offset+1] === 0x01 && derData[offset+2] === 0x01) {
-    offset += 3;
-  }
-
-  // Find OCTET STRING (0x04) containing private key
-  while (offset < derData.length - 33) {
-    if (derData[offset] === 0x04 && derData[offset+1] === 0x20) {
-      // Found 32-byte octet string
-      return derData.slice(offset + 2, offset + 34);
-    }
-    offset++;
-  }
-
-  return null;
-}
-
-/**
  * Validate if a hex string is a valid secp256k1 private key
  */
 function isValidPrivateKey(hex: string): boolean {
@@ -441,12 +398,14 @@ export async function importWallet(
         }
 
         // Decrypt - exact method from index.html
+        // Use explicit parameters for cross-version CryptoJS compatibility
         try {
           console.log("Attempting to decrypt with provided password...");
           const salt = "alpha_wallet_salt";
           const passwordKey = CryptoJS.PBKDF2(password, salt, {
             keySize: 256 / 32,
             iterations: 100000,
+            hasher: CryptoJS.algo.SHA1, // Explicitly specify SHA1 hasher for compatibility
           }).toString();
 
           const decryptedBytes = CryptoJS.AES.decrypt(encryptedMasterKey, passwordKey);
@@ -637,10 +596,12 @@ export function exportWallet(wallet: Wallet, options: ExportOptions = {}): strin
 
   if (password) {
     // Encrypted wallet - exact method from index.html
+    // Use explicit parameters for cross-version CryptoJS compatibility
     const salt = "alpha_wallet_salt";
     const passwordKey = CryptoJS.PBKDF2(password, salt, {
       keySize: 256 / 32,
       iterations: 100000,
+      hasher: CryptoJS.algo.SHA1, // Explicitly specify SHA1 hasher for compatibility
     }).toString();
 
     const encryptedMasterKey = CryptoJS.AES.encrypt(
@@ -665,12 +626,11 @@ export function exportWallet(wallet: Wallet, options: ExportOptions = {}): strin
 ${encryptedMasterKey}`;
 
     if (wallet.isImportedAlphaWallet && wallet.masterChainCode) {
+      // Match webwallet format exactly - no DESCRIPTOR PATH in encrypted format
       encryptedContent += `
 
 MASTER CHAIN CODE (for BIP32 HD wallet compatibility):
 ${wallet.masterChainCode}
-
-DESCRIPTOR PATH: ${wallet.descriptorPath || "84'/1'/0'"}
 
 WALLET TYPE: BIP32 hierarchical deterministic wallet`;
     } else {

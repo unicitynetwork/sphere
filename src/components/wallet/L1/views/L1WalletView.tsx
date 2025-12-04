@@ -18,7 +18,7 @@ import {
 import { useL1Wallet } from "../hooks";
 import { NoWalletView, HistoryView, MainWalletView } from ".";
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
-import { WalletScanModal, ImportWalletModal } from "../components/modals";
+import { WalletScanModal, ImportWalletModal, LoadPasswordModal } from "../components/modals";
 
 type ViewMode = "main" | "history";
 
@@ -483,6 +483,27 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         message={messageModal.message}
         txids={messageModal.txids}
         onClose={closeMessage}
+      />
+      <ImportWalletModal
+        show={showImportModal}
+        onImport={onImportFromModal}
+        onCancel={() => setShowImportModal(false)}
+      />
+      <LoadPasswordModal
+        show={showLoadPasswordModal}
+        onConfirm={onConfirmLoadWithPassword}
+        onCancel={() => {
+          setShowLoadPasswordModal(false);
+          setPendingFile(null);
+        }}
+      />
+      <WalletScanModal
+        show={showScanModal}
+        wallet={pendingWallet}
+        initialScanCount={initialScanCount}
+        onSelectAddress={onSelectScannedAddress}
+        onSelectAll={onSelectAllScannedAddresses}
+        onCancel={onCancelScan}
       />
     </div>
   );
