@@ -46,6 +46,26 @@ export class WalletRepository {
   }
 
   /**
+   * Check if an address has a nametag without loading the full wallet
+   * Static method for use during onboarding address selection
+   */
+  static checkNametagForAddress(address: string): NametagData | null {
+    if (!address) return null;
+
+    const storageKey = `${STORAGE_KEY_PREFIX}${address}`;
+    try {
+      const json = localStorage.getItem(storageKey);
+      if (json) {
+        const parsed = JSON.parse(json) as StoredWallet;
+        return parsed.nametag || null;
+      }
+    } catch (error) {
+      console.error("Error checking nametag for address:", error);
+    }
+    return null;
+  }
+
+  /**
    * Validate address format
    * Returns true if the address is valid, false otherwise
    */

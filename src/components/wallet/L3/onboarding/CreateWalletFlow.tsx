@@ -1,28 +1,143 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft, Upload } from 'lucide-react';
+import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft, Upload, Plus, ChevronDown, Check } from 'lucide-react';
 import { useWallet } from '../hooks/useWallet';
+import { WalletRepository } from '../../../../repositories/WalletRepository';
+import { IdentityManager } from '../services/IdentityManager';
+
+// Type for derived address info with nametag status
+interface DerivedAddressInfo {
+  index: number;
+  l1Address: string;
+  l3Address: string;
+  path: string;
+  hasNametag: boolean;
+  existingNametag?: string;
+}
+
+// Session key (same as useWallet.ts)
+const SESSION_KEY = "user-pin-1234";
+const identityManager = new IdentityManager(SESSION_KEY);
 
 export function CreateWalletFlow() {
-  const { identity, createWallet, restoreWallet, mintNametag, nametag } = useWallet();
+  const { identity, createWallet, restoreWallet, mintNametag, nametag, getUnifiedKeyManager } = useWallet();
 
-  const [step, setStep] = useState<'start' | 'restore' | 'nametag' | 'processing'>('start');
+  const [step, setStep] = useState<'start' | 'restore' | 'addressSelection' | 'nametag' | 'processing'>('start');
   const [nametagInput, setNametagInput] = useState('');
   const [seedWords, setSeedWords] = useState<string[]>(Array(12).fill(''));
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Address selection state
+  const [derivedAddresses, setDerivedAddresses] = useState<DerivedAddressInfo[]>([]);
+  const [selectedAddressIndex, setSelectedAddressIndex] = useState<number>(0);
+  const [showAddressDropdown, setShowAddressDropdown] = useState(false);
+
+  // Helper: truncate address for display
+  const truncateAddress = (addr: string) =>
+    addr ? addr.slice(0, 12) + "..." + addr.slice(-8) : '';
+
+  // Helper: derive addresses and check for existing nametags
+  const deriveAndCheckAddresses = async (count: number): Promise<DerivedAddressInfo[]> => {
+    const keyManager = getUnifiedKeyManager();
+    const results: DerivedAddressInfo[] = [];
+
+    for (let i = 0; i < count; i++) {
+      const derived = keyManager.deriveAddress(i);
+      const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(i);
+      const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+
+      results.push({
+        index: i,
+        l1Address: derived.l1Address,
+        l3Address: l3Identity.address,
+        path: derived.path,
+        hasNametag: !!existingNametag,
+        existingNametag: existingNametag?.name,
+      });
+    }
+
+    return results;
+  };
+
+  // Helper: derive one more address
+  const handleDeriveNewAddress = async () => {
+    setIsBusy(true);
+    try {
+      const nextIndex = derivedAddresses.length;
+      const keyManager = getUnifiedKeyManager();
+      const derived = keyManager.deriveAddress(nextIndex);
+      const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(nextIndex);
+      const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+
+      setDerivedAddresses([...derivedAddresses, {
+        index: nextIndex,
+        l1Address: derived.l1Address,
+        l3Address: l3Identity.address,
+        path: derived.path,
+        hasNametag: !!existingNametag,
+        existingNametag: existingNametag?.name,
+      }]);
+    } catch (e: any) {
+      setError("Failed to derive new address: " + e.message);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  // Handler: continue with selected address
+  const handleContinueWithAddress = async () => {
+    setIsBusy(true);
+    setError(null);
+
+    try {
+      const selected = derivedAddresses[selectedAddressIndex];
+
+      // Store selected index for future identity derivation
+      identityManager.setSelectedAddressIndex(selected.index);
+
+      if (selected.hasNametag) {
+        // Address already has nametag - proceed to main app
+        console.log("✅ Address has existing nametag, proceeding to main app");
+        window.location.reload();
+      } else {
+        // No nametag - show nametag creation step
+        setStep('nametag');
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to select address");
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  // Helper: go to address selection after wallet creation/restore/import
+  const goToAddressSelection = async () => {
+    setIsBusy(true);
+    setError(null);
+    try {
+      const addresses = await deriveAndCheckAddresses(1); // Start with 1 address
+      setDerivedAddresses(addresses);
+      setSelectedAddressIndex(0);
+      setStep('addressSelection');
+    } catch (e: any) {
+      setError("Failed to derive addresses: " + e.message);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   const handleCreateKeys = async () => {
     setIsBusy(true);
     setError(null);
     try {
       await createWallet();
-      setStep('nametag');
+      // Go to address selection instead of nametag
+      await goToAddressSelection();
     } catch (e: any) {
       setError("Failed to generate keys: " + e.message);
-    } finally {
       setIsBusy(false);
     }
   };
@@ -60,10 +175,10 @@ export function CreateWalletFlow() {
     try {
       const mnemonic = words.join(' ');
       await restoreWallet(mnemonic);
-      setStep('nametag');
+      // Go to address selection instead of nametag
+      await goToAddressSelection();
     } catch (e: any) {
       setError(e.message || "Invalid recovery phrase");
-    } finally {
       setIsBusy(false);
     }
   };
@@ -77,12 +192,14 @@ export function CreateWalletFlow() {
 
     try {
       const content = await file.text();
-      let mnemonic: string | null = null;
+      let imported = false;
 
-      // Try to parse as JSON first (wallet backup file)
+      // Try to parse as JSON first (wallet backup file with mnemonic)
       try {
         const json = JSON.parse(content);
-        // Support various wallet file formats
+        let mnemonic: string | null = null;
+
+        // Support various JSON wallet file formats
         if (json.mnemonic) {
           mnemonic = json.mnemonic;
         } else if (json.seed) {
@@ -92,25 +209,61 @@ export function CreateWalletFlow() {
         } else if (json.words && Array.isArray(json.words)) {
           mnemonic = json.words.join(' ');
         }
+
+        if (mnemonic) {
+          await restoreWallet(mnemonic);
+          imported = true;
+        }
       } catch {
-        // Not JSON, try as plain text mnemonic
+        // Not JSON - continue to try other formats
+      }
+
+      // Try plain text mnemonic (12 or 24 words)
+      if (!imported) {
         const trimmed = content.trim();
         const words = trimmed.split(/\s+/);
         if (words.length === 12 || words.length === 24) {
-          mnemonic = trimmed;
+          // Check if all words are lowercase alpha (likely a mnemonic)
+          const isMnemonic = words.every(w => /^[a-z]+$/.test(w.toLowerCase()));
+          if (isMnemonic) {
+            await restoreWallet(trimmed);
+            imported = true;
+          }
         }
       }
 
-      if (!mnemonic) {
-        throw new Error("Could not find recovery phrase in file. Expected 12 or 24 words.");
+      // Try L1 wallet file format (MASTER PRIVATE KEY / ENCRYPTED MASTER KEY)
+      if (!imported) {
+        if (content.includes("MASTER PRIVATE KEY") || content.includes("ENCRYPTED MASTER KEY")) {
+          if (content.includes("ENCRYPTED MASTER KEY")) {
+            throw new Error("Encrypted wallet files require password. Please decrypt the file first or use the L1 wallet tab to import.");
+          }
+
+          // Use UnifiedKeyManager to import L1 wallet file
+          const keyManager = getUnifiedKeyManager();
+          await keyManager.importFromFileContent(content);
+
+          // Verify the import was successful
+          const walletInfo = keyManager.getWalletInfo();
+          if (!walletInfo.address0) {
+            throw new Error("Wallet import failed - could not derive address");
+          }
+
+          console.log("✅ Wallet file imported successfully:", walletInfo);
+          imported = true;
+        }
       }
 
-      await restoreWallet(mnemonic);
-      setStep('nametag');
+      if (!imported) {
+        throw new Error("Could not import wallet from file. Supported formats: mnemonic (12/24 words), JSON with mnemonic, or L1 wallet backup file.");
+      }
+
+      // Go to address selection for ALL import types
+      await goToAddressSelection();
     } catch (e: any) {
       setError(e.message || "Failed to import wallet from file");
-    } finally {
       setIsBusy(false);
+    } finally {
       // Reset file input
       event.target.value = "";
     }
@@ -344,6 +497,192 @@ export function CreateWalletFlow() {
                 </span>
               </motion.button>
             </div>
+
+            {error && (
+              <motion.p
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-3 md:mt-4 text-red-500 dark:text-red-400 text-xs md:text-sm bg-red-500/10 border border-red-500/20 p-2 md:p-3 rounded-lg"
+              >
+                {error}
+              </motion.p>
+            )}
+          </motion.div>
+        )}
+
+        {step === 'addressSelection' && (
+          <motion.div
+            key="addressSelection"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            transition={{ duration: 0.3 }}
+            className="relative z-10 w-full max-w-[320px] md:max-w-[400px]"
+          >
+            {/* Icon */}
+            <motion.div
+              className="relative w-16 h-16 md:w-20 md:h-20 mx-auto mb-6"
+              whileHover={{ scale: 1.05 }}
+            >
+              <div className="absolute inset-0 bg-purple-500/30 rounded-2xl md:rounded-3xl blur-xl" />
+              <div className="relative w-full h-full rounded-2xl md:rounded-3xl bg-linear-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-2xl shadow-purple-500/30">
+                <Wallet className="w-8 h-8 md:w-10 md:h-10 text-white" />
+              </div>
+            </motion.div>
+
+            <h2 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white mb-2 md:mb-3 tracking-tight">
+              Select Address
+            </h2>
+            <p className="text-neutral-500 dark:text-neutral-400 text-xs md:text-sm mb-6 md:mb-8 mx-auto leading-relaxed">
+              Choose which address to use for your <span className="text-purple-500 dark:text-purple-400 font-semibold">Unicity identity</span>
+            </p>
+
+            {/* Address Dropdown */}
+            <div className="relative mb-4">
+              <button
+                onClick={() => setShowAddressDropdown(!showAddressDropdown)}
+                className="w-full bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 rounded-xl py-3 md:py-3.5 px-4 text-left flex items-center justify-between hover:border-purple-500/50 transition-all"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-neutral-400 dark:text-neutral-500">
+                      #{derivedAddresses[selectedAddressIndex]?.index ?? 0}
+                    </span>
+                    <span className="text-sm md:text-base font-mono text-neutral-900 dark:text-white truncate">
+                      {truncateAddress(derivedAddresses[selectedAddressIndex]?.l1Address || '')}
+                    </span>
+                    {derivedAddresses[selectedAddressIndex]?.hasNametag && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
+                        <Check className="w-3 h-3" />
+                        {derivedAddresses[selectedAddressIndex]?.existingNametag}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <motion.div
+                  animate={{ rotate: showAddressDropdown ? 180 : 0 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <ChevronDown className="w-5 h-5 text-neutral-400 dark:text-neutral-500" />
+                </motion.div>
+              </button>
+
+              {/* Dropdown Menu */}
+              <AnimatePresence>
+                {showAddressDropdown && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl overflow-hidden z-50"
+                  >
+                    <div className="max-h-64 overflow-y-auto">
+                      {derivedAddresses.map((addr, idx) => (
+                        <button
+                          key={addr.index}
+                          onClick={() => {
+                            setSelectedAddressIndex(idx);
+                            setShowAddressDropdown(false);
+                          }}
+                          className={`w-full px-4 py-3 flex items-center gap-3 hover:bg-neutral-100 dark:hover:bg-neutral-700/50 transition-colors ${
+                            idx === selectedAddressIndex ? 'bg-purple-50 dark:bg-purple-900/20' : ''
+                          }`}
+                        >
+                          <span className="text-xs text-neutral-400 dark:text-neutral-500 w-6">
+                            #{addr.index}
+                          </span>
+                          <span className="flex-1 text-sm font-mono text-neutral-900 dark:text-white truncate text-left">
+                            {truncateAddress(addr.l1Address)}
+                          </span>
+                          {addr.hasNametag && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
+                              <Check className="w-3 h-3" />
+                              {addr.existingNametag}
+                            </span>
+                          )}
+                          {idx === selectedAddressIndex && (
+                            <div className="w-2 h-2 rounded-full bg-purple-500" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Derive New Address Button */}
+                    <button
+                      onClick={handleDeriveNewAddress}
+                      disabled={isBusy}
+                      className="w-full px-4 py-3 flex items-center gap-3 border-t border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-700/50 transition-colors text-purple-600 dark:text-purple-400 disabled:opacity-50"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span className="text-sm font-medium">Derive New Address</span>
+                      {isBusy && <Loader2 className="w-4 h-4 animate-spin ml-auto" />}
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* L3 Address Info */}
+            <div className="mb-6 p-3 bg-neutral-100 dark:bg-neutral-800/50 rounded-lg border border-neutral-200 dark:border-neutral-700/50">
+              <div className="text-xs text-neutral-500 dark:text-neutral-400 mb-1">L3 Unicity Address</div>
+              <div className="text-xs font-mono text-neutral-700 dark:text-neutral-300 break-all">
+                {derivedAddresses[selectedAddressIndex]?.l3Address || '...'}
+              </div>
+            </div>
+
+            {/* Continue Button */}
+            <div className="flex gap-3">
+              <motion.button
+                onClick={goToStart}
+                disabled={isBusy}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="flex-1 py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 text-sm md:text-base font-bold border-2 border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4 md:w-5 md:h-5" />
+                Back
+              </motion.button>
+
+              <motion.button
+                onClick={handleContinueWithAddress}
+                disabled={isBusy || derivedAddresses.length === 0}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="flex-2 relative py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-linear-to-r from-purple-500 to-purple-600 text-white text-sm md:text-base font-bold shadow-xl shadow-purple-500/30 flex items-center justify-center gap-2 md:gap-3 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden group"
+              >
+                <div className="absolute inset-0 bg-linear-to-r from-purple-400 to-purple-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <span className="relative z-10 flex items-center gap-2 md:gap-3">
+                  {isBusy ? (
+                    <>
+                      <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" />
+                      Loading...
+                    </>
+                  ) : derivedAddresses[selectedAddressIndex]?.hasNametag ? (
+                    <>
+                      Continue
+                      <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />
+                    </>
+                  ) : (
+                    <>
+                      Create ID
+                      <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />
+                    </>
+                  )}
+                </span>
+              </motion.button>
+            </div>
+
+            {/* Info about nametag */}
+            {derivedAddresses[selectedAddressIndex]?.hasNametag && (
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="mt-4 text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-lg"
+              >
+                This address already has a Unicity ID. You can continue directly.
+              </motion.p>
+            )}
 
             {error && (
               <motion.p

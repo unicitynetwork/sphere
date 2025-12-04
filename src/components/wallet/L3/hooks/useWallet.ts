@@ -59,8 +59,12 @@ export const useWallet = () => {
 
   const identityQuery = useQuery({
     queryKey: KEYS.IDENTITY,
-    queryFn: () => identityManager.getCurrentIdentity(),
-    staleTime: Infinity,
+    queryFn: async () => {
+      const identity = await identityManager.getCurrentIdentity();
+      console.log("🔑 Identity query result:", identity ? `address: ${identity.address.slice(0, 20)}...` : "null");
+      return identity;
+    },
+    staleTime: 5000, // Allow refetch after 5 seconds instead of never
   });
 
   const nametagQuery = useQuery({

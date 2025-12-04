@@ -81,6 +81,14 @@ export class UnifiedKeyManager {
   static getInstance(sessionKey: string): UnifiedKeyManager {
     if (!UnifiedKeyManager.instance) {
       UnifiedKeyManager.instance = new UnifiedKeyManager(sessionKey);
+    } else if (UnifiedKeyManager.instance.sessionKey !== sessionKey) {
+      // Session key mismatch! This is a critical error that would cause
+      // decryption to fail. Log the issue and update the session key.
+      console.error(
+        "WARNING: UnifiedKeyManager session key mismatch detected!",
+        "This can cause data loss. Updating session key to maintain consistency."
+      );
+      UnifiedKeyManager.instance.sessionKey = sessionKey;
     }
     return UnifiedKeyManager.instance;
   }
@@ -97,12 +105,23 @@ export class UnifiedKeyManager {
       const source = localStorage.getItem(STORAGE_KEY_WALLET_SOURCE) as WalletSource;
       const derivationMode = localStorage.getItem(STORAGE_KEY_DERIVATION_MODE) as DerivationMode;
 
+      console.log("🔐 UnifiedKeyManager initializing...", {
+        hasMnemonic: !!encryptedMnemonic,
+        hasMaster: !!encryptedMaster,
+        hasChainCode: !!chainCode,
+        source,
+        derivationMode,
+      });
+
       if (encryptedMnemonic) {
         // Wallet was created from mnemonic
         const mnemonic = this.decrypt(encryptedMnemonic);
         if (mnemonic) {
           await this.createFromMnemonic(mnemonic, false); // Don't save again
+          console.log("✅ Wallet initialized from mnemonic");
           return true;
+        } else {
+          console.error("❌ Failed to decrypt mnemonic - session key mismatch?");
         }
       } else if (encryptedMaster) {
         // Wallet was imported from file
@@ -112,10 +131,14 @@ export class UnifiedKeyManager {
           this.chainCode = chainCode || null; // May be null for WIF HMAC mode
           this.source = source || "file";
           this.derivationMode = derivationMode || (chainCode ? "bip32" : "wif_hmac");
+          console.log("✅ Wallet initialized from file import");
           return true;
+        } else {
+          console.error("❌ Failed to decrypt master key - session key mismatch?");
         }
       }
 
+      console.log("ℹ️ No wallet data found in storage");
       return false;
     } catch (error) {
       console.error("Failed to initialize UnifiedKeyManager:", error);
@@ -172,9 +195,39 @@ export class UnifiedKeyManager {
 
     let masterKey: string | null = null;
     let chainCode: string | null = null;
+    let expectMasterKey = false;
+    let expectChainCode = false;
 
     for (const line of lines) {
-      // Match various formats for master key
+      // Check if this line is a label for master key (value on next line)
+      // Handles formats like: "MASTER PRIVATE KEY (keep secret!):" or "MASTER PRIVATE KEY:"
+      if (/MASTER\s*PRIVATE\s*KEY/i.test(line) && !/[a-fA-F0-9]{64}/.test(line)) {
+        expectMasterKey = true;
+        continue;
+      }
+
+      // Check if this line is a label for chain code (value on next line)
+      // Handles formats like: "MASTER CHAIN CODE (for BIP32...):" or "MASTER CHAIN CODE:"
+      if (/MASTER\s*CHAIN\s*CODE/i.test(line) && !/[a-fA-F0-9]{64}/.test(line)) {
+        expectChainCode = true;
+        continue;
+      }
+
+      // If we're expecting a master key and this line is a 64-char hex string
+      if (expectMasterKey && /^[a-fA-F0-9]{64}$/.test(line)) {
+        masterKey = line.toLowerCase();
+        expectMasterKey = false;
+        continue;
+      }
+
+      // If we're expecting a chain code and this line is a 64-char hex string
+      if (expectChainCode && /^[a-fA-F0-9]{64}$/.test(line)) {
+        chainCode = line.toLowerCase();
+        expectChainCode = false;
+        continue;
+      }
+
+      // Also try same-line format: "Master Private Key: <hex>"
       const masterMatch = line.match(/(?:Master\s*(?:Private\s*)?Key|masterPriv)[:\s]+([a-fA-F0-9]{64})/i);
       const chainMatch = line.match(/(?:Chain\s*Code|chainCode)[:\s]+([a-fA-F0-9]{64})/i);
 
@@ -183,6 +236,12 @@ export class UnifiedKeyManager {
       }
       if (chainMatch) {
         chainCode = chainMatch[1].toLowerCase();
+      }
+
+      // Reset expectations if we hit a non-hex line
+      if (!/^[a-fA-F0-9]{64}$/.test(line)) {
+        expectMasterKey = false;
+        expectChainCode = false;
       }
     }
 
@@ -196,6 +255,9 @@ export class UnifiedKeyManager {
     } catch {
       throw new Error("Invalid master private key format");
     }
+
+    // Clear any existing mnemonic storage (so file import takes precedence)
+    localStorage.removeItem(STORAGE_KEY_ENCRYPTED_MNEMONIC);
 
     this.mnemonic = null; // No mnemonic when importing from file
     this.masterKey = masterKey;
@@ -472,8 +534,13 @@ export class UnifiedKeyManager {
     try {
       const bytes = CryptoJS.AES.decrypt(encrypted, this.sessionKey);
       const decrypted = bytes.toString(CryptoJS.enc.Utf8);
-      return decrypted || null;
-    } catch {
+      if (!decrypted) {
+        console.error("Decryption failed: empty result. Possible session key mismatch.");
+        return null;
+      }
+      return decrypted;
+    } catch (error) {
+      console.error("Decryption error:", error);
       return null;
     }
   }

@@ -10,6 +10,7 @@ import { UnmaskedPredicateReference } from "@unicitylabs/state-transition-sdk/li
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 
 const STORAGE_KEY_ENC_SEED = "encrypted_seed";
+const STORAGE_KEY_SELECTED_INDEX = "l3_selected_address_index";
 const UNICITY_TOKEN_TYPE_HEX =
   "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9ef0efbe397867509";
 
@@ -39,6 +40,29 @@ export class IdentityManager {
       this.unifiedKeyManager = UnifiedKeyManager.getInstance(this.sessionKey);
     }
     return this.unifiedKeyManager;
+  }
+
+  /**
+   * Get the selected address index for identity derivation
+   * Defaults to 0 if not set
+   */
+  getSelectedAddressIndex(): number {
+    const saved = localStorage.getItem(STORAGE_KEY_SELECTED_INDEX);
+    return saved ? parseInt(saved, 10) : 0;
+  }
+
+  /**
+   * Set the selected address index for identity derivation
+   */
+  setSelectedAddressIndex(index: number): void {
+    localStorage.setItem(STORAGE_KEY_SELECTED_INDEX, index.toString());
+  }
+
+  /**
+   * Clear the selected address index (for wallet reset)
+   */
+  clearSelectedAddressIndex(): void {
+    localStorage.removeItem(STORAGE_KEY_SELECTED_INDEX);
   }
 
   /**
@@ -183,7 +207,8 @@ export class IdentityManager {
     const initialized = await keyManager.initialize();
 
     if (initialized) {
-      return this.deriveIdentityFromUnifiedWallet(0);
+      const index = this.getSelectedAddressIndex(); // Use stored index instead of hardcoded 0
+      return this.deriveIdentityFromUnifiedWallet(index);
     }
 
     // No wallet initialized - user must create or import a wallet
