@@ -137,15 +137,18 @@ export function generateMasterKeyFromSeed(seedHex: string): {
 /**
  * Generate HD address using standard BIP32
  * Standard path: m/44'/0'/0'/0/{index} (external chain, non-hardened)
+ * For change addresses, use isChange = true to get m/44'/0'/0'/1/{index}
  */
 export function generateHDAddressBIP32(
   masterPriv: string,
   chainCode: string,
   index: number,
-  basePath: string = "m/44'/0'/0'"
+  basePath: string = "m/44'/0'/0'",
+  isChange: boolean = false
 ) {
-  // Standard path: m/44'/0'/0'/0/{index} (external chain, non-hardened)
-  const fullPath = `${basePath}/0/${index}`;
+  // Chain: 0 = external (receiving), 1 = internal (change)
+  const chain = isChange ? 1 : 0;
+  const fullPath = `${basePath}/${chain}/${index}`;
 
   const derived = deriveKeyAtPath(masterPriv, chainCode, fullPath);
 

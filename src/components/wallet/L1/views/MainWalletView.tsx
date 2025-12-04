@@ -76,6 +76,7 @@ interface MainWalletViewProps {
   selectedPrivateKey: string;
   addresses: string[];
   balance: number;
+  totalBalance: number;
   showBalances: boolean;
   onNewAddress: () => void;
   onSelectAddress: (address: string) => void;
@@ -96,6 +97,7 @@ export function MainWalletView({
   selectedPrivateKey,
   addresses,
   balance,
+  totalBalance,
   showBalances,
   onNewAddress,
   onSelectAddress,
@@ -284,6 +286,16 @@ export function MainWalletView({
             <AnimatedBalance value={balance} show={showBalances} />
           </motion.h2>
         </AnimatePresence>
+
+        {/* Total balance across all addresses */}
+        {addresses.length > 1 && (
+          <p className="text-[10px] sm:text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+            Total ({addresses.length} addresses):{" "}
+            <span className="font-medium text-neutral-700 dark:text-neutral-300">
+              {showBalances ? `${totalBalance} ALPHA` : "••••••"}
+            </span>
+          </p>
+        )}
       </div>
 
       {/* Vesting Selector */}
