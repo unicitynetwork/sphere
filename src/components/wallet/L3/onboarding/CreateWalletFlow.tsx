@@ -152,6 +152,9 @@ export function CreateWalletFlow() {
     try {
       const cleanTag = nametagInput.trim().replace('@', '');
       await mintNametag(cleanTag);
+      // Successfully minted nametag - reload to reinitialize with new nametag
+      // This ensures React Query refreshes and the app transitions to main wallet view
+      window.location.reload();
     } catch (e: any) {
       setError(e.message || "Minting failed");
       setStep('nametag');

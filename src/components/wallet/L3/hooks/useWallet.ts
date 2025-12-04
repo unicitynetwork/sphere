@@ -68,8 +68,20 @@ export const useWallet = () => {
   });
 
   const nametagQuery = useQuery({
-    queryKey: KEYS.NAMETAG,
-    queryFn: () => nametagService.getActiveNametag(),
+    queryKey: [...KEYS.NAMETAG, identityQuery.data?.address],
+    queryFn: () => {
+      const identity = identityQuery.data;
+      if (!identity?.address) return null;
+
+      // Ensure wallet is loaded for current identity (loads nametag from storage)
+      const currentWallet = walletRepo.getWallet();
+      if (!currentWallet || currentWallet.address !== identity.address) {
+        walletRepo.loadWalletForAddress(identity.address);
+      }
+
+      return nametagService.getActiveNametag();
+    },
+    enabled: !!identityQuery.data?.address,
   });
 
   const pricesQuery = useQuery({

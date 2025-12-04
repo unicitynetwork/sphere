@@ -398,6 +398,22 @@ export class UnifiedKeyManager {
   }
 
   /**
+   * Get the master private key in hex format
+   * Used by L1 wallet for signing transactions
+   */
+  getMasterKeyHex(): string | null {
+    return this.masterKey;
+  }
+
+  /**
+   * Get the chain code in hex format
+   * Used by L1 wallet for BIP32 derivation
+   */
+  getChainCodeHex(): string | null {
+    return this.chainCode;
+  }
+
+  /**
    * Get wallet info
    */
   getWalletInfo(): WalletInfo {
