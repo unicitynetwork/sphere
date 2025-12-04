@@ -11,6 +11,7 @@ import { UnmaskedPredicateReference } from "@unicitylabs/state-transition-sdk/li
 const STORAGE_KEY_ENC_SEED = "encrypted_seed";
 const UNICITY_TOKEN_TYPE_HEX =
   "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9ef0efbe397867509";
+const DEFAULT_SESSION_KEY = "user-pin-1234";
 
 export interface UserIdentity {
   privateKey: string;
@@ -21,10 +22,18 @@ export interface UserIdentity {
 }
 
 export class IdentityManager {
+  private static instance: IdentityManager;
   private sessionKey: string;
 
-  constructor(sessionKey: string) {
+  private constructor(sessionKey: string) {
     this.sessionKey = sessionKey;
+  }
+
+  static getInstance(sessionKey: string = DEFAULT_SESSION_KEY): IdentityManager {
+    if (!IdentityManager.instance) {
+      IdentityManager.instance = new IdentityManager(sessionKey);
+    }
+    return IdentityManager.instance;
   }
 
   async generateNewIdentity(): Promise<UserIdentity> {

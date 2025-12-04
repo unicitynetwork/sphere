@@ -1,11 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import { Header } from './Header';
-import { useIncomingTransfers } from '../wallet/L3/hooks/useIncomingTransfers';
 
 export function DashboardLayout() {
-
-  useIncomingTransfers();
-
   return (
     <div className="h-full flex flex-col bg-neutral-100 dark:bg-linear-to-br dark:from-neutral-950 dark:via-neutral-900 dark:to-neutral-950 theme-transition lg:overflow-auto">
       <Header />

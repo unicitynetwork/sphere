@@ -2,8 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChatRepository } from '../data/ChatRepository';
 import { ChatConversation, ChatMessage } from '../data/models';
-import { NostrService } from '../../wallet/L3/services/NostrService';
-import { IdentityManager } from '../../wallet/L3/services/IdentityManager';
+import { useServices } from '../../../contexts/useServices';
 
 const QUERY_KEYS = {
   CONVERSATIONS: ['chat', 'conversations'],
@@ -11,10 +10,7 @@ const QUERY_KEYS = {
   UNREAD_COUNT: ['chat', 'unreadCount'],
 };
 
-const SESSION_KEY = 'user-pin-1234';
-const identityManager = new IdentityManager(SESSION_KEY);
 const chatRepository = ChatRepository.getInstance();
-const nostrService = NostrService.getInstance(identityManager);
 
 export interface UseChatReturn {
   // Conversations
@@ -47,6 +43,7 @@ export interface UseChatReturn {
 
 export const useChat = (): UseChatReturn => {
   const queryClient = useQueryClient();
+  const { nostrService } = useServices();
   const [selectedConversation, setSelectedConversation] = useState<ChatConversation | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -86,11 +83,6 @@ export const useChat = (): UseChatReturn => {
       window.removeEventListener('dm-received', handleDMReceived as EventListener);
     };
   }, [queryClient, selectedConversation]);
-
-  // Initialize Nostr service
-  useEffect(() => {
-    nostrService.start().catch(console.error);
-  }, []);
 
   // Query conversations
   const conversationsQuery = useQuery({

@@ -54,7 +54,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
     setRecipientError(null);
 
     try {
-      const identityManager = new IdentityManager("demo-session-key");
+      const identityManager = IdentityManager.getInstance();
       const nostr = NostrService.getInstance(identityManager);
       const cleanTag = recipient.replace('@', '').replace('@unicity', '').trim();
 
