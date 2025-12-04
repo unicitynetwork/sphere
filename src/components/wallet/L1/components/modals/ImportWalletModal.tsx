@@ -14,8 +14,6 @@ export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModa
   const [scanCount, setScanCount] = useState(10);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const isDatFile = selectedFile?.name.endsWith(".dat");
-
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -45,7 +43,7 @@ export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModa
 
   const handleImport = () => {
     if (!selectedFile) return;
-    onImport(selectedFile, isDatFile ? scanCount : undefined);
+    onImport(selectedFile, scanCount);
   };
 
   const handleCancel = () => {
@@ -140,21 +138,19 @@ export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModa
               </div>
             </div>
 
-            {/* Scan count for .dat files */}
-            {isDatFile && (
-              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg mb-3">
-                <p className="text-xs text-blue-700 dark:text-blue-300 mb-2">
-                  How many addresses to scan?
-                </p>
-                <input
-                  type="number"
-                  value={scanCount}
-                  onChange={(e) => setScanCount(Math.max(1, parseInt(e.target.value) || 10))}
-                  className="w-full px-2 py-1.5 bg-white dark:bg-neutral-800 border border-blue-300 dark:border-blue-700 rounded text-sm text-neutral-900 dark:text-white"
-                  min={1}
-                />
-              </div>
-            )}
+            {/* Scan count for address scanning */}
+            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg mb-3">
+              <p className="text-xs text-blue-700 dark:text-blue-300 mb-2">
+                How many addresses to scan?
+              </p>
+              <input
+                type="number"
+                value={scanCount}
+                onChange={(e) => setScanCount(Math.max(1, parseInt(e.target.value) || 10))}
+                className="w-full px-2 py-1.5 bg-white dark:bg-neutral-800 border border-blue-300 dark:border-blue-700 rounded text-sm text-neutral-900 dark:text-white"
+                min={1}
+              />
+            </div>
 
             {/* Action buttons */}
             <div className="flex gap-2">

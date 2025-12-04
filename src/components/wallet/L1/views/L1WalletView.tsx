@@ -148,6 +148,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
       if (content.includes("ENCRYPTED MASTER KEY")) {
         setPendingFile(file);
+        setInitialScanCount(scanCount || 10);
         setShowLoadPasswordModal(true);
       } else {
         // Check if this is a BIP32 wallet that needs scanning
@@ -163,7 +164,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           }
           // Show scan modal - don't save wallet yet
           setPendingWallet(result.wallet);
-          setInitialScanCount(scanCount || 100);
+          setInitialScanCount(scanCount || 10);
           setShowScanModal(true);
         } else {
           // Standard wallet - import directly
@@ -263,7 +264,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       // Check if BIP32 wallet - show scan modal
       if (result.wallet.masterChainCode || result.wallet.isImportedAlphaWallet) {
         setPendingWallet(result.wallet);
-        setInitialScanCount(100);
+        // initialScanCount already set when showing password modal
         setShowScanModal(true);
       } else {
         // Standard wallet - save directly
