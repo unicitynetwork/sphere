@@ -489,9 +489,22 @@ export const useWallet = () => {
     return identity.mnemonic.split(' ');
   };
 
+  // Get L1 address from unified wallet (if available)
+  const getL1Address = async (): Promise<string | null> => {
+    return identityManager.getL1Address();
+  };
+
+  // Get UnifiedKeyManager for advanced operations
+  const getUnifiedKeyManager = () => {
+    return identityManager.getUnifiedKeyManager();
+  };
+
   return {
     identity: identityQuery.data,
     isLoadingIdentity: identityQuery.isLoading,
+
+    // L1 address (from unified wallet)
+    l1Address: identityQuery.data?.l1Address || null,
 
     nametag: nametagQuery.data,
     isLoadingNametag: nametagQuery.isLoading,
@@ -509,5 +522,7 @@ export const useWallet = () => {
     isSending: sendAmountMutation.isPending || sendTokenMutation.isPending,
 
     getSeedPhrase,
+    getL1Address,
+    getUnifiedKeyManager,
   };
 };

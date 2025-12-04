@@ -7,6 +7,7 @@ import CryptoJS from "crypto-js";
 import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
 import type { DirectAddress } from "@unicitylabs/state-transition-sdk/lib/address/DirectAddress";
 import { UnmaskedPredicateReference } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicateReference";
+import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 
 const STORAGE_KEY_ENC_SEED = "encrypted_seed";
 const UNICITY_TOKEN_TYPE_HEX =
@@ -18,19 +19,115 @@ export interface UserIdentity {
   publicKey: string;
   address: string;
   mnemonic?: string;
+  l1Address?: string; // Alpha L1 address (if derived from unified wallet)
+  addressIndex?: number; // BIP44 address index
 }
 
 export class IdentityManager {
   private sessionKey: string;
+  private unifiedKeyManager: UnifiedKeyManager | null = null;
 
   constructor(sessionKey: string) {
     this.sessionKey = sessionKey;
   }
 
-  async generateNewIdentity(): Promise<UserIdentity> {
-    const mnemonic = bip39.generateMnemonic();
-    return this.deriveIdentityFromMnemonic(mnemonic);
+  /**
+   * Get the UnifiedKeyManager instance
+   */
+  getUnifiedKeyManager(): UnifiedKeyManager {
+    if (!this.unifiedKeyManager) {
+      this.unifiedKeyManager = UnifiedKeyManager.getInstance(this.sessionKey);
+    }
+    return this.unifiedKeyManager;
   }
+
+  /**
+   * Generate a new identity using the UnifiedKeyManager (standard BIP32)
+   * This creates a unified wallet where L1 and L3 share the same keypairs
+   */
+  async generateNewIdentity(): Promise<UserIdentity> {
+    const keyManager = this.getUnifiedKeyManager();
+    const mnemonic = await keyManager.generateNew(12);
+    return this.deriveIdentityFromUnifiedWallet(0, mnemonic);
+  }
+
+  /**
+   * Derive identity from the UnifiedKeyManager at a specific index
+   * Uses standard BIP32 derivation: m/44'/0'/0'/0/{index}
+   */
+  async deriveIdentityFromUnifiedWallet(
+    index: number = 0,
+    mnemonic?: string
+  ): Promise<UserIdentity> {
+    const keyManager = this.getUnifiedKeyManager();
+
+    if (!keyManager.isInitialized()) {
+      throw new Error("Unified wallet not initialized");
+    }
+
+    const derived = keyManager.deriveAddress(index);
+    const nonce = keyManager.deriveL3Nonce(derived.privateKey, index);
+
+    const secret = Buffer.from(derived.privateKey, "hex");
+    const nonceBuffer = Buffer.from(nonce, "hex");
+
+    const l3Address = await this.deriveL3Address(secret, nonceBuffer);
+
+    const signingService = await SigningService.createFromSecret(secret);
+    const publicKey = Buffer.from(signingService.publicKey).toString("hex");
+
+    const identity: UserIdentity = {
+      privateKey: derived.privateKey,
+      nonce: nonce,
+      publicKey: publicKey,
+      address: l3Address,
+      mnemonic: mnemonic || keyManager.getMnemonic() || undefined,
+      l1Address: derived.l1Address,
+      addressIndex: index,
+    };
+
+    // Save mnemonic for legacy compatibility
+    if (identity.mnemonic) {
+      this.saveSeed(identity.mnemonic);
+    }
+
+    return identity;
+  }
+
+  /**
+   * Derive identity from a raw private key and index
+   * Useful for external integrations
+   */
+  async deriveIdentityFromPrivateKey(
+    privateKey: string,
+    index: number = 0
+  ): Promise<UserIdentity> {
+    const nonce = CryptoJS.HmacSHA256(
+      CryptoJS.enc.Utf8.parse(`unicity-nonce-${index}`),
+      CryptoJS.enc.Hex.parse(privateKey)
+    ).toString();
+
+    const secret = Buffer.from(privateKey, "hex");
+    const nonceBuffer = Buffer.from(nonce, "hex");
+
+    const l3Address = await this.deriveL3Address(secret, nonceBuffer);
+
+    const signingService = await SigningService.createFromSecret(secret);
+    const publicKey = Buffer.from(signingService.publicKey).toString("hex");
+
+    return {
+      privateKey,
+      nonce,
+      publicKey,
+      address: l3Address,
+      addressIndex: index,
+    };
+  }
+
+  /**
+   * @deprecated Use deriveIdentityFromUnifiedWallet for new wallets
+   * Legacy method: derive identity directly from mnemonic (non-BIP32)
+   */
 
   async deriveIdentityFromMnemonic(mnemonic: string): Promise<UserIdentity> {
     // Validate mnemonic phrase
@@ -39,6 +136,16 @@ export class IdentityManager {
       throw new Error("Invalid recovery phrase. Please check your words and try again.");
     }
 
+    // Try to use UnifiedKeyManager for standard BIP32 derivation
+    try {
+      const keyManager = this.getUnifiedKeyManager();
+      await keyManager.createFromMnemonic(mnemonic);
+      return this.deriveIdentityFromUnifiedWallet(0, mnemonic);
+    } catch (error) {
+      console.warn("Failed to use UnifiedKeyManager, falling back to legacy derivation:", error);
+    }
+
+    // Legacy fallback: direct seed-based derivation
     const seed = await bip39.mnemonicToSeed(mnemonic);
 
     const seedBuffer = Buffer.from(seed);
@@ -54,7 +161,7 @@ export class IdentityManager {
       );
     }
 
-    const address = await this.deriveAddress(secret, nonce);
+    const address = await this.deriveL3Address(secret, nonce);
 
     const signingService = await SigningService.createFromSecret(secret);
     const publicKey = Buffer.from(signingService.publicKey).toString("hex");
@@ -71,7 +178,10 @@ export class IdentityManager {
     return identity;
   }
 
-  private async deriveAddress(secret: Buffer, nonce: Buffer): Promise<string> {
+  /**
+   * Derive L3 Unicity address from secret and nonce
+   */
+  private async deriveL3Address(secret: Buffer, nonce: Buffer): Promise<string> {
     try {
       const signingService = await SigningService.createFromSecret(secret);
 
@@ -104,6 +214,18 @@ export class IdentityManager {
   }
 
   async getCurrentIdentity(): Promise<UserIdentity | null> {
+    // Try unified wallet first
+    try {
+      const keyManager = this.getUnifiedKeyManager();
+      const initialized = await keyManager.initialize();
+      if (initialized) {
+        return this.deriveIdentityFromUnifiedWallet(0);
+      }
+    } catch (error) {
+      console.warn("UnifiedKeyManager not available, trying legacy:", error);
+    }
+
+    // Fall back to legacy encrypted seed
     const encrypted = localStorage.getItem(STORAGE_KEY_ENC_SEED);
     if (!encrypted) return null;
 
@@ -117,6 +239,14 @@ export class IdentityManager {
       console.error("Failed to decrypt identity", error);
       return null;
     }
+  }
+
+  /**
+   * Get the L1 Alpha address associated with current identity
+   */
+  async getL1Address(): Promise<string | null> {
+    const identity = await this.getCurrentIdentity();
+    return identity?.l1Address || null;
   }
 
   async getWalletAddress(): Promise<DirectAddress | null> {
