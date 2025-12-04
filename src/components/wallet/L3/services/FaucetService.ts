@@ -70,19 +70,12 @@ export class FaucetService {
       { coin: 'ethereum', amount: 42 },
     ];
 
-    console.log(`🚀 Starting faucet requests for @${unicityId}...`);
-    const results: FaucetResponse[] = [];
+    console.log(`🚀 Starting parallel faucet requests for @${unicityId}...`);
 
-    // Request coins sequentially with a small delay between each
-    for (const { coin, amount } of requests) {
-      const result = await this.requestTokens(unicityId, coin, amount);
-      results.push(result);
-
-      // Add 500ms delay between requests to avoid rate limiting
-      if (coin !== 'ethereum') {
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-    }
+    // Request all coins in parallel for better performance
+    const results = await Promise.all(
+      requests.map(({ coin, amount }) => this.requestTokens(unicityId, coin, amount))
+    );
 
     console.log(`📊 Faucet results:`, results);
     const successful = results.filter(r => r.success).length;

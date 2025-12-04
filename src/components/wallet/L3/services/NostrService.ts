@@ -149,11 +149,11 @@ export class NostrService {
         }
         this.processedEventIds.add(event.id);
 
-        // Skip old events
+        // Skip old events (but allow events with same timestamp for parallel faucet requests)
         const currentLastSync = this.getOrInitLastSync();
-        if (event.created_at <= currentLastSync) {
+        if (event.created_at < currentLastSync) {
           console.log(
-            `⏭️ Skipping old event (Time: ${event.created_at} <= Sync: ${currentLastSync})`
+            `⏭️ Skipping old event (Time: ${event.created_at} < Sync: ${currentLastSync})`
           );
           return;
         }
@@ -348,9 +348,6 @@ export class NostrService {
     try {
       let sourceTokenInput = payloadObj["sourceToken"];
       let transferTxInput = payloadObj["transferTx"];
-
-      console.log(sourceTokenInput);
-      console.log(transferTxInput);
 
       if (typeof sourceTokenInput === "string") {
         try {

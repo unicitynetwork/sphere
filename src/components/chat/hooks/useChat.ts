@@ -158,7 +158,7 @@ export const useChat = (): UseChatReturn => {
         return null;
       }
     },
-    [queryClient]
+    [nostrService, queryClient]
   );
 
   // Select conversation
