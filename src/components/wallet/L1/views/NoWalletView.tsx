@@ -59,7 +59,7 @@ export function NoWalletView({
         type="file"
         ref={fileInputRef}
         className="hidden"
-        accept=".json,.txt"
+        accept=".json,.txt,.dat"
         onChange={handleFileSelect}
       />
 

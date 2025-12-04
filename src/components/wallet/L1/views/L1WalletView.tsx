@@ -8,12 +8,17 @@ import {
   createTransactionPlan,
   createAndSignTransaction,
   broadcast,
+  saveWalletToStorage,
+  importWallet as importWalletFromFile,
   type VestingMode,
   type TransactionPlan,
+  type Wallet,
+  type ScannedAddress,
 } from "../sdk";
 import { useL1Wallet } from "../hooks";
 import { NoWalletView, HistoryView, MainWalletView } from ".";
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
+import { WalletScanModal } from "../components/modals";
 
 type ViewMode = "main" | "history";
 
@@ -32,6 +37,8 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     message: string;
     txids?: string[];
   }>({ show: false, type: "info", title: "", message: "" });
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [pendingWallet, setPendingWallet] = useState<Wallet | null>(null);
 
   // Use TanStack Query based hook
   const {
@@ -113,6 +120,19 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   // Load wallet from file
   const onLoadWallet = async (file: File) => {
     try {
+      // For .dat files, use direct SDK import (not hook) to avoid auto-save
+      // Then show scan modal to find addresses with balances
+      if (file.name.endsWith(".dat")) {
+        const result = await importWalletFromFile(file);
+        if (!result.success || !result.wallet) {
+          throw new Error(result.error || "Import failed");
+        }
+        // Show scan modal - don't save wallet yet
+        setPendingWallet(result.wallet);
+        setShowScanModal(true);
+        return;
+      }
+
       const content = await file.text();
 
       if (content.includes("ENCRYPTED MASTER KEY")) {
@@ -133,6 +153,38 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       );
       console.error(err);
     }
+  };
+
+  // Handle scanned address selection
+  const onSelectScannedAddress = (scannedAddr: ScannedAddress) => {
+    if (!pendingWallet) return;
+
+    // Add the scanned address to wallet
+    const walletWithAddress: Wallet = {
+      ...pendingWallet,
+      addresses: [{
+        index: scannedAddr.index,
+        address: scannedAddr.address,
+        privateKey: scannedAddr.privateKey,
+        publicKey: scannedAddr.publicKey,
+        path: scannedAddr.path,
+        createdAt: new Date().toISOString(),
+      }],
+    };
+
+    // Save to storage
+    saveWalletToStorage("main", walletWithAddress);
+    invalidateWallet();
+    setSelectedAddress(scannedAddr.address);
+    setShowScanModal(false);
+    setPendingWallet(null);
+    showMessage("success", "Wallet Loaded", `Loaded address with ${scannedAddr.balance.toFixed(8)} ALPHA`);
+  };
+
+  // Cancel scan modal
+  const onCancelScan = () => {
+    setShowScanModal(false);
+    setPendingWallet(null);
   };
 
   // Confirm load with password
@@ -312,6 +364,12 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           message={messageModal.message}
           txids={messageModal.txids}
           onClose={closeMessage}
+        />
+        <WalletScanModal
+          show={showScanModal}
+          wallet={pendingWallet}
+          onSelectAddress={onSelectScannedAddress}
+          onCancel={onCancelScan}
         />
       </div>
     );
