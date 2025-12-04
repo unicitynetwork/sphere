@@ -113,6 +113,7 @@ export function WalletPanel() {
       {/* DYNAMIC CONTENT AREA - Both components stay mounted */}
       <div className="flex-1 relative overflow-hidden">
         <motion.div
+          initial={false}
           animate={{ x: activeLayer === 'L1' ? '0%' : '-100%' }}
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
           className="absolute inset-0"
@@ -121,6 +122,7 @@ export function WalletPanel() {
           <L1WalletView showBalances={showBalances} />
         </motion.div>
         <motion.div
+          initial={false}
           animate={{ x: activeLayer === 'L3' ? '0%' : '100%' }}
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
           className="absolute inset-0"
