@@ -7,9 +7,19 @@ import { useWallet } from './L3/hooks/useWallet';
 
 type LayerType = 'L1' | 'L3';
 
+const getInitialLayer = (): LayerType => {
+  const saved = localStorage.getItem('wallet-active-layer');
+  return saved === 'L1' ? 'L1' : 'L3';
+};
+
 export function WalletPanel() {
   const [showBalances, setShowBalances] = useState(true);
-  const [activeLayer, setActiveLayer] = useState<LayerType>('L3');
+  const [activeLayer, setActiveLayer] = useState<LayerType>(getInitialLayer);
+
+  const handleLayerChange = (layer: LayerType) => {
+    setActiveLayer(layer);
+    localStorage.setItem('wallet-active-layer', layer);
+  };
   const [copied, setCopied] = useState(false);
   const { nametag } = useWallet();
 
@@ -83,14 +93,14 @@ export function WalletPanel() {
         {/* CUSTOM TOGGLE */}
         <div className="bg-neutral-100 dark:bg-neutral-900/50 p-1 rounded-lg sm:rounded-xl border border-neutral-200 dark:border-neutral-800/50 flex relative mb-1">
             <button
-                onClick={() => setActiveLayer('L1')}
+                onClick={() => handleLayerChange('L1')}
                 className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-1.5 sm:py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-md sm:rounded-lg relative z-10 transition-colors ${activeLayer === 'L1' ? 'text-white' : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}
             >
                 <Layers className="w-3 h-3" />
                 <span>Layer 1</span>
             </button>
             <button
-                onClick={() => setActiveLayer('L3')}
+                onClick={() => handleLayerChange('L3')}
                 className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-1.5 sm:py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-md sm:rounded-lg relative z-10 transition-colors ${activeLayer === 'L3' ? 'text-white' : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}
             >
                 <Network className="w-3 h-3" />
