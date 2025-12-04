@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { getTriviaMockResponse, getAmaMockResponse, getDefaultMockResponse, getGamesMockResponse } from '../data/agentsMockData';
+import { loadMemory, saveMemory, isLocalStorageAvailable } from '../utils/memory';
 
 export interface ChatMessage {
   id: string;
@@ -95,12 +96,20 @@ export function useAgentChat({ activityId, userId }: UseAgentChatOptions) {
     try {
       abortControllerRef.current = new AbortController();
       const apiUrl = getAgentApiUrl();
+
       const allMessages = [...messages, userMessage].map(m => ({
         id: m.id,
         role: m.role,
         content: [{ type: 'text', text: m.content }],
         timestamp: m.timestamp,
       }));
+
+      // Load memory state from localStorage
+      const memoryState = isLocalStorageAvailable()
+        ? loadMemory(effectiveUserId, activityId)
+        : {};
+
+      console.log('[useAgentChat] Sending memory state:', memoryState);
 
       const response = await fetch(`${apiUrl}/chat/stream`, {
         method: 'POST',
@@ -111,6 +120,12 @@ export function useAgentChat({ activityId, userId }: UseAgentChatOptions) {
           activityId,
           userId: effectiveUserId,
           messages: allMessages,
+          userContext: {
+            userId: effectiveUserId,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            locale: navigator.language,
+          },
+          memoryState, // Send localStorage memory data to backend
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -158,6 +173,12 @@ export function useAgentChat({ activityId, userId }: UseAgentChatOptions) {
                     ? { ...msg, thinking: (msg.thinking || '') + data.text }
                     : msg
                 ));
+                break;
+              case 'memory-update':
+                // Handle memory updates from backend
+                if (isLocalStorageAvailable() && data.memoryState) {
+                  saveMemory(effectiveUserId, activityId, data.memoryState);
+                }
                 break;
               case 'done':
                 setIsStreaming(false);
