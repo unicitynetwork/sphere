@@ -22,6 +22,8 @@ import {
 } from "../sdk";
 import { subscribeBlocks } from "../sdk/network";
 import { loadWalletFromUnifiedKeyManager, getUnifiedKeyManager } from "../sdk/unifiedWalletBridge";
+import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
+import { WalletRepository } from "../../../../repositories/WalletRepository";
 
 // Query keys for L1 wallet
 export const L1_KEYS = {
@@ -188,6 +190,10 @@ export function useL1Wallet(selectedAddress?: string) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: L1_KEYS.WALLET });
+      // Also invalidate L3 queries since wallet changed
+      queryClient.invalidateQueries({ queryKey: ["l3", "identity"] });
+      queryClient.invalidateQueries({ queryKey: ["l3", "nametag"] });
+      queryClient.invalidateQueries({ queryKey: ["l3", "tokens"] });
     },
   });
 
@@ -235,19 +241,36 @@ export function useL1Wallet(selectedAddress?: string) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: L1_KEYS.WALLET });
+      // Also invalidate L3 queries since wallet changed
+      queryClient.invalidateQueries({ queryKey: ["l3", "identity"] });
+      queryClient.invalidateQueries({ queryKey: ["l3", "nametag"] });
+      queryClient.invalidateQueries({ queryKey: ["l3", "tokens"] });
     },
   });
 
   // Mutation: Delete wallet via UnifiedKeyManager
   const deleteWalletMutation = useMutation({
     mutationFn: async () => {
+      // 1. Clear UnifiedKeyManager localStorage and reset singleton
       const keyManager = getUnifiedKeyManager();
       keyManager.clear();
+      UnifiedKeyManager.resetInstance();
+
+      // 2. Clear IdentityManager selected index
+      localStorage.removeItem("l3_selected_address_index");
+
+      // 3. Reset WalletRepository in-memory state (keeps localStorage intact for tokens/nametags)
+      WalletRepository.getInstance().resetInMemoryState();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: L1_KEYS.WALLET });
-      queryClient.removeQueries({ queryKey: ["l1", "balance"] });
-      queryClient.removeQueries({ queryKey: ["l1", "transactions"] });
+      // Clear ALL L1 queries
+      queryClient.removeQueries({ queryKey: ["l1"] });
+
+      // Clear ALL L3 queries
+      queryClient.removeQueries({ queryKey: ["l3"] });
+
+      // Force page reload for clean state
+      window.location.reload();
     },
   });
 

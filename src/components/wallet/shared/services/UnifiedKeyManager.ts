@@ -516,6 +516,15 @@ export class UnifiedKeyManager {
     console.log("🔐 Unified wallet cleared");
   }
 
+  /**
+   * Reset the singleton instance
+   * Call this after clear() to ensure fresh state on next getInstance()
+   */
+  static resetInstance(): void {
+    UnifiedKeyManager.instance = null;
+    console.log("🔐 UnifiedKeyManager instance reset");
+  }
+
   // ==========================================
   // Private methods
   // ==========================================

@@ -359,6 +359,17 @@ export class WalletRepository {
   }
 
   /**
+   * Reset in-memory state without touching localStorage
+   * Used when switching wallets - preserves per-identity token/nametag storage
+   */
+  resetInMemoryState(): void {
+    this._wallet = null;
+    this._currentAddress = null;
+    this._nametag = null;
+    this.refreshWallet();
+  }
+
+  /**
    * Get the current active address
    */
   getCurrentAddress(): string | null {

@@ -73,10 +73,14 @@ export const useWallet = () => {
       const identity = identityQuery.data;
       if (!identity?.address) return null;
 
-      // Ensure wallet is loaded for current identity (loads nametag from storage)
+      // Ensure wallet is loaded/created for current identity (loads nametag from storage)
       const currentWallet = walletRepo.getWallet();
       if (!currentWallet || currentWallet.address !== identity.address) {
-        walletRepo.loadWalletForAddress(identity.address);
+        const loaded = walletRepo.loadWalletForAddress(identity.address);
+        if (!loaded) {
+          // No existing wallet, create one (same as tokensQuery does)
+          walletRepo.createWallet(identity.address);
+        }
       }
 
       return nametagService.getActiveNametag();
