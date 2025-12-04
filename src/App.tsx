@@ -14,9 +14,12 @@ import { AgentPage } from './pages/AgentPage';
 export default function App() {
   const location = useLocation();
 
+  // Use base path as key to prevent remounting when switching agents
+  const routeKey = location.pathname.startsWith('/agents/') ? '/agents' : location.pathname;
+
   return (
     <AnimatePresence mode="wait">
-      <Routes location={location} key={location.pathname}>
+      <Routes location={location} key={routeKey}>
         <Route path="/" element={<IntroPage />} />
         <Route
           element={

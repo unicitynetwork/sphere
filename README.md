@@ -1,73 +1,231 @@
-# React + TypeScript + Vite
+# Unicity AgentSphere
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A multifunctional Web3 platform with integrated crypto wallet, specialized AI agents, and P2P functionality.
 
-Currently, two official plugins are available:
+## Overview
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+**Unicity AgentSphere** is a modern decentralized application built on the concept of "agents" — specialized AI interfaces for various activities: sports betting, gaming, merchandise shopping, P2P crypto trading, trivia, direct messaging, and AI assistance.
 
-## React Compiler
+## Key Features
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 🤖 Agent System
 
-## Expanding the ESLint configuration
+- **Chat Agent** — direct and group messaging via Nostr protocol
+- **AI Assistant (Viktor)** — uncensored LLM with internet access
+- **Trivia Agent** — quiz games with score tracking
+- **P2P Gaming** — gaming platform (Quake arena, crypto poker)
+- **Sports Betting** — sports event betting with history tracking
+- **OTC Trading** — P2P cryptocurrency trading
+- **Merch Store** — merchandise store with order management
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### 💰 Multi-Layer Wallet
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+**Layer 1 (L1)** — base blockchain layer:
+- Wallet creation and management
+- Transaction history
+- Vesting selector
+- Password protection
+- Bridge between layers
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+**Layer 3 (L3)** — application-specific rollup:
+- Fast, low-cost transactions
+- Token management
+- Direct transfers
+- Incoming payment notifications
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+**Additional Features:**
+- Nametag system (@username identification)
+- Wallet switching
+- QR codes for receiving payments
+- Seed phrase management
+- Real-time market data
+
+### 🔐 Security
+
+- Cryptographic identification
+- Transaction signing via elliptic curve cryptography
+- PIN-based session protection
+- Decentralized messaging (Nostr protocol)
+- Secure seed phrase storage
+
+## Tech Stack
+
+### Frontend
+- **React 19** with TypeScript
+- **Vite 7** — build tool and HMR
+- **Tailwind CSS 4** — styling
+- **Framer Motion** — animations
+- **React Router DOM v7** — routing
+- **TanStack React Query v5** — server state management
+
+### Web3 / Crypto
+- **Unicity Labs State Transition SDK** — blockchain interaction
+- **Nostr JS SDK** — decentralized messaging
+- **BIP39** — seed phrase generation
+- **Elliptic** — cryptography
+- **CryptoJS** — encryption
+
+### Utilities
+- **Axios** — HTTP client
+- **Lucide React** — icons
+- **UUID** — identifier generation
+- **QR Code Styling** — QR code generation
+
+## Installation and Setup
+
+### Requirements
+- Node.js 18+
+- npm or yarn
+
+### Install Dependencies
+
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Run Development Server
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run dev
 ```
+
+The application will be available at `http://localhost:5173`
+
+### Build for Production
+
+```bash
+npm run build
+```
+
+### Preview Production Build
+
+```bash
+npm run preview
+```
+
+### Lint Code
+
+```bash
+npm run lint
+```
+
+## Environment Variables
+
+Create a `.env` file in the project root:
+
+```env
+# Agent mode (mock/real)
+VITE_USE_MOCK_AGENTS=true
+
+# Backend API URL
+VITE_AGENT_API_URL=https://api.example.com
+
+# Base path for deployment
+BASE_PATH=/
+```
+
+## Project Structure
+
+```
+src/
+├── components/          # React components
+│   ├── agents/         # Agent components
+│   │   ├── shared/     # Reusable chat components
+│   │   └── [specific]  # AIChat, SportChat, P2PChat, etc.
+│   ├── wallet/         # Multi-layer wallet
+│   │   ├── L1/         # Layer 1 components
+│   │   ├── L3/         # Layer 3 components
+│   │   └── shared/     # Shared utilities
+│   ├── chat/           # Messaging system
+│   ├── auth/           # Authentication
+│   ├── layout/         # Page layouts
+│   ├── theme/          # Theme management
+│   └── splash/         # Loading screen
+├── pages/              # Application pages
+├── hooks/              # Custom React hooks
+├── config/             # Configuration (agent definitions)
+├── types/              # TypeScript types
+├── data/               # Mock data
+├── repositories/       # Data access layer
+├── utils/              # Helper functions
+└── assets/             # Static resources
+```
+
+## Responsive Design
+
+### Mobile (< 1024px)
+- Swipeable tab interface (chat/wallet)
+- Optimized keyboard handling
+- Touch-friendly elements
+
+### Desktop (≥ 1024px)
+- Grid layout with agent picker, chat, and wallet
+- Sidebars with additional information
+- Extended navigation capabilities
+
+## Core Components
+
+### Agent Architecture
+
+Each agent is a specialized interface:
+
+```typescript
+interface IAgent {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  activityId?: string; // For backend integration
+}
+```
+
+### State Management
+
+- **Server State:** TanStack Query
+- **UI State:** React hooks (useState, useRef)
+- **Theme State:** Context API
+- **Persistent State:** localStorage
+
+### Real-time Features
+
+- WebSocket via Nostr for chat
+- Automatic wallet balance updates
+- Market data refresh (60 sec intervals)
+- Automatic incoming transfer detection
+
+## User Flow
+
+1. **Splash Screen** → IntroPage
+2. **Authentication** → WalletGate (create/import wallet)
+3. **Dashboard** → Agent selection
+4. **Interaction** → Chat interface with optional sidebar
+5. **Wallet** → L1/L3 management, transfers
+6. **Direct Messages** → Real-time communication
+7. **Marketplace** → Shopping, trading, betting, gaming
+
+## Development Features
+
+### Performance Optimization
+- Query caching via React Query
+- Debounced scroll detection
+- Memoization with Framer Motion
+- Lazy component mounting
+- LocalStorage for offline access
+
+### Security
+- Cryptographic key management
+- Transaction signing
+- PIN session authentication
+- Identity verification via Unicity SDK
+
+## License
+
+Private project
+
+## Contact
+
+For questions and suggestions, please contact the Unicity Labs development team.
+
+---
+
+**Built with React, TypeScript, Vite, and Unicity SDKs**
