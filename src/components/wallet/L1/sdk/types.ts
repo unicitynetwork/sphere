@@ -19,6 +19,7 @@ export interface WalletAddress {
   path: string | null;
   index: number;
   createdAt?: string;
+  isChange?: boolean; // true for change addresses (BIP32 chain 1)
 }
 
 export interface StoredWallet {
