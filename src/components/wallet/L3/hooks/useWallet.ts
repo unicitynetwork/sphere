@@ -18,6 +18,7 @@ import { v4 as uuidv4 } from "uuid";
 import { TokenSplitExecutor } from "../services/transfer/TokenSplitExecutor";
 import { TokenSplitCalculator } from "../services/transfer/TokenSplitCalculator";
 import { TokenId } from "@unicitylabs/state-transition-sdk/lib/token/TokenId";
+import { IpfsStorageService } from "../services/IpfsStorageService";
 
 export const KEYS = {
   IDENTITY: ["wallet", "identity"],
@@ -66,6 +67,12 @@ export const useWallet = () => {
     return () =>
       window.removeEventListener("wallet-updated", handleWalletUpdate);
   }, [queryClient]);
+
+  // Initialize IPFS storage service for automatic token sync
+  useEffect(() => {
+    const storageService = IpfsStorageService.getInstance(identityManager);
+    storageService.startAutoSync();
+  }, []);
 
   const identityQuery = useQuery({
     queryKey: KEYS.IDENTITY,
