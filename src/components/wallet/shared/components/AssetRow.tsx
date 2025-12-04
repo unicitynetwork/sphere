@@ -50,11 +50,6 @@ export function AssetRow({ asset, showBalances, delay, onClick }: AssetRowProps)
               <div className="text-xs text-neutral-500 truncate max-w-[120px]">
                 {asset.name}
               </div>
-              {asset.tokenCount > 1 && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700">
-                  x{asset.tokenCount}
-                </span>
-              )}
             </div>
             <div className="text-xs text-left text-neutral-500">
               {formattedAmount}

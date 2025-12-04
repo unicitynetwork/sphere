@@ -2,6 +2,7 @@ import { motion } from 'framer-motion';
 import { Token } from '../../L3/data/model';
 import { Box, Copy, CheckCircle2 } from 'lucide-react';
 import { useState } from 'react';
+import { AmountFormatUtils } from '../../L3/utils/currency';
 
 interface TokenRowProps {
   token: Token;
@@ -10,7 +11,7 @@ interface TokenRowProps {
 
 export function TokenRow({ token, delay }: TokenRowProps) {
   const [copied, setCopied] = useState(false);
-
+  const displayAmount = AmountFormatUtils.formatDisplayAmount(token.amount, token.coinId)
   const handleCopyId = (e: React.MouseEvent) => {
     e.stopPropagation();
     navigator.clipboard.writeText(token.id);
@@ -39,7 +40,7 @@ export function TokenRow({ token, delay }: TokenRowProps) {
 
           <div>
             <div className="text-neutral-900 dark:text-white font-medium text-sm">
-              {token.symbol}
+              {`${displayAmount} ${token.symbol}`}
             </div>
             <div
               className="flex items-center gap-1 text-[10px] text-neutral-500 font-mono cursor-pointer hover:text-orange-500 dark:hover:text-orange-400 transition-colors"
