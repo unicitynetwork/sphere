@@ -142,26 +142,7 @@ export class NostrService {
     walletFilter.since = lastSync;
 
     this.client.subscribe(walletFilter, {
-      onEvent: (event) => {
-        // Deduplicate by event ID (in-session)
-        if (this.processedEventIds.has(event.id)) {
-          return;
-        }
-        this.processedEventIds.add(event.id);
-
-        // Skip old events (but allow events with same timestamp for parallel faucet requests)
-        const currentLastSync = this.getOrInitLastSync();
-        if (event.created_at < currentLastSync) {
-          console.log(
-            `⏭️ Skipping old event (Time: ${event.created_at} < Sync: ${currentLastSync})`
-          );
-          return;
-        }
-
-        console.log(`Received wallet event kind=${event.kind}`);
-        this.handleIncomingEvent(event);
-        this.updateLastSync(event.created_at);
-      },
+      onEvent: (event) => this.handleSubscriptionEvent(event, true),
       onEndOfStoredEvents: () => {
         console.log("End of stored wallet events");
       },
@@ -174,26 +155,44 @@ export class NostrService {
     chatFilter["#p"] = [publicKey];
 
     this.client.subscribe(chatFilter, {
-      onEvent: (event) => {
-        // In-session deduplication only
-        if (this.processedEventIds.has(event.id)) {
-          return;
-        }
-        this.processedEventIds.add(event.id);
-
-        // Keep set size manageable (max 1000 entries)
-        if (this.processedEventIds.size > 1000) {
-          const firstId = this.processedEventIds.values().next().value;
-          if (firstId) this.processedEventIds.delete(firstId);
-        }
-
-        console.log(`Received chat event kind=${event.kind}`);
-        this.handleIncomingEvent(event);
-      },
+      onEvent: (event) => this.handleSubscriptionEvent(event, false),
       onEndOfStoredEvents: () => {
         console.log("End of stored chat events");
       },
     });
+  }
+
+  private handleSubscriptionEvent(event: Event, isWalletEvent: boolean) {
+    // Deduplicate by event ID (in-session)
+    if (this.processedEventIds.has(event.id)) {
+      return;
+    }
+    this.processedEventIds.add(event.id);
+
+    // Keep set size manageable (max 1000 entries)
+    if (this.processedEventIds.size > 1000) {
+      const firstId = this.processedEventIds.values().next().value;
+      if (firstId) this.processedEventIds.delete(firstId);
+    }
+
+    // For wallet events, skip old events based on lastSync
+    if (isWalletEvent) {
+      const currentLastSync = this.getOrInitLastSync();
+      if (event.created_at < currentLastSync) {
+        console.log(
+          `⏭️ Skipping old event (Time: ${event.created_at} < Sync: ${currentLastSync})`
+        );
+        return;
+      }
+    }
+
+    console.log(`Received ${isWalletEvent ? 'wallet' : 'chat'} event kind=${event.kind}`);
+    this.handleIncomingEvent(event);
+
+    // Update lastSync only for wallet events
+    if (isWalletEvent) {
+      this.updateLastSync(event.created_at);
+    }
   }
 
   private getOrInitLastSync(): number {
