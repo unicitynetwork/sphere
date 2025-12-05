@@ -59,6 +59,8 @@ export class NostrService {
   private client: NostrClient | null = null;
   private identityManager: IdentityManager;
   private isConnected: boolean = false;
+  private isConnecting: boolean = false;
+  private connectPromise: Promise<void> | null = null;
   private paymentRequests: IncomingPaymentRequest[] = [];
   private chatRepository: ChatRepository;
   private dmListeners: ((message: ChatMessage) => void)[] = [];
@@ -78,19 +80,35 @@ export class NostrService {
   }
 
   async start() {
+    // Already connected
     if (this.isConnected) return;
 
+    // Connection in progress - wait for it
+    if (this.isConnecting && this.connectPromise) {
+      return this.connectPromise;
+    }
+
+    // Start connection
+    this.isConnecting = true;
+    this.connectPromise = this.doConnect();
+
+    try {
+      await this.connectPromise;
+    } finally {
+      this.isConnecting = false;
+    }
+  }
+
+  private async doConnect(): Promise<void> {
     const identity = await this.identityManager.getCurrentIdentity();
     if (!identity) throw new Error("No identity found for Nostr");
 
     const secretKey = Buffer.from(identity.privateKey, "hex");
     const keyManager = NostrKeyManager.fromPrivateKey(secretKey);
 
-    console.log(secretKey)
-
     this.client = new NostrClient(keyManager);
 
-    console.log("Connecting to Nostr relays...");
+    console.log("📡 Connecting to Nostr relays...");
     try {
       await this.client.connect(UNICITY_RELAYS[0]);
       this.isConnected = true;

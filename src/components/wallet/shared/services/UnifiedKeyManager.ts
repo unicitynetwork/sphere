@@ -74,6 +74,11 @@ export class UnifiedKeyManager {
   private source: WalletSource = "unknown";
   private sessionKey: string;
 
+  // Initialization guards
+  private isInitializing: boolean = false;
+  private hasInitialized: boolean = false;
+  private initializePromise: Promise<boolean> | null = null;
+
   private constructor(sessionKey: string) {
     this.sessionKey = sessionKey;
   }
@@ -97,6 +102,30 @@ export class UnifiedKeyManager {
    * Initialize wallet from stored data (if available)
    */
   async initialize(): Promise<boolean> {
+    // Return cached result if already initialized
+    if (this.hasInitialized) {
+      return this.masterKey !== null;
+    }
+
+    // Return existing promise if initialization in progress
+    if (this.isInitializing && this.initializePromise) {
+      return this.initializePromise;
+    }
+
+    // Start initialization
+    this.isInitializing = true;
+    this.initializePromise = this.doInitialize();
+
+    try {
+      const result = await this.initializePromise;
+      this.hasInitialized = true;
+      return result;
+    } finally {
+      this.isInitializing = false;
+    }
+  }
+
+  private async doInitialize(): Promise<boolean> {
     try {
       // Try to load from storage
       const encryptedMnemonic = localStorage.getItem(STORAGE_KEY_ENCRYPTED_MNEMONIC);
@@ -506,6 +535,11 @@ export class UnifiedKeyManager {
     this.chainCode = null;
     this.derivationMode = "bip32";
     this.source = "unknown";
+
+    // Reset initialization state
+    this.hasInitialized = false;
+    this.isInitializing = false;
+    this.initializePromise = null;
 
     localStorage.removeItem(STORAGE_KEY_ENCRYPTED_MNEMONIC);
     localStorage.removeItem(STORAGE_KEY_ENCRYPTED_MASTER);
