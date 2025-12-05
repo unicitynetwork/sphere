@@ -41,7 +41,6 @@ export const useWallet = () => {
 
   useEffect(() => {
     const handleWalletUpdate = () => {
-      console.log("♻️ Wallet update detected! Refreshing...");
       queryClient.refetchQueries({ queryKey: KEYS.TOKENS });
       queryClient.refetchQueries({ queryKey: KEYS.AGGREGATED });
     };
