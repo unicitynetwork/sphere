@@ -10,8 +10,7 @@ import type { Token } from "../data/model";
 import type { TxfStorageData, TxfMeta } from "./types/TxfTypes";
 import { buildTxfStorageData, parseTxfStorageData } from "./TxfSerializer";
 import { getTokenValidationService } from "./TokenValidationService";
-// ConflictResolutionService will be used for remote conflict detection
-// import { getConflictResolutionService } from "./ConflictResolutionService";
+import { getConflictResolutionService } from "./ConflictResolutionService";
 
 // Configure @noble/ed25519 to use sync sha512 (required for getPublicKey without WebCrypto)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -48,6 +47,7 @@ export interface StorageResult {
   version?: number;
   tokenCount?: number;
   validationIssues?: string[];
+  conflictsResolved?: number;
   error?: string;
 }
 
@@ -427,7 +427,69 @@ export class IpfsStorageService {
 
       console.log(`📦 Syncing ${validTokens.length} tokens${nametag ? ` + nametag "${nametag.name}"` : ""} to IPFS (TXF format)...`);
 
-      // 3. Build TXF storage data with incremented version
+      // 3. Check for remote conflicts before syncing
+      let tokensToSync = validTokens;
+      let conflictsResolved = 0;
+      const lastCid = this.getLastCid();
+
+      if (lastCid) {
+        try {
+          console.log(`📦 Checking for remote conflicts (last CID: ${lastCid.slice(0, 16)}...)...`);
+          const j = json(this.helia);
+          const { CID } = await import("multiformats/cid");
+          const remoteCid = CID.parse(lastCid);
+          const remoteData = await j.get(remoteCid) as unknown;
+
+          if (remoteData && typeof remoteData === "object" && "_meta" in (remoteData as object)) {
+            const remoteTxf = remoteData as TxfStorageData;
+            const remoteVersion = remoteTxf._meta.version;
+            const localVersion = this.getVersionCounter();
+
+            if (remoteVersion !== localVersion) {
+              console.log(`📦 Version mismatch detected: local v${localVersion} vs remote v${remoteVersion}`);
+
+              // Build local storage data for comparison
+              const localMeta: Omit<TxfMeta, "formatVersion"> = {
+                version: localVersion,
+                timestamp: Date.now(),
+                address: wallet.address,
+                ipnsName: this.cachedIpnsName || "",
+              };
+              const localTxf = buildTxfStorageData(validTokens, localMeta, nametag || undefined);
+
+              // Resolve conflicts
+              const conflictService = getConflictResolutionService();
+              const mergeResult = conflictService.resolveConflict(localTxf, remoteTxf);
+
+              if (mergeResult.conflicts.length > 0) {
+                console.log(`📦 Resolved ${mergeResult.conflicts.length} token conflict(s):`);
+                for (const conflict of mergeResult.conflicts) {
+                  console.log(`   - ${conflict.tokenId.slice(0, 8)}...: ${conflict.reason} (${conflict.resolution} wins)`);
+                }
+                conflictsResolved = mergeResult.conflicts.length;
+              }
+
+              if (mergeResult.newTokens.length > 0) {
+                console.log(`📦 Added ${mergeResult.newTokens.length} token(s) from remote`);
+              }
+
+              // Extract tokens from merged data for re-sync
+              const { tokens: mergedTokens } = parseTxfStorageData(mergeResult.merged);
+              tokensToSync = mergedTokens;
+
+              // Update local version to merged version
+              this.setVersionCounter(mergeResult.merged._meta.version);
+            } else {
+              console.log(`📦 Remote is in sync (v${remoteVersion})`);
+            }
+          }
+        } catch (err) {
+          console.warn(`📦 Could not fetch remote for conflict check:`, err instanceof Error ? err.message : err);
+          // Continue with local data
+        }
+      }
+
+      // 4. Build TXF storage data with incremented version
       const newVersion = this.incrementVersionCounter();
       const meta: Omit<TxfMeta, "formatVersion"> = {
         version: newVersion,
@@ -437,7 +499,7 @@ export class IpfsStorageService {
         lastCid: this.getLastCid() || undefined,
       };
 
-      const txfStorageData = buildTxfStorageData(validTokens, meta, nametag || undefined);
+      const txfStorageData = buildTxfStorageData(tokensToSync, meta, nametag || undefined);
 
       // 4. Store to IPFS
       const j = json(this.helia);
@@ -456,8 +518,9 @@ export class IpfsStorageService {
         ipnsName: this.cachedIpnsName || undefined,
         timestamp: Date.now(),
         version: newVersion,
-        tokenCount: validTokens.length,
+        tokenCount: tokensToSync.length,
         validationIssues: issues.length > 0 ? issues.map(i => i.reason) : undefined,
+        conflictsResolved: conflictsResolved > 0 ? conflictsResolved : undefined,
       };
 
       this.lastSync = result;
@@ -537,7 +600,11 @@ export class IpfsStorageService {
       if (isTxfFormat) {
         // TXF Format
         const txfData = rawData as TxfStorageData;
-        const { tokens, meta, nametag } = parseTxfStorageData(txfData);
+        const { tokens, meta, nametag, validationErrors } = parseTxfStorageData(txfData);
+
+        if (validationErrors.length > 0) {
+          console.warn(`📦 Validation warnings during restore:`, validationErrors);
+        }
 
         // Validate address
         const currentIdentity = await this.identityManager.getCurrentIdentity();
@@ -753,7 +820,11 @@ export class IpfsStorageService {
       const { parseTxfFile } = await import("./TxfSerializer");
       const validationService = getTokenValidationService();
 
-      const parsedTokens = parseTxfFile(txfData);
+      const { tokens: parsedTokens, errors: parseErrors } = parseTxfFile(txfData);
+
+      if (parseErrors.length > 0) {
+        console.warn("📦 TXF file parsing warnings:", parseErrors);
+      }
 
       if (parsedTokens.length === 0) {
         return { success: false, error: "No valid tokens found in TXF file" };

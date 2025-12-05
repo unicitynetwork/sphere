@@ -15,6 +15,11 @@ import {
   tokenIdFromKey,
   keyFromTokenId,
 } from "./types/TxfTypes";
+import {
+  safeParseTxfToken,
+  safeParseTxfMeta,
+  validateTokenEntry,
+} from "./types/TxfSchemas";
 
 // ==========================================
 // Token → TXF Conversion
@@ -23,6 +28,7 @@ import {
 /**
  * Extract TXF token structure from Token.jsonData
  * The jsonData field already contains TXF-format JSON string
+ * Uses Zod validation for type safety
  */
 export function tokenToTxf(token: Token): TxfToken | null {
   if (!token.jsonData) {
@@ -61,6 +67,14 @@ export function tokenToTxf(token: Token): TxfToken | null {
       };
     }
 
+    // Validate with Zod schema
+    const validated = safeParseTxfToken(txfData);
+    if (validated) {
+      return validated;
+    }
+
+    // Fallback: return without strict validation (for backwards compatibility)
+    console.warn(`Token ${token.id}: Zod validation failed, using unvalidated data`);
     return txfData as TxfToken;
   } catch (err) {
     console.error(`Failed to parse token ${token.id} jsonData:`, err);
@@ -166,52 +180,84 @@ export function buildTxfStorageData(
 }
 
 /**
- * Parse TXF storage data from IPFS
+ * Parse TXF storage data from IPFS with Zod validation
  */
 export function parseTxfStorageData(data: unknown): {
   tokens: Token[];
   meta: TxfMeta | null;
   nametag: NametagData | null;
+  validationErrors: string[];
 } {
   const result: {
     tokens: Token[];
     meta: TxfMeta | null;
     nametag: NametagData | null;
+    validationErrors: string[];
   } = {
     tokens: [],
     meta: null,
     nametag: null,
+    validationErrors: [],
   };
 
   if (!data || typeof data !== "object") {
+    result.validationErrors.push("Storage data is not an object");
     return result;
   }
 
   const storageData = data as Record<string, unknown>;
 
-  // Extract metadata
-  if (storageData._meta && typeof storageData._meta === "object") {
-    result.meta = storageData._meta as TxfMeta;
+  // Extract and validate metadata using Zod
+  if (storageData._meta) {
+    const validatedMeta = safeParseTxfMeta(storageData._meta);
+    if (validatedMeta) {
+      result.meta = validatedMeta;
+    } else {
+      result.validationErrors.push("Invalid _meta structure");
+      // Still try to use it as fallback
+      if (typeof storageData._meta === "object") {
+        result.meta = storageData._meta as TxfMeta;
+      }
+    }
   }
 
-  // Extract nametag
+  // Extract nametag (less strict validation)
   if (storageData._nametag && typeof storageData._nametag === "object") {
     result.nametag = storageData._nametag as NametagData;
   }
 
-  // Extract tokens
+  // Extract and validate tokens using Zod
   for (const key of Object.keys(storageData)) {
     if (isTokenKey(key)) {
       const tokenId = tokenIdFromKey(key);
-      const txfToken = storageData[key] as TxfToken;
+      const validation = validateTokenEntry(key, storageData[key]);
 
-      try {
-        const token = txfToToken(tokenId, txfToken);
-        result.tokens.push(token);
-      } catch (err) {
-        console.error(`Failed to parse token ${tokenId}:`, err);
+      if (validation.valid && validation.token) {
+        try {
+          const token = txfToToken(tokenId, validation.token);
+          result.tokens.push(token);
+        } catch (err) {
+          result.validationErrors.push(`Token ${tokenId}: conversion failed - ${err}`);
+        }
+      } else {
+        result.validationErrors.push(`Token ${tokenId}: ${validation.error || "validation failed"}`);
+        // Try fallback without strict validation
+        try {
+          const txfToken = storageData[key] as TxfToken;
+          if (txfToken?.genesis?.data?.tokenId) {
+            const token = txfToToken(tokenId, txfToken);
+            result.tokens.push(token);
+            console.warn(`Token ${tokenId} loaded with fallback (failed Zod validation)`);
+          }
+        } catch {
+          // Skip invalid token
+        }
       }
     }
+  }
+
+  if (result.validationErrors.length > 0) {
+    console.warn("TXF storage data validation issues:", result.validationErrors);
   }
 
   return result;
@@ -240,31 +286,52 @@ export function buildTxfExportFile(tokens: Token[]): Record<string, TxfToken> {
 }
 
 /**
- * Parse TXF file content (for manual import)
+ * Parse TXF file content (for manual import) with Zod validation
  */
-export function parseTxfFile(content: unknown): Token[] {
+export function parseTxfFile(content: unknown): { tokens: Token[]; errors: string[] } {
   if (!content || typeof content !== "object") {
-    return [];
+    return { tokens: [], errors: ["Content is not an object"] };
   }
 
   const tokens: Token[] = [];
+  const errors: string[] = [];
   const data = content as Record<string, unknown>;
 
   for (const key of Object.keys(data)) {
     if (isTokenKey(key)) {
       const tokenId = tokenIdFromKey(key);
-      const txfToken = data[key] as TxfToken;
 
-      try {
-        const token = txfToToken(tokenId, txfToken);
-        tokens.push(token);
-      } catch (err) {
-        console.error(`Failed to parse TXF token ${tokenId}:`, err);
+      // First try with Zod validation
+      const validatedToken = safeParseTxfToken(data[key]);
+
+      if (validatedToken) {
+        try {
+          const token = txfToToken(tokenId, validatedToken);
+          tokens.push(token);
+        } catch (err) {
+          errors.push(`Token ${tokenId}: conversion failed - ${err}`);
+        }
+      } else {
+        // Fallback: try without strict validation
+        errors.push(`Token ${tokenId}: Zod validation failed, trying fallback`);
+        try {
+          const txfToken = data[key] as TxfToken;
+          if (txfToken?.genesis?.data?.tokenId) {
+            const token = txfToToken(tokenId, txfToken);
+            tokens.push(token);
+          }
+        } catch (err) {
+          errors.push(`Token ${tokenId}: fallback also failed - ${err}`);
+        }
       }
     }
   }
 
-  return tokens;
+  if (errors.length > 0) {
+    console.warn("TXF file parsing issues:", errors);
+  }
+
+  return { tokens, errors };
 }
 
 // ==========================================

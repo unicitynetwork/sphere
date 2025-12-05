@@ -38,31 +38,69 @@ export class TokenValidationService {
   // ==========================================
 
   /**
-   * Validate all tokens before IPFS sync
+   * Validate all tokens before IPFS sync (parallel with batch limit)
    * Returns valid tokens and list of issues
    */
-  async validateAllTokens(tokens: LocalToken[]): Promise<ValidationResult> {
+  async validateAllTokens(
+    tokens: LocalToken[],
+    options?: { batchSize?: number; onProgress?: (completed: number, total: number) => void }
+  ): Promise<ValidationResult> {
     const validTokens: LocalToken[] = [];
     const issues: ValidationIssue[] = [];
 
-    for (const token of tokens) {
-      try {
-        const result = await this.validateToken(token);
-        if (result.isValid && result.token) {
-          validTokens.push(result.token);
+    const batchSize = options?.batchSize ?? 5; // Default: 5 concurrent validations
+    const total = tokens.length;
+    let completed = 0;
+
+    // Process in batches for controlled parallelism
+    for (let i = 0; i < tokens.length; i += batchSize) {
+      const batch = tokens.slice(i, i + batchSize);
+
+      const batchResults = await Promise.allSettled(
+        batch.map(async (token) => {
+          try {
+            const result = await this.validateToken(token);
+            return { token, result };
+          } catch (err) {
+            return {
+              token,
+              result: {
+                isValid: false,
+                reason: err instanceof Error ? err.message : String(err),
+              } as TokenValidationResult,
+            };
+          }
+        })
+      );
+
+      // Process batch results
+      for (const settledResult of batchResults) {
+        completed++;
+
+        if (settledResult.status === "fulfilled") {
+          const { token, result } = settledResult.value;
+          if (result.isValid && result.token) {
+            validTokens.push(result.token);
+          } else {
+            issues.push({
+              tokenId: token.id,
+              reason: result.reason || "Unknown validation error",
+              recoverable: false,
+            });
+          }
         } else {
+          // Promise rejected (shouldn't happen due to try/catch above, but handle anyway)
           issues.push({
-            tokenId: token.id,
-            reason: result.reason || "Unknown validation error",
+            tokenId: batch[batchResults.indexOf(settledResult)]?.id || "unknown",
+            reason: String(settledResult.reason),
             recoverable: false,
           });
         }
-      } catch (err) {
-        issues.push({
-          tokenId: token.id,
-          reason: err instanceof Error ? err.message : String(err),
-          recoverable: false,
-        });
+      }
+
+      // Report progress
+      if (options?.onProgress) {
+        options.onProgress(completed, total);
       }
     }
 
