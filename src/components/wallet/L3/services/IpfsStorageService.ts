@@ -1,5 +1,6 @@
 import { createHelia, type Helia } from "helia";
 import { json } from "@helia/json";
+import { bootstrap } from "@libp2p/bootstrap";
 import { hkdf } from "@noble/hashes/hkdf";
 import { sha256 } from "@noble/hashes/sha256";
 import { sha512 } from "@noble/hashes/sha512";
@@ -11,6 +12,7 @@ import type { TxfStorageData, TxfMeta } from "./types/TxfTypes";
 import { buildTxfStorageData, parseTxfStorageData } from "./TxfSerializer";
 import { getTokenValidationService } from "./TokenValidationService";
 import { getConflictResolutionService } from "./ConflictResolutionService";
+import { getBootstrapPeers, getConfiguredCustomPeers } from "../../../../config/ipfs.config";
 
 // Configure @noble/ed25519 to use sync sha512 (required for getPublicKey without WebCrypto)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -270,9 +272,20 @@ export class IpfsStorageService {
       // 3. Compute IPNS name from public key
       this.cachedIpnsName = this.computeIpnsName(this.ed25519PublicKey);
 
-      // 4. Initialize Helia (browser IPFS)
-      console.log("📦 Initializing Helia...");
-      this.helia = await createHelia();
+      // 4. Initialize Helia (browser IPFS) with custom bootstrap peers
+      const bootstrapPeers = getBootstrapPeers();
+      const customPeerCount = getConfiguredCustomPeers().length;
+
+      console.log("📦 Initializing Helia with custom peers...");
+      console.log(`📦 Bootstrap peers: ${bootstrapPeers.length} total (${customPeerCount} custom, ${bootstrapPeers.length - customPeerCount} default)`);
+
+      this.helia = await createHelia({
+        libp2p: {
+          peerDiscovery: [
+            bootstrap({ list: bootstrapPeers }),
+          ],
+        },
+      });
 
       console.log("📦 IPFS storage service initialized");
       console.log("📦 IPNS name:", this.cachedIpnsName);
