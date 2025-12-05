@@ -41,14 +41,13 @@ export const useWallet = () => {
 
   useEffect(() => {
     const handleWalletUpdate = () => {
-      console.log("♻️ Wallet update detected! Force refreshing...");
+      console.log("♻️ Wallet update detected! Refreshing...");
       queryClient.refetchQueries({ queryKey: KEYS.TOKENS });
       queryClient.refetchQueries({ queryKey: KEYS.AGGREGATED });
     };
 
     window.addEventListener("wallet-updated", handleWalletUpdate);
-    return () =>
-      window.removeEventListener("wallet-updated", handleWalletUpdate);
+    return () => window.removeEventListener("wallet-updated", handleWalletUpdate);
   }, [queryClient]);
 
   // Initialize IPFS storage service for automatic token sync

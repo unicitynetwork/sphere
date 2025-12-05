@@ -34,6 +34,9 @@ export class WalletRepository {
   private _migrationComplete: boolean = false;
   private _nametag: NametagData | null = null;
 
+  // Debounce timer for wallet refresh events
+  private _refreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
   private constructor() {
     // Don't auto-load wallet in constructor - wait for address
   }
@@ -429,6 +432,14 @@ export class WalletRepository {
   }
 
   refreshWallet(): void {
-    window.dispatchEvent(new Event("wallet-updated"));
+    // Debounce at the source - coalesce rapid updates into one event
+    if (this._refreshDebounceTimer) {
+      clearTimeout(this._refreshDebounceTimer);
+    }
+
+    this._refreshDebounceTimer = setTimeout(() => {
+      this._refreshDebounceTimer = null;
+      window.dispatchEvent(new Event("wallet-updated"));
+    }, 100); // 100ms debounce at source
   }
 }
