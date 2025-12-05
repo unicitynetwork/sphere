@@ -7,6 +7,11 @@ import * as ed from "@noble/ed25519";
 import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
 import type { IdentityManager } from "./IdentityManager";
 import type { Token } from "../data/model";
+import type { TxfStorageData, TxfMeta } from "./types/TxfTypes";
+import { buildTxfStorageData, parseTxfStorageData } from "./TxfSerializer";
+import { getTokenValidationService } from "./TokenValidationService";
+// ConflictResolutionService will be used for remote conflict detection
+// import { getConflictResolutionService } from "./ConflictResolutionService";
 
 // Configure @noble/ed25519 to use sync sha512 (required for getPublicKey without WebCrypto)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,12 +45,17 @@ export interface StorageResult {
   cid?: string;
   ipnsName?: string;
   timestamp: number;
+  version?: number;
+  tokenCount?: number;
+  validationIssues?: string[];
   error?: string;
 }
 
 export interface RestoreResult {
   success: boolean;
   tokens?: Token[];
+  nametag?: NametagData;
+  version?: number;
   timestamp: number;
   error?: string;
 }
@@ -56,6 +66,8 @@ export interface StorageStatus {
   lastSync: StorageResult | null;
   ipnsName: string | null;
   webCryptoAvailable: boolean;
+  currentVersion: number;
+  lastCid: string | null;
 }
 
 interface StorageData {
@@ -85,7 +97,8 @@ interface SerializedToken {
 
 const HKDF_INFO = "ipfs-storage-ed25519-v1";
 const SYNC_DEBOUNCE_MS = 5000;
-const STORAGE_VERSION = 1;
+const VERSION_STORAGE_PREFIX = "ipfs_version_";
+const CID_STORAGE_PREFIX = "ipfs_last_cid_";
 
 // ==========================================
 // IpfsStorageService
@@ -289,6 +302,58 @@ export class IpfsStorageService {
   }
 
   // ==========================================
+  // Version Counter Management
+  // ==========================================
+
+  /**
+   * Get current version counter for this wallet
+   */
+  private getVersionCounter(): number {
+    if (!this.cachedIpnsName) return 0;
+    const key = `${VERSION_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    return parseInt(localStorage.getItem(key) || "0", 10);
+  }
+
+  /**
+   * Increment and return new version counter
+   */
+  private incrementVersionCounter(): number {
+    if (!this.cachedIpnsName) return 1;
+    const key = `${VERSION_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const current = this.getVersionCounter();
+    const next = current + 1;
+    localStorage.setItem(key, String(next));
+    return next;
+  }
+
+  /**
+   * Set version counter to specific value (used after merge)
+   */
+  private setVersionCounter(version: number): void {
+    if (!this.cachedIpnsName) return;
+    const key = `${VERSION_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    localStorage.setItem(key, String(version));
+  }
+
+  /**
+   * Get last stored CID for this wallet
+   */
+  private getLastCid(): string | null {
+    if (!this.cachedIpnsName) return null;
+    const key = `${CID_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    return localStorage.getItem(key);
+  }
+
+  /**
+   * Store last CID for recovery
+   */
+  private setLastCid(cid: string): void {
+    if (!this.cachedIpnsName) return;
+    const key = `${CID_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    localStorage.setItem(key, cid);
+  }
+
+  // ==========================================
   // Storage Operations
   // ==========================================
 
@@ -305,7 +370,7 @@ export class IpfsStorageService {
   }
 
   /**
-   * Perform immediate sync to IPFS
+   * Perform immediate sync to IPFS with TXF format and validation
    */
   async syncNow(): Promise<StorageResult> {
     if (this.isSyncing) {
@@ -348,42 +413,41 @@ export class IpfsStorageService {
         );
       }
 
-      const tokens = wallet.tokens;
       const walletRepo = WalletRepository.getInstance();
       const nametag = walletRepo.getNametag();
 
-      console.log(`📦 Syncing ${tokens.length} tokens${nametag ? ` + nametag "${nametag.name}"` : ""} to IPFS...`);
+      // 2. Validate tokens before sync
+      const validationService = getTokenValidationService();
+      const { validTokens, issues } = await validationService.validateAllTokens(wallet.tokens);
 
-      // 2. Serialize to storage format
-      const storageData: StorageData = {
-        version: STORAGE_VERSION,
+      if (issues.length > 0) {
+        console.warn(`📦 ${issues.length} token(s) failed validation and will be excluded:`,
+          issues.map(i => `${i.tokenId.slice(0, 8)}...: ${i.reason}`).join(", "));
+      }
+
+      console.log(`📦 Syncing ${validTokens.length} tokens${nametag ? ` + nametag "${nametag.name}"` : ""} to IPFS (TXF format)...`);
+
+      // 3. Build TXF storage data with incremented version
+      const newVersion = this.incrementVersionCounter();
+      const meta: Omit<TxfMeta, "formatVersion"> = {
+        version: newVersion,
         timestamp: Date.now(),
         address: wallet.address,
-        tokens: tokens.map((t) => ({
-          id: t.id,
-          name: t.name,
-          symbol: t.symbol,
-          amount: t.amount,
-          coinId: t.coinId,
-          jsonData: t.jsonData,
-          status: t.status,
-          timestamp: t.timestamp,
-          type: t.type,
-          iconUrl: t.iconUrl,
-        })),
-        nametag: nametag || undefined,  // Include nametag in IPFS sync
+        ipnsName: this.cachedIpnsName || "",
+        lastCid: this.getLastCid() || undefined,
       };
 
-      // 3. Store to IPFS
-      const j = json(this.helia);
-      const cid = await j.add(storageData);
-      const cidString = cid.toString();
-      console.log(`📦 Tokens stored to IPFS: ${cidString}`);
+      const txfStorageData = buildTxfStorageData(validTokens, meta, nametag || undefined);
 
-      // 4. Publish to IPNS
-      // Note: Full IPNS publishing requires libp2p key management
-      // For MVP, we log the CID and emit events for external systems
-      console.log(`📦 CID for IPNS publication: ${cidString}`);
+      // 4. Store to IPFS
+      const j = json(this.helia);
+      const cid = await j.add(txfStorageData);
+      const cidString = cid.toString();
+
+      // 5. Store CID for recovery
+      this.setLastCid(cidString);
+
+      console.log(`📦 Tokens stored to IPFS (v${newVersion}): ${cidString}`);
       console.log(`📦 IPNS name: ${this.cachedIpnsName}`);
 
       const result: StorageResult = {
@@ -391,6 +455,9 @@ export class IpfsStorageService {
         cid: cidString,
         ipnsName: this.cachedIpnsName || undefined,
         timestamp: Date.now(),
+        version: newVersion,
+        tokenCount: validTokens.length,
+        validationIssues: issues.length > 0 ? issues.map(i => i.reason) : undefined,
       };
 
       this.lastSync = result;
@@ -401,7 +468,7 @@ export class IpfsStorageService {
         data: {
           cid: cidString,
           ipnsName: this.cachedIpnsName || undefined,
-          tokenCount: tokens.length,
+          tokenCount: validTokens.length,
         },
       });
 
@@ -447,6 +514,7 @@ export class IpfsStorageService {
 
   /**
    * Restore tokens from IPFS using CID
+   * Supports both legacy format and TXF format
    */
   async restore(cid: string): Promise<RestoreResult> {
     try {
@@ -461,57 +529,89 @@ export class IpfsStorageService {
       const { CID } = await import("multiformats/cid");
       const parsedCid = CID.parse(cid);
 
-      const storageData = (await j.get(parsedCid)) as StorageData;
+      const rawData = await j.get(parsedCid);
 
-      if (!storageData || storageData.version !== STORAGE_VERSION) {
-        throw new Error("Invalid or incompatible storage data");
+      // Detect format: TXF has _meta, legacy has version number
+      const isTxfFormat = rawData && typeof rawData === "object" && "_meta" in (rawData as object);
+
+      if (isTxfFormat) {
+        // TXF Format
+        const txfData = rawData as TxfStorageData;
+        const { tokens, meta, nametag } = parseTxfStorageData(txfData);
+
+        // Validate address
+        const currentIdentity = await this.identityManager.getCurrentIdentity();
+        if (currentIdentity && meta && meta.address !== currentIdentity.address) {
+          console.warn(
+            `📦 Address mismatch: stored=${meta.address}, current=${currentIdentity.address}`
+          );
+          throw new Error(
+            "Cannot restore tokens: address mismatch. This data belongs to a different identity."
+          );
+        }
+
+        // Update local version counter to match restored version
+        if (meta) {
+          this.setVersionCounter(meta.version);
+        }
+
+        console.log(`📦 Restored ${tokens.length} tokens (TXF v${meta?.version || "?"})${nametag ? ` + nametag "${nametag.name}"` : ""} from IPFS`);
+
+        return {
+          success: true,
+          tokens,
+          nametag: nametag || undefined,
+          version: meta?.version,
+          timestamp: Date.now(),
+        };
+      } else {
+        // Legacy format
+        const storageData = rawData as StorageData;
+
+        if (!storageData || !storageData.version) {
+          throw new Error("Invalid storage data format");
+        }
+
+        // Validate address
+        const currentIdentity = await this.identityManager.getCurrentIdentity();
+        if (currentIdentity && storageData.address !== currentIdentity.address) {
+          console.warn(
+            `📦 Address mismatch: stored=${storageData.address}, current=${currentIdentity.address}`
+          );
+          throw new Error(
+            "Cannot restore tokens: address mismatch. This data belongs to a different identity."
+          );
+        }
+
+        console.log(`📦 Restored ${storageData.tokens.length} tokens (legacy format)${storageData.nametag ? ` + nametag "${storageData.nametag.name}"` : ""} from IPFS`);
+
+        // Convert serialized tokens back to Token objects
+        const { Token: TokenClass, TokenStatus } = await import("../data/model");
+        const tokens = storageData.tokens.map(
+          (t) =>
+            new TokenClass({
+              id: t.id,
+              name: t.name,
+              symbol: t.symbol,
+              amount: t.amount,
+              coinId: t.coinId,
+              jsonData: t.jsonData,
+              status: (t.status as keyof typeof TokenStatus) in TokenStatus
+                ? t.status as typeof TokenStatus[keyof typeof TokenStatus]
+                : TokenStatus.CONFIRMED,
+              timestamp: t.timestamp,
+              type: t.type,
+              iconUrl: t.iconUrl,
+            })
+        ) as Token[];
+
+        return {
+          success: true,
+          tokens,
+          nametag: storageData.nametag,
+          timestamp: Date.now(),
+        };
       }
-
-      // Validate that the restored data belongs to the current identity
-      const currentIdentity = await this.identityManager.getCurrentIdentity();
-      if (currentIdentity && storageData.address !== currentIdentity.address) {
-        console.warn(
-          `📦 Address mismatch: stored=${storageData.address}, current=${currentIdentity.address}`
-        );
-        throw new Error(
-          "Cannot restore tokens: address mismatch. This data belongs to a different identity."
-        );
-      }
-
-      console.log(`📦 Restored ${storageData.tokens.length} tokens${storageData.nametag ? ` + nametag "${storageData.nametag.name}"` : ""} from IPFS`);
-
-      // Convert serialized tokens back to Token objects
-      const { Token: TokenClass, TokenStatus } = await import("../data/model");
-      const tokens = storageData.tokens.map(
-        (t) =>
-          new TokenClass({
-            id: t.id,
-            name: t.name,
-            symbol: t.symbol,
-            amount: t.amount,
-            coinId: t.coinId,
-            jsonData: t.jsonData,
-            status: (t.status as keyof typeof TokenStatus) in TokenStatus
-              ? t.status as typeof TokenStatus[keyof typeof TokenStatus]
-              : TokenStatus.CONFIRMED,
-            timestamp: t.timestamp,
-            type: t.type,
-            iconUrl: t.iconUrl,
-          })
-      ) as Token[];
-
-      // Restore nametag to WalletRepository
-      if (storageData.nametag) {
-        const walletRepo = WalletRepository.getInstance();
-        walletRepo.setNametag(storageData.nametag);
-        console.log(`📦 Nametag "${storageData.nametag.name}" restored from IPFS`);
-      }
-
-      return {
-        success: true,
-        tokens,
-        timestamp: Date.now(),
-      };
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error";
@@ -523,6 +623,21 @@ export class IpfsStorageService {
         error: errorMessage,
       };
     }
+  }
+
+  /**
+   * Restore from last known CID (recovery helper)
+   */
+  async restoreFromLastCid(): Promise<RestoreResult> {
+    const lastCid = this.getLastCid();
+    if (!lastCid) {
+      return {
+        success: false,
+        timestamp: Date.now(),
+        error: "No previous CID found for recovery",
+      };
+    }
+    return this.restore(lastCid);
   }
 
   // ==========================================
@@ -566,7 +681,16 @@ export class IpfsStorageService {
       lastSync: this.lastSync,
       ipnsName: this.cachedIpnsName,
       webCryptoAvailable: this.isWebCryptoAvailable(),
+      currentVersion: this.getVersionCounter(),
+      lastCid: this.getLastCid(),
     };
+  }
+
+  /**
+   * Get current version counter
+   */
+  getCurrentVersion(): number {
+    return this.getVersionCounter();
   }
 
   /**
@@ -574,5 +698,93 @@ export class IpfsStorageService {
    */
   isCurrentlySyncing(): boolean {
     return this.isSyncing;
+  }
+
+  // ==========================================
+  // TXF Import/Export
+  // ==========================================
+
+  /**
+   * Export all tokens as TXF file content
+   */
+  async exportAsTxf(): Promise<{ success: boolean; data?: string; filename?: string; error?: string }> {
+    try {
+      const wallet = WalletRepository.getInstance().getWallet();
+      if (!wallet) {
+        return { success: false, error: "No wallet found" };
+      }
+
+      // Import serializer
+      const { buildTxfExportFile } = await import("./TxfSerializer");
+      const txfData = buildTxfExportFile(wallet.tokens);
+
+      const filename = `tokens-${wallet.address.slice(0, 8)}-${Date.now()}.txf`;
+      const jsonString = JSON.stringify(txfData, null, 2);
+
+      console.log(`📦 Exported ${wallet.tokens.length} tokens as TXF`);
+
+      return {
+        success: true,
+        data: jsonString,
+        filename,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      console.error("📦 TXF export failed:", errorMessage);
+      return { success: false, error: errorMessage };
+    }
+  }
+
+  /**
+   * Import tokens from TXF file content
+   * Returns imported tokens that can be added to wallet
+   */
+  async importFromTxf(content: string): Promise<{
+    success: boolean;
+    tokens?: Token[];
+    imported?: number;
+    skipped?: number;
+    error?: string;
+  }> {
+    try {
+      const txfData = JSON.parse(content);
+
+      // Import serializer and validator
+      const { parseTxfFile } = await import("./TxfSerializer");
+      const validationService = getTokenValidationService();
+
+      const parsedTokens = parseTxfFile(txfData);
+
+      if (parsedTokens.length === 0) {
+        return { success: false, error: "No valid tokens found in TXF file" };
+      }
+
+      // Validate each token
+      const validTokens: Token[] = [];
+      let skipped = 0;
+
+      for (const token of parsedTokens) {
+        const result = await validationService.validateToken(token);
+        if (result.isValid && result.token) {
+          validTokens.push(result.token);
+        } else {
+          skipped++;
+          console.warn(`📦 Skipping invalid token ${token.id.slice(0, 8)}...: ${result.reason}`);
+        }
+      }
+
+      console.log(`📦 Imported ${validTokens.length} tokens from TXF (${skipped} skipped)`);
+
+      return {
+        success: true,
+        tokens: validTokens,
+        imported: validTokens.length,
+        skipped,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      console.error("📦 TXF import failed:", errorMessage);
+      return { success: false, error: errorMessage };
+    }
   }
 }

@@ -9,6 +9,7 @@ import {
 } from "../services/IpfsStorageService";
 import { IdentityManager } from "../services/IdentityManager";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
+import type { Token } from "../data/model";
 
 // Query keys
 export const IPFS_STORAGE_KEYS = {
@@ -97,6 +98,86 @@ export function useIpfsStorage() {
     mutationFn: async (cid: string): Promise<RestoreResult> => {
       const result = await storageService.restore(cid);
 
+      // If successful, add tokens to wallet and restore nametag
+      if (result.success && result.tokens) {
+        const walletRepo = WalletRepository.getInstance();
+        for (const token of result.tokens) {
+          walletRepo.addToken(token);
+        }
+        // Restore nametag if present
+        if (result.nametag) {
+          walletRepo.setNametag(result.nametag);
+        }
+      }
+
+      return result;
+    },
+    onSuccess: (result) => {
+      if (result.success) {
+        // Invalidate wallet queries to refresh UI
+        queryClient.invalidateQueries({ queryKey: ["wallet"] });
+      }
+    },
+  });
+
+  // Mutation: Restore from last known CID
+  const restoreFromLastMutation = useMutation({
+    mutationFn: async (): Promise<RestoreResult> => {
+      const result = await storageService.restoreFromLastCid();
+
+      // If successful, add tokens to wallet
+      if (result.success && result.tokens) {
+        const walletRepo = WalletRepository.getInstance();
+        for (const token of result.tokens) {
+          walletRepo.addToken(token);
+        }
+        if (result.nametag) {
+          walletRepo.setNametag(result.nametag);
+        }
+      }
+
+      return result;
+    },
+    onSuccess: (result) => {
+      if (result.success) {
+        queryClient.invalidateQueries({ queryKey: ["wallet"] });
+      }
+    },
+  });
+
+  // Mutation: Export as TXF
+  const exportTxfMutation = useMutation({
+    mutationFn: async (): Promise<{ success: boolean; data?: string; filename?: string; error?: string }> => {
+      const result = await storageService.exportAsTxf();
+
+      // If successful, trigger browser download
+      if (result.success && result.data && result.filename) {
+        const blob = new Blob([result.data], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = result.filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+
+      return result;
+    },
+  });
+
+  // Mutation: Import from TXF file
+  const importTxfMutation = useMutation({
+    mutationFn: async (content: string): Promise<{
+      success: boolean;
+      tokens?: Token[];
+      imported?: number;
+      skipped?: number;
+      error?: string;
+    }> => {
+      const result = await storageService.importFromTxf(content);
+
       // If successful, add tokens to wallet
       if (result.success && result.tokens) {
         const walletRepo = WalletRepository.getInstance();
@@ -109,7 +190,6 @@ export function useIpfsStorage() {
     },
     onSuccess: (result) => {
       if (result.success) {
-        // Invalidate wallet queries to refresh UI
         queryClient.invalidateQueries({ queryKey: ["wallet"] });
       }
     },
@@ -128,6 +208,8 @@ export function useIpfsStorage() {
     status: statusQuery.data,
     isLoadingStatus: statusQuery.isLoading,
     isServiceReady,
+    currentVersion: statusQuery.data?.currentVersion ?? 0,
+    lastCid: statusQuery.data?.lastCid ?? null,
 
     // IPNS name
     ipnsName: ipnsNameQuery.data,
@@ -142,6 +224,16 @@ export function useIpfsStorage() {
     restore: restoreMutation.mutateAsync,
     isRestoring: restoreMutation.isPending,
     restoreError: restoreMutation.error,
+    restoreFromLast: restoreFromLastMutation.mutateAsync,
+    isRestoringFromLast: restoreFromLastMutation.isPending,
+
+    // TXF Import/Export
+    exportTxf: exportTxfMutation.mutateAsync,
+    isExportingTxf: exportTxfMutation.isPending,
+    exportTxfError: exportTxfMutation.error,
+    importTxf: importTxfMutation.mutateAsync,
+    isImportingTxf: importTxfMutation.isPending,
+    importTxfError: importTxfMutation.error,
 
     // Events
     lastEvent,
