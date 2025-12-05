@@ -2,14 +2,29 @@ import { Token, Wallet } from "../components/wallet/L3/data/model";
 import { v4 as uuidv4 } from "uuid";
 
 const STORAGE_KEY_WALLET = "unicity_wallet_data";
+const STORAGE_KEY_HISTORY = "unicity_transaction_history";
+
+export interface TransactionHistoryEntry {
+  id: string;
+  type: 'SENT' | 'RECEIVED';
+  amount: string;
+  coinId: string;
+  symbol: string;
+  iconUrl?: string;
+  timestamp: number;
+  recipientNametag?: string;
+  senderPubkey?: string;
+}
 
 export class WalletRepository {
   private static instance: WalletRepository;
 
   private _wallet: Wallet | null = null;
+  private _transactionHistory: TransactionHistoryEntry[] = [];
 
   private constructor() {
     this.loadWallet();
+    this.loadTransactionHistory();
   }
 
   static getInstance(): WalletRepository {
@@ -39,6 +54,36 @@ export class WalletRepository {
       console.error("Failed to load wallet", error);
       this._wallet = null;
     }
+  }
+
+  private loadTransactionHistory() {
+    try {
+      const json = localStorage.getItem(STORAGE_KEY_HISTORY);
+      if (json) {
+        this._transactionHistory = JSON.parse(json);
+      }
+    } catch (error) {
+      console.error("Failed to load transaction history", error);
+      this._transactionHistory = [];
+    }
+  }
+
+  private saveTransactionHistory() {
+    try {
+      localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(this._transactionHistory));
+    } catch (error) {
+      console.error("Failed to save transaction history", error);
+    }
+  }
+
+  addTransactionToHistory(entry: Omit<TransactionHistoryEntry, 'id'>): void {
+    const historyEntry: TransactionHistoryEntry = {
+      id: uuidv4(),
+      ...entry,
+    };
+    this._transactionHistory.push(historyEntry);
+    this.saveTransactionHistory();
+    this.refreshWallet(); // Trigger UI update
   }
 
   createWallet(address: string, name: string = "My Wallet"): Wallet {
@@ -80,7 +125,7 @@ export class WalletRepository {
     return false;
   }
 
-  addToken(token: Token): void {
+  addToken(token: Token, skipHistory: boolean = false): void {
     console.log("💾 Repository: Adding token...", token.id);
     if (!this._wallet) {
       console.error("💾 Repository: Wallet not initialized!");
@@ -115,12 +160,29 @@ export class WalletRepository {
     );
 
     this.saveWallet(updatedWallet);
+
+    // Add to transaction history (RECEIVED) - skip for change tokens from split
+    if (!skipHistory && token.coinId && token.amount) {
+      this.addTransactionToHistory({
+        type: 'RECEIVED',
+        amount: token.amount,
+        coinId: token.coinId,
+        symbol: token.symbol || 'UNK',
+        iconUrl: token.iconUrl,
+        timestamp: token.timestamp,
+        senderPubkey: token.senderPubkey,
+      });
+    }
+
     console.log(`💾 Repository: Saved! Total tokens: ${updatedTokens.length}`);
     this.refreshWallet();
   }
 
-  removeToken(tokenId: string): void {
+  removeToken(tokenId: string, recipientNametag?: string, skipHistory: boolean = false): void {
     if (!this._wallet) return;
+
+    // Find the token before removing to add to history
+    const tokenToRemove = this._wallet.tokens.find((t) => t.id === tokenId);
 
     const updatedTokens = this._wallet.tokens.filter((t) => t.id !== tokenId);
     const updatedWallet = new Wallet(
@@ -131,6 +193,20 @@ export class WalletRepository {
     );
 
     this.saveWallet(updatedWallet);
+
+    // Add to transaction history (SENT) - skip for split operations
+    if (!skipHistory && tokenToRemove && tokenToRemove.coinId && tokenToRemove.amount) {
+      this.addTransactionToHistory({
+        type: 'SENT',
+        amount: tokenToRemove.amount,
+        coinId: tokenToRemove.coinId,
+        symbol: tokenToRemove.symbol || 'UNK',
+        iconUrl: tokenToRemove.iconUrl,
+        timestamp: Date.now(),
+        recipientNametag: recipientNametag,
+      });
+    }
+
     this.refreshWallet();
   }
 
@@ -142,5 +218,21 @@ export class WalletRepository {
 
   refreshWallet(): void {
     window.dispatchEvent(new Event("wallet-updated"));
+  }
+
+  getTransactionHistory(): TransactionHistoryEntry[] {
+    return [...this._transactionHistory].sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  addSentTransaction(amount: string, coinId: string, symbol: string, iconUrl: string | undefined, recipientNametag: string): void {
+    this.addTransactionToHistory({
+      type: 'SENT',
+      amount: amount,
+      coinId: coinId,
+      symbol: symbol,
+      iconUrl: iconUrl,
+      timestamp: Date.now(),
+      recipientNametag: recipientNametag,
+    });
   }
 }

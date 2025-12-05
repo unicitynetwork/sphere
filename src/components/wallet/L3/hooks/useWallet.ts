@@ -341,7 +341,8 @@ export const useWallet = () => {
           recipientAddress,
           recipientPubkey,
           signingService,
-          nostrService
+          nostrService,
+          recipientNametag
         );
       }
 
@@ -354,8 +355,21 @@ export const useWallet = () => {
           plan,
           recipientAddress,
           signingService,
-          (burnedId) => walletRepo.removeToken(burnedId)
+          (burnedId) => walletRepo.removeToken(burnedId, undefined, true) // Skip history for split
         );
+
+        // Add transaction history for the actual sent amount
+        if (plan.splitAmount) {
+          const def = registryService.getCoinDefinition(params.coinId);
+          const iconUrl = def ? registryService.getIconUrl(def) || undefined : undefined;
+          walletRepo.addSentTransaction(
+            plan.splitAmount.toString(),
+            params.coinId,
+            def?.symbol || 'UNK',
+            iconUrl,
+            recipientNametag
+          );
+        }
 
         for (let i = 0; i < splitResult.tokensForRecipient.length; i++) {
           const token = splitResult.tokensForRecipient[i];
@@ -394,7 +408,8 @@ export const useWallet = () => {
     recipientAddress: any,
     recipientPubkey: string,
     signingService: any,
-    nostr: NostrService
+    nostr: NostrService,
+    recipientNametag: string
   ) => {
     const salt = Buffer.alloc(32);
     window.crypto.getRandomValues(salt);
@@ -431,7 +446,7 @@ export const useWallet = () => {
 
     await nostr.sendTokenTransfer(recipientPubkey, payload);
 
-    walletRepo.removeToken(uiId);
+    walletRepo.removeToken(uiId, recipientNametag);
   };
 
   const saveChangeTokenToWallet = (sdkToken: SdkToken<any>, coinId: string) => {
@@ -470,7 +485,7 @@ export const useWallet = () => {
     });
 
     console.log(`💾 Saving change token: ${amount} ${def?.symbol}`);
-    walletRepo.addToken(uiToken);
+    walletRepo.addToken(uiToken, true); // Skip history for change token
   };
 
   const getSeedPhrase = async (): Promise<string[] | null> => {
