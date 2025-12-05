@@ -1,4 +1,4 @@
-import { Plus, ArrowUpRight, Sparkles, Loader2, Coins, Layers, Bell, CheckCircle, XCircle, Key, Download, Upload } from 'lucide-react';
+import { Plus, ArrowUpRight, Sparkles, Loader2, Coins, Layers, Bell, CheckCircle, XCircle, Key, Download, Upload, Clock } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
@@ -11,6 +11,7 @@ import { PaymentRequestsModal } from '../modals/PaymentRequestModal';
 import { FaucetService } from '../services/FaucetService';
 import { SeedPhraseModal } from '../modals/SeedPhraseModal';
 import { useIpfsStorage } from '../hooks/useIpfsStorage';
+import { TransactionHistoryModal } from '../modals/TransactionHistoryModal';
 
 type Tab = 'assets' | 'tokens';
 
@@ -21,6 +22,7 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const [isRequestsOpen, setIsRequestsOpen] = useState(false);
   const [isSeedPhraseOpen, setIsSeedPhraseOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [seedPhrase, setSeedPhrase] = useState<string[]>([]);
   const [isFaucetLoading, setIsFaucetLoading] = useState(false);
   const [faucetSuccess, setFaucetSuccess] = useState(false);
@@ -143,6 +145,13 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
           </div>
 
           <div className="flex items-center gap-2">
+                 <button
+                    onClick={() => setIsHistoryOpen(true)}
+                    className="p-1.5 rounded-lg hover:bg-neutral-200/50 dark:hover:bg-white/10 transition-colors group"
+                    title="Transaction history"
+                 >
+                    <Clock className="w-5 h-5 text-neutral-400 dark:text-neutral-500 group-hover:text-neutral-900 dark:group-hover:text-white transition-colors" />
+                 </button>
                  <button
                     onClick={handleShowSeedPhrase}
                     className="p-1.5 rounded-lg hover:bg-neutral-200/50 dark:hover:bg-white/10 transition-colors group"
@@ -329,7 +338,7 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
           </div>
         ) : (
           <AnimatePresence mode="wait">
-            {activeTab === 'assets' ? (
+            {activeTab === 'assets' && (
               /* ASSETS VIEW */
               <motion.div
                 key="assets"
@@ -352,7 +361,9 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
                   ))
                 )}
               </motion.div>
-            ) : (
+            )}
+
+            {activeTab === 'tokens' && (
               <motion.div
                 key="tokens"
                 initial={{ opacity: 0, x: 20 }}
@@ -389,6 +400,8 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
         onClose={() => setIsSeedPhraseOpen(false)}
         seedPhrase={seedPhrase}
       />
+
+      <TransactionHistoryModal isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} />
     </div>
   );
 }

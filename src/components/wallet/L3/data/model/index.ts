@@ -45,6 +45,7 @@ export class Token {
     transferredAt?: number;
     splitSourceTokenId?: string;
     splitSentAmount?: string;
+    senderPubkey?: string;     // Pubkey of sender (for received tokens)
 
     constructor(data: Partial<Token>) {
         this.id = data.id || uuidv4();
@@ -65,6 +66,7 @@ export class Token {
         this.transferredAt = data.transferredAt;
         this.splitSourceTokenId = data.splitSourceTokenId;
         this.splitSentAmount = data.splitSentAmount;
+        this.senderPubkey = data.senderPubkey;
     }
 
     getFormattedSize(): string {
