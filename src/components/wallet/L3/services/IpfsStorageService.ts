@@ -119,6 +119,8 @@ export class IpfsStorageService {
   private isSyncing = false;
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
   private lastSync: StorageResult | null = null;
+  private autoSyncEnabled = false;
+  private boundSyncHandler: (() => void) | null = null;
 
   private constructor(identityManager: IdentityManager) {
     this.identityManager = identityManager;
@@ -137,9 +139,17 @@ export class IpfsStorageService {
 
   /**
    * Start listening for wallet changes and enable auto-sync
+   * Safe to call multiple times - will only initialize once
    */
   startAutoSync(): void {
-    window.addEventListener("wallet-updated", () => this.scheduleSync());
+    if (this.autoSyncEnabled) {
+      return; // Already enabled
+    }
+
+    // Create bound handler to allow proper cleanup
+    this.boundSyncHandler = () => this.scheduleSync();
+    window.addEventListener("wallet-updated", this.boundSyncHandler);
+    this.autoSyncEnabled = true;
     console.log("📦 IPFS auto-sync enabled");
   }
 
@@ -147,6 +157,13 @@ export class IpfsStorageService {
    * Graceful shutdown
    */
   async shutdown(): Promise<void> {
+    // Remove event listener
+    if (this.boundSyncHandler) {
+      window.removeEventListener("wallet-updated", this.boundSyncHandler);
+      this.boundSyncHandler = null;
+    }
+    this.autoSyncEnabled = false;
+
     if (this.syncTimer) {
       clearTimeout(this.syncTimer);
       this.syncTimer = null;
