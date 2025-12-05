@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   ConflictResolutionService,
   getConflictResolutionService,
-} from "../ConflictResolutionService";
-import type { TxfStorageData, TxfToken, TxfMeta } from "../types/TxfTypes";
+} from "../../../../../../src/components/wallet/L3/services/ConflictResolutionService";
+import type { TxfStorageData, TxfToken, TxfMeta } from "../../../../../../src/components/wallet/L3/services/types/TxfTypes";
 
 // ==========================================
 // Test Fixtures

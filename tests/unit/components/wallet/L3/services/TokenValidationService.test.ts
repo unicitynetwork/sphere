@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   TokenValidationService,
   getTokenValidationService,
-} from "../TokenValidationService";
-import { Token, TokenStatus } from "../../data/model";
-import type { TxfToken } from "../types/TxfTypes";
+} from "../../../../../../src/components/wallet/L3/services/TokenValidationService";
+import { Token, TokenStatus } from "../../../../../../src/components/wallet/L3/data/model";
+import type { TxfToken } from "../../../../../../src/components/wallet/L3/services/types/TxfTypes";
 
 // ==========================================
 // Mock fetch globally

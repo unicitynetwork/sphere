@@ -9,9 +9,9 @@ import {
   hasValidTxfData,
   countCommittedTransactions,
   hasUncommittedTransactions,
-} from "../TxfSerializer";
-import { Token, TokenStatus } from "../../data/model";
-import type { TxfToken, TxfStorageData } from "../types/TxfTypes";
+} from "../../../../../../src/components/wallet/L3/services/TxfSerializer";
+import { Token, TokenStatus } from "../../../../../../src/components/wallet/L3/data/model";
+import type { TxfToken, TxfStorageData } from "../../../../../../src/components/wallet/L3/services/types/TxfTypes";
 
 // ==========================================
 // Test Fixtures
