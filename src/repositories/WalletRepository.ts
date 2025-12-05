@@ -248,6 +248,8 @@ export class WalletRepository {
     this._currentAddress = address;
     this.saveWallet(newWallet);
     console.log(`Created new wallet for address ${address}`);
+    this.refreshWallet(); // Trigger wallet-updated for UI updates
+    window.dispatchEvent(new Event("wallet-loaded")); // Signal wallet creation for Nostr initialization
     return newWallet;
   }
 

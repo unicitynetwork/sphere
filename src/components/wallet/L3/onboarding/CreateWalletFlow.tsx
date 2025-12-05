@@ -18,7 +18,7 @@ interface DerivedAddressInfo {
 
 // Session key (same as useWallet.ts)
 const SESSION_KEY = "user-pin-1234";
-const identityManager = new IdentityManager(SESSION_KEY);
+const identityManager = IdentityManager.getInstance(SESSION_KEY);
 
 export function CreateWalletFlow() {
   const { identity, createWallet, restoreWallet, mintNametag, nametag, getUnifiedKeyManager } = useWallet();

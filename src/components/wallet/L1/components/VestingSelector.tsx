@@ -1,7 +1,21 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import { Loader2 } from "lucide-react";
 import { vestingState } from "../sdk/vestingState";
 import type { VestingMode, VestingBalances } from "../sdk/types";
+
+// Skeleton shimmer component
+function BalanceSkeleton() {
+  return (
+    <div className="relative overflow-hidden h-3 w-12 sm:w-14 rounded bg-neutral-200 dark:bg-neutral-700/50 mt-0.5 sm:mt-1 mx-auto">
+      <motion.div
+        className="absolute inset-0 bg-linear-to-r from-transparent via-white/20 dark:via-white/10 to-transparent"
+        animate={{ x: ["-100%", "100%"] }}
+        transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+      />
+    </div>
+  );
+}
 
 interface VestingSelectorProps {
   address: string;
@@ -83,10 +97,12 @@ export function VestingSelector({
       <div className="flex items-center justify-between mb-1.5 sm:mb-2">
         <span className="text-[10px] sm:text-xs text-neutral-500 dark:text-neutral-400">Coin Filter</span>
         {classificationProgress && (
-          <span className="text-[10px] sm:text-xs text-blue-500 dark:text-blue-400">
-            Classifying {classificationProgress.current}/
-            {classificationProgress.total}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <Loader2 className="w-3 h-3 text-blue-500 dark:text-blue-400 animate-spin" />
+            <span className="text-[10px] sm:text-xs text-blue-500 dark:text-blue-400">
+              Analyzing...
+            </span>
+          </div>
         )}
       </div>
 
@@ -116,11 +132,15 @@ export function VestingSelector({
                   {option.label}
                 </span>
                 {showBalances && (
-                  <span
-                    className={`text-[10px] sm:text-xs mt-0.5 sm:mt-1 font-mono ${isSelected ? colors.text : "text-neutral-500"}`}
-                  >
-                    {formatBalance(balance).split(" ")[0]}
-                  </span>
+                  classificationProgress ? (
+                    <BalanceSkeleton />
+                  ) : (
+                    <span
+                      className={`text-[10px] sm:text-xs mt-0.5 sm:mt-1 font-mono ${isSelected ? colors.text : "text-neutral-500"}`}
+                    >
+                      {formatBalance(balance).split(" ")[0]}
+                    </span>
+                  )
                 )}
               </div>
             </motion.button>

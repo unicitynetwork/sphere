@@ -4,7 +4,7 @@ import { type IncomingPaymentRequest, PaymentRequestStatus } from '../data/model
 import { useWallet } from '../hooks/useWallet';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useState } from 'react';
-import { RegistryService } from '../services/RegistryService';
+import { AmountFormatUtils } from '../utils/currency';
 
 interface PaymentRequestsModalProps {
   isOpen: boolean;
@@ -193,7 +193,7 @@ interface RequestCardProps {
 
 function RequestCard({ req, error, onPay, onReject, isProcessing, isGlobalDisabled }: RequestCardProps) {
   const isPending = req.status === PaymentRequestStatus.PENDING;
-  const amountDisplay = formatDisplayAmount(req);
+  const amountDisplay = AmountFormatUtils.formatDisplayAmount(req.amount.toString(), req.coinId);
   const timeAgo = getTimeAgo(req.timestamp);
 
   // Стиль статуса
@@ -330,25 +330,4 @@ const getTimeAgo = (timestamp: number) => {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-};
-
-const formatDisplayAmount = (req: IncomingPaymentRequest): string => {
-  try {
-    const amount = parseFloat(req.amount.toString());
-
-    const registryService = RegistryService.getInstance();
-    const def = registryService.getCoinDefinition(req.coinId);
-
-    const decimals = def?.decimals ?? 6;
-    const divisor = Math.pow(10, decimals);
-
-    const val = amount / divisor;
-
-    return new Intl.NumberFormat('en-US', {
-      maximumFractionDigits: 6
-    }).format(val);
-  } catch (error) { 
-    console.warn("Error formatting amount", error);
-    return req.amount.toString(); 
-  }
 };

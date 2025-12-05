@@ -8,13 +8,18 @@ import {
   createTransactionPlan,
   createAndSignTransaction,
   broadcast,
+  saveWalletToStorage,
+  importWallet as importWalletFromFile,
   type VestingMode,
   type TransactionPlan,
+  type Wallet,
+  type ScannedAddress,
 } from "../sdk";
 import { useL1Wallet } from "../hooks";
 import { NoWalletView, HistoryView, MainWalletView } from ".";
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { WalletScanModal, ImportWalletModal, LoadPasswordModal } from "../components/modals";
 
 type ViewMode = "main" | "history";
 
@@ -33,18 +38,23 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     message: string;
     txids?: string[];
   }>({ show: false, type: "info", title: "", message: "" });
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [pendingWallet, setPendingWallet] = useState<Wallet | null>(null);
+  const [initialScanCount, setInitialScanCount] = useState(10);
 
   // Use TanStack Query based hook
   const {
     wallet,
     isLoadingWallet,
     balance,
+    totalBalance,
     transactions,
     transactionDetails,
     isLoadingTransactions,
     currentBlockHeight,
     vestingBalances,
-    isClassifyingVesting,
+    isLoadingVesting,
     createWallet,
     importWallet,
     deleteWallet,
@@ -97,9 +107,9 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     }
   }, [wallet]);
 
-  // Vesting progress for UI
-  const vestingProgress = isClassifyingVesting
-    ? { current: 0, total: 1 } // Simplified progress indicator
+  // Vesting progress for UI - show loading only on initial load, not on refetch
+  const vestingProgress = isLoadingVesting
+    ? { current: 0, total: 1 }
     : null;
 
   // Handle vesting mode change
@@ -119,20 +129,60 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     }
   };
 
-  // Load wallet from file
-  const onLoadWallet = async (file: File) => {
+  // Show import modal
+  const onShowImportModal = () => {
+    setShowImportModal(true);
+  };
+
+  // Handle import from modal
+  const onImportFromModal = async (file: File, scanCount?: number) => {
+    setShowImportModal(false);
+
     try {
+      // For .dat files, use direct SDK import (not hook) to avoid auto-save
+      // Then show scan modal to find addresses with balances
+      if (file.name.endsWith(".dat")) {
+        const result = await importWalletFromFile(file);
+        if (!result.success || !result.wallet) {
+          throw new Error(result.error || "Import failed");
+        }
+        // Show scan modal - don't save wallet yet
+        setPendingWallet(result.wallet);
+        setInitialScanCount(scanCount || 100);
+        setShowScanModal(true);
+        return;
+      }
+
       const content = await file.text();
 
       if (content.includes("ENCRYPTED MASTER KEY")) {
         setPendingFile(file);
+        setInitialScanCount(scanCount || 10);
         setShowLoadPasswordModal(true);
       } else {
-        const newWallet = await importWallet({ file });
-        if (newWallet.addresses.length > 0) {
-          setSelectedAddress(newWallet.addresses[0].address);
+        // Check if this is a BIP32 wallet that needs scanning
+        const isBIP32 = content.includes("MASTER CHAIN CODE") ||
+                        content.includes("WALLET TYPE: BIP32") ||
+                        content.includes("WALLET TYPE: Alpha descriptor");
+
+        if (isBIP32) {
+          // For BIP32 .txt files, import and show scan modal like .dat files
+          const result = await importWalletFromFile(file);
+          if (!result.success || !result.wallet) {
+            throw new Error(result.error || "Import failed");
+          }
+          // Show scan modal - don't save wallet yet
+          setPendingWallet(result.wallet);
+          setInitialScanCount(scanCount || 10);
+          setShowScanModal(true);
+        } else {
+          // Standard wallet - import directly
+          const newWallet = await importWallet({ file });
+          if (newWallet.addresses.length > 0) {
+            setSelectedAddress(newWallet.addresses[0].address);
+          }
+          showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
         }
-        showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
       }
     } catch (err: unknown) {
       showMessage(
@@ -144,18 +194,95 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     }
   };
 
+  // Handle scanned address selection
+  const onSelectScannedAddress = (scannedAddr: ScannedAddress) => {
+    if (!pendingWallet) return;
+
+    // Add the scanned address to wallet
+    const walletWithAddress: Wallet = {
+      ...pendingWallet,
+      addresses: [{
+        index: scannedAddr.index,
+        address: scannedAddr.address,
+        privateKey: scannedAddr.privateKey,
+        publicKey: scannedAddr.publicKey,
+        path: scannedAddr.path,
+        createdAt: new Date().toISOString(),
+      }],
+    };
+
+    // Save to storage
+    saveWalletToStorage("main", walletWithAddress);
+    invalidateWallet();
+    setSelectedAddress(scannedAddr.address);
+    setShowScanModal(false);
+    setPendingWallet(null);
+    showMessage("success", "Wallet Loaded", `Loaded address with ${scannedAddr.balance.toFixed(8)} ALPHA`);
+  };
+
+  // Handle loading all scanned addresses
+  const onSelectAllScannedAddresses = (scannedAddresses: ScannedAddress[]) => {
+    if (!pendingWallet || scannedAddresses.length === 0) return;
+
+    // Add all scanned addresses to wallet (preserving isChange flag)
+    const walletWithAddresses: Wallet = {
+      ...pendingWallet,
+      addresses: scannedAddresses.map((addr) => ({
+        index: addr.index,
+        address: addr.address,
+        privateKey: addr.privateKey,
+        publicKey: addr.publicKey,
+        path: addr.path,
+        createdAt: new Date().toISOString(),
+        isChange: addr.isChange,
+      })),
+    };
+
+    // Calculate total balance
+    const totalBalance = scannedAddresses.reduce((sum, addr) => sum + addr.balance, 0);
+
+    // Save to storage
+    saveWalletToStorage("main", walletWithAddresses);
+    invalidateWallet();
+    setSelectedAddress(scannedAddresses[0].address);
+    setShowScanModal(false);
+    setPendingWallet(null);
+    showMessage("success", "Wallet Loaded", `Loaded ${scannedAddresses.length} addresses with ${totalBalance.toFixed(8)} ALPHA total`);
+  };
+
+  // Cancel scan modal
+  const onCancelScan = () => {
+    setShowScanModal(false);
+    setPendingWallet(null);
+  };
+
   // Confirm load with password
   const onConfirmLoadWithPassword = async (password: string) => {
     if (!pendingFile) return;
 
     try {
-      const newWallet = await importWallet({ file: pendingFile, password });
-      if (newWallet.addresses.length > 0) {
-        setSelectedAddress(newWallet.addresses[0].address);
+      // First, import without saving to check if it's BIP32
+      const result = await importWalletFromFile(pendingFile, password);
+      if (!result.success || !result.wallet) {
+        throw new Error(result.error || "Import failed");
       }
+
       setShowLoadPasswordModal(false);
       setPendingFile(null);
-      showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
+
+      // Check if BIP32 wallet - show scan modal
+      if (result.wallet.masterChainCode || result.wallet.isImportedAlphaWallet) {
+        setPendingWallet(result.wallet);
+        // initialScanCount already set when showing password modal
+        setShowScanModal(true);
+      } else {
+        // Standard wallet - save directly
+        const newWallet = await importWallet({ file: pendingFile, password });
+        if (newWallet.addresses.length > 0) {
+          setSelectedAddress(newWallet.addresses[0].address);
+        }
+        showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
+      }
     } catch (err) {
       showMessage("error", "Load Error", "Error loading wallet: " + (err instanceof Error ? err.message : String(err)));
     }
@@ -316,7 +443,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       <div className="h-full overflow-y-auto">
         <NoWalletView
           onCreateWallet={onCreateWallet}
-          onLoadWallet={onLoadWallet}
+          onImportWallet={onShowImportModal}
           showLoadPasswordModal={showLoadPasswordModal}
           onConfirmLoadWithPassword={onConfirmLoadWithPassword}
           onCancelLoadPassword={() => {
@@ -331,6 +458,19 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           message={messageModal.message}
           txids={messageModal.txids}
           onClose={closeMessage}
+        />
+        <ImportWalletModal
+          show={showImportModal}
+          onImport={onImportFromModal}
+          onCancel={() => setShowImportModal(false)}
+        />
+        <WalletScanModal
+          show={showScanModal}
+          wallet={pendingWallet}
+          initialScanCount={initialScanCount}
+          onSelectAddress={onSelectScannedAddress}
+          onSelectAll={onSelectAllScannedAddresses}
+          onCancel={onCancelScan}
         />
       </div>
     );
@@ -375,6 +515,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         selectedPrivateKey={selectedPrivateKey}
         addresses={addresses}
         balance={balance}
+        totalBalance={totalBalance}
         showBalances={showBalances}
         onNewAddress={onNewAddress}
         onSelectAddress={onSelectAddress}
@@ -396,6 +537,27 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         message={messageModal.message}
         txids={messageModal.txids}
         onClose={closeMessage}
+      />
+      <ImportWalletModal
+        show={showImportModal}
+        onImport={onImportFromModal}
+        onCancel={() => setShowImportModal(false)}
+      />
+      <LoadPasswordModal
+        show={showLoadPasswordModal}
+        onConfirm={onConfirmLoadWithPassword}
+        onCancel={() => {
+          setShowLoadPasswordModal(false);
+          setPendingFile(null);
+        }}
+      />
+      <WalletScanModal
+        show={showScanModal}
+        wallet={pendingWallet}
+        initialScanCount={initialScanCount}
+        onSelectAddress={onSelectScannedAddress}
+        onSelectAll={onSelectAllScannedAddresses}
+        onCancel={onCancelScan}
       />
     </div>
   );
