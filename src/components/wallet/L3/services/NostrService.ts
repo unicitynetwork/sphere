@@ -53,6 +53,8 @@ const UNICITY_RELAYS = [
 ];
 
 const STORAGE_KEY_LAST_SYNC = "unicity_nostr_last_sync";
+const STORAGE_KEY_PROCESSED_EVENTS = "unicity_processed_events";
+const MAX_PROCESSED_EVENTS = 100; // Maximum number of processed event IDs to store
 
 export class NostrService {
   private static instance: NostrService;
@@ -65,11 +67,12 @@ export class NostrService {
   private chatRepository: ChatRepository;
   private dmListeners: ((message: ChatMessage) => void)[] = [];
 
-  private processedEventIds: Set<string> = new Set();
+  private processedEventIds: Set<string> = new Set(); // Persistent storage for all processed events
 
   private constructor(identityManager: IdentityManager) {
     this.identityManager = identityManager;
     this.chatRepository = ChatRepository.getInstance();
+    this.loadProcessedEvents();
   }
 
   static getInstance(identityManager?: IdentityManager): NostrService {
@@ -142,26 +145,7 @@ export class NostrService {
     walletFilter.since = lastSync;
 
     this.client.subscribe(walletFilter, {
-      onEvent: (event) => {
-        // Deduplicate by event ID (in-session)
-        if (this.processedEventIds.has(event.id)) {
-          return;
-        }
-        this.processedEventIds.add(event.id);
-
-        // Skip old events (but allow events with same timestamp for parallel faucet requests)
-        const currentLastSync = this.getOrInitLastSync();
-        if (event.created_at < currentLastSync) {
-          console.log(
-            `⏭️ Skipping old event (Time: ${event.created_at} < Sync: ${currentLastSync})`
-          );
-          return;
-        }
-
-        console.log(`Received wallet event kind=${event.kind}`);
-        this.handleIncomingEvent(event);
-        this.updateLastSync(event.created_at);
-      },
+      onEvent: (event) => this.handleSubscriptionEvent(event, true),
       onEndOfStoredEvents: () => {
         console.log("End of stored wallet events");
       },
@@ -174,26 +158,42 @@ export class NostrService {
     chatFilter["#p"] = [publicKey];
 
     this.client.subscribe(chatFilter, {
-      onEvent: (event) => {
-        // In-session deduplication only
-        if (this.processedEventIds.has(event.id)) {
-          return;
-        }
-        this.processedEventIds.add(event.id);
-
-        // Keep set size manageable (max 1000 entries)
-        if (this.processedEventIds.size > 1000) {
-          const firstId = this.processedEventIds.values().next().value;
-          if (firstId) this.processedEventIds.delete(firstId);
-        }
-
-        console.log(`Received chat event kind=${event.kind}`);
-        this.handleIncomingEvent(event);
-      },
+      onEvent: (event) => this.handleSubscriptionEvent(event, false),
       onEndOfStoredEvents: () => {
         console.log("End of stored chat events");
       },
     });
+  }
+
+  private handleSubscriptionEvent(event: Event, isWalletEvent: boolean) {
+    // Deduplicate by event ID (persistent storage - works across page reloads)
+    if (this.isEventProcessed(event.id)) {
+      console.log(`⏭️ Event ${event.id.slice(0, 8)} already processed (persistent check), skipping`);
+      return;
+    }
+
+    // For wallet events, skip old events based on lastSync
+    if (isWalletEvent) {
+      const currentLastSync = this.getOrInitLastSync();
+      if (event.created_at < currentLastSync) {
+        console.log(
+          `⏭️ Skipping old event (Time: ${event.created_at} <= Sync: ${currentLastSync})`
+        );
+        return;
+      }
+    }
+
+    console.log(`📥 Processing ${isWalletEvent ? 'wallet' : 'chat'} event kind=${event.kind}`);
+
+    // Mark as processed BEFORE handling to prevent race conditions
+    this.markEventAsProcessed(event.id);
+
+    this.handleIncomingEvent(event);
+
+    // Update lastSync only for wallet events
+    if (isWalletEvent) {
+      this.updateLastSync(event.created_at);
+    }
   }
 
   private getOrInitLastSync(): number {
@@ -212,6 +212,54 @@ export class NostrService {
     if (timestamp > current) {
       localStorage.setItem(STORAGE_KEY_LAST_SYNC, timestamp.toString());
     }
+  }
+
+  private loadProcessedEvents() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PROCESSED_EVENTS);
+      if (saved) {
+        const ids = JSON.parse(saved) as string[];
+        this.processedEventIds = new Set(ids);
+        console.log(`📋 Loaded ${ids.length} processed event IDs from persistent storage`);
+      }
+    } catch (error) {
+      console.error("Failed to load processed events", error);
+      this.processedEventIds = new Set();
+    }
+  }
+
+  private saveProcessedEvents() {
+    try {
+      let ids = Array.from(this.processedEventIds);
+
+      // Keep only the last MAX_PROCESSED_EVENTS entries (FIFO)
+      if (ids.length > MAX_PROCESSED_EVENTS) {
+        ids = ids.slice(-MAX_PROCESSED_EVENTS);
+        this.processedEventIds = new Set(ids);
+      }
+
+      localStorage.setItem(STORAGE_KEY_PROCESSED_EVENTS, JSON.stringify(ids));
+    } catch (error) {
+      console.error("Failed to save processed events", error);
+    }
+  }
+
+  private markEventAsProcessed(eventId: string) {
+    this.processedEventIds.add(eventId);
+
+    // If exceeding limit, remove oldest entry
+    if (this.processedEventIds.size > MAX_PROCESSED_EVENTS) {
+      const firstId = this.processedEventIds.values().next().value;
+      if (firstId) {
+        this.processedEventIds.delete(firstId);
+      }
+    }
+
+    this.saveProcessedEvents();
+  }
+
+  private isEventProcessed(eventId: string): boolean {
+    return this.processedEventIds.has(eventId);
   }
 
   private async handleIncomingEvent(event: Event) {
@@ -337,14 +385,14 @@ export class NostrService {
           console.warn("Failed to parse JSON:", error);
           return;
         }
-        this.handleProperTokenTransfer(payloadObj);
+        this.handleProperTokenTransfer(payloadObj, event.pubkey);
       }
     } catch (error) {
       console.error("Failed to handle token transfer", error);
     }
   }
 
-  private async handleProperTokenTransfer(payloadObj: Record<string, any>) {
+  private async handleProperTokenTransfer(payloadObj: Record<string, any>, senderPubkey: string) {
     try {
       let sourceTokenInput = payloadObj["sourceToken"];
       let transferTxInput = payloadObj["transferTx"];
@@ -373,7 +421,7 @@ export class NostrService {
       const sourceToken = await Token.fromJSON(sourceTokenInput);
       const transferTx = await TransferTransaction.fromJSON(transferTxInput);
 
-      this.finalizeTransfer(sourceToken, transferTx);
+      this.finalizeTransfer(sourceToken, transferTx, senderPubkey);
     } catch (error) {
       console.error("Error handling proper token transfer", error);
     }
@@ -381,7 +429,8 @@ export class NostrService {
 
   private async finalizeTransfer(
     sourceToken: Token<any>,
-    transferTx: TransferTransaction
+    transferTx: TransferTransaction,
+    senderPubkey: string
   ) {
     try {
       const recipientAddress = transferTx.data.recipient;
@@ -455,19 +504,19 @@ export class NostrService {
         );
 
         console.log("Token finalized successfully!");
-        this.saveReceivedToken(finalizedToken);
+        this.saveReceivedToken(finalizedToken, senderPubkey);
       } else {
         console.log(
           "Transfer is to DIRECT address - saving without finalization"
         );
-        this.saveReceivedToken(sourceToken);
+        this.saveReceivedToken(sourceToken, senderPubkey);
       }
     } catch (error) {
       console.error("Error occured while finalizing transfer:", error);
     }
   }
 
-  private saveReceivedToken(token: Token<any>) {
+  private saveReceivedToken(token: Token<any>, senderPubkey: string) {
     let amount = undefined;
     let coinId = undefined;
     let symbol = undefined;
@@ -540,6 +589,7 @@ export class NostrService {
       coinId: coinId,
       iconUrl: iconUrl,
       timestamp: Date.now(),
+      senderPubkey: senderPubkey,
     });
 
     walletRepo.addToken(uiToken);
