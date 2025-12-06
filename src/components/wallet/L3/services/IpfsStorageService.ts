@@ -8,11 +8,11 @@ import * as ed from "@noble/ed25519";
 import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
 import type { IdentityManager } from "./IdentityManager";
 import type { Token } from "../data/model";
-import type { TxfStorageData, TxfMeta } from "./types/TxfTypes";
-import { buildTxfStorageData, parseTxfStorageData } from "./TxfSerializer";
+import type { TxfStorageData, TxfMeta, TxfToken } from "./types/TxfTypes";
+import { buildTxfStorageData, parseTxfStorageData, txfToToken } from "./TxfSerializer";
 import { getTokenValidationService } from "./TokenValidationService";
 import { getConflictResolutionService } from "./ConflictResolutionService";
-import { getBootstrapPeers, getConfiguredCustomPeers } from "../../../../config/ipfs.config";
+import { getBootstrapPeers, getConfiguredCustomPeers, getBackendPeerId, getAllBackendGatewayUrls } from "../../../../config/ipfs.config";
 
 // Configure @noble/ed25519 to use sync sha512 (required for getPublicKey without WebCrypto)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -123,6 +123,7 @@ export class IpfsStorageService {
   private lastSync: StorageResult | null = null;
   private autoSyncEnabled = false;
   private boundSyncHandler: (() => void) | null = null;
+  private connectionMaintenanceInterval: ReturnType<typeof setInterval> | null = null;
 
   private constructor(identityManager: IdentityManager) {
     this.identityManager = identityManager;
@@ -153,6 +154,9 @@ export class IpfsStorageService {
     window.addEventListener("wallet-updated", this.boundSyncHandler);
     this.autoSyncEnabled = true;
     console.log("📦 IPFS auto-sync enabled");
+
+    // Trigger initial sync to re-send pin requests on startup
+    this.scheduleSync();
   }
 
   /**
@@ -169,6 +173,10 @@ export class IpfsStorageService {
     if (this.syncTimer) {
       clearTimeout(this.syncTimer);
       this.syncTimer = null;
+    }
+    if (this.connectionMaintenanceInterval) {
+      clearInterval(this.connectionMaintenanceInterval);
+      this.connectionMaintenanceInterval = null;
     }
     if (this.helia) {
       await this.helia.stop();
@@ -284,11 +292,41 @@ export class IpfsStorageService {
           peerDiscovery: [
             bootstrap({ list: bootstrapPeers }),
           ],
+          connectionManager: {
+            maxConnections: 50,
+          },
         },
       });
 
+      // Log browser's peer ID for debugging
+      const peerId = this.helia.libp2p.peerId.toString();
       console.log("📦 IPFS storage service initialized");
+      console.log("📦 Browser Peer ID:", peerId);
       console.log("📦 IPNS name:", this.cachedIpnsName);
+
+      // Set up peer connection event handlers for debugging
+      this.helia.libp2p.addEventListener("peer:connect", (event) => {
+        const remotePeerId = event.detail.toString();
+        console.log(`📦 Connected to peer: ${remotePeerId.slice(0, 16)}...`);
+      });
+
+      this.helia.libp2p.addEventListener("peer:disconnect", (event) => {
+        const remotePeerId = event.detail.toString();
+        console.log(`📦 Disconnected from peer: ${remotePeerId.slice(0, 16)}...`);
+      });
+
+      // Log initial connections after a short delay
+      setTimeout(() => {
+        const connections = this.helia?.libp2p.getConnections() || [];
+        console.log(`📦 Active connections: ${connections.length}`);
+        connections.slice(0, 5).forEach((conn) => {
+          console.log(`📦   - ${conn.remotePeer.toString().slice(0, 16)}... via ${conn.remoteAddr.toString()}`);
+        });
+      }, 5000);
+
+      // Start connection maintenance for backend peer
+      this.startBackendConnectionMaintenance();
+
       return true;
     } catch (error) {
       console.error("📦 Failed to initialize IPFS storage:", error);
@@ -329,6 +367,110 @@ export class IpfsStorageService {
     // For now, use hex-encoded public key as identifier
     // In production, this would be a proper CIDv1/PeerId
     return `ipns-${this.bytesToHex(publicKey).slice(0, 32)}`;
+  }
+
+  // ==========================================
+  // Backend Connection Maintenance
+  // ==========================================
+
+  /**
+   * Maintain a persistent connection to the backend IPFS node
+   * This ensures bitswap can function properly for content transfer
+   */
+  private startBackendConnectionMaintenance(): void {
+    const backendPeerId = getBackendPeerId();
+    if (!backendPeerId || !this.helia) {
+      return;
+    }
+
+    // Import peerIdFromString dynamically
+    const maintainConnection = async () => {
+      if (!this.helia) return;
+
+      try {
+        // Check if we're connected to the backend
+        const connections = this.helia.libp2p.getConnections();
+        const isConnected = connections.some(
+          (conn) => conn.remotePeer.toString() === backendPeerId
+        );
+
+        if (!isConnected) {
+          console.log(`📦 Backend peer disconnected, reconnecting...`);
+          // The bootstrap will reconnect automatically, but we can also dial directly
+          const bootstrapPeers = getBootstrapPeers();
+          const backendAddr = bootstrapPeers.find((addr) =>
+            addr.includes(backendPeerId)
+          );
+          if (backendAddr) {
+            try {
+              const { multiaddr } = await import("@multiformats/multiaddr");
+              await this.helia.libp2p.dial(multiaddr(backendAddr));
+              console.log(`📦 Reconnected to backend peer`);
+            } catch (dialError) {
+              console.warn(`📦 Failed to reconnect to backend:`, dialError);
+            }
+          }
+        } else {
+          // Connection exists, log status
+          const backendConn = connections.find(
+            (conn) => conn.remotePeer.toString() === backendPeerId
+          );
+          if (backendConn) {
+            console.log(`📦 Backend connection alive: ${backendConn.remoteAddr.toString()}`);
+          }
+        }
+      } catch (error) {
+        console.warn(`📦 Connection maintenance error:`, error);
+      }
+    };
+
+    // Run immediately
+    setTimeout(maintainConnection, 2000);
+
+    // Then periodically (every 30 seconds)
+    this.connectionMaintenanceInterval = setInterval(maintainConnection, 30000);
+    console.log(`📦 Backend connection maintenance started`);
+  }
+
+  /**
+   * Ensure backend is connected before storing content
+   * Returns true if connected or successfully reconnected
+   */
+  private async ensureBackendConnected(): Promise<boolean> {
+    const backendPeerId = getBackendPeerId();
+    if (!backendPeerId || !this.helia) {
+      return false;
+    }
+
+    const connections = this.helia.libp2p.getConnections();
+    const isConnected = connections.some(
+      (conn) => conn.remotePeer.toString() === backendPeerId
+    );
+
+    if (isConnected) {
+      return true;
+    }
+
+    // Try to reconnect
+    console.log(`📦 Backend not connected, dialing...`);
+    const bootstrapPeers = getBootstrapPeers();
+    const backendAddr = bootstrapPeers.find((addr) =>
+      addr.includes(backendPeerId)
+    );
+
+    if (backendAddr) {
+      try {
+        const { multiaddr } = await import("@multiformats/multiaddr");
+        await this.helia.libp2p.dial(multiaddr(backendAddr));
+        console.log(`📦 Connected to backend for content transfer`);
+        return true;
+      } catch (error) {
+        console.warn(`📦 Failed to connect to backend:`, error);
+        return false;
+      }
+    }
+
+    return false;
   }
 
   // ==========================================
@@ -468,7 +610,15 @@ export class IpfsStorageService {
           const j = json(this.helia);
           const { CID } = await import("multiformats/cid");
           const remoteCid = CID.parse(lastCid);
-          const remoteData = await j.get(remoteCid) as unknown;
+
+          // Add timeout to prevent hanging indefinitely when IPFS network is slow
+          const REMOTE_FETCH_TIMEOUT = 15000; // 15 seconds
+          const remoteData = await Promise.race([
+            j.get(remoteCid),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("Remote fetch timeout")), REMOTE_FETCH_TIMEOUT)
+            ),
+          ]) as unknown;
 
           if (remoteData && typeof remoteData === "object" && "_meta" in (remoteData as object)) {
             const remoteTxf = remoteData as TxfStorageData;
@@ -501,6 +651,23 @@ export class IpfsStorageService {
 
               if (mergeResult.newTokens.length > 0) {
                 console.log(`📦 Added ${mergeResult.newTokens.length} token(s) from remote`);
+
+                // Save new tokens from remote to local storage (IPFS → localStorage sync)
+                for (const tokenId of mergeResult.newTokens) {
+                  const tokenKey = `_${tokenId}`;
+                  const txfToken = mergeResult.merged[tokenKey] as TxfToken;
+                  if (txfToken) {
+                    const token = txfToToken(tokenId, txfToken);
+                    walletRepo.addToken(token);
+                    console.log(`📦 Synced token ${tokenId.slice(0, 8)}... from IPFS to local`);
+                  }
+                }
+              }
+
+              // Also sync nametag from remote if local doesn't have one
+              if (!nametag && mergeResult.merged._nametag) {
+                walletRepo.setNametag(mergeResult.merged._nametag);
+                console.log(`📦 Synced nametag "${mergeResult.merged._nametag.name}" from IPFS to local`);
               }
 
               // Extract tokens from merged data for re-sync
@@ -531,10 +698,82 @@ export class IpfsStorageService {
 
       const txfStorageData = buildTxfStorageData(tokensToSync, meta, nametag || undefined);
 
-      // 4. Store to IPFS
+      // 4. Ensure backend is connected before storing
+      const backendConnected = await this.ensureBackendConnected();
+      if (backendConnected) {
+        console.log(`📦 Backend connected - content will be available via bitswap`);
+      }
+
+      // 4.1. Store to IPFS
       const j = json(this.helia);
       const cid = await j.add(txfStorageData);
       const cidString = cid.toString();
+
+      // 4.2. Wait briefly for bitswap to have a chance to exchange blocks
+      // This gives the backend time to request blocks while we're connected
+      if (backendConnected) {
+        console.log(`📦 Waiting for bitswap block exchange...`);
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      }
+
+      // 4.3. Multi-node upload: directly upload content to all configured IPFS nodes
+      // This bypasses bitswap limitations since browser can't be directly dialed
+      const gatewayUrls = getAllBackendGatewayUrls();
+      if (gatewayUrls.length > 0) {
+        console.log(`📦 Uploading to ${gatewayUrls.length} IPFS node(s)...`);
+
+        const jsonBlob = new Blob([JSON.stringify(txfStorageData)], {
+          type: "application/json",
+        });
+
+        // Upload to all nodes in parallel
+        const uploadPromises = gatewayUrls.map(async (gatewayUrl) => {
+          try {
+            const formData = new FormData();
+            formData.append("file", jsonBlob, "wallet.json");
+
+            const response = await fetch(
+              `${gatewayUrl}/api/v0/add?pin=true&cid-version=1`,
+              { method: "POST", body: formData }
+            );
+            if (response.ok) {
+              const result = await response.json();
+              const hostname = new URL(gatewayUrl).hostname;
+              console.log(`📦 Uploaded to ${hostname}: ${result.Hash}`);
+              return { success: true, host: gatewayUrl, cid: result.Hash };
+            }
+            return { success: false, host: gatewayUrl, error: response.status };
+          } catch (error) {
+            const hostname = new URL(gatewayUrl).hostname;
+            console.warn(`📦 Upload to ${hostname} failed:`, error);
+            return { success: false, host: gatewayUrl, error };
+          }
+        });
+
+        const results = await Promise.allSettled(uploadPromises);
+        const successful = results.filter(
+          (r) => r.status === "fulfilled" && r.value.success
+        ).length;
+        console.log(`📦 Content uploaded to ${successful}/${gatewayUrls.length} nodes`);
+      }
+
+      // 4.4. Announce content to connected peers (DHT provide)
+      // This helps ensure our backend IPFS node can discover and fetch the content
+      // Use timeout since DHT operations can be slow in browser
+      const PROVIDE_TIMEOUT = 10000; // 10 seconds
+      try {
+        console.log(`📦 Announcing CID to network: ${cidString.slice(0, 16)}...`);
+        await Promise.race([
+          this.helia.routing.provide(cid),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("DHT provide timeout")), PROVIDE_TIMEOUT)
+          ),
+        ]);
+        console.log(`📦 CID announced to network`);
+      } catch (provideError) {
+        // Non-fatal - content is still stored locally
+        console.warn(`📦 Could not announce to DHT (non-fatal):`, provideError);
+      }
 
       // 5. Store CID for recovery
       this.setLastCid(cidString);

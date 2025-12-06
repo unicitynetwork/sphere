@@ -23,7 +23,7 @@ interface IpfsPeer {
  * UPDATE peer IDs after running `docker exec ipfs-kubo ipfs id -f='<id>'` on each host
  */
 export const CUSTOM_PEERS: IpfsPeer[] = [
-  { host: "unicity-ipfs1.dyndns.org", peerId: "<PEER_ID_1>", wsPort: 4002, wssPort: 4003 },
+  { host: "unicity-ipfs1.dyndns.org", peerId: "12D3KooWDKJqEMAhH4nsSSiKtK1VLcas5coUqSPZAfbWbZpxtL4u", wsPort: 4002, wssPort: 4003 },
   { host: "unicity-ipfs2.dyndns.org", peerId: "<PEER_ID_2>", wsPort: 4002, wssPort: 4003 },
   { host: "unicity-ipfs3.dyndns.org", peerId: "<PEER_ID_3>", wsPort: 4002, wssPort: 4003 },
   { host: "unicity-ipfs4.dyndns.org", peerId: "<PEER_ID_4>", wsPort: 4002, wssPort: 4003 },
@@ -94,3 +94,41 @@ export const IPFS_CONFIG = {
   enableAutoSync: true,
   syncIntervalMs: 5 * 60 * 1000, // 5 minutes
 };
+
+/**
+ * Get the backend gateway URL for API calls
+ * Uses HTTPS on secure pages, HTTP otherwise
+ */
+export function getBackendGatewayUrl(): string | null {
+  const configured = CUSTOM_PEERS.find((p) => isPeerConfigured(p.peerId));
+  if (!configured) return null;
+
+  const isSecure =
+    typeof window !== "undefined" && window.location.protocol === "https:";
+
+  // Use HTTPS gateway (port 443) for secure pages
+  return isSecure
+    ? `https://${configured.host}`
+    : `http://${configured.host}:9080`;
+}
+
+/**
+ * Get all configured backend gateway URLs for multi-node upload
+ * Returns URLs for all IPFS nodes that have valid peer IDs configured
+ */
+export function getAllBackendGatewayUrls(): string[] {
+  const isSecure =
+    typeof window !== "undefined" && window.location.protocol === "https:";
+
+  return CUSTOM_PEERS.filter((p) => isPeerConfigured(p.peerId)).map((peer) =>
+    isSecure ? `https://${peer.host}` : `http://${peer.host}:9080`
+  );
+}
+
+/**
+ * Get the primary backend peer ID for direct connection maintenance
+ */
+export function getBackendPeerId(): string | null {
+  const configured = CUSTOM_PEERS.find((p) => isPeerConfigured(p.peerId));
+  return configured?.peerId || null;
+}
