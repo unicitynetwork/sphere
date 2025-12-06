@@ -1,10 +1,15 @@
 import { createHelia, type Helia } from "helia";
 import { json } from "@helia/json";
 import { bootstrap } from "@libp2p/bootstrap";
+import { generateKeyPairFromSeed } from "@libp2p/crypto/keys";
+import { peerIdFromPrivateKey } from "@libp2p/peer-id";
+import { createIPNSRecord, marshalIPNSRecord, unmarshalIPNSRecord, multihashToIPNSRoutingKey } from "ipns";
 import { hkdf } from "@noble/hashes/hkdf";
 import { sha256 } from "@noble/hashes/sha256";
 import { sha512 } from "@noble/hashes/sha512";
 import * as ed from "@noble/ed25519";
+import type { CID } from "multiformats/cid";
+import type { PrivateKey } from "@libp2p/interface";
 import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
 import type { IdentityManager } from "./IdentityManager";
 import type { Token } from "../data/model";
@@ -50,6 +55,7 @@ export interface StorageResult {
   tokenCount?: number;
   validationIssues?: string[];
   conflictsResolved?: number;
+  ipnsPublished?: boolean;
   error?: string;
 }
 
@@ -113,6 +119,8 @@ export class IpfsStorageService {
   private ed25519PrivateKey: Uint8Array | null = null;
   private ed25519PublicKey: Uint8Array | null = null;
   private cachedIpnsName: string | null = null;
+  private ipnsKeyPair: PrivateKey | null = null;
+  private ipnsSequenceNumber: bigint = 0n;
 
   private identityManager: IdentityManager;
   private eventCallbacks: StorageEventCallback[] = [];
@@ -155,8 +163,9 @@ export class IpfsStorageService {
     this.autoSyncEnabled = true;
     console.log("📦 IPFS auto-sync enabled");
 
-    // Trigger initial sync to re-send pin requests on startup
-    this.scheduleSync();
+    // On startup, run IPNS-based sync to discover remote state
+    // This resolves IPNS, verifies remote content, and merges if needed
+    this.syncFromIpns().catch(console.error);
   }
 
   /**
@@ -277,8 +286,18 @@ export class IpfsStorageService {
       this.ed25519PrivateKey = derivedKey;
       this.ed25519PublicKey = ed.getPublicKey(derivedKey);
 
-      // 3. Compute IPNS name from public key
-      this.cachedIpnsName = this.computeIpnsName(this.ed25519PublicKey);
+      // 3. Generate libp2p key pair for IPNS from the derived key
+      this.ipnsKeyPair = await generateKeyPairFromSeed("Ed25519", derivedKey);
+      const ipnsPeerId = peerIdFromPrivateKey(this.ipnsKeyPair);
+
+      // 4. Compute proper IPNS name from peer ID and migrate old storage keys
+      const oldIpnsName = `ipns-${this.bytesToHex(this.ed25519PublicKey).slice(0, 32)}`;
+      const newIpnsName = ipnsPeerId.toString();
+      this.cachedIpnsName = newIpnsName;
+      this.migrateStorageKeys(oldIpnsName, newIpnsName);
+
+      // Load last IPNS sequence number from storage
+      this.ipnsSequenceNumber = this.getIpnsSequenceNumber();
 
       // 4. Initialize Helia (browser IPFS) with custom bootstrap peers
       const bootstrapPeers = getBootstrapPeers();
@@ -299,9 +318,9 @@ export class IpfsStorageService {
       });
 
       // Log browser's peer ID for debugging
-      const peerId = this.helia.libp2p.peerId.toString();
+      const browserPeerId = this.helia.libp2p.peerId.toString();
       console.log("📦 IPFS storage service initialized");
-      console.log("📦 Browser Peer ID:", peerId);
+      console.log("📦 Browser Peer ID:", browserPeerId);
       console.log("📦 IPNS name:", this.cachedIpnsName);
 
       // Set up peer connection event handlers for debugging
@@ -360,13 +379,163 @@ export class IpfsStorageService {
   }
 
   /**
-   * Compute IPNS name from Ed25519 public key
-   * Format: Base36-encoded CIDv1 of the public key
+   * Migrate local storage keys from old IPNS name format to new PeerId format
    */
-  private computeIpnsName(publicKey: Uint8Array): string {
-    // For now, use hex-encoded public key as identifier
-    // In production, this would be a proper CIDv1/PeerId
-    return `ipns-${this.bytesToHex(publicKey).slice(0, 32)}`;
+  private migrateStorageKeys(oldIpnsName: string, newIpnsName: string): void {
+    if (oldIpnsName === newIpnsName) return;
+
+    // Migrate version counter
+    const oldVersionKey = `${VERSION_STORAGE_PREFIX}${oldIpnsName}`;
+    const newVersionKey = `${VERSION_STORAGE_PREFIX}${newIpnsName}`;
+    const version = localStorage.getItem(oldVersionKey);
+    if (version && !localStorage.getItem(newVersionKey)) {
+      localStorage.setItem(newVersionKey, version);
+      localStorage.removeItem(oldVersionKey);
+      console.log(`📦 Migrated version key: ${oldIpnsName} -> ${newIpnsName}`);
+    }
+
+    // Migrate last CID
+    const oldCidKey = `${CID_STORAGE_PREFIX}${oldIpnsName}`;
+    const newCidKey = `${CID_STORAGE_PREFIX}${newIpnsName}`;
+    const lastCid = localStorage.getItem(oldCidKey);
+    if (lastCid && !localStorage.getItem(newCidKey)) {
+      localStorage.setItem(newCidKey, lastCid);
+      localStorage.removeItem(oldCidKey);
+      console.log(`📦 Migrated CID key: ${oldIpnsName} -> ${newIpnsName}`);
+    }
+  }
+
+  // ==========================================
+  // IPNS Publishing
+  // ==========================================
+
+  private readonly IPNS_SEQ_STORAGE_PREFIX = "ipns_seq_";
+
+  /**
+   * Get the last IPNS sequence number from storage
+   */
+  private getIpnsSequenceNumber(): bigint {
+    if (!this.cachedIpnsName) return 0n;
+    const key = `${this.IPNS_SEQ_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const stored = localStorage.getItem(key);
+    return stored ? BigInt(stored) : 0n;
+  }
+
+  /**
+   * Save the IPNS sequence number to storage
+   */
+  private setIpnsSequenceNumber(seq: bigint): void {
+    if (!this.cachedIpnsName) return;
+    const key = `${this.IPNS_SEQ_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    localStorage.setItem(key, seq.toString());
+  }
+
+  /**
+   * Publish CID to IPNS so ipns://{peerId} resolves to the latest content
+   * Uses low-level ipns package to create and publish records via DHT
+   * @param cid The CID to publish
+   * @returns The IPNS name on success, null on failure (non-fatal)
+   */
+  private async publishToIpns(cid: CID): Promise<string | null> {
+    if (!this.helia || !this.ipnsKeyPair) {
+      console.warn("📦 IPNS key not initialized - skipping IPNS publish");
+      return null;
+    }
+
+    const IPNS_PUBLISH_TIMEOUT = 30000; // 30 seconds
+    const IPNS_LIFETIME = 24 * 60 * 60 * 1000; // 24 hours in ms
+
+    try {
+      console.log(`📦 Publishing to IPNS: ${this.cachedIpnsName?.slice(0, 16)}... -> ${cid.toString().slice(0, 16)}...`);
+
+      // Increment sequence number for new record
+      this.ipnsSequenceNumber++;
+
+      // Create IPNS record with the CID value
+      const record = await createIPNSRecord(
+        this.ipnsKeyPair,
+        `/ipfs/${cid.toString()}`,
+        this.ipnsSequenceNumber,
+        IPNS_LIFETIME
+      );
+
+      // Marshal the record for DHT storage
+      const marshalledRecord = marshalIPNSRecord(record);
+
+      // Create the routing key from the public key
+      const routingKey = multihashToIPNSRoutingKey(this.ipnsKeyPair.publicKey.toMultihash());
+
+      // Publish to DHT with timeout
+      await Promise.race([
+        this.helia.routing.put(routingKey, marshalledRecord),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("IPNS publish timeout")), IPNS_PUBLISH_TIMEOUT)
+        ),
+      ]);
+
+      // Save sequence number on success
+      this.setIpnsSequenceNumber(this.ipnsSequenceNumber);
+
+      console.log(`📦 IPNS record published successfully (seq: ${this.ipnsSequenceNumber})`);
+      return this.cachedIpnsName;
+    } catch (error) {
+      // Rollback sequence number on failure
+      this.ipnsSequenceNumber--;
+      // Non-fatal - content is still stored and announced
+      console.warn(`📦 Could not publish to IPNS (non-fatal):`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Resolve IPNS name to CID using DHT
+   * Uses low-level ipns package to fetch and parse records via DHT routing
+   * Returns the CID that our IPNS name points to, or null if resolution fails
+   */
+  private async resolveIpns(): Promise<string | null> {
+    if (!this.helia || !this.ipnsKeyPair) {
+      return null;
+    }
+
+    const IPNS_RESOLVE_TIMEOUT = 30000; // 30 seconds - DHT can be slow
+
+    try {
+      console.log(`📦 Resolving IPNS: ${this.cachedIpnsName?.slice(0, 16)}...`);
+
+      // Create the routing key from our public key
+      const routingKey = multihashToIPNSRoutingKey(this.ipnsKeyPair.publicKey.toMultihash());
+
+      // Fetch the record from DHT with timeout
+      const recordData = await Promise.race([
+        this.helia.routing.get(routingKey),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("IPNS resolve timeout")), IPNS_RESOLVE_TIMEOUT)
+        ),
+      ]);
+
+      // Unmarshal the IPNS record
+      const record = unmarshalIPNSRecord(recordData);
+
+      // Extract the value (path) from the record
+      // The value is typically "/ipfs/CID" and is already a string
+      const valueStr = record.value;
+      console.log(`📦 IPNS record value: ${valueStr}`);
+
+      // Extract CID from path (remove "/ipfs/" prefix)
+      const cidMatch = valueStr.match(/^\/ipfs\/(.+)$/);
+      if (!cidMatch) {
+        console.warn(`📦 IPNS value is not an IPFS path: ${valueStr}`);
+        return null;
+      }
+
+      const cidString = cidMatch[1];
+      console.log(`📦 IPNS resolved to: ${cidString.slice(0, 16)}...`);
+      return cidString;
+    } catch (error) {
+      // Non-fatal - can fall back to local lastCid
+      console.warn(`📦 IPNS resolution failed (non-fatal):`, error);
+      return null;
+    }
   }
 
   // ==========================================
@@ -526,6 +695,78 @@ export class IpfsStorageService {
   }
 
   // ==========================================
+  // IPNS Sync Helpers
+  // ==========================================
+
+  /**
+   * Fetch remote content from IPFS by CID
+   * Returns the TXF storage data or null if fetch fails
+   */
+  private async fetchRemoteContent(cidString: string): Promise<TxfStorageData | null> {
+    if (!this.helia) return null;
+
+    const FETCH_TIMEOUT = 15000; // 15 seconds
+
+    try {
+      console.log(`📦 Fetching remote content: ${cidString.slice(0, 16)}...`);
+      const j = json(this.helia);
+      const { CID } = await import("multiformats/cid");
+      const cid = CID.parse(cidString);
+
+      const data = await Promise.race([
+        j.get(cid),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Fetch timeout")), FETCH_TIMEOUT)
+        ),
+      ]);
+
+      // Validate it's TXF format
+      if (data && typeof data === "object" && "_meta" in (data as object)) {
+        console.log(`📦 Remote content fetched successfully`);
+        return data as TxfStorageData;
+      }
+
+      console.warn(`📦 Remote content is not valid TXF format`);
+      return null;
+    } catch (error) {
+      console.warn(`📦 Failed to fetch CID ${cidString.slice(0, 16)}...:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Import remote data into local storage
+   * Only imports tokens and nametag that don't exist locally
+   */
+  private async importRemoteData(remoteTxf: TxfStorageData): Promise<number> {
+    const walletRepo = WalletRepository.getInstance();
+    const { tokens, nametag } = parseTxfStorageData(remoteTxf);
+
+    // Get local tokens
+    const localTokens = walletRepo.getWallet()?.tokens || [];
+    const localTokenIds = new Set(localTokens.map(t => t.id));
+
+    let importedCount = 0;
+
+    // Import tokens not in local storage
+    for (const token of tokens) {
+      if (!localTokenIds.has(token.id)) {
+        walletRepo.addToken(token);
+        console.log(`📦 Imported token ${token.id.slice(0, 8)}... from remote`);
+        importedCount++;
+      }
+    }
+
+    // Import nametag if local doesn't have one
+    if (nametag && !walletRepo.getNametag()) {
+      walletRepo.setNametag(nametag);
+      console.log(`📦 Imported nametag "${nametag.name}" from remote`);
+    }
+
+    return importedCount;
+  }
+
+  // ==========================================
   // Storage Operations
   // ==========================================
 
@@ -539,6 +780,103 @@ export class IpfsStorageService {
     this.syncTimer = setTimeout(() => {
       this.syncNow().catch(console.error);
     }, SYNC_DEBOUNCE_MS);
+  }
+
+  /**
+   * Sync from IPNS on startup - resolves IPNS and merges with local state
+   * This ensures we have the latest state from DHT before making changes
+   *
+   * Flow:
+   * 1. Resolve IPNS to get remote CID
+   * 2. Compare with local CID - if different, fetch remote content
+   * 3. Version comparison: remote > local → import; local > remote → sync to update IPNS
+   * 4. Always verify remote is fetchable (handles interrupted syncs)
+   * 5. If fetch fails, fall back to normal sync (republish local)
+   */
+  async syncFromIpns(): Promise<StorageResult> {
+    console.log(`📦 Starting IPNS-based sync...`);
+
+    const initialized = await this.ensureInitialized();
+    if (!initialized) {
+      console.warn(`📦 Not initialized, skipping IPNS sync`);
+      return { success: false, timestamp: Date.now(), error: "Not initialized" };
+    }
+
+    // 1. Resolve IPNS to get remote CID from DHT
+    const remoteCid = await this.resolveIpns();
+    const localCid = this.getLastCid();
+
+    console.log(`📦 IPNS sync: remote=${remoteCid?.slice(0, 16) || 'none'}..., local=${localCid?.slice(0, 16) || 'none'}...`);
+
+    // 2. Determine which CID to fetch
+    const cidToFetch = remoteCid || localCid;
+
+    if (!cidToFetch) {
+      // Fresh wallet - no IPNS record and no local CID
+      console.log(`📦 No IPNS record or local CID - fresh wallet, triggering initial sync`);
+      return this.syncNow();
+    }
+
+    // 3. Check if remote CID differs from local (another device may have updated IPNS)
+    if (remoteCid && remoteCid !== localCid) {
+      console.log(`📦 IPNS CID differs from local! Remote may have been updated from another device`);
+    }
+
+    // 4. Always try to fetch and verify remote content
+    // This handles cases where previous sync was interrupted
+    const remoteData = await this.fetchRemoteContent(cidToFetch);
+
+    if (!remoteData) {
+      // Could not fetch remote content - republish local
+      console.warn(`📦 Failed to fetch remote content (CID: ${cidToFetch.slice(0, 16)}...), will republish local`);
+      return this.syncNow();
+    }
+
+    // 5. Compare versions and decide action
+    const localVersion = this.getVersionCounter();
+    const remoteVersion = remoteData._meta.version;
+
+    console.log(`📦 Version comparison: local=v${localVersion}, remote=v${remoteVersion}`);
+
+    if (remoteVersion > localVersion) {
+      // Remote is newer - import to local
+      console.log(`📦 Remote is newer (v${remoteVersion} > v${localVersion}), importing...`);
+      const importedCount = await this.importRemoteData(remoteData);
+
+      // Update local version and CID to match remote
+      this.setVersionCounter(remoteVersion);
+      this.setLastCid(cidToFetch);
+
+      console.log(`📦 Imported ${importedCount} token(s) from remote, now at v${remoteVersion}`);
+
+      return {
+        success: true,
+        cid: cidToFetch,
+        ipnsName: this.cachedIpnsName || undefined,
+        timestamp: Date.now(),
+        version: remoteVersion,
+      };
+    } else if (remoteVersion < localVersion) {
+      // Local is newer - need to update IPNS
+      console.log(`📦 Local is newer (v${localVersion} > v${remoteVersion}), updating IPNS...`);
+      return this.syncNow();
+    } else {
+      // Same version - remote is in sync
+      // Still update lastCid to match IPNS if resolved
+      if (remoteCid && remoteCid !== localCid) {
+        this.setLastCid(remoteCid);
+        console.log(`📦 Updated local CID to match IPNS`);
+      }
+
+      console.log(`📦 Versions match (v${remoteVersion}), remote verified accessible`);
+      return {
+        success: true,
+        cid: cidToFetch,
+        ipnsName: this.cachedIpnsName || undefined,
+        timestamp: Date.now(),
+        version: remoteVersion,
+      };
+    }
   }
 
   /**
@@ -677,7 +1015,30 @@ export class IpfsStorageService {
               // Update local version to merged version
               this.setVersionCounter(mergeResult.merged._meta.version);
             } else {
-              console.log(`📦 Remote is in sync (v${remoteVersion})`);
+              // Remote is in sync - check if local has any changes worth uploading
+              const localTokenIds = validTokens.map(t => t.id).sort().join(",");
+              // TXF format stores tokens as _tokenId keys
+              const remoteTokenIds = Object.keys(remoteTxf)
+                .filter(k => k.startsWith("_") && k !== "_meta" && k !== "_nametag")
+                .map(k => k.slice(1))
+                .sort()
+                .join(",");
+
+              if (localTokenIds === remoteTokenIds) {
+                // No changes - remote was verified accessible by startup syncFromIpns()
+                // Skip re-upload for this wallet-updated event
+                console.log(`📦 Remote is in sync (v${remoteVersion}) - no changes to upload`);
+                this.isSyncing = false;
+                return {
+                  success: true,
+                  cid: lastCid || undefined,
+                  ipnsName: this.cachedIpnsName || undefined,
+                  timestamp: Date.now(),
+                  version: remoteVersion,
+                  tokenCount: validTokens.length,
+                };
+              }
+              console.log(`📦 Remote version matches but local has token changes - uploading...`);
             }
           }
         } catch (err) {
@@ -775,6 +1136,16 @@ export class IpfsStorageService {
         console.warn(`📦 Could not announce to DHT (non-fatal):`, provideError);
       }
 
+      // 4.5. Publish to IPNS only if CID changed
+      const previousCid = this.getLastCid();
+      let ipnsPublished = false;
+      if (cidString !== previousCid) {
+        await this.publishToIpns(cid);
+        ipnsPublished = true;
+      } else {
+        console.log(`📦 CID unchanged (${cidString.slice(0, 16)}...) - skipping IPNS publish`);
+      }
+
       // 5. Store CID for recovery
       this.setLastCid(cidString);
 
@@ -790,6 +1161,7 @@ export class IpfsStorageService {
         tokenCount: tokensToSync.length,
         validationIssues: issues.length > 0 ? issues.map(i => i.reason) : undefined,
         conflictsResolved: conflictsResolved > 0 ? conflictsResolved : undefined,
+        ipnsPublished,
       };
 
       this.lastSync = result;
@@ -982,6 +1354,7 @@ export class IpfsStorageService {
 
   /**
    * Get the deterministic IPNS name for this wallet
+   * Returns a proper PeerId-based IPNS name
    */
   async getIpnsName(): Promise<string | null> {
     if (this.cachedIpnsName) {
@@ -997,9 +1370,12 @@ export class IpfsStorageService {
     try {
       const walletSecret = this.hexToBytes(identity.privateKey);
       const derivedKey = hkdf(sha256, walletSecret, undefined, HKDF_INFO, 32);
-      const publicKey = ed.getPublicKey(derivedKey);
 
-      this.cachedIpnsName = this.computeIpnsName(publicKey);
+      // Generate libp2p key pair and derive peer ID for proper IPNS name
+      const keyPair = await generateKeyPairFromSeed("Ed25519", derivedKey);
+      const peerId = peerIdFromPrivateKey(keyPair);
+      this.cachedIpnsName = peerId.toString();
+
       return this.cachedIpnsName;
     } catch (error) {
       console.warn("📦 Failed to compute IPNS name:", error);
