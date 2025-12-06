@@ -153,7 +153,8 @@ export function txfToToken(tokenId: string, txf: TxfToken): Token {
 export function buildTxfStorageData(
   tokens: Token[],
   meta: Omit<TxfMeta, "formatVersion">,
-  nametag?: NametagData
+  nametag?: NametagData,
+  tombstones?: string[]
 ): TxfStorageData {
   const storageData: TxfStorageData = {
     _meta: {
@@ -164,6 +165,11 @@ export function buildTxfStorageData(
 
   if (nametag) {
     storageData._nametag = nametag;
+  }
+
+  // Add tombstones for deleted tokens (prevents zombie token resurrection)
+  if (tombstones && tombstones.length > 0) {
+    storageData._tombstones = tombstones;
   }
 
   // Add each token with _<tokenId> key
@@ -186,17 +192,20 @@ export function parseTxfStorageData(data: unknown): {
   tokens: Token[];
   meta: TxfMeta | null;
   nametag: NametagData | null;
+  tombstones: string[];
   validationErrors: string[];
 } {
   const result: {
     tokens: Token[];
     meta: TxfMeta | null;
     nametag: NametagData | null;
+    tombstones: string[];
     validationErrors: string[];
   } = {
     tokens: [],
     meta: null,
     nametag: null,
+    tombstones: [],
     validationErrors: [],
   };
 
@@ -224,6 +233,13 @@ export function parseTxfStorageData(data: unknown): {
   // Extract nametag (less strict validation)
   if (storageData._nametag && typeof storageData._nametag === "object") {
     result.nametag = storageData._nametag as NametagData;
+  }
+
+  // Extract tombstones (deleted token IDs)
+  if (storageData._tombstones && Array.isArray(storageData._tombstones)) {
+    result.tombstones = storageData._tombstones.filter(
+      (id): id is string => typeof id === "string"
+    );
   }
 
   // Extract and validate tokens using Zod

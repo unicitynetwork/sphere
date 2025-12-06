@@ -40,6 +40,7 @@ interface StoredWallet {
   address: string;
   tokens: Partial<Token>[];
   nametag?: NametagData;  // One nametag per wallet/identity
+  tombstones?: string[];  // Deleted token IDs (prevents zombie resurrection during sync)
 }
 
 export class WalletRepository {
@@ -49,6 +50,7 @@ export class WalletRepository {
   private _currentAddress: string | null = null;
   private _migrationComplete: boolean = false;
   private _nametag: NametagData | null = null;
+  private _tombstones: string[] = [];  // Deleted token IDs for IPFS sync
   private _transactionHistory: TransactionHistoryEntry[] = [];
 
   // Debounce timer for wallet refresh events
@@ -217,9 +219,10 @@ export class WalletRepository {
         this._wallet = wallet;
         this._currentAddress = address;
         this._nametag = parsed.nametag || null;
+        this._tombstones = parsed.tombstones || [];
         this.refreshWallet();
 
-        console.log(`Loaded wallet for address ${address} with ${tokens.length} tokens${this._nametag ? `, nametag: ${this._nametag.name}` : ""}`);
+        console.log(`Loaded wallet for address ${address} with ${tokens.length} tokens${this._nametag ? `, nametag: ${this._nametag.name}` : ""}${this._tombstones.length > 0 ? `, ${this._tombstones.length} tombstones` : ""}`);
         return wallet;
       }
 
@@ -323,13 +326,14 @@ export class WalletRepository {
     this._currentAddress = wallet.address;
     const storageKey = this.getStorageKey(wallet.address);
 
-    // Include nametag in stored data
+    // Include nametag and tombstones in stored data
     const storedData: StoredWallet = {
       id: wallet.id,
       name: wallet.name,
       address: wallet.address,
       tokens: wallet.tokens,
       nametag: this._nametag || undefined,
+      tombstones: this._tombstones.length > 0 ? this._tombstones : undefined,
     };
 
     localStorage.setItem(storageKey, JSON.stringify(storedData));
@@ -428,6 +432,13 @@ export class WalletRepository {
       updatedTokens
     );
 
+    // Add to tombstones (prevents zombie token resurrection during IPFS sync)
+    // Only add if not already in tombstones
+    if (!this._tombstones.includes(tokenId)) {
+      this._tombstones.push(tokenId);
+      console.log(`💀 Token ${tokenId.slice(0, 8)}... added to tombstones`);
+    }
+
     this.saveWallet(updatedWallet);
 
     // Add to transaction history (SENT) - skip for split operations
@@ -456,6 +467,7 @@ export class WalletRepository {
     this._wallet = null;
     this._currentAddress = null;
     this._nametag = null;
+    this._tombstones = [];
     this.refreshWallet();
   }
 
@@ -467,6 +479,7 @@ export class WalletRepository {
     this._wallet = null;
     this._currentAddress = null;
     this._nametag = null;
+    this._tombstones = [];
     this.refreshWallet();
   }
 
@@ -539,5 +552,79 @@ export class WalletRepository {
       this._refreshDebounceTimer = null;
       window.dispatchEvent(new Event("wallet-updated"));
     }, 100); // 100ms debounce at source
+  }
+
+  // ==========================================
+  // Tombstone Methods (IPFS sync)
+  // ==========================================
+
+  /**
+   * Get all tombstones (deleted token IDs)
+   * Used during IPFS sync to prevent zombie token resurrection
+   */
+  getTombstones(): string[] {
+    return [...this._tombstones];
+  }
+
+  /**
+   * Merge remote tombstones into local
+   * Also removes any local tokens that are tombstoned
+   */
+  mergeTombstones(remoteTombstones: string[]): number {
+    if (!this._wallet) return 0;
+
+    let removedCount = 0;
+    const remoteTombstoneSet = new Set(remoteTombstones);
+
+    // Find and remove any local tokens that are in remote tombstones
+    const tokensToRemove = this._wallet.tokens.filter(t =>
+      remoteTombstoneSet.has(t.id)
+    );
+
+    for (const token of tokensToRemove) {
+      if (!this._wallet) break; // Type guard
+      // Remove from wallet without adding to history (it's a sync operation)
+      const currentTokens: Token[] = this._wallet.tokens;
+      const updatedTokens: Token[] = currentTokens.filter((t: Token) => t.id !== token.id);
+      this._wallet = new Wallet(
+        this._wallet.id,
+        this._wallet.name,
+        this._wallet.address,
+        updatedTokens
+      );
+      console.log(`💀 Removed tombstoned token ${token.id.slice(0, 8)}... from local`);
+      removedCount++;
+    }
+
+    // Merge tombstones (union of local and remote)
+    for (const tombstoneId of remoteTombstones) {
+      if (!this._tombstones.includes(tombstoneId)) {
+        this._tombstones.push(tombstoneId);
+      }
+    }
+
+    if (removedCount > 0) {
+      this.saveWallet(this._wallet);
+      this.refreshWallet();
+    }
+
+    return removedCount;
+  }
+
+  /**
+   * Clear old tombstones (optional cleanup after successful sync)
+   * Keeps tombstones under a reasonable limit to prevent unlimited growth
+   */
+  pruneTombstones(maxAge: number = 30 * 24 * 60 * 60 * 1000): void {
+    // For now, just limit to most recent 100 tombstones
+    // In future, could add timestamps to tombstones for age-based pruning
+    if (this._tombstones.length > 100) {
+      this._tombstones = this._tombstones.slice(-100);
+      if (this._wallet) {
+        this.saveWallet(this._wallet);
+      }
+      console.log(`💀 Pruned tombstones to ${this._tombstones.length}`);
+    }
+    void maxAge; // Reserved for future timestamp-based pruning
   }
 }

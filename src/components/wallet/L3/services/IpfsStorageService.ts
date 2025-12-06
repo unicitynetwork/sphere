@@ -17,6 +17,8 @@ import type { TxfStorageData, TxfMeta, TxfToken } from "./types/TxfTypes";
 import { buildTxfStorageData, parseTxfStorageData, txfToToken } from "./TxfSerializer";
 import { getTokenValidationService } from "./TokenValidationService";
 import { getConflictResolutionService } from "./ConflictResolutionService";
+import { getSyncCoordinator } from "./SyncCoordinator";
+import { retryWithBackoff, IPFS_RETRY_OPTIONS } from "../../../../utils/retry";
 import { getBootstrapPeers, getConfiguredCustomPeers, getBackendPeerId, getAllBackendGatewayUrls } from "../../../../config/ipfs.config";
 
 // Configure @noble/ed25519 to use sync sha512 (required for getPublicKey without WebCrypto)
@@ -56,6 +58,7 @@ export interface StorageResult {
   validationIssues?: string[];
   conflictsResolved?: number;
   ipnsPublished?: boolean;
+  ipnsPublishPending?: boolean;  // True if IPNS publish failed and will be retried
   error?: string;
 }
 
@@ -107,6 +110,7 @@ const HKDF_INFO = "ipfs-storage-ed25519-v1";
 const SYNC_DEBOUNCE_MS = 5000;
 const VERSION_STORAGE_PREFIX = "ipfs_version_";
 const CID_STORAGE_PREFIX = "ipfs_last_cid_";
+const PENDING_IPNS_PREFIX = "ipfs_pending_ipns_";
 
 // ==========================================
 // IpfsStorageService
@@ -433,6 +437,7 @@ export class IpfsStorageService {
   /**
    * Publish CID to IPNS so ipns://{peerId} resolves to the latest content
    * Uses low-level ipns package to create and publish records via DHT
+   * Includes exponential backoff retry for transient failures
    * @param cid The CID to publish
    * @returns The IPNS name on success, null on failure (non-fatal)
    */
@@ -445,6 +450,10 @@ export class IpfsStorageService {
     const IPNS_PUBLISH_TIMEOUT = 30000; // 30 seconds
     const IPNS_LIFETIME = 24 * 60 * 60 * 1000; // 24 hours in ms
 
+    // Store helia and keyPair in local vars for closure
+    const helia = this.helia;
+    const ipnsKeyPair = this.ipnsKeyPair;
+
     try {
       console.log(`📦 Publishing to IPNS: ${this.cachedIpnsName?.slice(0, 16)}... -> ${cid.toString().slice(0, 16)}...`);
 
@@ -453,7 +462,7 @@ export class IpfsStorageService {
 
       // Create IPNS record with the CID value
       const record = await createIPNSRecord(
-        this.ipnsKeyPair,
+        ipnsKeyPair,
         `/ipfs/${cid.toString()}`,
         this.ipnsSequenceNumber,
         IPNS_LIFETIME
@@ -463,15 +472,23 @@ export class IpfsStorageService {
       const marshalledRecord = marshalIPNSRecord(record);
 
       // Create the routing key from the public key
-      const routingKey = multihashToIPNSRoutingKey(this.ipnsKeyPair.publicKey.toMultihash());
+      const routingKey = multihashToIPNSRoutingKey(ipnsKeyPair.publicKey.toMultihash());
 
-      // Publish to DHT with timeout
-      await Promise.race([
-        this.helia.routing.put(routingKey, marshalledRecord),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("IPNS publish timeout")), IPNS_PUBLISH_TIMEOUT)
-        ),
-      ]);
+      // Publish to DHT with retry and timeout
+      await retryWithBackoff(
+        async () => {
+          await Promise.race([
+            helia.routing.put(routingKey, marshalledRecord),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("IPNS publish timeout")), IPNS_PUBLISH_TIMEOUT)
+            ),
+          ]);
+        },
+        {
+          ...IPFS_RETRY_OPTIONS,
+          maxRetries: 2, // Fewer retries for IPNS (already slow)
+        }
+      );
 
       // Save sequence number on success
       this.setIpnsSequenceNumber(this.ipnsSequenceNumber);
@@ -482,7 +499,7 @@ export class IpfsStorageService {
       // Rollback sequence number on failure
       this.ipnsSequenceNumber--;
       // Non-fatal - content is still stored and announced
-      console.warn(`📦 Could not publish to IPNS (non-fatal):`, error);
+      console.warn(`📦 Could not publish to IPNS after retries (non-fatal):`, error);
       return null;
     }
   }
@@ -695,6 +712,65 @@ export class IpfsStorageService {
   }
 
   // ==========================================
+  // Pending IPNS Publish Tracking
+  // ==========================================
+
+  /**
+   * Get pending IPNS publish CID (if previous publish failed)
+   */
+  private getPendingIpnsPublish(): string | null {
+    if (!this.cachedIpnsName) return null;
+    const key = `${PENDING_IPNS_PREFIX}${this.cachedIpnsName}`;
+    return localStorage.getItem(key);
+  }
+
+  /**
+   * Set pending IPNS publish CID for retry
+   */
+  private setPendingIpnsPublish(cid: string): void {
+    if (!this.cachedIpnsName) return;
+    const key = `${PENDING_IPNS_PREFIX}${this.cachedIpnsName}`;
+    localStorage.setItem(key, cid);
+    console.log(`📦 IPNS publish marked as pending for CID: ${cid.slice(0, 16)}...`);
+  }
+
+  /**
+   * Clear pending IPNS publish after successful publish
+   */
+  private clearPendingIpnsPublish(): void {
+    if (!this.cachedIpnsName) return;
+    const key = `${PENDING_IPNS_PREFIX}${this.cachedIpnsName}`;
+    localStorage.removeItem(key);
+  }
+
+  /**
+   * Retry any pending IPNS publish from previous failed sync
+   */
+  private async retryPendingIpnsPublish(): Promise<boolean> {
+    const pendingCid = this.getPendingIpnsPublish();
+    if (!pendingCid) return true; // No pending publish
+
+    console.log(`📦 Retrying pending IPNS publish for CID: ${pendingCid.slice(0, 16)}...`);
+
+    try {
+      const { CID } = await import("multiformats/cid");
+      const cid = CID.parse(pendingCid);
+      const result = await this.publishToIpns(cid);
+
+      if (result) {
+        this.clearPendingIpnsPublish();
+        this.setLastCid(pendingCid);
+        console.log(`📦 Pending IPNS publish succeeded`);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.warn(`📦 Pending IPNS publish retry failed:`, error);
+      return false;
+    }
+  }
+
+  // ==========================================
   // IPNS Sync Helpers
   // ==========================================
 
@@ -736,32 +812,57 @@ export class IpfsStorageService {
 
   /**
    * Import remote data into local storage
-   * Only imports tokens and nametag that don't exist locally
+   * - Imports tokens that don't exist locally (unless tombstoned)
+   * - Removes local tokens that are tombstoned in remote
+   * - Merges tombstones from remote
+   * - Imports nametag if local doesn't have one
    */
   private async importRemoteData(remoteTxf: TxfStorageData): Promise<number> {
     const walletRepo = WalletRepository.getInstance();
-    const { tokens, nametag } = parseTxfStorageData(remoteTxf);
+    const { tokens, nametag, tombstones: remoteTombstones } = parseTxfStorageData(remoteTxf);
 
-    // Get local tokens
+    // Get local tokens and tombstones
     const localTokens = walletRepo.getWallet()?.tokens || [];
     const localTokenIds = new Set(localTokens.map(t => t.id));
+    const localTombstones = new Set(walletRepo.getTombstones());
 
     let importedCount = 0;
 
-    // Import tokens not in local storage
-    for (const token of tokens) {
-      if (!localTokenIds.has(token.id)) {
-        walletRepo.addToken(token);
-        console.log(`📦 Imported token ${token.id.slice(0, 8)}... from remote`);
-        importedCount++;
+    // 1. Merge tombstones - this removes local tokens that are in remote tombstones
+    if (remoteTombstones.length > 0) {
+      const removedCount = walletRepo.mergeTombstones(remoteTombstones);
+      if (removedCount > 0) {
+        console.log(`📦 Removed ${removedCount} tombstoned token(s) from local`);
       }
     }
 
-    // Import nametag if local doesn't have one
+    // 2. Import tokens not in local storage (and not in any tombstone list)
+    const allTombstones = new Set([...localTombstones, ...remoteTombstones]);
+    for (const token of tokens) {
+      // Skip if already in local
+      if (localTokenIds.has(token.id)) {
+        continue;
+      }
+
+      // Skip if tombstoned (deleted on any device)
+      if (allTombstones.has(token.id)) {
+        console.log(`📦 Skipping tombstoned token ${token.id.slice(0, 8)}... from remote`);
+        continue;
+      }
+
+      walletRepo.addToken(token);
+      console.log(`📦 Imported token ${token.id.slice(0, 8)}... from remote`);
+      importedCount++;
+    }
+
+    // 3. Import nametag if local doesn't have one
     if (nametag && !walletRepo.getNametag()) {
       walletRepo.setNametag(nametag);
       console.log(`📦 Imported nametag "${nametag.name}" from remote`);
     }
+
+    // 4. Prune old tombstones to prevent unlimited growth
+    walletRepo.pruneTombstones();
 
     return importedCount;
   }
@@ -787,6 +888,7 @@ export class IpfsStorageService {
    * This ensures we have the latest state from DHT before making changes
    *
    * Flow:
+   * 0. Retry any pending IPNS publishes from previous failed syncs
    * 1. Resolve IPNS to get remote CID
    * 2. Compare with local CID - if different, fetch remote content
    * 3. Version comparison: remote > local → import; local > remote → sync to update IPNS
@@ -801,6 +903,9 @@ export class IpfsStorageService {
       console.warn(`📦 Not initialized, skipping IPNS sync`);
       return { success: false, timestamp: Date.now(), error: "Not initialized" };
     }
+
+    // 0. Retry any pending IPNS publishes from previous failed syncs
+    await this.retryPendingIpnsPublish();
 
     // 1. Resolve IPNS to get remote CID from DHT
     const remoteCid = await this.resolveIpns();
@@ -881,13 +986,28 @@ export class IpfsStorageService {
 
   /**
    * Perform immediate sync to IPFS with TXF format and validation
+   * Uses SyncCoordinator for cross-tab coordination to prevent race conditions
    */
   async syncNow(): Promise<StorageResult> {
+    // Use SyncCoordinator to acquire distributed lock across browser tabs
+    const coordinator = getSyncCoordinator();
+
     if (this.isSyncing) {
       return {
         success: false,
         timestamp: Date.now(),
         error: "Sync already in progress",
+      };
+    }
+
+    // Try to acquire cross-tab lock
+    const lockAcquired = await coordinator.acquireLock();
+    if (!lockAcquired) {
+      console.log(`📦 Another tab is syncing, skipping this sync`);
+      return {
+        success: false,
+        timestamp: Date.now(),
+        error: "Another tab is syncing",
       };
     }
 
@@ -966,14 +1086,15 @@ export class IpfsStorageService {
             if (remoteVersion !== localVersion) {
               console.log(`📦 Version mismatch detected: local v${localVersion} vs remote v${remoteVersion}`);
 
-              // Build local storage data for comparison
+              // Build local storage data for comparison (include tombstones)
               const localMeta: Omit<TxfMeta, "formatVersion"> = {
                 version: localVersion,
                 timestamp: Date.now(),
                 address: wallet.address,
                 ipnsName: this.cachedIpnsName || "",
               };
-              const localTxf = buildTxfStorageData(validTokens, localMeta, nametag || undefined);
+              const localTombstones = walletRepo.getTombstones();
+              const localTxf = buildTxfStorageData(validTokens, localMeta, nametag || undefined, localTombstones);
 
               // Resolve conflicts
               const conflictService = getConflictResolutionService();
@@ -1029,6 +1150,7 @@ export class IpfsStorageService {
                 // Skip re-upload for this wallet-updated event
                 console.log(`📦 Remote is in sync (v${remoteVersion}) - no changes to upload`);
                 this.isSyncing = false;
+                coordinator.releaseLock(); // Release cross-tab lock on early return
                 return {
                   success: true,
                   cid: lastCid || undefined,
@@ -1047,8 +1169,9 @@ export class IpfsStorageService {
         }
       }
 
-      // 4. Build TXF storage data with incremented version
+      // 4. Build TXF storage data with incremented version (include tombstones)
       const newVersion = this.incrementVersionCounter();
+      const tombstones = walletRepo.getTombstones();
       const meta: Omit<TxfMeta, "formatVersion"> = {
         version: newVersion,
         timestamp: Date.now(),
@@ -1057,7 +1180,10 @@ export class IpfsStorageService {
         lastCid: this.getLastCid() || undefined,
       };
 
-      const txfStorageData = buildTxfStorageData(tokensToSync, meta, nametag || undefined);
+      const txfStorageData = buildTxfStorageData(tokensToSync, meta, nametag || undefined, tombstones);
+      if (tombstones.length > 0) {
+        console.log(`📦 Including ${tombstones.length} tombstone(s) in sync`);
+      }
 
       // 4. Ensure backend is connected before storing
       const backendConnected = await this.ensureBackendConnected();
@@ -1139,14 +1265,23 @@ export class IpfsStorageService {
       // 4.5. Publish to IPNS only if CID changed
       const previousCid = this.getLastCid();
       let ipnsPublished = false;
+      let ipnsPublishPending = false;
       if (cidString !== previousCid) {
-        await this.publishToIpns(cid);
-        ipnsPublished = true;
+        const ipnsResult = await this.publishToIpns(cid);
+        if (ipnsResult) {
+          ipnsPublished = true;
+          this.clearPendingIpnsPublish(); // Clear any previous pending
+        } else {
+          // IPNS publish failed - mark as pending for retry
+          this.setPendingIpnsPublish(cidString);
+          ipnsPublishPending = true;
+        }
       } else {
         console.log(`📦 CID unchanged (${cidString.slice(0, 16)}...) - skipping IPNS publish`);
+        this.clearPendingIpnsPublish(); // Clear any stale pending
       }
 
-      // 5. Store CID for recovery
+      // 5. Store CID for recovery (even if IPNS failed, content is stored)
       this.setLastCid(cidString);
 
       console.log(`📦 Tokens stored to IPFS (v${newVersion}): ${cidString}`);
@@ -1162,6 +1297,7 @@ export class IpfsStorageService {
         validationIssues: issues.length > 0 ? issues.map(i => i.reason) : undefined,
         conflictsResolved: conflictsResolved > 0 ? conflictsResolved : undefined,
         ipnsPublished,
+        ipnsPublishPending: ipnsPublishPending || undefined,
       };
 
       this.lastSync = result;
@@ -1209,6 +1345,8 @@ export class IpfsStorageService {
       return result;
     } finally {
       this.isSyncing = false;
+      // Release cross-tab lock
+      coordinator.releaseLock();
     }
   }
 

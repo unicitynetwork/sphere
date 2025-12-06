@@ -11,13 +11,14 @@ import type { NametagData } from "../../../../../repositories/WalletRepository";
 
 /**
  * Complete storage data structure for IPFS
- * Contains metadata, nametag, and all tokens keyed by their IDs
+ * Contains metadata, nametag, tombstones, and all tokens keyed by their IDs
  */
 export interface TxfStorageData {
   _meta: TxfMeta;
   _nametag?: NametagData;
+  _tombstones?: string[];  // Array of deleted token IDs (prevents zombie tokens)
   // Dynamic keys for tokens: _<tokenId>
-  [key: string]: TxfToken | TxfMeta | NametagData | undefined;
+  [key: string]: TxfToken | TxfMeta | NametagData | string[] | undefined;
 }
 
 /**
@@ -30,6 +31,7 @@ export interface TxfMeta {
   ipnsName: string;          // IPNS name for this wallet
   formatVersion: "2.0";      // TXF format version
   lastCid?: string;          // Last successfully stored CID
+  deviceId?: string;         // Unique device identifier for conflict resolution
 }
 
 // ==========================================
@@ -183,6 +185,7 @@ export function isTokenKey(key: string): boolean {
   return key.startsWith("_") &&
          key !== "_meta" &&
          key !== "_nametag" &&
+         key !== "_tombstones" &&
          key !== "_integrity";
 }
 
