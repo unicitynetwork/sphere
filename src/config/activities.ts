@@ -48,8 +48,8 @@ export const agents: AgentConfig[] = [
   },
   {
     id: 'ai',
-    name: 'Uncensored Viktor',
-    description: 'AI Assistant with web access',
+    name: 'Uncensored AI',
+    description: 'Viktor can assist with anything',
     Icon: Sparkles,
     category: 'Assistant',
     color: 'from-orange-500 to-amber-500',
@@ -102,7 +102,7 @@ export const agents: AgentConfig[] = [
   {
     id: 'sport',
     name: 'P2P Prediction',
-    description: 'Sports betting',
+    description: 'Sports prediction markets',
     Icon: Trophy,
     category: 'Prediction',
     color: 'from-emerald-500 to-teal-500',
