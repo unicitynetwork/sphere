@@ -18,7 +18,7 @@ import { buildTxfStorageData, parseTxfStorageData, txfToToken } from "./TxfSeria
 import { getTokenValidationService } from "./TokenValidationService";
 import { getConflictResolutionService } from "./ConflictResolutionService";
 import { getSyncCoordinator } from "./SyncCoordinator";
-import { retryWithBackoff, IPFS_RETRY_OPTIONS } from "../../../../utils/retry";
+// Note: retryWithBackoff was used for DHT publish, now handled by HTTP primary path
 import { getBootstrapPeers, getConfiguredCustomPeers, getBackendPeerId, getAllBackendGatewayUrls } from "../../../../config/ipfs.config";
 
 // Configure @noble/ed25519 to use sync sha512 (required for getPublicKey without WebCrypto)
@@ -435,9 +435,123 @@ export class IpfsStorageService {
   }
 
   /**
-   * Publish CID to IPNS so ipns://{peerId} resolves to the latest content
-   * Uses low-level ipns package to create and publish records via DHT
-   * Includes exponential backoff retry for transient failures
+   * Publish pre-signed IPNS record via Kubo HTTP API
+   * Much faster than browser DHT - server has better connectivity
+   * @param marshalledRecord The signed, marshalled IPNS record bytes
+   * @returns true if at least one backend accepted the record
+   */
+  private async publishIpnsViaHttp(
+    marshalledRecord: Uint8Array
+  ): Promise<boolean> {
+    const gatewayUrls = getAllBackendGatewayUrls();
+    if (gatewayUrls.length === 0) {
+      console.warn("📦 No backend gateways configured for HTTP IPNS publish");
+      return false;
+    }
+
+    // For Kubo API, we pass the IPNS name (peer ID) as the first arg
+    const ipnsName = this.cachedIpnsName;
+    if (!ipnsName) {
+      console.warn("📦 No IPNS name cached - cannot publish via HTTP");
+      return false;
+    }
+
+    console.log(`📦 Publishing IPNS via HTTP to ${gatewayUrls.length} backend(s)...`);
+
+    // Try all configured gateways in parallel
+    const results = await Promise.allSettled(
+      gatewayUrls.map(async (gatewayUrl) => {
+        try {
+          // Kubo /api/v0/routing/put expects:
+          // - arg: the routing key path (e.g., "/ipns/12D3KooW...")
+          // - body: the marshalled record bytes as multipart form
+          const formData = new FormData();
+          // Create Blob from Uint8Array (spread to array for type compatibility)
+          formData.append(
+            "file",
+            new Blob([new Uint8Array(marshalledRecord)]),
+            "record"
+          );
+
+          // allow-offline=true: Store record locally first, then propagate async
+          // This makes the HTTP call return quickly instead of waiting for DHT
+          const response = await fetch(
+            `${gatewayUrl}/api/v0/routing/put?arg=/ipns/${ipnsName}&allow-offline=true`,
+            {
+              method: "POST",
+              body: formData,
+              signal: AbortSignal.timeout(30000), // 30s timeout
+            }
+          );
+
+          if (!response.ok) {
+            const errorText = await response.text().catch(() => "");
+            throw new Error(`HTTP ${response.status}: ${errorText.slice(0, 100)}`);
+          }
+
+          const hostname = new URL(gatewayUrl).hostname;
+          console.log(`📦 IPNS record accepted by ${hostname}`);
+          return gatewayUrl;
+        } catch (error) {
+          const hostname = new URL(gatewayUrl).hostname;
+          console.warn(`📦 HTTP IPNS publish to ${hostname} failed:`, error);
+          throw error;
+        }
+      })
+    );
+
+    const successful = results.filter((r) => r.status === "fulfilled");
+    if (successful.length > 0) {
+      console.log(
+        `📦 IPNS record published via HTTP to ${successful.length}/${gatewayUrls.length} backends`
+      );
+      return true;
+    }
+
+    console.warn("📦 HTTP IPNS publish failed on all backends");
+    return false;
+  }
+
+  /**
+   * Fire-and-forget IPNS publish via browser DHT
+   * Runs in background - doesn't block sync completion
+   * Provides redundancy alongside HTTP publish
+   * @param routingKey The DHT routing key
+   * @param marshalledRecord The signed, marshalled IPNS record bytes
+   */
+  private publishIpnsViaDhtAsync(
+    routingKey: Uint8Array,
+    marshalledRecord: Uint8Array
+  ): void {
+    if (!this.helia) return;
+
+    const helia = this.helia;
+    const DHT_BACKGROUND_TIMEOUT = 60000; // 60s - longer timeout since it's background
+
+    // Don't await - let it run in background
+    (async () => {
+      try {
+        await Promise.race([
+          helia.routing.put(routingKey, marshalledRecord),
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error("DHT background timeout")),
+              DHT_BACKGROUND_TIMEOUT
+            )
+          ),
+        ]);
+        console.log("📦 IPNS record also propagated via browser DHT");
+      } catch (error) {
+        // Non-fatal - HTTP publish is primary
+        console.debug("📦 Browser DHT IPNS publish completed with:", error);
+      }
+    })();
+  }
+
+  /**
+   * Publish CID to IPNS using dual strategy:
+   * 1. Primary: HTTP POST to Kubo backend (fast, reliable)
+   * 2. Fallback: Fire-and-forget browser DHT (slow but provides redundancy)
    * @param cid The CID to publish
    * @returns The IPNS name on success, null on failure (non-fatal)
    */
@@ -447,20 +561,18 @@ export class IpfsStorageService {
       return null;
     }
 
-    const IPNS_PUBLISH_TIMEOUT = 30000; // 30 seconds
     const IPNS_LIFETIME = 24 * 60 * 60 * 1000; // 24 hours in ms
-
-    // Store helia and keyPair in local vars for closure
-    const helia = this.helia;
     const ipnsKeyPair = this.ipnsKeyPair;
 
     try {
-      console.log(`📦 Publishing to IPNS: ${this.cachedIpnsName?.slice(0, 16)}... -> ${cid.toString().slice(0, 16)}...`);
+      console.log(
+        `📦 Publishing to IPNS: ${this.cachedIpnsName?.slice(0, 16)}... -> ${cid.toString().slice(0, 16)}...`
+      );
 
       // Increment sequence number for new record
       this.ipnsSequenceNumber++;
 
-      // Create IPNS record with the CID value
+      // 1. Create and sign IPNS record (once - used for both paths)
       const record = await createIPNSRecord(
         ipnsKeyPair,
         `/ipfs/${cid.toString()}`,
@@ -468,38 +580,44 @@ export class IpfsStorageService {
         IPNS_LIFETIME
       );
 
-      // Marshal the record for DHT storage
+      // Marshal the record for storage/transmission
       const marshalledRecord = marshalIPNSRecord(record);
 
-      // Create the routing key from the public key
-      const routingKey = multihashToIPNSRoutingKey(ipnsKeyPair.publicKey.toMultihash());
-
-      // Publish to DHT with retry and timeout
-      await retryWithBackoff(
-        async () => {
-          await Promise.race([
-            helia.routing.put(routingKey, marshalledRecord),
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error("IPNS publish timeout")), IPNS_PUBLISH_TIMEOUT)
-            ),
-          ]);
-        },
-        {
-          ...IPFS_RETRY_OPTIONS,
-          maxRetries: 2, // Fewer retries for IPNS (already slow)
-        }
+      // Create the routing key from the public key (needed for DHT path)
+      const routingKey = multihashToIPNSRoutingKey(
+        ipnsKeyPair.publicKey.toMultihash()
       );
 
-      // Save sequence number on success
-      this.setIpnsSequenceNumber(this.ipnsSequenceNumber);
+      // 2. Publish via HTTP (primary, fast) - AWAIT this
+      // HTTP path uses cachedIpnsName internally, doesn't need routingKey
+      const httpSuccess = await this.publishIpnsViaHttp(marshalledRecord);
 
-      console.log(`📦 IPNS record published successfully (seq: ${this.ipnsSequenceNumber})`);
-      return this.cachedIpnsName;
+      // 3. Publish via browser DHT (fallback, fire-and-forget) - DON'T await
+      // This runs in background regardless of HTTP result for redundancy
+      this.publishIpnsViaDhtAsync(routingKey, marshalledRecord);
+
+      if (httpSuccess) {
+        // Save sequence number on HTTP success
+        this.setIpnsSequenceNumber(this.ipnsSequenceNumber);
+        console.log(
+          `📦 IPNS record published successfully (seq: ${this.ipnsSequenceNumber})`
+        );
+        return this.cachedIpnsName;
+      }
+
+      // HTTP failed - DHT is still trying in background
+      // We still consider this a partial success since DHT may succeed
+      console.warn(
+        "📦 HTTP IPNS publish failed, DHT attempting in background"
+      );
+      // Don't rollback sequence - DHT may succeed with this sequence
+      // But don't persist it either - if DHT fails, we'll retry with same seq
+      return null;
     } catch (error) {
       // Rollback sequence number on failure
       this.ipnsSequenceNumber--;
       // Non-fatal - content is still stored and announced
-      console.warn(`📦 Could not publish to IPNS after retries (non-fatal):`, error);
+      console.warn(`📦 IPNS publish failed:`, error);
       return null;
     }
   }
