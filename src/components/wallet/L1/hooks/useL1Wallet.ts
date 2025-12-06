@@ -1,16 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import {
-  createWallet,
-  deleteWallet,
   importWallet,
   exportWallet,
   downloadWalletFile,
   generateHDAddress,
   generateHDAddressBIP32,
-  saveWalletToStorage,
-  loadWalletFromStorage,
-  deleteWalletFromStorage,
   getBalance,
   getTransactionHistory,
   getTransaction,
@@ -27,6 +22,9 @@ import {
   type VestingBalances,
 } from "../sdk";
 import { subscribeBlocks } from "../sdk/network";
+import { loadWalletFromUnifiedKeyManager, getUnifiedKeyManager } from "../sdk/unifiedWalletBridge";
+import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
+import { WalletRepository } from "../../../../repositories/WalletRepository";
 
 // Query keys for L1 wallet
 export const L1_KEYS = {
@@ -38,17 +36,6 @@ export const L1_KEYS = {
   VESTING: (address: string) => ["l1", "vesting", address],
 };
 
-const WALLET_STORAGE_KEY = "main";
-
-// Load wallet from localStorage
-const loadWallet = (): Wallet | null => {
-  return loadWalletFromStorage(WALLET_STORAGE_KEY);
-};
-
-// Save wallet to localStorage
-const saveWallet = (wallet: Wallet) => {
-  saveWalletToStorage(WALLET_STORAGE_KEY, wallet);
-};
 
 export function useL1Wallet(selectedAddress?: string) {
   const queryClient = useQueryClient();
@@ -105,10 +92,13 @@ export function useL1Wallet(selectedAddress?: string) {
     };
   }, [queryClient]);
 
-  // Query: Wallet from localStorage
+  // Query: Wallet from UnifiedKeyManager
   const walletQuery = useQuery({
     queryKey: L1_KEYS.WALLET,
-    queryFn: loadWallet,
+    queryFn: async () => {
+      const wallet = await loadWalletFromUnifiedKeyManager();
+      return wallet;
+    },
     staleTime: Infinity, // Wallet doesn't change unless we mutate it
   });
 
@@ -207,19 +197,28 @@ export function useL1Wallet(selectedAddress?: string) {
     staleTime: 60000, // 1 minute - vesting classification is expensive
   });
 
-  // Mutation: Create new wallet
+  // Mutation: Create new wallet via UnifiedKeyManager
   const createWalletMutation = useMutation({
     mutationFn: async () => {
-      const wallet = createWallet();
-      saveWallet(wallet);
+      const keyManager = getUnifiedKeyManager();
+      await keyManager.generateNew(12);
+      // Load the wallet from UnifiedKeyManager
+      const wallet = await loadWalletFromUnifiedKeyManager();
+      if (!wallet) {
+        throw new Error("Failed to create wallet");
+      }
       return wallet;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: L1_KEYS.WALLET });
+      // Also invalidate L3 queries since wallet changed
+      queryClient.invalidateQueries({ queryKey: ["l3", "identity"] });
+      queryClient.invalidateQueries({ queryKey: ["l3", "nametag"] });
+      queryClient.invalidateQueries({ queryKey: ["l3", "tokens"] });
     },
   });
 
-  // Mutation: Import wallet from file
+  // Mutation: Import wallet from file via UnifiedKeyManager
   const importWalletMutation = useMutation({
     mutationFn: async ({
       file,
@@ -228,54 +227,71 @@ export function useL1Wallet(selectedAddress?: string) {
       file: File;
       password?: string;
     }) => {
-      const result = await importWallet(file, password);
+      const keyManager = getUnifiedKeyManager();
 
-      if (!result.success || !result.wallet) {
-        throw new Error(result.error || "Import failed");
-      }
+      // Read file content
+      const content = await file.text();
 
-      let wallet = result.wallet;
-
-      // Regenerate addresses for BIP32 wallets
-      if (wallet.isImportedAlphaWallet && wallet.chainCode) {
-        const addresses = [];
-        const numAddresses = wallet.addresses.length || 1;
-
-        // Use descriptorPath if available, otherwise default to BIP84 for Alpha
-        const basePath = wallet.descriptorPath
-          ? `m/${wallet.descriptorPath}`
-          : "m/84'/1'/0'";
-
-        for (let i = 0; i < numAddresses; i++) {
-          const addr = generateHDAddressBIP32(
-            wallet.masterPrivateKey,
-            wallet.chainCode,
-            i,
-            basePath
-          );
-          addresses.push(addr);
+      // Use UnifiedKeyManager's import (handles decryption if needed)
+      if (password) {
+        // For encrypted files, use the SDK's importWallet to decrypt first
+        const result = await importWallet(file, password);
+        if (!result.success || !result.wallet) {
+          throw new Error(result.error || "Import failed");
         }
-        wallet = { ...wallet, addresses };
+        // Then import the decrypted content via UnifiedKeyManager
+        // Construct a text file format from the decrypted wallet
+        const masterKey = result.wallet.masterPrivateKey;
+        const chainCode = result.wallet.chainCode;
+        let textContent = `MASTER PRIVATE KEY:\n${masterKey}`;
+        if (chainCode) {
+          textContent += `\n\nMASTER CHAIN CODE:\n${chainCode}`;
+        }
+        await keyManager.importFromFileContent(textContent);
+      } else {
+        // For unencrypted txt files, import directly
+        await keyManager.importFromFileContent(content);
       }
 
-      saveWallet(wallet);
+      // Load the wallet from UnifiedKeyManager
+      const wallet = await loadWalletFromUnifiedKeyManager();
+      if (!wallet) {
+        throw new Error("Failed to import wallet");
+      }
       return wallet;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: L1_KEYS.WALLET });
+      // Also invalidate L3 queries since wallet changed
+      queryClient.invalidateQueries({ queryKey: ["l3", "identity"] });
+      queryClient.invalidateQueries({ queryKey: ["l3", "nametag"] });
+      queryClient.invalidateQueries({ queryKey: ["l3", "tokens"] });
     },
   });
 
-  // Mutation: Delete wallet
+  // Mutation: Delete wallet via UnifiedKeyManager
   const deleteWalletMutation = useMutation({
     mutationFn: async () => {
-      deleteWallet();
-      deleteWalletFromStorage(WALLET_STORAGE_KEY);
+      // 1. Clear UnifiedKeyManager localStorage and reset singleton
+      const keyManager = getUnifiedKeyManager();
+      keyManager.clear();
+      UnifiedKeyManager.resetInstance();
+
+      // 2. Clear IdentityManager selected index
+      localStorage.removeItem("l3_selected_address_index");
+
+      // 3. Reset WalletRepository in-memory state (keeps localStorage intact for tokens/nametags)
+      WalletRepository.getInstance().resetInMemoryState();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: L1_KEYS.WALLET });
-      queryClient.removeQueries({ queryKey: ["l1", "balance"] });
-      queryClient.removeQueries({ queryKey: ["l1", "transactions"] });
+      // Clear ALL L1 queries
+      queryClient.removeQueries({ queryKey: ["l1"] });
+
+      // Clear ALL L3 queries
+      queryClient.removeQueries({ queryKey: ["l3"] });
+
+      // Force page reload for clean state
+      window.location.reload();
     },
   });
 

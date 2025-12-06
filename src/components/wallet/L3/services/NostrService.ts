@@ -62,7 +62,7 @@ export class NostrService {
   private identityManager: IdentityManager;
   private isConnected: boolean = false;
   private isConnecting: boolean = false;
-  private connectionPromise: Promise<void> | null = null;
+  private connectPromise: Promise<void> | null = null;
   private paymentRequests: IncomingPaymentRequest[] = [];
   private chatRepository: ChatRepository;
   private dmListeners: ((message: ChatMessage) => void)[] = [];
@@ -84,42 +84,36 @@ export class NostrService {
   }
 
   async start() {
-    // If already connected, return immediately
-    if (this.isConnected) {
-      console.log("Nostr already connected, skipping start");
-      return;
+    // Already connected
+    if (this.isConnected) return;
+
+    // Connection in progress - wait for it
+    if (this.isConnecting && this.connectPromise) {
+      return this.connectPromise;
     }
 
-    // If connection is in progress, wait for it
-    if (this.isConnecting && this.connectionPromise) {
-      console.log("Nostr connection in progress, waiting...");
-      return this.connectionPromise;
-    }
-
-    // Start new connection
+    // Start connection
     this.isConnecting = true;
-    this.connectionPromise = this._performStart();
+    this.connectPromise = this.doConnect();
 
     try {
-      await this.connectionPromise;
+      await this.connectPromise;
     } finally {
       this.isConnecting = false;
-      this.connectionPromise = null;
+      this.connectPromise = null;
     }
   }
 
-  private async _performStart() {
+  private async doConnect(): Promise<void> {
     const identity = await this.identityManager.getCurrentIdentity();
     if (!identity) throw new Error("No identity found for Nostr");
 
     const secretKey = Buffer.from(identity.privateKey, "hex");
     const keyManager = NostrKeyManager.fromPrivateKey(secretKey);
 
-    console.log(secretKey)
-
     this.client = new NostrClient(keyManager);
 
-    console.log("Connecting to Nostr relays...");
+    console.log("📡 Connecting to Nostr relays...");
     try {
       await this.client.connect(UNICITY_RELAYS[0]);
       this.isConnected = true;
@@ -934,5 +928,53 @@ export class NostrService {
   async getMyNametag(): Promise<string | null> {
     const nametagService = NametagService.getInstance(this.identityManager);
     return nametagService.getActiveNametag();
+  }
+
+  // ==========================================
+  // App-Specific Data Publishing (NIP-78)
+  // ==========================================
+
+  /**
+   * Publish an app-specific data event to Nostr relays.
+   * Used for IPFS CID pin announcements (kind 30078).
+   *
+   * @param kind - Event kind (e.g., 30078 for app-specific data)
+   * @param tags - Event tags array (e.g., [["d", "ipfs-pin"], ["cid", "Qm..."]])
+   * @param content - Event content (can be empty string or JSON)
+   * @returns Event ID if successful, null otherwise
+   */
+  async publishAppDataEvent(
+    kind: number,
+    tags: string[][],
+    content: string
+  ): Promise<string | null> {
+    if (!this.client) {
+      await this.start();
+    }
+
+    try {
+      const keyManager = await this.getKeyManager();
+      if (!keyManager || !this.client) {
+        console.error("Cannot publish app data event: no key manager or client");
+        return null;
+      }
+
+      // Create and sign the event
+      // The SDK's NostrClient createAndPublishEvent expects an UnsignedEventData object
+      const eventId = await this.client.createAndPublishEvent({
+        kind,
+        tags,
+        content,
+      });
+
+      if (eventId) {
+        console.log(`📤 Published app data event (kind ${kind}): ${eventId.slice(0, 8)}...`);
+      }
+
+      return eventId || null;
+    } catch (error) {
+      console.error("Failed to publish app data event:", error);
+      return null;
+    }
   }
 }
