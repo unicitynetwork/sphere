@@ -145,7 +145,7 @@ export const agents: AgentConfig[] = [
     backendActivityId: 'merch',
     quickActions: [
       { label: 'All items', message: 'Show all merch' },
-      { label: 'Hoodies', message: 'Show hoodies' },
+      { label: 'Mugs', message: 'Show mugs' },
       { label: 'T-Shirts', message: 'Show t-shirts' },
     ],
     contentType: 'merch',
