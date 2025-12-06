@@ -48,7 +48,7 @@ export const agents: AgentConfig[] = [
   },
   {
     id: 'ai',
-    name: 'Uncensored LLM',
+    name: 'Uncensored Viktor',
     description: 'AI Assistant with web access',
     Icon: Sparkles,
     category: 'Assistant',
@@ -107,7 +107,7 @@ export const agents: AgentConfig[] = [
     category: 'Prediction',
     color: 'from-emerald-500 to-teal-500',
     type: 'ai-with-sidebar',
-    greetingMessage: "Welcome to the Betting Floor! 🏟️ I'm connected to the live markets. I can check odds, show your active slips, or help you place a wager. What are we looking at today?",
+    greetingMessage: "Welcome to the P2P Prediction Marketplace! 🏟️ Right now I'm only able to help you make predictions on sports games. I can help you check odds, make a prediction and show you what your active predictions are. What are we looking at ? English Premier League ? IPL ? Let me know and we can have some fun.",
     backendActivityId: 'sports',
     quickActions: [
       { label: 'Live odds', message: 'Show me live odds' },
