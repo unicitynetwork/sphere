@@ -1,7 +1,7 @@
-import { Plus, ArrowUpRight, Sparkles, Loader2, Coins, Layers, Bell, CheckCircle, XCircle, Key, Clock } from 'lucide-react';
+import { Plus, ArrowUpRight, Sparkles, Loader2, Coins, Layers, Bell, CheckCircle, XCircle, Key, Download, Upload, Clock } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useWallet } from '../hooks/useWallet';
 import { CreateWalletFlow } from '../onboarding/CreateWalletFlow';
 import { TokenRow } from '../../shared/components';
@@ -10,12 +10,14 @@ import { useIncomingPaymentRequests } from '../hooks/useIncomingPaymentRequests'
 import { PaymentRequestsModal } from '../modals/PaymentRequestModal';
 import { FaucetService } from '../services/FaucetService';
 import { SeedPhraseModal } from '../modals/SeedPhraseModal';
+import { useIpfsStorage } from '../hooks/useIpfsStorage';
 import { TransactionHistoryModal } from '../modals/TransactionHistoryModal';
 
 type Tab = 'assets' | 'tokens';
 
 export function L3WalletView({ showBalances }: { showBalances: boolean }) {
   const { identity, assets, tokens, isLoadingAssets, isLoadingIdentity, nametag, getSeedPhrase } = useWallet();
+  const { exportTxf, importTxf, isExportingTxf, isImportingTxf } = useIpfsStorage();
   const [activeTab, setActiveTab] = useState<Tab>('assets');
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const [isRequestsOpen, setIsRequestsOpen] = useState(false);
@@ -25,6 +27,9 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
   const [isFaucetLoading, setIsFaucetLoading] = useState(false);
   const [faucetSuccess, setFaucetSuccess] = useState(false);
   const [faucetError, setFaucetError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { pendingCount } = useIncomingPaymentRequests();
 
@@ -77,6 +82,42 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
       setIsSeedPhraseOpen(true);
     }
   };
+
+  const handleExportTxf = useCallback(async () => {
+    try {
+      setImportError(null);
+      await exportTxf();
+    } catch (error) {
+      console.error('Export failed:', error);
+    }
+  }, [exportTxf]);
+
+  const handleImportTxf = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setImportError(null);
+    setImportSuccess(false);
+
+    try {
+      const content = await file.text();
+      const result = await importTxf(content);
+
+      if (result.success) {
+        setImportSuccess(true);
+        setTimeout(() => setImportSuccess(false), 3000);
+      } else {
+        setImportError(result.error || 'Import failed');
+      }
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Import failed');
+    }
+
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, [importTxf]);
 
   if (isLoadingIdentity) {
     return (
@@ -235,10 +276,63 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
             <Sparkles className="w-4 h-4 text-orange-500" />
             <h4 className="text-sm text-neutral-500 dark:text-neutral-400">Network Assets</h4>
           </div>
-          <button className="text-xs text-orange-500 dark:text-orange-400 hover:text-orange-600 dark:hover:text-orange-300">Manage</button>
+          <div className="flex items-center gap-2">
+            {/* Hidden file input for import */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txf,.json"
+              onChange={handleImportTxf}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isImportingTxf}
+              className="flex items-center gap-1 text-xs text-orange-500 dark:text-orange-400 hover:text-orange-600 dark:hover:text-orange-300 disabled:opacity-50"
+              title="Import tokens from TXF file"
+            >
+              {isImportingTxf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+              <span>Import</span>
+            </button>
+            <button
+              onClick={handleExportTxf}
+              disabled={isExportingTxf}
+              className="flex items-center gap-1 text-xs text-orange-500 dark:text-orange-400 hover:text-orange-600 dark:hover:text-orange-300 disabled:opacity-50"
+              title="Export tokens as TXF file"
+            >
+              {isExportingTxf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+              <span>Export</span>
+            </button>
+          </div>
         </div>
 
-{isLoadingAssets ? (
+        {/* Import feedback */}
+        <AnimatePresence>
+          {importSuccess && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="mb-4 flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-xl"
+            >
+              <CheckCircle className="w-4 h-4 text-green-500 dark:text-green-400 shrink-0" />
+              <p className="text-xs text-green-600 dark:text-green-400">Tokens imported successfully!</p>
+            </motion.div>
+          )}
+          {importError && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="mb-4 flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl"
+            >
+              <XCircle className="w-4 h-4 text-red-500 dark:text-red-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-red-600 dark:text-red-400">{importError}</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {isLoadingAssets ? (
           <div className="py-10 text-center">
             <Loader2 className="w-6 h-6 text-orange-500 animate-spin mx-auto" />
           </div>

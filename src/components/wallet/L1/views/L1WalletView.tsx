@@ -18,6 +18,7 @@ import {
 import { useL1Wallet } from "../hooks";
 import { NoWalletView, HistoryView, MainWalletView } from ".";
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
+import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { WalletScanModal, ImportWalletModal, LoadPasswordModal } from "../components/modals";
 
 type ViewMode = "main" | "history";
@@ -91,12 +92,20 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     })();
   }, []);
 
-  // Set initial selected address when wallet loads
+  // Set initial selected address when wallet loads - sync with L3's stored index
   useEffect(() => {
-    if (wallet && !selectedAddress && wallet.addresses.length > 0) {
-      setSelectedAddress(wallet.addresses[0].address);
+    if (wallet && wallet.addresses.length > 0) {
+      // Read stored index (same one L3 uses)
+      const storedIndex = parseInt(localStorage.getItem("l3_selected_address_index") || "0", 10);
+      const validIndex = Math.min(Math.max(0, storedIndex), wallet.addresses.length - 1);
+      const addressFromIndex = wallet.addresses[validIndex].address;
+
+      // Only update if different from current selection
+      if (selectedAddress !== addressFromIndex) {
+        setSelectedAddress(addressFromIndex);
+      }
     }
-  }, [wallet, selectedAddress]);
+  }, [wallet]);
 
   // Vesting progress for UI - show loading only on initial load, not on refetch
   const vestingProgress = isLoadingVesting
@@ -404,9 +413,19 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     setViewMode("main");
   };
 
-  // Select address
+  // Select address - sync with L3's selected address index
   const onSelectAddress = (address: string) => {
-    setSelectedAddress(address);
+    // Find index of selected address
+    const index = wallet?.addresses.findIndex(a => a.address === address) ?? 0;
+
+    // Sync to L3's selected address index
+    localStorage.setItem("l3_selected_address_index", String(index));
+
+    // Reset L3 state so it picks up new identity
+    WalletRepository.getInstance().resetInMemoryState();
+
+    // Force page reload to restart NostrService with new identity
+    window.location.reload();
   };
 
   // Show loading state while connecting
