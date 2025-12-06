@@ -47,10 +47,12 @@ export const useWallet = () => {
     return () => window.removeEventListener("wallet-updated", handleWalletUpdate);
   }, [queryClient]);
 
-  // Initialize IPFS storage service for automatic token sync
+  // Initialize IPFS storage service for automatic token sync (disabled by default)
   useEffect(() => {
-    const storageService = IpfsStorageService.getInstance(identityManager);
-    storageService.startAutoSync();
+    if (import.meta.env.VITE_ENABLE_IPFS === 'true') {
+      const storageService = IpfsStorageService.getInstance(identityManager);
+      storageService.startAutoSync();
+    }
   }, []);
 
   const identityQuery = useQuery({

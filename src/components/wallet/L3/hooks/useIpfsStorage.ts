@@ -30,8 +30,10 @@ export function useIpfsStorage() {
   const [lastEvent, setLastEvent] = useState<StorageEvent | null>(null);
   const [isServiceReady, setIsServiceReady] = useState(false);
 
-  // Get storage service instance
-  const storageService = IpfsStorageService.getInstance(identityManager);
+  const isEnabled = import.meta.env.VITE_ENABLE_IPFS === 'true';
+
+  // Get storage service instance (only if enabled)
+  const storageService = isEnabled ? IpfsStorageService.getInstance(identityManager) : null;
 
   // Listen for storage events
   useEffect(() => {
@@ -59,8 +61,9 @@ export function useIpfsStorage() {
     };
   }, [queryClient]);
 
-  // Start auto-sync on mount
+  // Start auto-sync on mount (only if enabled)
   useEffect(() => {
+    if (!storageService) return;
     storageService.startAutoSync();
     setIsServiceReady(true);
 
@@ -72,22 +75,22 @@ export function useIpfsStorage() {
   // Query: Storage status
   const statusQuery = useQuery({
     queryKey: IPFS_STORAGE_KEYS.STATUS,
-    queryFn: (): StorageStatus => storageService.getStatus(),
+    queryFn: (): StorageStatus => storageService!.getStatus(),
     refetchInterval: 30000, // Refresh every 30 seconds
-    enabled: isServiceReady,
+    enabled: isServiceReady && !!storageService,
   });
 
   // Query: IPNS name
   const ipnsNameQuery = useQuery({
     queryKey: IPFS_STORAGE_KEYS.IPNS_NAME,
-    queryFn: () => storageService.getIpnsName(),
+    queryFn: () => storageService!.getIpnsName(),
     staleTime: Infinity, // IPNS name is deterministic, doesn't change
-    enabled: isServiceReady,
+    enabled: isServiceReady && !!storageService,
   });
 
   // Mutation: Manual sync
   const syncMutation = useMutation({
-    mutationFn: (): Promise<StorageResult> => storageService.syncNow(),
+    mutationFn: (): Promise<StorageResult> => storageService!.syncNow(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: IPFS_STORAGE_KEYS.STATUS });
     },
@@ -96,7 +99,7 @@ export function useIpfsStorage() {
   // Mutation: Restore from CID
   const restoreMutation = useMutation({
     mutationFn: async (cid: string): Promise<RestoreResult> => {
-      const result = await storageService.restore(cid);
+      const result = await storageService!.restore(cid);
 
       // If successful, add tokens to wallet and restore nametag
       if (result.success && result.tokens) {
@@ -123,7 +126,7 @@ export function useIpfsStorage() {
   // Mutation: Restore from last known CID
   const restoreFromLastMutation = useMutation({
     mutationFn: async (): Promise<RestoreResult> => {
-      const result = await storageService.restoreFromLastCid();
+      const result = await storageService!.restoreFromLastCid();
 
       // If successful, add tokens to wallet
       if (result.success && result.tokens) {
@@ -148,7 +151,7 @@ export function useIpfsStorage() {
   // Mutation: Export as TXF
   const exportTxfMutation = useMutation({
     mutationFn: async (): Promise<{ success: boolean; data?: string; filename?: string; error?: string }> => {
-      const result = await storageService.exportAsTxf();
+      const result = await storageService!.exportAsTxf();
 
       // If successful, trigger browser download
       if (result.success && result.data && result.filename) {
@@ -176,7 +179,7 @@ export function useIpfsStorage() {
       skipped?: number;
       error?: string;
     }> => {
-      const result = await storageService.importFromTxf(content);
+      const result = await storageService!.importFromTxf(content);
 
       // If successful, add tokens to wallet
       if (result.success && result.tokens) {
@@ -198,16 +201,20 @@ export function useIpfsStorage() {
   // Register event callback for external integrations
   const onStorageEvent = useCallback(
     (callback: (event: StorageEvent) => void | Promise<void>) => {
+      if (!storageService) return () => {};
       return storageService.onEvent(callback);
     },
     [storageService]
   );
 
   return {
+    // Enabled state
+    isEnabled,
+
     // Status
     status: statusQuery.data,
     isLoadingStatus: statusQuery.isLoading,
-    isServiceReady,
+    isServiceReady: isEnabled && isServiceReady,
     currentVersion: statusQuery.data?.currentVersion ?? 0,
     lastCid: statusQuery.data?.lastCid ?? null,
 
@@ -217,7 +224,7 @@ export function useIpfsStorage() {
 
     // Sync operations
     sync: syncMutation.mutateAsync,
-    isSyncing: syncMutation.isPending || storageService.isCurrentlySyncing(),
+    isSyncing: syncMutation.isPending || (storageService?.isCurrentlySyncing() ?? false),
     syncError: syncMutation.error,
 
     // Restore operations
