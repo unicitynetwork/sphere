@@ -2,6 +2,14 @@ import { type LucideIcon } from "lucide-react";
 
 export type ChatMode = 'global' | 'dm';
 
+/**
+ * Memory state stored in browser localStorage
+ * Used for persistent user preferences and context across sessions
+ */
+export interface MemoryState {
+  [key: string]: any;
+}
+
 export interface IAgent {
   id: string;
   name: string;
