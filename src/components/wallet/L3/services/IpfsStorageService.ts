@@ -327,15 +327,27 @@ export class IpfsStorageService {
       console.log("📦 Browser Peer ID:", browserPeerId);
       console.log("📦 IPNS name:", this.cachedIpnsName);
 
-      // Set up peer connection event handlers for debugging
+      // Extract bootstrap peer IDs for filtering connection logs
+      const bootstrapPeerIds = new Set(
+        bootstrapPeers.map((addr) => {
+          const match = addr.match(/\/p2p\/([^/]+)$/);
+          return match ? match[1] : null;
+        }).filter(Boolean) as string[]
+      );
+
+      // Set up peer connection event handlers - only log bootstrap peers
       this.helia.libp2p.addEventListener("peer:connect", (event) => {
         const remotePeerId = event.detail.toString();
-        console.log(`📦 Connected to peer: ${remotePeerId.slice(0, 16)}...`);
+        if (bootstrapPeerIds.has(remotePeerId)) {
+          console.log(`📦 Connected to bootstrap peer: ${remotePeerId.slice(0, 16)}...`);
+        }
       });
 
       this.helia.libp2p.addEventListener("peer:disconnect", (event) => {
         const remotePeerId = event.detail.toString();
-        console.log(`📦 Disconnected from peer: ${remotePeerId.slice(0, 16)}...`);
+        if (bootstrapPeerIds.has(remotePeerId)) {
+          console.log(`📦 Disconnected from bootstrap peer: ${remotePeerId.slice(0, 16)}...`);
+        }
       });
 
       // Log initial connections after a short delay
