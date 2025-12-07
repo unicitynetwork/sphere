@@ -80,6 +80,8 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
     if (phrase) {
       setSeedPhrase(phrase);
       setIsSeedPhraseOpen(true);
+    } else {
+      alert("Recovery phrase not available.\n\nThis wallet was imported from a file that doesn't contain a mnemonic phrase. Only the master key was imported.");
     }
   };
 
