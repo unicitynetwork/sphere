@@ -492,51 +492,46 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
       {/* Messages area */}
       <div ref={messagesContainerRef} className="overflow-y-auto p-4 space-y-4 min-h-0">
         <AnimatePresence initial={false}>
-          {extendedMessages.map((message) => (
-            <ChatBubble
-              key={message.id}
-              role={message.role}
-              content={message.content}
-              agentName={agent.name}
-              agentColor={agent.color}
-              thinking={message.thinking}
-              showCopy={true}
-              isCopied={copiedId === message.id}
-              onCopy={() => handleCopy(message.content, message.id)}
-            >
-              {/* Custom card content */}
-              {message.cardData && renderMessageCard && renderMessageCard(message.cardData, message)}
+          {extendedMessages.map((message) => {
+            // Determine if this message is currently streaming
+            const isLastMessage = message.id === extendedMessages[extendedMessages.length - 1]?.id;
+            const messageIsStreaming = isTyping && isLastMessage;
 
-              {/* Additional message actions */}
-              {renderMessageActions && renderMessageActions(message)}
+            return (
+              <ChatBubble
+                key={message.id}
+                role={message.role}
+                content={message.content}
+                agentName={agent.name}
+                agentColor={agent.color}
+                thinking={message.thinking}
+                showCopy={true}
+                isCopied={copiedId === message.id}
+                onCopy={() => handleCopy(message.content, message.id)}
+                isStreaming={messageIsStreaming}
+                currentStatus={messageIsStreaming ? currentStatus : null}
+              >
+                {/* Custom card content */}
+                {message.cardData && renderMessageCard && renderMessageCard(message.cardData, message)}
 
-              {/* Action button */}
-              {message.showActionButton && message.cardData && actionConfig && (
-                <motion.button
-                  onClick={() => handleAction(message.cardData!)}
-                  className={`mt-2 w-full py-3 rounded-xl bg-linear-to-r ${agent.color} text-white font-medium`}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  {getActionLabel(message.cardData)}
-                </motion.button>
-              )}
-            </ChatBubble>
-          ))}
+                {/* Additional message actions */}
+                {renderMessageActions && renderMessageActions(message)}
+
+                {/* Action button */}
+                {message.showActionButton && message.cardData && actionConfig && (
+                  <motion.button
+                    onClick={() => handleAction(message.cardData!)}
+                    className={`mt-2 w-full py-3 rounded-xl bg-linear-to-r ${agent.color} text-white font-medium`}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    {getActionLabel(message.cardData)}
+                  </motion.button>
+                )}
+              </ChatBubble>
+            );
+          })}
         </AnimatePresence>
-
-        {/* Typing indicator */}
-        {isTyping && (() => {
-          if (useMockMode) {
-            return <TypingIndicator color={getIndicatorColor()} />;
-          }
-          // For streaming mode, only show if last message is empty assistant
-          const lastMsg = extendedMessages[extendedMessages.length - 1];
-          const showIndicator = lastMsg?.role === 'assistant' && !lastMsg.content;
-          return showIndicator ? (
-            <TypingIndicator color={getIndicatorColor()} status={currentStatus} />
-          ) : null;
-        })()}
       </div>
 
       {/* Bottom section - always at bottom */}

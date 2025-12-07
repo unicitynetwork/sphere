@@ -2,6 +2,22 @@ import { Sparkles, Copy, Check } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { parseMarkdown } from '../../../utils/markdown';
 
+function AnimatedDots({ color }: { color: string }) {
+  return (
+    <div className="flex items-center gap-1">
+      <div className={`w-1.5 h-1.5 ${color} rounded-full animate-bounce`} />
+      <div
+        className={`w-1.5 h-1.5 ${color} rounded-full animate-bounce`}
+        style={{ animationDelay: '0.1s' }}
+      />
+      <div
+        className={`w-1.5 h-1.5 ${color} rounded-full animate-bounce`}
+        style={{ animationDelay: '0.2s' }}
+      />
+    </div>
+  );
+}
+
 interface ChatBubbleProps {
   role: 'user' | 'assistant';
   content: string;
@@ -14,6 +30,9 @@ interface ChatBubbleProps {
   onCopy?: () => void;
   // Custom content after message
   children?: React.ReactNode;
+  // Streaming state
+  isStreaming?: boolean;
+  currentStatus?: string | null;
 }
 
 export function ChatBubble({
@@ -26,7 +45,18 @@ export function ChatBubble({
   isCopied = false,
   onCopy,
   children,
+  isStreaming = false,
+  currentStatus = null,
 }: ChatBubbleProps) {
+  // Helper to determine dots color from agent color
+  const getDotsColor = (agentColor: string): string => {
+    if (agentColor.includes('indigo')) return 'bg-indigo-500';
+    if (agentColor.includes('emerald') || agentColor.includes('teal')) return 'bg-emerald-500';
+    if (agentColor.includes('orange') || agentColor.includes('red')) return 'bg-orange-500';
+    if (agentColor.includes('purple') || agentColor.includes('pink')) return 'bg-purple-500';
+    return 'bg-indigo-500';
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -51,15 +81,34 @@ export function ChatBubble({
           </span>
         </div>
 
-        {/* Thinking indicator */}
-        {thinking && (
-          <details className="mb-2">
-            <summary className="text-xs text-neutral-400 dark:text-neutral-500 cursor-pointer">Thinking...</summary>
-            <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1 italic">{thinking}</p>
-          </details>
+        {/* Thinking/Status section with streaming support */}
+        {role === 'assistant' && (isStreaming || thinking) && (
+          <div className="mb-2">
+            <details className="group">
+              <summary className="flex items-center gap-2 text-xs text-neutral-400 dark:text-neutral-500 cursor-pointer list-none">
+                {isStreaming && <AnimatedDots color={getDotsColor(agentColor)} />}
+                <span>{currentStatus || 'Thinking...'}</span>
+                {thinking && (
+                  <span className="text-neutral-300 dark:text-neutral-600 ml-1">
+                    ▸
+                  </span>
+                )}
+              </summary>
+              {thinking && (
+                <div className="mt-2 pl-1">
+                  <p className="text-xs text-neutral-400 dark:text-neutral-500 italic leading-relaxed">
+                    {thinking}
+                  </p>
+                </div>
+              )}
+            </details>
+          </div>
         )}
 
-        <div className="leading-relaxed">{parseMarkdown(content)}</div>
+        {/* Main content - only show if there's actual content */}
+        {content && content.trim() && (
+          <div className="leading-relaxed">{parseMarkdown(content)}</div>
+        )}
 
         {/* Custom content (cards, buttons, etc.) */}
         {children}
