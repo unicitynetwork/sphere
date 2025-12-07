@@ -1,10 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft, Upload, Plus, ChevronDown, Check } from 'lucide-react';
 import { useWallet } from '../hooks/useWallet';
 import { WalletRepository } from '../../../../repositories/WalletRepository';
 import { IdentityManager } from '../services/IdentityManager';
+import { UnifiedKeyManager } from '../../shared/services/UnifiedKeyManager';
+import { fetchNametagFromIpns } from '../services/IpnsNametagFetcher';
 
 // Type for derived address info with nametag status
 interface DerivedAddressInfo {
@@ -14,6 +16,18 @@ interface DerivedAddressInfo {
   path: string;
   hasNametag: boolean;
   existingNametag?: string;
+  // Full nametag data for localStorage persistence
+  nametagData?: {
+    name: string;
+    token: object;
+    timestamp?: number;
+    format?: string;
+  };
+  // IPNS fetching state
+  privateKey?: string;          // Needed to derive IPNS name
+  ipnsName?: string;
+  ipnsLoading?: boolean;        // True while fetching from IPFS
+  ipnsError?: string;           // Error message if fetch failed
 }
 
 // Session key (same as useWallet.ts)
@@ -35,6 +49,71 @@ export function CreateWalletFlow() {
   const [selectedAddressIndex, setSelectedAddressIndex] = useState<number>(0);
   const [showAddressDropdown, setShowAddressDropdown] = useState(false);
 
+  // Effect: Fetch nametags from IPNS in parallel when addresses are derived
+  useEffect(() => {
+    // Only run when in addressSelection step and we have addresses to check
+    if (step !== 'addressSelection' || derivedAddresses.length === 0) return;
+
+    // Find addresses that need IPNS fetching
+    const addressesToFetch = derivedAddresses.filter(
+      (addr) => addr.ipnsLoading && addr.privateKey
+    );
+
+    if (addressesToFetch.length === 0) return;
+
+    // Fetch nametags in parallel
+    const fetchAllNametags = async () => {
+      console.log(`🔍 Fetching nametags from IPNS for ${addressesToFetch.length} addresses...`);
+
+      const fetchPromises = addressesToFetch.map(async (addr) => {
+        try {
+          const result = await fetchNametagFromIpns(addr.privateKey!);
+          console.log(`🔍 IPNS result for #${addr.index}: ${result.nametag || 'none'} (via ${result.source})`);
+
+          // Update state with fetched result
+          setDerivedAddresses((prev) =>
+            prev.map((a) =>
+              a.index === addr.index
+                ? {
+                    ...a,
+                    ipnsName: result.ipnsName,
+                    hasNametag: !!result.nametag,
+                    existingNametag: result.nametag || undefined,
+                    nametagData: result.nametagData,
+                    ipnsLoading: false,
+                    ipnsError: result.error,
+                    // Clear private key after use (security)
+                    privateKey: undefined,
+                  }
+                : a
+            )
+          );
+        } catch (error: any) {
+          console.warn(`🔍 IPNS fetch error for #${addr.index}:`, error.message);
+          // Mark as failed but not loading
+          setDerivedAddresses((prev) =>
+            prev.map((a) =>
+              a.index === addr.index
+                ? {
+                    ...a,
+                    ipnsLoading: false,
+                    ipnsError: error.message,
+                    privateKey: undefined,
+                  }
+                : a
+            )
+          );
+        }
+      });
+
+      await Promise.allSettled(fetchPromises);
+      console.log('🔍 IPNS nametag fetch complete');
+    };
+
+    fetchAllNametags();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, derivedAddresses.length]);
+
   // Helper: truncate address for display
   const truncateAddress = (addr: string) =>
     addr ? addr.slice(0, 12) + "..." + addr.slice(-8) : '';
@@ -48,14 +127,19 @@ export function CreateWalletFlow() {
       const derived = keyManager.deriveAddress(i);
       const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(i);
       const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+      const hasLocalNametag = !!existingNametag;
 
       results.push({
         index: i,
         l1Address: derived.l1Address,
         l3Address: l3Identity.address,
         path: derived.path,
-        hasNametag: !!existingNametag,
+        hasNametag: hasLocalNametag,
         existingNametag: existingNametag?.name,
+        // Store private key for IPNS derivation (only if no local nametag)
+        privateKey: hasLocalNametag ? undefined : derived.privateKey,
+        // Mark for IPNS loading if no local nametag found
+        ipnsLoading: !hasLocalNametag,
       });
     }
 
@@ -71,14 +155,19 @@ export function CreateWalletFlow() {
       const derived = keyManager.deriveAddress(nextIndex);
       const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(nextIndex);
       const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+      const hasLocalNametag = !!existingNametag;
 
       setDerivedAddresses([...derivedAddresses, {
         index: nextIndex,
         l1Address: derived.l1Address,
         l3Address: l3Identity.address,
         path: derived.path,
-        hasNametag: !!existingNametag,
+        hasNametag: hasLocalNametag,
         existingNametag: existingNametag?.name,
+        // Store private key for IPNS derivation (only if no local nametag)
+        privateKey: hasLocalNametag ? undefined : derived.privateKey,
+        // Mark for IPNS loading if no local nametag found
+        ipnsLoading: !hasLocalNametag,
       }]);
     } catch (e: any) {
       setError("Failed to derive new address: " + e.message);
@@ -99,6 +188,18 @@ export function CreateWalletFlow() {
       identityManager.setSelectedAddressIndex(selected.index);
 
       if (selected.hasNametag) {
+        // If nametag was fetched from IPNS, save it to localStorage before reload
+        if (selected.nametagData && selected.l3Address) {
+          console.log("💾 Saving IPNS-fetched nametag to localStorage before reload...");
+          WalletRepository.saveNametagForAddress(selected.l3Address, {
+            name: selected.nametagData.name,
+            token: selected.nametagData.token,
+            timestamp: selected.nametagData.timestamp || Date.now(),
+            format: selected.nametagData.format || "TXF",
+            version: "1.0",
+          });
+        }
+
         // Address already has nametag - proceed to main app
         console.log("✅ Address has existing nametag, proceeding to main app");
         window.location.reload();
@@ -118,7 +219,7 @@ export function CreateWalletFlow() {
     setIsBusy(true);
     setError(null);
     try {
-      const addresses = await deriveAndCheckAddresses(1); // Start with 1 address
+      const addresses = await deriveAndCheckAddresses(10); // Derive 10 addresses upfront
       setDerivedAddresses(addresses);
       setSelectedAddressIndex(0);
       setStep('addressSelection');
@@ -133,6 +234,14 @@ export function CreateWalletFlow() {
     setIsBusy(true);
     setError(null);
     try {
+      // Clear any existing wallet data to prevent conflicts with old identity
+      const existingKeyManager = getUnifiedKeyManager();
+      if (existingKeyManager?.isInitialized()) {
+        console.log("🔐 Clearing existing wallet before creating new one");
+        existingKeyManager.clear();
+        UnifiedKeyManager.resetInstance();
+      }
+
       await createWallet();
       // Go to address selection instead of nametag
       await goToAddressSelection();
@@ -176,6 +285,14 @@ export function CreateWalletFlow() {
     setError(null);
 
     try {
+      // Clear any existing wallet data to prevent conflicts with old identity
+      const existingKeyManager = getUnifiedKeyManager();
+      if (existingKeyManager?.isInitialized()) {
+        console.log("🔐 Clearing existing wallet before restoring");
+        existingKeyManager.clear();
+        UnifiedKeyManager.resetInstance();
+      }
+
       const mnemonic = words.join(' ');
       await restoreWallet(mnemonic);
       // Go to address selection instead of nametag
@@ -194,6 +311,14 @@ export function CreateWalletFlow() {
     setError(null);
 
     try {
+      // Clear any existing wallet data to prevent conflicts with old identity
+      const existingKeyManager = getUnifiedKeyManager();
+      if (existingKeyManager?.isInitialized()) {
+        console.log("🔐 Clearing existing wallet before importing from file");
+        existingKeyManager.clear();
+        UnifiedKeyManager.resetInstance();
+      }
+
       const content = await file.text();
       let imported = false;
 
@@ -554,12 +679,17 @@ export function CreateWalletFlow() {
                     <span className="text-sm md:text-base font-mono text-neutral-900 dark:text-white truncate">
                       {truncateAddress(derivedAddresses[selectedAddressIndex]?.l1Address || '')}
                     </span>
-                    {derivedAddresses[selectedAddressIndex]?.hasNametag && (
+                    {derivedAddresses[selectedAddressIndex]?.ipnsLoading ? (
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-neutral-200 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Checking...
+                      </span>
+                    ) : derivedAddresses[selectedAddressIndex]?.hasNametag ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
                         <Check className="w-3 h-3" />
                         {derivedAddresses[selectedAddressIndex]?.existingNametag}
                       </span>
-                    )}
+                    ) : null}
                   </div>
                 </div>
                 <motion.div
@@ -598,12 +728,17 @@ export function CreateWalletFlow() {
                           <span className="flex-1 text-sm font-mono text-neutral-900 dark:text-white truncate text-left">
                             {truncateAddress(addr.l1Address)}
                           </span>
-                          {addr.hasNametag && (
+                          {addr.ipnsLoading ? (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-neutral-200 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              Checking...
+                            </span>
+                          ) : addr.hasNametag ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
                               <Check className="w-3 h-3" />
                               {addr.existingNametag}
                             </span>
-                          )}
+                          ) : null}
                           {idx === selectedAddressIndex && (
                             <div className="w-2 h-2 rounded-full bg-purple-500" />
                           )}

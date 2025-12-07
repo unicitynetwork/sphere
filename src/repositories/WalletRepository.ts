@@ -89,6 +89,41 @@ export class WalletRepository {
   }
 
   /**
+   * Save nametag for an address without loading the full wallet
+   * Used during onboarding when we fetch nametag from IPNS
+   * Creates minimal wallet structure if needed
+   */
+  static saveNametagForAddress(address: string, nametag: NametagData): void {
+    if (!address || !nametag) return;
+
+    const storageKey = `${STORAGE_KEY_PREFIX}${address}`;
+    try {
+      // Load existing wallet data or create minimal structure
+      let walletData: StoredWallet;
+      const existingJson = localStorage.getItem(storageKey);
+
+      if (existingJson) {
+        walletData = JSON.parse(existingJson) as StoredWallet;
+        walletData.nametag = nametag;
+      } else {
+        // Create minimal wallet structure with just the nametag
+        walletData = {
+          id: crypto.randomUUID ? crypto.randomUUID() : `wallet-${Date.now()}`,
+          name: "Wallet",
+          address: address,
+          tokens: [],
+          nametag: nametag,
+        };
+      }
+
+      localStorage.setItem(storageKey, JSON.stringify(walletData));
+      console.log(`💾 Saved IPNS-fetched nametag "${nametag.name}" for address ${address.slice(0, 20)}...`);
+    } catch (error) {
+      console.error("Error saving nametag for address:", error);
+    }
+  }
+
+  /**
    * Validate address format
    * Returns true if the address is valid, false otherwise
    */
