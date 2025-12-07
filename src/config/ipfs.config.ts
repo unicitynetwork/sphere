@@ -24,10 +24,10 @@ interface IpfsPeer {
  */
 export const CUSTOM_PEERS: IpfsPeer[] = [
   { host: "unicity-ipfs1.dyndns.org", peerId: "12D3KooWDKJqEMAhH4nsSSiKtK1VLcas5coUqSPZAfbWbZpxtL4u", wsPort: 4002, wssPort: 4003 },
-  { host: "unicity-ipfs2.dyndns.org", peerId: "<PEER_ID_2>", wsPort: 4002, wssPort: 4003 },
-  { host: "unicity-ipfs3.dyndns.org", peerId: "<PEER_ID_3>", wsPort: 4002, wssPort: 4003 },
-  { host: "unicity-ipfs4.dyndns.org", peerId: "<PEER_ID_4>", wsPort: 4002, wssPort: 4003 },
-  { host: "unicity-ipfs5.dyndns.org", peerId: "<PEER_ID_5>", wsPort: 4002, wssPort: 4003 },
+  { host: "unicity-ipfs2.dyndns.org", peerId: "12D3KooWLNi5NDPPHbrfJakAQqwBqymYTTwMQXQKEWuCrJNDdmfh", wsPort: 4002, wssPort: 4003 },
+  { host: "unicity-ipfs3.dyndns.org", peerId: "12D3KooWQ4aujVE4ShLjdusNZBdffq3TbzrwT2DuWZY9H1Gxhwn6", wsPort: 4002, wssPort: 4003 },
+  { host: "unicity-ipfs4.dyndns.org", peerId: "12D3KooWJ1ByPfUzUrpYvgxKU8NZrR8i6PU1tUgMEbQX9Hh2DEn1", wsPort: 4002, wssPort: 4003 },
+  { host: "unicity-ipfs5.dyndns.org", peerId: "12D3KooWB1MdZZGHN5B8TvWXntbycfe7Cjcz7n6eZ9eykZadvmDv", wsPort: 4002, wssPort: 4003 },
 ];
 
 /**
