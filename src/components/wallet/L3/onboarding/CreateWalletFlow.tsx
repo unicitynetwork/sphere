@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft, Upload, Plus, ChevronDown, Check } from 'lucide-react';
+import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft, Plus, ChevronDown, Check, Upload } from 'lucide-react';
 import { useWallet } from '../hooks/useWallet';
 import { WalletRepository } from '../../../../repositories/WalletRepository';
 import { IdentityManager } from '../services/IdentityManager';
@@ -47,6 +47,7 @@ export function CreateWalletFlow() {
   const [showAddressDropdown, setShowAddressDropdown] = useState(false);
 
   // Wallet import and scanning state (for .dat and BIP32 .txt files)
+  const [showRestoreMethodModal, setShowRestoreMethodModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showScanModal, setShowScanModal] = useState(false);
   const [showLoadPasswordModal, setShowLoadPasswordModal] = useState(false);
@@ -672,7 +673,7 @@ export function CreateWalletFlow() {
             </motion.button>
 
             <motion.button
-              onClick={() => setStep('restore')}
+              onClick={() => setShowRestoreMethodModal(true)}
               disabled={isBusy}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -681,18 +682,6 @@ export function CreateWalletFlow() {
             >
               <KeyRound className="w-4 h-4 md:w-5 md:h-5" />
               Restore Wallet
-            </motion.button>
-
-            <motion.button
-              onClick={() => setShowImportModal(true)}
-              disabled={isBusy}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              transition={{ duration: 0.1 }}
-              className="relative w-full py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 text-sm md:text-base font-bold border-2 border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 md:gap-3 disabled:opacity-50 disabled:cursor-not-allowed mt-3 hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
-            >
-              <Upload className="w-4 h-4 md:w-5 md:h-5" />
-              Import from File
             </motion.button>
 
             {error && (
@@ -1193,6 +1182,105 @@ export function CreateWalletFlow() {
           </motion.div>
         )}
 
+      </AnimatePresence>
+
+      {/* Restore Method Selection Modal */}
+      <AnimatePresence>
+        {showRestoreMethodModal && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowRestoreMethodModal(false)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
+            />
+
+            {/* Modal */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ duration: 0.2 }}
+              className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            >
+              <div className="bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl w-full max-w-md p-6 border border-neutral-200 dark:border-neutral-800">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl md:text-2xl font-black text-neutral-900 dark:text-white">
+                    Restore Wallet
+                  </h3>
+                  <button
+                    onClick={() => setShowRestoreMethodModal(false)}
+                    className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+                  >
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <p className="text-neutral-500 dark:text-neutral-400 text-sm mb-6">
+                  Choose how you want to restore your wallet
+                </p>
+
+                <div className="space-y-3">
+                  {/* Recovery Phrase Option */}
+                  <motion.button
+                    onClick={() => {
+                      setShowRestoreMethodModal(false);
+                      setStep('restore');
+                    }}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    className="w-full p-4 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 hover:border-blue-500/50 dark:hover:border-blue-500/50 transition-all text-left group"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center group-hover:bg-blue-500/20 transition-colors">
+                        <KeyRound className="w-6 h-6 text-blue-500" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-bold text-neutral-900 dark:text-white mb-1">
+                          Recovery Phrase
+                        </div>
+                        <div className="text-sm text-neutral-500 dark:text-neutral-400">
+                          Use your 12-word mnemonic phrase
+                        </div>
+                      </div>
+                      <ArrowRight className="w-5 h-5 text-neutral-400 group-hover:text-blue-500 transition-colors" />
+                    </div>
+                  </motion.button>
+
+                  {/* Import from File Option */}
+                  <motion.button
+                    onClick={() => {
+                      setShowRestoreMethodModal(false);
+                      setShowImportModal(true);
+                    }}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    className="w-full p-4 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 hover:border-orange-500/50 dark:hover:border-orange-500/50 transition-all text-left group"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-lg bg-orange-500/10 flex items-center justify-center group-hover:bg-orange-500/20 transition-colors">
+                        <Upload className="w-6 h-6 text-orange-500" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-bold text-neutral-900 dark:text-white mb-1">
+                          Import from File
+                        </div>
+                        <div className="text-sm text-neutral-500 dark:text-neutral-400">
+                          Import wallet from .dat or .txt file
+                        </div>
+                      </div>
+                      <ArrowRight className="w-5 h-5 text-neutral-400 group-hover:text-orange-500 transition-colors" />
+                    </div>
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
       </AnimatePresence>
 
       {/* Import Wallet Modal - your implementation */}
