@@ -1,10 +1,22 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft, Upload, Plus, ChevronDown, Check } from 'lucide-react';
 import { useWallet } from '../hooks/useWallet';
 import { WalletRepository } from '../../../../repositories/WalletRepository';
 import { IdentityManager } from '../services/IdentityManager';
+import {
+  importWallet as importWalletFromFile,
+  type Wallet as L1Wallet,
+  type ScannedAddress,
+  saveWalletToStorage,
+  loadWalletFromStorage,
+  connect as connectL1,
+  isWebSocketConnected
+} from '../../L1/sdk';
+import { WalletScanModal } from '../../L1/components/modals/WalletScanModal';
+import { ImportWalletModal } from '../../L1/components/modals/ImportWalletModal';
+import { LoadPasswordModal } from '../../L1/components/modals/LoadPasswordModal';
 
 // Type for derived address info with nametag status
 interface DerivedAddressInfo {
@@ -28,12 +40,28 @@ export function CreateWalletFlow() {
   const [seedWords, setSeedWords] = useState<string[]>(Array(12).fill(''));
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Address selection state
   const [derivedAddresses, setDerivedAddresses] = useState<DerivedAddressInfo[]>([]);
   const [selectedAddressIndex, setSelectedAddressIndex] = useState<number>(0);
   const [showAddressDropdown, setShowAddressDropdown] = useState(false);
+
+  // Wallet import and scanning state (for .dat and BIP32 .txt files)
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [showLoadPasswordModal, setShowLoadPasswordModal] = useState(false);
+  const [pendingWallet, setPendingWallet] = useState<L1Wallet | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [initialScanCount, setInitialScanCount] = useState(10);
+
+  // Connect to L1 WebSocket on mount (needed for wallet scanning)
+  useEffect(() => {
+    if (!isWebSocketConnected()) {
+      connectL1().catch(err => {
+        console.warn("Failed to connect to L1 WebSocket:", err);
+      });
+    }
+  }, []);
 
   // Helper: truncate address for display
   const truncateAddress = (addr: string) =>
@@ -118,9 +146,51 @@ export function CreateWalletFlow() {
     setIsBusy(true);
     setError(null);
     try {
-      const addresses = await deriveAndCheckAddresses(1); // Start with 1 address
-      setDerivedAddresses(addresses);
-      setSelectedAddressIndex(0);
+      // Check if L1 wallet exists in storage with addresses
+      const l1Wallet = loadWalletFromStorage("main");
+
+      if (l1Wallet && l1Wallet.addresses && l1Wallet.addresses.length > 0) {
+        // Use addresses from L1 wallet storage
+        console.log(`📋 Loading ${l1Wallet.addresses.length} addresses from L1 wallet storage`);
+        const results: DerivedAddressInfo[] = [];
+
+        // For each L1 address, derive L3 identity using sequential index (not L1's index)
+        // This ensures we can find existing nametags that were created with deriveIdentityFromUnifiedWallet
+        for (let i = 0; i < l1Wallet.addresses.length; i++) {
+          const addr = l1Wallet.addresses[i];
+
+          if (!addr.privateKey) {
+            console.warn(`Skipping address ${addr.address} - no private key`);
+            continue;
+          }
+
+          // Use sequential index i for L3 derivation (0, 1, 2...)
+          // This matches how deriveIdentityFromUnifiedWallet works
+          const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(i);
+          const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+
+          console.log(`🔍 Address ${i}: L1=${addr.address.slice(0, 20)}... L3=${l3Identity.address.slice(0, 20)}... hasNametag=${!!existingNametag} nametag=${existingNametag?.name}`);
+
+          results.push({
+            index: i, // Use sequential index for L3
+            l1Address: addr.address,
+            l3Address: l3Identity.address,
+            path: addr.path || `m/44'/0'/0'/0/${addr.index}`,
+            hasNametag: !!existingNametag,
+            existingNametag: existingNametag?.name,
+          });
+        }
+
+        setDerivedAddresses(results);
+        setSelectedAddressIndex(0);
+      } else {
+        // No L1 wallet addresses - derive from UnifiedKeyManager
+        console.log("📋 No L1 wallet addresses found, deriving from UnifiedKeyManager");
+        const addresses = await deriveAndCheckAddresses(1);
+        setDerivedAddresses(addresses);
+        setSelectedAddressIndex(0);
+      }
+
       setStep('addressSelection');
     } catch (e: any) {
       setError("Failed to derive addresses: " + e.message);
@@ -191,23 +261,79 @@ export function CreateWalletFlow() {
     }
   };
 
-  const handleFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
+  // Handle import from your ImportWalletModal
+  const handleImportFromModal = async (file: File, scanCount?: number) => {
+    setShowImportModal(false);
     setIsBusy(true);
     setError(null);
 
     try {
+      // Clear any existing L1 wallet from storage before importing new one
+      // This prevents showing old addresses when importing a different wallet
+      localStorage.removeItem("wallet_main");
+
+      // For .dat files, use direct SDK import and show scan modal
+      if (file.name.endsWith(".dat")) {
+        const result = await importWalletFromFile(file);
+        if (!result.success || !result.wallet) {
+          throw new Error(result.error || "Import failed");
+        }
+        console.log("📦 .dat file imported, showing scan modal:", {
+          hasWallet: !!result.wallet,
+          hasMasterKey: !!result.wallet.masterPrivateKey,
+          scanCount: scanCount || 100
+        });
+        // Show scan modal - don't save wallet yet, let user select addresses
+        setPendingWallet(result.wallet);
+        setInitialScanCount(scanCount || 100);
+        setShowScanModal(true);
+        setIsBusy(false);
+        return;
+      }
+
       const content = await file.text();
+
+      // Check if encrypted
+      if (content.includes("ENCRYPTED MASTER KEY")) {
+        setPendingFile(file);
+        setInitialScanCount(scanCount || 10);
+        setShowLoadPasswordModal(true);
+        setIsBusy(false);
+        return;
+      }
+
+      // Check if this is a BIP32 wallet that needs scanning
+      const isBIP32 = content.includes("MASTER CHAIN CODE") ||
+                      content.includes("WALLET TYPE: BIP32") ||
+                      content.includes("WALLET TYPE: Alpha descriptor");
+
+      if (isBIP32 && content.includes("MASTER PRIVATE KEY")) {
+        // For BIP32 .txt files, import and show scan modal
+        const result = await importWalletFromFile(file);
+        if (!result.success || !result.wallet) {
+          throw new Error(result.error || "Import failed");
+        }
+        console.log("📦 BIP32 .txt file imported, showing scan modal:", {
+          hasWallet: !!result.wallet,
+          hasMasterKey: !!result.wallet.masterPrivateKey,
+          hasChainCode: !!result.wallet.masterChainCode,
+          scanCount: scanCount || 10
+        });
+        setPendingWallet(result.wallet);
+        setInitialScanCount(scanCount || 10);
+        setShowScanModal(true);
+        setIsBusy(false);
+        return;
+      }
+
+      // For other formats, try to import as mnemonic or simple wallet
       let imported = false;
 
-      // Try to parse as JSON first (wallet backup file with mnemonic)
+      // Try to parse as JSON first
       try {
         const json = JSON.parse(content);
         let mnemonic: string | null = null;
 
-        // Support various JSON wallet file formats
         if (json.mnemonic) {
           mnemonic = json.mnemonic;
         } else if (json.seed) {
@@ -223,15 +349,14 @@ export function CreateWalletFlow() {
           imported = true;
         }
       } catch {
-        // Not JSON - continue to try other formats
+        // Not JSON - continue
       }
 
-      // Try plain text mnemonic (12 or 24 words)
+      // Try plain text mnemonic
       if (!imported) {
         const trimmed = content.trim();
         const words = trimmed.split(/\s+/);
         if (words.length === 12 || words.length === 24) {
-          // Check if all words are lowercase alpha (likely a mnemonic)
           const isMnemonic = words.every(w => /^[a-z]+$/.test(w.toLowerCase()));
           if (isMnemonic) {
             await restoreWallet(trimmed);
@@ -240,40 +365,217 @@ export function CreateWalletFlow() {
         }
       }
 
-      // Try L1 wallet file format (MASTER PRIVATE KEY / ENCRYPTED MASTER KEY)
-      if (!imported) {
-        if (content.includes("MASTER PRIVATE KEY") || content.includes("ENCRYPTED MASTER KEY")) {
-          if (content.includes("ENCRYPTED MASTER KEY")) {
-            throw new Error("Encrypted wallet files require password. Please decrypt the file first or use the L1 wallet tab to import.");
-          }
-
-          // Use UnifiedKeyManager to import L1 wallet file
-          const keyManager = getUnifiedKeyManager();
-          await keyManager.importFromFileContent(content);
-
-          // Verify the import was successful
-          const walletInfo = keyManager.getWalletInfo();
-          if (!walletInfo.address0) {
-            throw new Error("Wallet import failed - could not derive address");
-          }
-
-          console.log("✅ Wallet file imported successfully:", walletInfo);
-          imported = true;
+      // Try L1 wallet file format (simple wallet without chain code)
+      // Standard wallets import directly without scanning
+      if (!imported && content.includes("MASTER PRIVATE KEY")) {
+        // Import wallet through SDK to parse addresses from file
+        const result = await importWalletFromFile(file);
+        if (!result.success || !result.wallet) {
+          throw new Error(result.error || "Import failed");
         }
+
+        console.log("✅ Standard wallet imported with addresses:", {
+          addresses: result.wallet.addresses.length,
+          hasPrivateKeys: result.wallet.addresses.every(a => a.privateKey)
+        });
+
+        // Import master key into UnifiedKeyManager
+        const keyManager = getUnifiedKeyManager();
+        await keyManager.importFromFileContent(content);
+
+        // Save wallet with all addresses to L1 storage
+        if (result.wallet.addresses.length > 0) {
+          saveWalletToStorage("main", result.wallet);
+        }
+
+        imported = true;
       }
 
       if (!imported) {
-        throw new Error("Could not import wallet from file. Supported formats: mnemonic (12/24 words), JSON with mnemonic, or L1 wallet backup file.");
+        throw new Error("Could not import wallet from file");
       }
 
-      // Go to address selection for ALL import types
+      // Go to address selection (for mnemonic imports only)
       await goToAddressSelection();
     } catch (e: any) {
       setError(e.message || "Failed to import wallet from file");
       setIsBusy(false);
-    } finally {
-      // Reset file input
-      event.target.value = "";
+    }
+  };
+
+  // Handle scanned address selection from L1 wallet scan modal
+  const onSelectScannedAddress = async (scannedAddr: ScannedAddress) => {
+    if (!pendingWallet) return;
+
+    try {
+      setIsBusy(true);
+      setError(null);
+
+      console.log(`✅ Selected address #${scannedAddr.index} with ${scannedAddr.balance.toFixed(8)} ALPHA`);
+
+      // Add the scanned address to L1 wallet and save it
+      const walletWithAddress: L1Wallet = {
+        ...pendingWallet,
+        addresses: [{
+          index: scannedAddr.index,
+          address: scannedAddr.address,
+          privateKey: scannedAddr.privateKey,
+          publicKey: scannedAddr.publicKey,
+          path: scannedAddr.path,
+          createdAt: new Date().toISOString(),
+        }],
+      };
+
+      // Save L1 wallet to storage
+      saveWalletToStorage("main", walletWithAddress);
+
+      // Import the wallet into UnifiedKeyManager
+      const keyManager = getUnifiedKeyManager();
+      if (pendingWallet.masterPrivateKey && pendingWallet.masterChainCode) {
+        await keyManager.importWithMode(
+          pendingWallet.masterPrivateKey,
+          pendingWallet.masterChainCode,
+          "bip32"
+        );
+      } else if (pendingWallet.masterPrivateKey) {
+        await keyManager.importWithMode(
+          pendingWallet.masterPrivateKey,
+          null,
+          "wif_hmac"
+        );
+      }
+
+      setShowScanModal(false);
+      setPendingWallet(null);
+
+      // Go to address selection to choose L3 identity
+      // User will see address #0 (the one they selected) in the dropdown
+      await goToAddressSelection();
+    } catch (e: any) {
+      setError(e.message || "Failed to import wallet");
+      setIsBusy(false);
+    }
+  };
+
+  // Handle loading all scanned addresses
+  const onSelectAllScannedAddresses = async (scannedAddresses: ScannedAddress[]) => {
+    if (!pendingWallet || scannedAddresses.length === 0) return;
+
+    try {
+      setIsBusy(true);
+      setError(null);
+
+      // Add all scanned addresses to L1 wallet
+      const walletWithAddresses: L1Wallet = {
+        ...pendingWallet,
+        addresses: scannedAddresses.map((addr) => ({
+          index: addr.index,
+          address: addr.address,
+          privateKey: addr.privateKey,
+          publicKey: addr.publicKey,
+          path: addr.path,
+          createdAt: new Date().toISOString(),
+          isChange: addr.isChange,
+        })),
+      };
+
+      // Calculate total balance for logging
+      const totalBalance = scannedAddresses.reduce((sum, addr) => sum + addr.balance, 0);
+      console.log(`✅ Loaded ${scannedAddresses.length} addresses with ${totalBalance.toFixed(8)} ALPHA total`);
+
+      // Save L1 wallet to storage with ALL addresses
+      saveWalletToStorage("main", walletWithAddresses);
+
+      // Import the wallet into UnifiedKeyManager
+      const keyManager = getUnifiedKeyManager();
+      if (pendingWallet.masterPrivateKey && pendingWallet.masterChainCode) {
+        await keyManager.importWithMode(
+          pendingWallet.masterPrivateKey,
+          pendingWallet.masterChainCode,
+          "bip32"
+        );
+      } else if (pendingWallet.masterPrivateKey) {
+        await keyManager.importWithMode(
+          pendingWallet.masterPrivateKey,
+          null,
+          "wif_hmac"
+        );
+      }
+
+      setShowScanModal(false);
+      setPendingWallet(null);
+
+      // Go to address selection to choose which L1 address to use for L3 identity
+      // This will show all the scanned addresses in the dropdown
+      await goToAddressSelection();
+    } catch (e: any) {
+      setError(e.message || "Failed to import wallet");
+      setIsBusy(false);
+    }
+  };
+
+  // Cancel scan modal
+  const onCancelScan = () => {
+    setShowScanModal(false);
+    setPendingWallet(null);
+  };
+
+  // Handle password confirmation for encrypted files
+  const onConfirmLoadWithPassword = async (password: string) => {
+    if (!pendingFile) return;
+
+    try {
+      setIsBusy(true);
+      setError(null);
+      setShowLoadPasswordModal(false);
+
+      // Import with password
+      const result = await importWalletFromFile(pendingFile, password);
+      if (!result.success || !result.wallet) {
+        throw new Error(result.error || "Import failed");
+      }
+
+      setPendingFile(null);
+
+      // Check if BIP32 wallet - show scan modal
+      if (result.wallet.masterChainCode || result.wallet.isImportedAlphaWallet) {
+        setPendingWallet(result.wallet);
+        // initialScanCount already set when showing password modal
+        setShowScanModal(true);
+        setIsBusy(false);
+      } else {
+        // Standard wallet - import master key and save addresses from file
+        console.log("✅ Standard encrypted wallet imported with addresses:", {
+          addresses: result.wallet.addresses.length,
+          hasPrivateKeys: result.wallet.addresses.every(a => a.privateKey)
+        });
+
+        const keyManager = getUnifiedKeyManager();
+        if (result.wallet.masterPrivateKey && result.wallet.masterChainCode) {
+          await keyManager.importWithMode(
+            result.wallet.masterPrivateKey,
+            result.wallet.masterChainCode,
+            "bip32"
+          );
+        } else if (result.wallet.masterPrivateKey) {
+          await keyManager.importWithMode(
+            result.wallet.masterPrivateKey,
+            null,
+            "wif_hmac"
+          );
+        }
+
+        // Save wallet with all addresses to L1 storage
+        if (result.wallet.addresses.length > 0) {
+          saveWalletToStorage("main", result.wallet);
+        }
+
+        // Go to address selection
+        await goToAddressSelection();
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to decrypt wallet");
+      setIsBusy(false);
     }
   };
 
@@ -382,7 +684,7 @@ export function CreateWalletFlow() {
             </motion.button>
 
             <motion.button
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => setShowImportModal(true)}
               disabled={isBusy}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -392,14 +694,6 @@ export function CreateWalletFlow() {
               <Upload className="w-4 h-4 md:w-5 md:h-5" />
               Import from File
             </motion.button>
-
-            <input
-              type="file"
-              ref={fileInputRef}
-              className="hidden"
-              accept=".json,.txt"
-              onChange={handleFileImport}
-            />
 
             {error && (
               <motion.p
@@ -588,7 +882,7 @@ export function CreateWalletFlow() {
                     <div className="max-h-64 overflow-y-auto">
                       {derivedAddresses.map((addr, idx) => (
                         <button
-                          key={addr.index}
+                          key={addr.l1Address}
                           onClick={() => {
                             setSelectedAddressIndex(idx);
                             setShowAddressDropdown(false);
@@ -900,6 +1194,33 @@ export function CreateWalletFlow() {
         )}
 
       </AnimatePresence>
+
+      {/* Import Wallet Modal - your implementation */}
+      <ImportWalletModal
+        show={showImportModal}
+        onImport={handleImportFromModal}
+        onCancel={() => setShowImportModal(false)}
+      />
+
+      {/* Password Modal for encrypted files */}
+      <LoadPasswordModal
+        show={showLoadPasswordModal}
+        onConfirm={onConfirmLoadWithPassword}
+        onCancel={() => {
+          setShowLoadPasswordModal(false);
+          setPendingFile(null);
+        }}
+      />
+
+      {/* Wallet Scan Modal for .dat and BIP32 .txt files */}
+      <WalletScanModal
+        show={showScanModal}
+        wallet={pendingWallet}
+        initialScanCount={initialScanCount}
+        onSelectAddress={onSelectScannedAddress}
+        onSelectAll={onSelectAllScannedAddresses}
+        onCancel={onCancelScan}
+      />
     </div>
   );
 }

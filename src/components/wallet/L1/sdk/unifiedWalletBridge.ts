@@ -7,6 +7,7 @@
 
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import type { Wallet, WalletAddress } from "./types";
+import { loadWalletFromStorage } from "./storage";
 
 // Same session key as L3 (from useWallet.ts)
 const SESSION_KEY = "user-pin-1234";
@@ -17,6 +18,10 @@ const SELECTED_INDEX_KEY = "l3_selected_address_index";
 /**
  * Load wallet from UnifiedKeyManager and convert to L1 Wallet interface
  * Returns null if UnifiedKeyManager is not initialized
+ *
+ * Priority:
+ * 1. If L1 wallet exists in storage with addresses (e.g., from import/scan), use those
+ * 2. Otherwise, derive addresses from UnifiedKeyManager (for new/restore wallets)
  */
 export async function loadWalletFromUnifiedKeyManager(): Promise<Wallet | null> {
   const keyManager = UnifiedKeyManager.getInstance(SESSION_KEY);
@@ -26,6 +31,14 @@ export async function loadWalletFromUnifiedKeyManager(): Promise<Wallet | null> 
     return null;
   }
 
+  // Check if L1 wallet exists in storage with addresses (from import/scan)
+  const storedWallet = loadWalletFromStorage("main");
+  if (storedWallet && storedWallet.addresses && storedWallet.addresses.length > 0) {
+    console.log(`📋 Loading L1 wallet from storage with ${storedWallet.addresses.length} addresses`);
+    return storedWallet;
+  }
+
+  // No stored wallet with addresses - derive from UnifiedKeyManager
   const walletInfo = keyManager.getWalletInfo();
   const masterKey = keyManager.getMasterKeyHex();
   const chainCode = keyManager.getChainCodeHex();

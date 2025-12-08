@@ -12,6 +12,7 @@ export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModa
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [scanCount, setScanCount] = useState(10);
+  const [needsScanning, setNeedsScanning] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -24,20 +25,46 @@ export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModa
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
 
     const file = e.dataTransfer.files[0];
     if (file && (file.name.endsWith(".txt") || file.name.endsWith(".dat"))) {
       setSelectedFile(file);
+      await checkIfNeedsScanning(file);
     }
   }, []);
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const checkIfNeedsScanning = async (file: File) => {
+    try {
+      // .dat files always need scanning
+      if (file.name.endsWith(".dat")) {
+        setNeedsScanning(true);
+        setScanCount(10);
+        return;
+      }
+
+      // For .txt files, check if BIP32 or standard
+      const content = await file.text();
+      const isBIP32 = content.includes("MASTER CHAIN CODE") ||
+                      content.includes("WALLET TYPE: BIP32") ||
+                      content.includes("WALLET TYPE: Alpha descriptor");
+
+      setNeedsScanning(isBIP32);
+      setScanCount(10);
+    } catch (err) {
+      console.error("Error checking file type:", err);
+      setNeedsScanning(true); // Default to showing scan option
+    }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setSelectedFile(file);
+      // Check if file needs scanning (BIP32/dat) or has addresses listed (standard)
+      await checkIfNeedsScanning(file);
     }
   };
 
@@ -49,6 +76,7 @@ export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModa
   const handleCancel = () => {
     setSelectedFile(null);
     setScanCount(10);
+    setNeedsScanning(true);
     onCancel();
   };
 
@@ -138,19 +166,27 @@ export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModa
               </div>
             </div>
 
-            {/* Scan count for address scanning */}
-            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg mb-3">
-              <p className="text-xs text-blue-700 dark:text-blue-300 mb-2">
-                How many addresses to scan?
-              </p>
-              <input
-                type="number"
-                value={scanCount}
-                onChange={(e) => setScanCount(Math.max(1, parseInt(e.target.value) || 10))}
-                className="w-full px-2 py-1.5 bg-white dark:bg-neutral-800 border border-blue-300 dark:border-blue-700 rounded text-sm text-neutral-900 dark:text-white"
-                min={1}
-              />
-            </div>
+            {/* Scan count for address scanning (only for BIP32/.dat files) */}
+            {needsScanning ? (
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg mb-3">
+                <p className="text-xs text-blue-700 dark:text-blue-300 mb-2">
+                  How many addresses to scan?
+                </p>
+                <input
+                  type="number"
+                  value={scanCount}
+                  onChange={(e) => setScanCount(Math.max(1, parseInt(e.target.value) || 10))}
+                  className="w-full px-2 py-1.5 bg-white dark:bg-neutral-800 border border-blue-300 dark:border-blue-700 rounded text-sm text-neutral-900 dark:text-white"
+                  min={1}
+                />
+              </div>
+            ) : (
+              <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg mb-3">
+                <p className="text-xs text-green-700 dark:text-green-300">
+                  Addresses will be imported from file
+                </p>
+              </div>
+            )}
 
             {/* Action buttons */}
             <div className="flex gap-2">
