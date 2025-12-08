@@ -11,10 +11,10 @@ import * as ed from "@noble/ed25519";
 import type { CID } from "multiformats/cid";
 import type { PrivateKey, ConnectionGater, PeerId } from "@libp2p/interface";
 import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
-import type { IdentityManager } from "./IdentityManager";
+import { IdentityManager } from "./IdentityManager";
 import type { Token } from "../data/model";
-import type { TxfStorageData, TxfMeta, TxfToken } from "./types/TxfTypes";
-import { buildTxfStorageData, parseTxfStorageData, txfToToken } from "./TxfSerializer";
+import type { TxfStorageData, TxfMeta, TxfToken, TombstoneEntry } from "./types/TxfTypes";
+import { buildTxfStorageData, parseTxfStorageData, txfToToken, tokenToTxf, getCurrentStateHash } from "./TxfSerializer";
 import { getTokenValidationService } from "./TokenValidationService";
 import { getConflictResolutionService } from "./ConflictResolutionService";
 import { getSyncCoordinator } from "./SyncCoordinator";
@@ -764,8 +764,17 @@ export class IpfsStorageService {
         return null;
       }
 
-      // The response is the raw marshalled IPNS record
-      const recordData = new Uint8Array(await response.arrayBuffer());
+      // Kubo returns JSON with base64-encoded record in "Extra" field:
+      // {"ID":"","Type":5,"Responses":null,"Extra":"<base64-encoded-ipns-record>"}
+      const json = await response.json() as { Extra?: string; Type?: number };
+
+      if (!json.Extra) {
+        console.debug(`📦 Gateway ${new URL(gatewayUrl).hostname} returned no Extra field`);
+        return null;
+      }
+
+      // Decode base64 Extra field to get raw IPNS record
+      const recordData = Uint8Array.from(atob(json.Extra), c => c.charCodeAt(0));
       const record = unmarshalIPNSRecord(recordData);
 
       // Extract CID from value path
@@ -959,6 +968,9 @@ export class IpfsStorageService {
           );
         }
       }
+
+      // Run spent token sanity check after checking for remote updates
+      await this.runSpentTokenSanityCheck();
     };
 
     // Calculate random interval with jitter
@@ -1293,59 +1305,384 @@ export class IpfsStorageService {
     }
   }
 
+  // ==========================================
+  // Sanity Check Methods (Token Loss Prevention)
+  // ==========================================
+
+  /**
+   * Sanity check tombstones before applying deletions
+   * Verifies each tombstoned token is actually spent on Unicity
+   * Returns tokens that should NOT be deleted (false tombstones)
+   */
+  private async sanityCheckTombstones(
+    tombstonesToApply: TombstoneEntry[],
+    walletRepo: WalletRepository
+  ): Promise<{
+    validTombstones: TombstoneEntry[];
+    invalidTombstones: TombstoneEntry[];
+    tokensToRestore: Array<{ tokenId: string; txf: TxfToken }>;
+  }> {
+    const validTombstones: TombstoneEntry[] = [];
+    const invalidTombstones: TombstoneEntry[] = [];
+    const tokensToRestore: Array<{ tokenId: string; txf: TxfToken }> = [];
+
+    if (tombstonesToApply.length === 0) {
+      return { validTombstones, invalidTombstones, tokensToRestore };
+    }
+
+    // Get identity for verification
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (!identity) {
+      console.warn("⚠️ No identity available, skipping tombstone verification (accepting all tombstones)");
+      return { validTombstones: tombstonesToApply, invalidTombstones: [], tokensToRestore: [] };
+    }
+
+    // Build Map of tokenId -> TxfToken from archived versions
+    const tokensToCheck = new Map<string, TxfToken>();
+    for (const tombstone of tombstonesToApply) {
+      const archivedVersion = walletRepo.getBestArchivedVersion(tombstone.tokenId);
+      if (archivedVersion) {
+        tokensToCheck.set(tombstone.tokenId, archivedVersion);
+      }
+    }
+
+    if (tokensToCheck.size === 0) {
+      console.warn("⚠️ No archived tokens available for verification, accepting all tombstones");
+      return { validTombstones: tombstonesToApply, invalidTombstones: [], tokensToRestore: [] };
+    }
+
+    // Check which tokens are NOT spent (should not be deleted)
+    const validationService = getTokenValidationService();
+    const publicKey = identity.publicKey;
+    const unspentTokenIds = await validationService.checkUnspentTokens(tokensToCheck, publicKey);
+    const unspentSet = new Set(unspentTokenIds);
+
+    // Categorize tombstones
+    for (const tombstone of tombstonesToApply) {
+      if (unspentSet.has(tombstone.tokenId)) {
+        // Token is NOT spent - tombstone is invalid
+        invalidTombstones.push(tombstone);
+
+        // Find best version to restore
+        const bestVersion = walletRepo.getBestArchivedVersion(tombstone.tokenId);
+        if (bestVersion) {
+          tokensToRestore.push({ tokenId: tombstone.tokenId, txf: bestVersion });
+        }
+
+        console.log(`⚠️ Invalid tombstone for ${tombstone.tokenId.slice(0, 8)}... - token is NOT spent on Unicity`);
+      } else {
+        // Token is spent - tombstone is valid
+        validTombstones.push(tombstone);
+      }
+    }
+
+    if (tombstonesToApply.length > 0) {
+      console.log(`📦 Tombstone sanity check: ${validTombstones.length} valid, ${invalidTombstones.length} invalid`);
+    }
+
+    return { validTombstones, invalidTombstones, tokensToRestore };
+  }
+
+  /**
+   * Check for tokens missing from remote collection (not tombstoned, just absent)
+   * This handles case where remote "jumped over" a version
+   * Returns tokens that should be preserved (unspent on Unicity)
+   */
+  private async sanityCheckMissingTokens(
+    localTokens: Token[],
+    remoteTokenIds: Set<string>,
+    remoteTombstoneIds: Set<string>
+  ): Promise<Array<{ tokenId: string; txf: TxfToken }>> {
+    const tokensToPreserve: Array<{ tokenId: string; txf: TxfToken }> = [];
+
+    // Find tokens that are in local but missing from remote (and not tombstoned)
+    const missingTokens: Token[] = [];
+    for (const token of localTokens) {
+      const txf = tokenToTxf(token);
+      if (!txf) continue;
+
+      const tokenId = txf.genesis.data.tokenId;
+      if (!remoteTokenIds.has(tokenId) && !remoteTombstoneIds.has(tokenId)) {
+        missingTokens.push(token);
+      }
+    }
+
+    if (missingTokens.length === 0) return [];
+
+    console.log(`📦 Found ${missingTokens.length} token(s) missing from remote (no tombstone)`);
+
+    // Get identity for verification
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (!identity) {
+      console.warn("⚠️ No identity available, preserving all missing tokens (safe fallback)");
+      // Safe fallback: preserve all missing tokens
+      for (const token of missingTokens) {
+        const txf = tokenToTxf(token);
+        if (txf) {
+          tokensToPreserve.push({ tokenId: txf.genesis.data.tokenId, txf });
+        }
+      }
+      return tokensToPreserve;
+    }
+
+    // Build Map of tokenId -> TxfToken for verification
+    const tokensToCheck = new Map<string, TxfToken>();
+    for (const token of missingTokens) {
+      const txf = tokenToTxf(token);
+      if (!txf) continue;
+
+      const tokenId = txf.genesis.data.tokenId;
+      tokensToCheck.set(tokenId, txf);
+    }
+
+    if (tokensToCheck.size === 0) return tokensToPreserve;
+
+    // Check which are unspent (should be preserved)
+    const validationService = getTokenValidationService();
+    const publicKey = identity.publicKey;
+    const unspentTokenIds = await validationService.checkUnspentTokens(tokensToCheck, publicKey);
+    const unspentSet = new Set(unspentTokenIds);
+
+    for (const [tokenId, txf] of tokensToCheck) {
+      if (unspentSet.has(tokenId)) {
+        // Token is NOT spent - should be preserved
+        tokensToPreserve.push({ tokenId, txf });
+        console.log(`📦 Preserving missing token ${tokenId.slice(0, 8)}... - NOT spent on Unicity`);
+      } else {
+        console.log(`📦 Token ${tokenId.slice(0, 8)}... legitimately removed (spent on Unicity)`);
+      }
+    }
+
+    return tokensToPreserve;
+  }
+
+  /**
+   * Verify integrity invariants after sync operations
+   * All spent tokens should have both tombstone and archive entry
+   */
+  private verifyIntegrityInvariants(walletRepo: WalletRepository): void {
+    const tombstones = walletRepo.getTombstones();
+    const archivedTokens = walletRepo.getArchivedTokens();
+    const activeTokens = walletRepo.getTokens();
+
+    let issues = 0;
+
+    // Check 1: Every tombstoned token should have archive entry
+    for (const tombstone of tombstones) {
+      if (!archivedTokens.has(tombstone.tokenId)) {
+        console.warn(`⚠️ Integrity: Tombstone ${tombstone.tokenId.slice(0, 8)}... has no archive entry`);
+        issues++;
+      }
+    }
+
+    // Check 2: Active tokens should not be tombstoned
+    const tombstoneKeySet = new Set(
+      tombstones.map(t => `${t.tokenId}:${t.stateHash}`)
+    );
+
+    for (const token of activeTokens) {
+      const txf = tokenToTxf(token);
+      if (!txf) continue;
+
+      const tokenId = txf.genesis.data.tokenId;
+      const stateHash = getCurrentStateHash(txf);
+      const key = `${tokenId}:${stateHash}`;
+
+      if (tombstoneKeySet.has(key)) {
+        console.warn(`⚠️ Integrity: Active token ${tokenId.slice(0, 8)}... matches a tombstone`);
+        issues++;
+      }
+    }
+
+    if (issues > 0) {
+      console.warn(`⚠️ Integrity check found ${issues} issue(s)`);
+    } else {
+      console.log(`✅ Integrity check passed`);
+    }
+  }
+
+  // ==========================================
+  // Data Import Methods
+  // ==========================================
+
   /**
    * Import remote data into local storage
    * - Imports tokens that don't exist locally (unless tombstoned)
-   * - Removes local tokens that are tombstoned in remote
+   * - Removes local tokens that are tombstoned in remote (with Unicity verification)
+   * - Handles missing tokens (tokens in local but not in remote)
    * - Merges tombstones from remote
    * - Imports nametag if local doesn't have one
    */
   private async importRemoteData(remoteTxf: TxfStorageData): Promise<number> {
     const walletRepo = WalletRepository.getInstance();
-    const { tokens, nametag, tombstones: remoteTombstones } = parseTxfStorageData(remoteTxf);
+
+    // Debug: Log raw tombstones from remote data
+    const rawTombstones = (remoteTxf as Record<string, unknown>)._tombstones;
+    console.log(`📦 Raw remote _tombstones field:`, rawTombstones);
+
+    const { tokens: remoteTokens, nametag, tombstones: remoteTombstones, archivedTokens: remoteArchived, forkedTokens: remoteForked } = parseTxfStorageData(remoteTxf);
+
+    // Debug: Log parsed tombstones (now TombstoneEntry[])
+    console.log(`📦 Parsed remote tombstones (${remoteTombstones.length}):`,
+      remoteTombstones.map(t => `${t.tokenId.slice(0, 8)}:${t.stateHash.slice(0, 8)}`));
 
     // Get local tokens and tombstones
     const localTokens = walletRepo.getWallet()?.tokens || [];
     const localTokenIds = new Set(localTokens.map(t => t.id));
-    const localTombstones = new Set(walletRepo.getTombstones());
+    const localTombstones = walletRepo.getTombstones();
+
+    // Debug: Log local token IDs for comparison
+    console.log(`📦 Local token IDs (${localTokenIds.size}):`, [...localTokenIds].map(id => id.slice(0, 8) + '...'));
 
     let importedCount = 0;
 
-    // 1. Merge tombstones - this removes local tokens that are in remote tombstones
-    if (remoteTombstones.length > 0) {
-      const removedCount = walletRepo.mergeTombstones(remoteTombstones);
+    // ==========================================
+    // SANITY CHECKS - Prevent token loss from race conditions
+    // ==========================================
+
+    // 1. Build remote token ID set for missing token detection
+    const remoteTokenIds = new Set<string>();
+    for (const token of remoteTokens) {
+      const txf = tokenToTxf(token);
+      if (txf) remoteTokenIds.add(txf.genesis.data.tokenId);
+    }
+
+    // 2. Build remote tombstone ID set
+    const remoteTombstoneIds = new Set(remoteTombstones.map(t => t.tokenId));
+
+    // 3. Check for missing tokens (local tokens absent from remote without tombstone)
+    const tokensToPreserveFromMissing = await this.sanityCheckMissingTokens(
+      localTokens,
+      remoteTokenIds,
+      remoteTombstoneIds
+    );
+
+    // 4. Get new tombstones that would be applied
+    const localTombstoneKeys = new Set(
+      localTombstones.map(t => `${t.tokenId}:${t.stateHash}`)
+    );
+    const newTombstones = remoteTombstones.filter(
+      t => !localTombstoneKeys.has(`${t.tokenId}:${t.stateHash}`)
+    );
+
+    // 5. Sanity check new tombstones with Unicity
+    let tokensToRestore: Array<{ tokenId: string; txf: TxfToken }> = [];
+    let validTombstones = newTombstones;
+
+    if (newTombstones.length > 0) {
+      console.log(`📦 Sanity checking ${newTombstones.length} new tombstone(s) with Unicity...`);
+      const result = await this.sanityCheckTombstones(newTombstones, walletRepo);
+      validTombstones = result.validTombstones;
+      tokensToRestore = result.tokensToRestore;
+
+      if (result.invalidTombstones.length > 0) {
+        console.log(`⚠️ Rejected ${result.invalidTombstones.length} invalid tombstone(s)`);
+      }
+    }
+
+    // 6. Combine tokens to preserve/restore
+    const allTokensToRestore = [...tokensToRestore, ...tokensToPreserveFromMissing];
+
+    // 7. Restore any tokens that should not be deleted
+    for (const { tokenId, txf } of allTokensToRestore) {
+      walletRepo.restoreTokenFromArchive(tokenId, txf);
+    }
+
+    // 8. Apply only valid tombstones (not the rejected invalid ones)
+    const tombstonesToApply = [...localTombstones];
+    for (const t of validTombstones) {
+      if (!localTombstoneKeys.has(`${t.tokenId}:${t.stateHash}`)) {
+        tombstonesToApply.push(t);
+      }
+    }
+
+    // Merge valid tombstones - this removes local tokens whose state matches tombstones
+    if (tombstonesToApply.length > 0) {
+      console.log(`📦 Processing ${tombstonesToApply.length} valid tombstone(s)`);
+      const removedCount = walletRepo.mergeTombstones(tombstonesToApply);
       if (removedCount > 0) {
         console.log(`📦 Removed ${removedCount} tombstoned token(s) from local`);
       }
     }
 
-    // 2. Import tokens not in local storage (and not in any tombstone list)
-    const allTombstones = new Set([...localTombstones, ...remoteTombstones]);
-    for (const token of tokens) {
+    // ==========================================
+    // IMPORT NEW TOKENS FROM REMOTE
+    // ==========================================
+
+    // Build combined tombstone lookup (tokenId:stateHash -> true)
+    const allTombstoneKeys = new Set<string>();
+    for (const t of walletRepo.getTombstones()) {
+      allTombstoneKeys.add(`${t.tokenId}:${t.stateHash}`);
+    }
+
+    // Import tokens not in local storage (and not tombstoned by state hash)
+    // Re-get local tokens as they may have changed after restore
+    const currentLocalTokenIds = new Set((walletRepo.getWallet()?.tokens || []).map(t => t.id));
+
+    for (const token of remoteTokens) {
       // Skip if already in local
-      if (localTokenIds.has(token.id)) {
+      if (currentLocalTokenIds.has(token.id)) {
         continue;
       }
 
-      // Skip if tombstoned (deleted on any device)
-      if (allTombstones.has(token.id)) {
-        console.log(`📦 Skipping tombstoned token ${token.id.slice(0, 8)}... from remote`);
+      // Extract tokenId and stateHash from incoming token to check against tombstones
+      let tokenId = token.id;
+      let stateHash = "";
+      if (token.jsonData) {
+        try {
+          const txf = JSON.parse(token.jsonData) as TxfToken;
+          tokenId = txf.genesis?.data?.tokenId || token.id;
+          stateHash = getCurrentStateHash(txf);
+        } catch {
+          // Use token.id as fallback
+        }
+      }
+
+      // Skip if this specific state is tombstoned
+      const tombstoneKey = `${tokenId}:${stateHash}`;
+      if (allTombstoneKeys.has(tombstoneKey)) {
+        console.log(`📦 Skipping tombstoned token ${tokenId.slice(0, 8)}... state ${stateHash.slice(0, 8)}... from remote`);
         continue;
       }
 
       walletRepo.addToken(token);
-      console.log(`📦 Imported token ${token.id.slice(0, 8)}... from remote`);
+      console.log(`📦 Imported token ${tokenId.slice(0, 8)}... from remote`);
       importedCount++;
     }
 
-    // 3. Import nametag if local doesn't have one
+    // ==========================================
+    // IMPORT METADATA & ARCHIVES
+    // ==========================================
+
+    // Import nametag if local doesn't have one
     if (nametag && !walletRepo.getNametag()) {
       walletRepo.setNametag(nametag);
       console.log(`📦 Imported nametag "${nametag.name}" from remote`);
     }
 
-    // 4. Prune old tombstones to prevent unlimited growth
+    // Merge archived and forked tokens from remote
+    if (remoteArchived.size > 0) {
+      const archivedMergedCount = walletRepo.mergeArchivedTokens(remoteArchived);
+      if (archivedMergedCount > 0) {
+        console.log(`📦 Merged ${archivedMergedCount} archived token(s) from remote`);
+      }
+    }
+    if (remoteForked.size > 0) {
+      const forkedMergedCount = walletRepo.mergeForkedTokens(remoteForked);
+      if (forkedMergedCount > 0) {
+        console.log(`📦 Merged ${forkedMergedCount} forked token(s) from remote`);
+      }
+    }
+
+    // Prune old tombstones and archives to prevent unlimited growth
     walletRepo.pruneTombstones();
+    walletRepo.pruneArchivedTokens();
+    walletRepo.pruneForkedTokens();
+
+    // ==========================================
+    // INTEGRITY VERIFICATION
+    // ==========================================
+    this.verifyIntegrityInvariants(walletRepo);
 
     return importedCount;
   }
@@ -1415,7 +1752,27 @@ export class IpfsStorageService {
     const cidToFetch = remoteCid || localCid;
 
     if (!cidToFetch) {
-      // Fresh wallet - no IPNS record and no local CID
+      // No IPNS record and no local CID - could be fresh wallet OR failed resolution
+      // CRITICAL: Don't upload if IPNS resolution failed and we have no local data
+      // This prevents overwriting existing remote tokens on wallet restore
+
+      const ipnsResolutionFailed = resolution.respondedCount === 0;
+      const localWallet = WalletRepository.getInstance();
+      const localTokenCount = localWallet.getTokens().length;
+
+      if (ipnsResolutionFailed && localTokenCount === 0) {
+        // IPNS resolution failed AND we have no local tokens
+        // This is likely a wallet restore - DO NOT overwrite remote!
+        console.warn(`📦 IPNS resolution failed (0/${resolution.totalGateways} responded) and no local tokens`);
+        console.warn(`📦 Skipping upload to prevent overwriting existing remote tokens`);
+        console.warn(`📦 Will retry IPNS resolution on next poll`);
+        return {
+          success: false,
+          timestamp: Date.now(),
+          error: "IPNS resolution failed - waiting for successful resolution before sync"
+        };
+      }
+
       console.log(`📦 No IPNS record or local CID - fresh wallet, triggering initial sync`);
       return this.syncNow();
     }
@@ -1620,6 +1977,32 @@ export class IpfsStorageService {
                 }
               }
 
+              // Process tombstones: merge remote tombstones into local
+              // This removes local tokens that were deleted on other devices
+              const remoteTombstones = remoteTxf._tombstones || [];
+              if (remoteTombstones.length > 0) {
+                console.log(`📦 Processing ${remoteTombstones.length} remote tombstone(s)`);
+                const removedCount = walletRepo.mergeTombstones(remoteTombstones);
+                if (removedCount > 0) {
+                  console.log(`📦 Removed ${removedCount} tombstoned token(s) from local during conflict resolution`);
+                }
+              }
+
+              // Merge archived and forked tokens from remote
+              const { archivedTokens: remoteArchived, forkedTokens: remoteForked } = parseTxfStorageData(remoteTxf);
+              if (remoteArchived.size > 0) {
+                const archivedMergedCount = walletRepo.mergeArchivedTokens(remoteArchived);
+                if (archivedMergedCount > 0) {
+                  console.log(`📦 Merged ${archivedMergedCount} archived token(s) from remote`);
+                }
+              }
+              if (remoteForked.size > 0) {
+                const forkedMergedCount = walletRepo.mergeForkedTokens(remoteForked);
+                if (forkedMergedCount > 0) {
+                  console.log(`📦 Merged ${forkedMergedCount} forked token(s) from remote`);
+                }
+              }
+
               // Also sync nametag from remote if local doesn't have one
               if (!nametag && mergeResult.merged._nametag) {
                 walletRepo.setNametag(mergeResult.merged._nametag);
@@ -1674,9 +2057,11 @@ export class IpfsStorageService {
         }
       }
 
-      // 4. Build TXF storage data with incremented version (include tombstones)
+      // 4. Build TXF storage data with incremented version (include tombstones, archives, forks)
       const newVersion = this.incrementVersionCounter();
       const tombstones = walletRepo.getTombstones();
+      const archivedTokens = walletRepo.getArchivedTokens();
+      const forkedTokens = walletRepo.getForkedTokens();
       const meta: Omit<TxfMeta, "formatVersion"> = {
         version: newVersion,
         address: wallet.address,
@@ -1684,9 +2069,9 @@ export class IpfsStorageService {
         lastCid: this.getLastCid() || undefined,
       };
 
-      const txfStorageData = buildTxfStorageData(tokensToSync, meta, nametag || undefined, tombstones);
-      if (tombstones.length > 0) {
-        console.log(`📦 Including ${tombstones.length} tombstone(s) in sync`);
+      const txfStorageData = buildTxfStorageData(tokensToSync, meta, nametag || undefined, tombstones, archivedTokens, forkedTokens);
+      if (tombstones.length > 0 || archivedTokens.size > 0 || forkedTokens.size > 0) {
+        console.log(`📦 Including ${tombstones.length} tombstone(s), ${archivedTokens.size} archived, ${forkedTokens.size} forked in sync`);
       }
 
       // 4. Ensure backend is connected before storing
@@ -1851,6 +2236,85 @@ export class IpfsStorageService {
       this.isSyncing = false;
       // Release cross-tab lock
       coordinator.releaseLock();
+    }
+  }
+
+  // ==========================================
+  // Spent Token Sanity Check
+  // ==========================================
+
+  /**
+   * Run sanity check to detect and remove spent tokens
+   * Called during each IPNS poll cycle
+   */
+  private async runSpentTokenSanityCheck(): Promise<void> {
+    console.log("📦 Running spent token sanity check...");
+
+    try {
+      // Get current identity for public key
+      const identity = await this.identityManager.getCurrentIdentity();
+      if (!identity) {
+        console.warn("📦 Sanity check: No identity, skipping");
+        return;
+      }
+
+      // Get all tokens from wallet
+      const walletRepo = WalletRepository.getInstance();
+      const tokens = walletRepo.getTokens();
+
+      if (tokens.length === 0) {
+        console.log("📦 Sanity check: No tokens to check");
+        return;
+      }
+
+      // Run spent token check
+      const validationService = getTokenValidationService();
+      const result = await validationService.checkSpentTokens(tokens, identity.publicKey, {
+        batchSize: 3,
+        onProgress: (completed, total) => {
+          if (completed % 5 === 0 || completed === total) {
+            console.log(`📦 Sanity check progress: ${completed}/${total}`);
+          }
+        },
+      });
+
+      // Remove spent tokens
+      if (result.spentTokens.length > 0) {
+        console.log(`📦 Sanity check found ${result.spentTokens.length} spent token(s):`);
+
+        for (const spent of result.spentTokens) {
+          const tokenIdStr = spent.tokenId || spent.localId || "unknown";
+          const stateHashStr = spent.stateHash || "unknown";
+          console.log(
+            `📦   - Removing spent token ${tokenIdStr.slice(0, 8)}... (state: ${stateHashStr.slice(0, 12)}...)`
+          );
+          // Use skipHistory=true since this is cleanup, not a user-initiated transfer
+          if (spent.localId) {
+            walletRepo.removeToken(spent.localId, undefined, true);
+          }
+        }
+
+        // Emit wallet-updated to refresh UI
+        window.dispatchEvent(new Event("wallet-updated"));
+
+        console.log(`📦 Sanity check complete: removed ${result.spentTokens.length} spent token(s)`);
+      } else {
+        console.log("📦 Sanity check complete: no spent tokens found");
+      }
+
+      // Log any errors (non-fatal)
+      if (result.errors.length > 0) {
+        console.warn(
+          `📦 Sanity check had ${result.errors.length} error(s):`,
+          result.errors.slice(0, 3)
+        );
+      }
+    } catch (error) {
+      // Non-fatal - sanity check failure shouldn't break sync
+      console.warn(
+        "📦 Sanity check failed (non-fatal):",
+        error instanceof Error ? error.message : error
+      );
     }
   }
 

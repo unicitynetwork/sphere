@@ -10,14 +10,30 @@ import type {
   TokenValidationResult,
   TxfTransaction,
   TxfInclusionProof,
+  TxfToken,
 } from "./types/TxfTypes";
+import { getCurrentStateHash } from "./TxfSerializer";
+
+// ==========================================
+// Spent Token Detection Types
+// ==========================================
+
+export interface SpentTokenInfo {
+  tokenId: string;     // SDK token ID from genesis
+  localId: string;     // Local Token.id for repository removal
+  stateHash: string;   // Current state hash being checked
+}
+
+export interface SpentTokenResult {
+  spentTokens: SpentTokenInfo[];
+  errors: string[];
+}
 
 // ==========================================
 // Constants
 // ==========================================
 
 const DEFAULT_AGGREGATOR_URL = "https://alpha-aggregator.unicity.network";
-const TRUST_BASE_URL = "https://alpha-explorer.unicity.network/api/trustbase";
 
 // ==========================================
 // TokenValidationService
@@ -228,6 +244,239 @@ export class TokenValidationService {
   }
 
   // ==========================================
+  // Spent Token Detection
+  // ==========================================
+
+  /**
+   * Check which tokens are NOT spent (unspent) on Unicity
+   * Used for sanity check when importing remote tombstones/missing tokens
+   * Requires full TxfToken data for SDK-based verification
+   * Returns array of tokenIds that are still valid/unspent
+   */
+  async checkUnspentTokens(
+    tokens: Map<string, TxfToken>,
+    publicKey: string
+  ): Promise<string[]> {
+    if (tokens.size === 0) return [];
+
+    const unspentTokenIds: string[] = [];
+
+    console.log(`📦 Sanity check: Verifying ${tokens.size} token(s) with aggregator...`);
+
+    // Get trust base and client
+    const trustBase = await this.getTrustBase();
+    if (!trustBase) {
+      console.warn("📦 Sanity check: Trust base not available, assuming all tokens unspent (safe fallback)");
+      return [...tokens.keys()];
+    }
+
+    let client: unknown;
+    try {
+      const { ServiceProvider } = await import("./ServiceProvider");
+      client = ServiceProvider.stateTransitionClient;
+    } catch {
+      console.warn("📦 Sanity check: StateTransitionClient not available, assuming all tokens unspent");
+      return [...tokens.keys()];
+    }
+
+    if (!client) {
+      console.warn("📦 Sanity check: StateTransitionClient is null, assuming all tokens unspent");
+      return [...tokens.keys()];
+    }
+
+    for (const [tokenId, txfToken] of tokens) {
+      try {
+        // Parse SDK token from TXF data
+        const { Token } = await import(
+          "@unicitylabs/state-transition-sdk/lib/token/Token"
+        );
+        const sdkToken = await Token.fromJSON(txfToken);
+
+        // Convert public key to bytes for SDK
+        const pubKeyBytes = Buffer.from(publicKey, "hex");
+
+        // Check if token state is spent using SDK
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const isSpent = await (client as any).isTokenStateSpent(
+          trustBase,
+          sdkToken,
+          pubKeyBytes
+        );
+
+        if (!isSpent) {
+          unspentTokenIds.push(tokenId);
+          console.log(`📦 Token ${tokenId.slice(0, 8)}... is NOT spent`);
+        } else {
+          console.log(`📦 Token ${tokenId.slice(0, 8)}... is SPENT`);
+        }
+      } catch (err) {
+        console.warn(`📦 Sanity check: Error checking token ${tokenId.slice(0, 8)}...:`, err);
+        // On error, assume unspent (safe fallback to avoid data loss)
+        unspentTokenIds.push(tokenId);
+      }
+    }
+
+    console.log(`📦 Sanity check result: ${unspentTokenIds.length} unspent, ${tokens.size - unspentTokenIds.length} spent`);
+    return unspentTokenIds;
+  }
+
+  /**
+   * Check all tokens for spent state against aggregator
+   * Returns list of spent tokens that should be removed
+   */
+  async checkSpentTokens(
+    tokens: LocalToken[],
+    publicKey: string,
+    options?: { batchSize?: number; onProgress?: (completed: number, total: number) => void }
+  ): Promise<SpentTokenResult> {
+    const spentTokens: SpentTokenInfo[] = [];
+    const errors: string[] = [];
+
+    const batchSize = options?.batchSize ?? 3; // Smaller batch for network calls
+    const total = tokens.length;
+    let completed = 0;
+
+    // Get trust base
+    const trustBase = await this.getTrustBase();
+    if (!trustBase) {
+      console.warn("📦 Sanity check: Trust base not available, skipping");
+      return { spentTokens: [], errors: ["Trust base not available"] };
+    }
+
+    // Get state transition client
+    let client: unknown;
+    try {
+      const { ServiceProvider } = await import("./ServiceProvider");
+      client = ServiceProvider.stateTransitionClient;
+    } catch {
+      console.warn("📦 Sanity check: StateTransitionClient not available");
+      return { spentTokens: [], errors: ["StateTransitionClient not available"] };
+    }
+
+    // Process in batches
+    for (let i = 0; i < tokens.length; i += batchSize) {
+      const batch = tokens.slice(i, i + batchSize);
+
+      const batchResults = await Promise.allSettled(
+        batch.map(async (token) => {
+          try {
+            return await this.checkSingleTokenSpent(token, publicKey, trustBase, client);
+          } catch (err) {
+            return {
+              tokenId: token.id,
+              localId: token.id,
+              stateHash: "",
+              spent: false,
+              error: err instanceof Error ? err.message : String(err),
+            };
+          }
+        })
+      );
+
+      for (const result of batchResults) {
+        completed++;
+        if (result.status === "fulfilled") {
+          if (result.value.spent) {
+            spentTokens.push({
+              tokenId: result.value.tokenId,
+              localId: result.value.localId,
+              stateHash: result.value.stateHash,
+            });
+          }
+          if (result.value.error) {
+            errors.push(`Token ${result.value.tokenId}: ${result.value.error}`);
+          }
+        } else {
+          errors.push(String(result.reason));
+        }
+      }
+
+      if (options?.onProgress) {
+        options.onProgress(completed, total);
+      }
+    }
+
+    return { spentTokens, errors };
+  }
+
+  /**
+   * Check if a single token's current state is spent
+   */
+  private async checkSingleTokenSpent(
+    token: LocalToken,
+    publicKey: string,
+    trustBase: unknown,
+    client: unknown
+  ): Promise<{
+    tokenId: string;
+    localId: string;
+    stateHash: string;
+    spent: boolean;
+    error?: string;
+  }> {
+    if (!token.jsonData) {
+      return {
+        tokenId: token.id,
+        localId: token.id,
+        stateHash: "",
+        spent: false,
+        error: "No jsonData",
+      };
+    }
+
+    let txfToken: TxfToken;
+    try {
+      txfToken = JSON.parse(token.jsonData);
+    } catch {
+      return {
+        tokenId: token.id,
+        localId: token.id,
+        stateHash: "",
+        spent: false,
+        error: "Invalid JSON",
+      };
+    }
+
+    // Get SDK token ID and state hash
+    const tokenId = txfToken.genesis?.data?.tokenId || token.id;
+    const stateHash = getCurrentStateHash(txfToken);
+
+    try {
+      // Parse SDK token
+      const { Token } = await import(
+        "@unicitylabs/state-transition-sdk/lib/token/Token"
+      );
+      const sdkToken = await Token.fromJSON(txfToken);
+
+      // Convert public key to bytes for SDK
+      const pubKeyBytes = Buffer.from(publicKey, "hex");
+
+      // Check if token state is spent using SDK client
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const isSpent = await (client as any).isTokenStateSpent(
+        trustBase,
+        sdkToken,
+        pubKeyBytes
+      );
+
+      return {
+        tokenId,
+        localId: token.id,
+        stateHash,
+        spent: isSpent === true,
+      };
+    } catch (err) {
+      return {
+        tokenId,
+        localId: token.id,
+        stateHash,
+        spent: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  // ==========================================
   // Private Helpers
   // ==========================================
 
@@ -336,7 +585,7 @@ export class TokenValidationService {
   }
 
   /**
-   * Fetch trust base from network
+   * Get trust base from ServiceProvider (local file)
    */
   private async getTrustBase(): Promise<unknown | null> {
     // Check cache
@@ -348,25 +597,17 @@ export class TokenValidationService {
     }
 
     try {
-      const response = await fetch(TRUST_BASE_URL);
-      if (!response.ok) {
-        return null;
-      }
-
-      const trustBaseJson = await response.json();
-
-      // Parse using SDK
-      const { RootTrustBase } = await import(
-        "@unicitylabs/state-transition-sdk/lib/bft/RootTrustBase"
-      );
-      const trustBase = RootTrustBase.fromJSON(trustBaseJson);
+      // Use ServiceProvider which loads from local trustbase-testnet.json
+      const { ServiceProvider } = await import("./ServiceProvider");
+      const trustBase = ServiceProvider.getRootTrustBase();
 
       // Cache
       this.trustBaseCache = trustBase;
       this.trustBaseCacheTime = Date.now();
 
       return trustBase;
-    } catch {
+    } catch (err) {
+      console.warn("📦 Failed to get trust base from ServiceProvider:", err);
       return null;
     }
   }

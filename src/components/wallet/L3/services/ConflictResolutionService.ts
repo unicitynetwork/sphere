@@ -10,12 +10,20 @@ import type {
   TokenConflict,
   MergeResult,
   TxfTransaction,
+  TombstoneEntry,
 } from "./types/TxfTypes";
 import {
   isTokenKey,
+  isArchivedKey,
+  isForkedKey,
   tokenIdFromKey,
+  tokenIdFromArchivedKey,
+  parseForkedKey,
   keyFromTokenId,
+  archivedKeyFromTokenId,
+  forkedKeyFromTokenIdAndState,
 } from "./types/TxfTypes";
+import { getCurrentStateHash } from "./TxfSerializer";
 import type { NametagData } from "../../../../repositories/WalletRepository";
 
 // ==========================================
@@ -130,13 +138,74 @@ export class ConflictResolutionService {
       merged._nametag = this.mergeNametags(localNametag, remoteNametag);
     }
 
-    // Add all tokens
+    // Merge tombstones (union of local and remote by tokenId+stateHash)
+    // This ensures deleted token states stay deleted across devices
+    const localTombstones: TombstoneEntry[] = local._tombstones || [];
+    const remoteTombstones: TombstoneEntry[] = remote._tombstones || [];
+
+    // Use Map for deduplication by tokenId+stateHash key
+    const tombstoneMap = new Map<string, TombstoneEntry>();
+    for (const t of [...localTombstones, ...remoteTombstones]) {
+      const key = `${t.tokenId}:${t.stateHash}`;
+      if (!tombstoneMap.has(key)) {
+        tombstoneMap.set(key, t);
+      }
+    }
+    const mergedTombstones = [...tombstoneMap.values()];
+
+    if (mergedTombstones.length > 0) {
+      merged._tombstones = mergedTombstones;
+      console.log(`📦 Merged ${mergedTombstones.length} tombstone(s) (${localTombstones.length} local + ${remoteTombstones.length} remote)`);
+    }
+
+    // Build tombstone lookup set (tokenId:stateHash)
+    const tombstoneKeySet = new Set(tombstoneMap.keys());
+
+    // Add all tokens (excluding tombstoned states)
     for (const [tokenId, token] of mergedTokens) {
+      // Get the token's current state hash
+      const stateHash = getCurrentStateHash(token);
+      const tombstoneKey = `${tokenId}:${stateHash}`;
+
+      // Don't include tokens whose current state is tombstoned
+      if (tombstoneKeySet.has(tombstoneKey)) {
+        console.log(`📦 Excluding tombstoned token ${tokenId.slice(0, 8)}... (state ${stateHash.slice(0, 12)}...) from merge`);
+        removedTokens.push(tokenId);
+        continue;
+      }
       merged[keyFromTokenId(tokenId)] = token;
     }
 
+    // Merge archived tokens (union of local and remote, prefer more transactions)
+    const localArchived = this.extractArchivedTokens(local);
+    const remoteArchived = this.extractArchivedTokens(remote);
+    const mergedArchived = this.mergeArchivedTokenMaps(localArchived, remoteArchived);
+    for (const [tokenId, token] of mergedArchived) {
+      merged[archivedKeyFromTokenId(tokenId)] = token;
+    }
+    if (mergedArchived.size > 0) {
+      console.log(`📦 Merged ${mergedArchived.size} archived token(s)`);
+    }
+
+    // Merge forked tokens (union of local and remote)
+    const localForked = this.extractForkedTokens(local);
+    const remoteForked = this.extractForkedTokens(remote);
+    const mergedForked = this.mergeForkedTokenMaps(localForked, remoteForked);
+    for (const [key, token] of mergedForked) {
+      // Parse key to get tokenId and stateHash
+      const parts = key.split("_");
+      if (parts.length >= 2) {
+        const tokenId = parts[0];
+        const stateHash = parts.slice(1).join("_");  // stateHash may contain underscores
+        merged[forkedKeyFromTokenIdAndState(tokenId, stateHash)] = token;
+      }
+    }
+    if (mergedForked.size > 0) {
+      console.log(`📦 Merged ${mergedForked.size} forked token(s)`);
+    }
+
     console.log(
-      `📦 Merge complete: ${mergedTokens.size} tokens, ${conflicts.length} conflicts resolved, ${newTokens.length} new tokens`
+      `📦 Merge complete: ${mergedTokens.size - removedTokens.length} active, ${mergedArchived.size} archived, ${mergedForked.size} forked, ${conflicts.length} conflicts resolved, ${newTokens.length} new, ${removedTokens.length} tombstoned`
     );
 
     return {
@@ -345,6 +414,103 @@ export class ConflictResolutionService {
     }
 
     return true;
+  }
+
+  // ==========================================
+  // Archived Token Methods
+  // ==========================================
+
+  /**
+   * Extract archived tokens from storage data into a Map
+   */
+  private extractArchivedTokens(data: TxfStorageData): Map<string, TxfToken> {
+    const archived = new Map<string, TxfToken>();
+
+    for (const key of Object.keys(data)) {
+      if (isArchivedKey(key)) {
+        const tokenId = tokenIdFromArchivedKey(key);
+        const token = data[key] as TxfToken;
+        if (token && token.genesis) {
+          archived.set(tokenId, token);
+        }
+      }
+    }
+
+    return archived;
+  }
+
+  /**
+   * Extract forked tokens from storage data into a Map
+   * Map key format: tokenId_stateHash
+   */
+  private extractForkedTokens(data: TxfStorageData): Map<string, TxfToken> {
+    const forked = new Map<string, TxfToken>();
+
+    for (const key of Object.keys(data)) {
+      if (isForkedKey(key)) {
+        const parsed = parseForkedKey(key);
+        if (parsed) {
+          const token = data[key] as TxfToken;
+          if (token && token.genesis) {
+            // Use tokenId_stateHash as map key
+            const mapKey = `${parsed.tokenId}_${parsed.stateHash}`;
+            forked.set(mapKey, token);
+          }
+        }
+      }
+    }
+
+    return forked;
+  }
+
+  /**
+   * Merge archived token maps
+   * Prefers token with more transactions (more complete history)
+   */
+  private mergeArchivedTokenMaps(
+    local: Map<string, TxfToken>,
+    remote: Map<string, TxfToken>
+  ): Map<string, TxfToken> {
+    const merged = new Map<string, TxfToken>(local);
+
+    for (const [tokenId, remoteToken] of remote) {
+      const localToken = merged.get(tokenId);
+
+      if (!localToken) {
+        // Only in remote - add it
+        merged.set(tokenId, remoteToken);
+      } else {
+        // Both have it - prefer one with more transactions (more complete history)
+        const localTxnCount = localToken.transactions?.length || 0;
+        const remoteTxnCount = remoteToken.transactions?.length || 0;
+
+        if (remoteTxnCount > localTxnCount) {
+          merged.set(tokenId, remoteToken);
+        }
+        // else keep local (ties go to local)
+      }
+    }
+
+    return merged;
+  }
+
+  /**
+   * Merge forked token maps (union merge)
+   * Each fork is unique by tokenId_stateHash
+   */
+  private mergeForkedTokenMaps(
+    local: Map<string, TxfToken>,
+    remote: Map<string, TxfToken>
+  ): Map<string, TxfToken> {
+    const merged = new Map<string, TxfToken>(local);
+
+    for (const [key, token] of remote) {
+      if (!merged.has(key)) {
+        merged.set(key, token);
+      }
+    }
+
+    return merged;
   }
 }
 

@@ -1,4 +1,5 @@
-import { Token, Wallet } from "../components/wallet/L3/data/model";
+import { Token, Wallet, TokenStatus } from "../components/wallet/L3/data/model";
+import type { TombstoneEntry, TxfToken, TxfTransaction } from "../components/wallet/L3/services/types/TxfTypes";
 import { v4 as uuidv4 } from "uuid";
 
 const LEGACY_STORAGE_KEY = "unicity_wallet_data";
@@ -40,7 +41,9 @@ interface StoredWallet {
   address: string;
   tokens: Partial<Token>[];
   nametag?: NametagData;  // One nametag per wallet/identity
-  tombstones?: string[];  // Deleted token IDs (prevents zombie resurrection during sync)
+  tombstones?: TombstoneEntry[] | string[];  // TombstoneEntry[] (new) or string[] (legacy, discarded on load)
+  archivedTokens?: Record<string, TxfToken>;  // Archived spent tokens (keyed by tokenId)
+  forkedTokens?: Record<string, TxfToken>;    // Forked tokens (keyed by tokenId_stateHash)
 }
 
 export class WalletRepository {
@@ -50,8 +53,10 @@ export class WalletRepository {
   private _currentAddress: string | null = null;
   private _migrationComplete: boolean = false;
   private _nametag: NametagData | null = null;
-  private _tombstones: string[] = [];  // Deleted token IDs for IPFS sync
+  private _tombstones: TombstoneEntry[] = [];  // State-hash-aware tombstones for IPFS sync
   private _transactionHistory: TransactionHistoryEntry[] = [];
+  private _archivedTokens: Map<string, TxfToken> = new Map();  // Archived spent tokens (keyed by tokenId)
+  private _forkedTokens: Map<string, TxfToken> = new Map();    // Forked tokens (keyed by tokenId_stateHash)
 
   // Debounce timer for wallet refresh events
   private _refreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -254,10 +259,50 @@ export class WalletRepository {
         this._wallet = wallet;
         this._currentAddress = address;
         this._nametag = parsed.nametag || null;
-        this._tombstones = parsed.tombstones || [];
+
+        // Parse tombstones - handle legacy format (string[]) by discarding it
+        this._tombstones = [];
+        if (parsed.tombstones && Array.isArray(parsed.tombstones)) {
+          for (const entry of parsed.tombstones) {
+            // New format: TombstoneEntry objects
+            if (
+              typeof entry === "object" &&
+              entry !== null &&
+              typeof (entry as TombstoneEntry).tokenId === "string" &&
+              typeof (entry as TombstoneEntry).stateHash === "string" &&
+              typeof (entry as TombstoneEntry).timestamp === "number"
+            ) {
+              this._tombstones.push(entry as TombstoneEntry);
+            }
+            // Legacy string format: discard (no state hash info)
+          }
+        }
+
+        // Load archived tokens
+        this._archivedTokens = new Map();
+        if (parsed.archivedTokens && typeof parsed.archivedTokens === "object") {
+          for (const [tokenId, txfToken] of Object.entries(parsed.archivedTokens)) {
+            if (txfToken && typeof txfToken === "object" && (txfToken as TxfToken).genesis) {
+              this._archivedTokens.set(tokenId, txfToken as TxfToken);
+            }
+          }
+        }
+
+        // Load forked tokens
+        this._forkedTokens = new Map();
+        if (parsed.forkedTokens && typeof parsed.forkedTokens === "object") {
+          for (const [key, txfToken] of Object.entries(parsed.forkedTokens)) {
+            if (txfToken && typeof txfToken === "object" && (txfToken as TxfToken).genesis) {
+              this._forkedTokens.set(key, txfToken as TxfToken);
+            }
+          }
+        }
+
         this.refreshWallet();
 
-        console.log(`Loaded wallet for address ${address} with ${tokens.length} tokens${this._nametag ? `, nametag: ${this._nametag.name}` : ""}${this._tombstones.length > 0 ? `, ${this._tombstones.length} tombstones` : ""}`);
+        const archiveInfo = this._archivedTokens.size > 0 ? `, ${this._archivedTokens.size} archived` : "";
+        const forkedInfo = this._forkedTokens.size > 0 ? `, ${this._forkedTokens.size} forked` : "";
+        console.log(`Loaded wallet for address ${address} with ${tokens.length} tokens${this._nametag ? `, nametag: ${this._nametag.name}` : ""}${this._tombstones.length > 0 ? `, ${this._tombstones.length} tombstones` : ""}${archiveInfo}${forkedInfo}`);
         return wallet;
       }
 
@@ -361,7 +406,7 @@ export class WalletRepository {
     this._currentAddress = wallet.address;
     const storageKey = this.getStorageKey(wallet.address);
 
-    // Include nametag and tombstones in stored data
+    // Include nametag, tombstones, and archived/forked tokens in stored data
     const storedData: StoredWallet = {
       id: wallet.id,
       name: wallet.name,
@@ -369,6 +414,8 @@ export class WalletRepository {
       tokens: wallet.tokens,
       nametag: this._nametag || undefined,
       tombstones: this._tombstones.length > 0 ? this._tombstones : undefined,
+      archivedTokens: this._archivedTokens.size > 0 ? Object.fromEntries(this._archivedTokens) : undefined,
+      forkedTokens: this._forkedTokens.size > 0 ? Object.fromEntries(this._forkedTokens) : undefined,
     };
 
     localStorage.setItem(storageKey, JSON.stringify(storedData));
@@ -436,6 +483,9 @@ export class WalletRepository {
 
     this.saveWallet(updatedWallet);
 
+    // Archive the token (ensures every token is preserved for sanity check restoration)
+    this.archiveToken(token);
+
     // Add to transaction history (RECEIVED) - skip for change tokens from split
     if (!skipHistory && token.coinId && token.amount) {
       this.addTransactionToHistory({
@@ -459,6 +509,11 @@ export class WalletRepository {
     // Find the token before removing to add to history
     const tokenToRemove = this._wallet.tokens.find((t) => t.id === tokenId);
 
+    // Archive the token before removing (preserves spent token history)
+    if (tokenToRemove?.jsonData) {
+      this.archiveToken(tokenToRemove);
+    }
+
     const updatedTokens = this._wallet.tokens.filter((t) => t.id !== tokenId);
     const updatedWallet = new Wallet(
       this._wallet.id,
@@ -467,11 +522,50 @@ export class WalletRepository {
       updatedTokens
     );
 
-    // Add to tombstones (prevents zombie token resurrection during IPFS sync)
-    // Only add if not already in tombstones
-    if (!this._tombstones.includes(tokenId)) {
-      this._tombstones.push(tokenId);
-      console.log(`💀 Token ${tokenId.slice(0, 8)}... added to tombstones`);
+    // Add to tombstones with state hash (prevents zombie token resurrection during IPFS sync)
+    // Extract current state hash from the token to tombstone the specific spent state
+    let stateHash = "";
+    if (tokenToRemove?.jsonData) {
+      try {
+        const txf = JSON.parse(tokenToRemove.jsonData);
+        if (txf.transactions && txf.transactions.length > 0) {
+          // Use newStateHash from the last transaction
+          stateHash = txf.transactions[txf.transactions.length - 1].newStateHash || "";
+        } else if (txf.genesis?.inclusionProof?.authenticator?.stateHash) {
+          // No transactions - use genesis state hash
+          stateHash = txf.genesis.inclusionProof.authenticator.stateHash;
+        }
+      } catch {
+        console.warn(`💀 Could not extract state hash for token ${tokenId.slice(0, 8)}...`);
+      }
+    }
+
+    // Get the actual SDK token ID from genesis data
+    let actualTokenId = tokenId;
+    if (tokenToRemove?.jsonData) {
+      try {
+        const txf = JSON.parse(tokenToRemove.jsonData);
+        if (txf.genesis?.data?.tokenId) {
+          actualTokenId = txf.genesis.data.tokenId;
+        }
+      } catch {
+        // Use the provided tokenId as fallback
+      }
+    }
+
+    // Only add if not already in tombstones (check by tokenId + stateHash)
+    const alreadyTombstoned = this._tombstones.some(
+      t => t.tokenId === actualTokenId && t.stateHash === stateHash
+    );
+
+    if (!alreadyTombstoned) {
+      const tombstone: TombstoneEntry = {
+        tokenId: actualTokenId,
+        stateHash,
+        timestamp: Date.now(),
+      };
+      this._tombstones.push(tombstone);
+      console.log(`💀 Token ${actualTokenId.slice(0, 8)}... state ${stateHash.slice(0, 12)}... added to tombstones`);
     }
 
     this.saveWallet(updatedWallet);
@@ -503,6 +597,8 @@ export class WalletRepository {
     this._currentAddress = null;
     this._nametag = null;
     this._tombstones = [];
+    this._archivedTokens = new Map();
+    this._forkedTokens = new Map();
     this.refreshWallet();
   }
 
@@ -515,6 +611,8 @@ export class WalletRepository {
     this._currentAddress = null;
     this._nametag = null;
     this._tombstones = [];
+    this._archivedTokens = new Map();
+    this._forkedTokens = new Map();
     this.refreshWallet();
   }
 
@@ -594,27 +692,62 @@ export class WalletRepository {
   // ==========================================
 
   /**
-   * Get all tombstones (deleted token IDs)
+   * Get all tombstones (state-hash-aware entries)
    * Used during IPFS sync to prevent zombie token resurrection
    */
-  getTombstones(): string[] {
+  getTombstones(): TombstoneEntry[] {
     return [...this._tombstones];
   }
 
   /**
-   * Merge remote tombstones into local
-   * Also removes any local tokens that are tombstoned
+   * Check if a specific token state is tombstoned
+   * Returns true if both tokenId AND stateHash match a tombstone
    */
-  mergeTombstones(remoteTombstones: string[]): number {
+  isStateTombstoned(tokenId: string, stateHash: string): boolean {
+    return this._tombstones.some(
+      t => t.tokenId === tokenId && t.stateHash === stateHash
+    );
+  }
+
+  /**
+   * Merge remote tombstones into local
+   * Also removes any local tokens whose state matches a remote tombstone
+   */
+  mergeTombstones(remoteTombstones: TombstoneEntry[]): number {
     if (!this._wallet) return 0;
 
     let removedCount = 0;
-    const remoteTombstoneSet = new Set(remoteTombstones);
 
-    // Find and remove any local tokens that are in remote tombstones
-    const tokensToRemove = this._wallet.tokens.filter(t =>
-      remoteTombstoneSet.has(t.id)
+    // Build a set of tombstoned states for quick lookup
+    const tombstoneKeys = new Set(
+      remoteTombstones.map(t => `${t.tokenId}:${t.stateHash}`)
     );
+
+    // Find and remove any local tokens whose state matches a remote tombstone
+    const tokensToRemove: Token[] = [];
+    for (const token of this._wallet.tokens) {
+      // Extract tokenId and stateHash from the token's jsonData
+      if (token.jsonData) {
+        try {
+          const txf = JSON.parse(token.jsonData);
+          const sdkTokenId = txf.genesis?.data?.tokenId;
+          let currentStateHash = "";
+
+          if (txf.transactions && txf.transactions.length > 0) {
+            currentStateHash = txf.transactions[txf.transactions.length - 1].newStateHash || "";
+          } else if (txf.genesis?.inclusionProof?.authenticator?.stateHash) {
+            currentStateHash = txf.genesis.inclusionProof.authenticator.stateHash;
+          }
+
+          const key = `${sdkTokenId}:${currentStateHash}`;
+          if (tombstoneKeys.has(key)) {
+            tokensToRemove.push(token);
+          }
+        } catch {
+          // Skip tokens with invalid jsonData
+        }
+      }
+    }
 
     for (const token of tokensToRemove) {
       if (!this._wallet) break; // Type guard
@@ -627,14 +760,17 @@ export class WalletRepository {
         this._wallet.address,
         updatedTokens
       );
-      console.log(`💀 Removed tombstoned token ${token.id.slice(0, 8)}... from local`);
+      console.log(`💀 Removed tombstoned token ${token.id.slice(0, 8)}... from local (state matched)`);
       removedCount++;
     }
 
-    // Merge tombstones (union of local and remote)
-    for (const tombstoneId of remoteTombstones) {
-      if (!this._tombstones.includes(tombstoneId)) {
-        this._tombstones.push(tombstoneId);
+    // Merge tombstones (union of local and remote by tokenId+stateHash)
+    for (const remoteTombstone of remoteTombstones) {
+      const alreadyExists = this._tombstones.some(
+        t => t.tokenId === remoteTombstone.tokenId && t.stateHash === remoteTombstone.stateHash
+      );
+      if (!alreadyExists) {
+        this._tombstones.push(remoteTombstone);
       }
     }
 
@@ -647,19 +783,416 @@ export class WalletRepository {
   }
 
   /**
-   * Clear old tombstones (optional cleanup after successful sync)
-   * Keeps tombstones under a reasonable limit to prevent unlimited growth
+   * Clear old tombstones (cleanup to prevent unlimited growth)
+   * Uses timestamp-based pruning - removes tombstones older than maxAge
    */
   pruneTombstones(maxAge: number = 30 * 24 * 60 * 60 * 1000): void {
-    // For now, just limit to most recent 100 tombstones
-    // In future, could add timestamps to tombstones for age-based pruning
+    const now = Date.now();
+    const originalCount = this._tombstones.length;
+
+    // Filter by age (keep tombstones newer than maxAge)
+    this._tombstones = this._tombstones.filter(t => (now - t.timestamp) < maxAge);
+
+    // Also limit to most recent 100 if still too many
     if (this._tombstones.length > 100) {
-      this._tombstones = this._tombstones.slice(-100);
+      // Sort by timestamp descending and keep newest 100
+      this._tombstones.sort((a, b) => b.timestamp - a.timestamp);
+      this._tombstones = this._tombstones.slice(0, 100);
+    }
+
+    if (this._tombstones.length < originalCount) {
       if (this._wallet) {
         this.saveWallet(this._wallet);
       }
-      console.log(`💀 Pruned tombstones to ${this._tombstones.length}`);
+      console.log(`💀 Pruned tombstones from ${originalCount} to ${this._tombstones.length}`);
     }
-    void maxAge; // Reserved for future timestamp-based pruning
+  }
+
+  // ==========================================
+  // Archived Token Methods (spent token history)
+  // ==========================================
+
+  /**
+   * Archive a token before removal
+   * Only updates archive if incoming token is an incremental (non-forking) update
+   */
+  archiveToken(token: Token): void {
+    if (!token.jsonData) return;
+
+    let txfToken: TxfToken;
+    try {
+      txfToken = JSON.parse(token.jsonData);
+    } catch {
+      console.warn(`📦 Cannot archive token ${token.id.slice(0, 8)}...: invalid JSON`);
+      return;
+    }
+
+    // Get the actual SDK token ID from genesis
+    const tokenId = txfToken.genesis?.data?.tokenId;
+    if (!tokenId) {
+      console.warn(`📦 Cannot archive token ${token.id.slice(0, 8)}...: missing genesis tokenId`);
+      return;
+    }
+
+    // Check if we already have this token archived
+    const existingArchive = this._archivedTokens.get(tokenId);
+
+    if (existingArchive) {
+      // Check if this is an incremental (non-forking) update
+      if (this.isIncrementalUpdate(existingArchive, txfToken)) {
+        this._archivedTokens.set(tokenId, txfToken);
+        console.log(`📦 Updated archived token ${tokenId.slice(0, 8)}... (incremental update: ${existingArchive.transactions.length} → ${txfToken.transactions.length} txns)`);
+      } else {
+        // This is a forking update - store as forked token instead
+        const stateHash = this.getCurrentStateHash(txfToken);
+        this.storeForkedToken(tokenId, stateHash, txfToken);
+        console.log(`📦 Archived token ${tokenId.slice(0, 8)}... is a fork, stored as forked`);
+      }
+    } else {
+      // First time archiving this token
+      this._archivedTokens.set(tokenId, txfToken);
+      console.log(`📦 Archived token ${tokenId.slice(0, 8)}... (${txfToken.transactions.length} txns)`);
+    }
+
+    // Save to persist changes
+    if (this._wallet) {
+      this.saveWallet(this._wallet);
+    }
+  }
+
+  /**
+   * Check if an incoming token is an incremental (non-forking) update to an existing archived token
+   *
+   * Incremental update criteria:
+   * 1. Same genesis (tokenId matches)
+   * 2. Incoming has >= transactions than existing
+   * 3. All existing transactions match incoming (same state hashes in order)
+   * 4. New transactions have inclusion proofs (committed)
+   */
+  isIncrementalUpdate(existing: TxfToken, incoming: TxfToken): boolean {
+    // 1. Same genesis (tokenId must match)
+    if (existing.genesis?.data?.tokenId !== incoming.genesis?.data?.tokenId) {
+      return false;
+    }
+
+    const existingTxns = existing.transactions || [];
+    const incomingTxns = incoming.transactions || [];
+
+    // 2. Incoming must have >= transactions
+    if (incomingTxns.length < existingTxns.length) {
+      return false;
+    }
+
+    // 3. All existing transactions must match incoming (same state hashes in order)
+    for (let i = 0; i < existingTxns.length; i++) {
+      const existingTx = existingTxns[i];
+      const incomingTx = incomingTxns[i];
+
+      if (existingTx.previousStateHash !== incomingTx.previousStateHash ||
+          existingTx.newStateHash !== incomingTx.newStateHash) {
+        return false;
+      }
+    }
+
+    // 4. New transactions (if any) must have inclusion proofs (committed)
+    for (let i = existingTxns.length; i < incomingTxns.length; i++) {
+      const newTx = incomingTxns[i] as TxfTransaction;
+      if (newTx.inclusionProof === null) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Get current state hash from a TxfToken
+   */
+  private getCurrentStateHash(txf: TxfToken): string {
+    if (txf.transactions && txf.transactions.length > 0) {
+      return txf.transactions[txf.transactions.length - 1].newStateHash || "";
+    }
+    return txf.genesis?.inclusionProof?.authenticator?.stateHash || "";
+  }
+
+  /**
+   * Store a forked token (alternative unconfirmed transaction history)
+   */
+  storeForkedToken(tokenId: string, stateHash: string, txfToken: TxfToken): void {
+    const key = `${tokenId}_${stateHash}`;
+
+    // Don't store if we already have this exact fork
+    if (this._forkedTokens.has(key)) {
+      return;
+    }
+
+    this._forkedTokens.set(key, txfToken);
+    console.log(`📦 Stored forked token ${tokenId.slice(0, 8)}... state ${stateHash.slice(0, 12)}...`);
+
+    // Save to persist changes
+    if (this._wallet) {
+      this.saveWallet(this._wallet);
+    }
+  }
+
+  /**
+   * Get all archived tokens (spent token history)
+   */
+  getArchivedTokens(): Map<string, TxfToken> {
+    return new Map(this._archivedTokens);
+  }
+
+  /**
+   * Get the best archived version of a token (most committed transactions)
+   * Checks both _archivedTokens and _forkedTokens
+   * Used for sanity check restoration when tombstones are invalid
+   */
+  getBestArchivedVersion(tokenId: string): TxfToken | null {
+    const candidates: TxfToken[] = [];
+
+    // Check main archive
+    const archived = this._archivedTokens.get(tokenId);
+    if (archived) candidates.push(archived);
+
+    // Check forked versions
+    for (const [key, forked] of this._forkedTokens) {
+      if (key.startsWith(tokenId + "_")) {
+        candidates.push(forked);
+      }
+    }
+
+    if (candidates.length === 0) return null;
+
+    // Sort by number of committed transactions (desc)
+    candidates.sort((a, b) => {
+      const aCommitted = (a.transactions || []).filter((tx: TxfTransaction) => tx.inclusionProof !== null).length;
+      const bCommitted = (b.transactions || []).filter((tx: TxfTransaction) => tx.inclusionProof !== null).length;
+      return bCommitted - aCommitted;
+    });
+
+    return candidates[0];
+  }
+
+  /**
+   * Restore a token from archive back to active tokens
+   * Used when sanity check detects invalid tombstone/missing token
+   * Returns true if restoration succeeded
+   */
+  restoreTokenFromArchive(tokenId: string, txfToken: TxfToken): boolean {
+    if (!this._wallet) {
+      console.error("Cannot restore token: wallet not initialized");
+      return false;
+    }
+
+    try {
+      // Create Token from TxfToken
+      const coinData = txfToken.genesis?.data?.coinData || [];
+      const totalAmount = coinData.reduce((sum: bigint, [, amt]: [string, string]) => {
+        return sum + BigInt(amt || "0");
+      }, BigInt(0));
+
+      // Get coin ID
+      let coinId = coinData[0]?.[0] || "";
+      for (const [cid, amt] of coinData) {
+        if (BigInt(amt || "0") > 0) {
+          coinId = cid;
+          break;
+        }
+      }
+
+      const tokenType = txfToken.genesis?.data?.tokenType || "";
+      const isNft = tokenType === "455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89";
+
+      const token = new Token({
+        id: tokenId,
+        name: isNft ? "NFT" : "Token",
+        type: isNft ? "NFT" : "UCT",
+        timestamp: Date.now(),
+        jsonData: JSON.stringify(txfToken),
+        status: TokenStatus.CONFIRMED,
+        amount: totalAmount.toString(),
+        coinId,
+        symbol: isNft ? "NFT" : "UCT",
+        sizeBytes: JSON.stringify(txfToken).length,
+      });
+
+      // Check if token already exists
+      const existingIdx = this._wallet.tokens.findIndex(t => {
+        try {
+          const parsed = JSON.parse(t.jsonData || "{}");
+          return parsed.genesis?.data?.tokenId === tokenId;
+        } catch {
+          return t.id === tokenId;
+        }
+      });
+
+      if (existingIdx !== -1) {
+        // Update existing token
+        const updatedTokens = [...this._wallet.tokens];
+        updatedTokens[existingIdx] = token;
+        this._wallet = new Wallet(
+          this._wallet.id,
+          this._wallet.name,
+          this._wallet.address,
+          updatedTokens
+        );
+      } else {
+        // Add new token
+        const updatedTokens = [token, ...this._wallet.tokens];
+        this._wallet = new Wallet(
+          this._wallet.id,
+          this._wallet.name,
+          this._wallet.address,
+          updatedTokens
+        );
+      }
+
+      this.saveWallet(this._wallet);
+      console.log(`📦 Restored token ${tokenId.slice(0, 8)}... from archive`);
+      return true;
+    } catch (err) {
+      console.error(`Failed to restore token ${tokenId}:`, err);
+      return false;
+    }
+  }
+
+  /**
+   * Get all forked tokens (alternative transaction histories)
+   */
+  getForkedTokens(): Map<string, TxfToken> {
+    return new Map(this._forkedTokens);
+  }
+
+  /**
+   * Import an archived token from remote (IPFS sync)
+   * Only updates if incoming is incremental or archive doesn't exist
+   */
+  importArchivedToken(tokenId: string, txfToken: TxfToken): void {
+    const existingArchive = this._archivedTokens.get(tokenId);
+
+    if (existingArchive) {
+      // Check if remote is an incremental update
+      if (this.isIncrementalUpdate(existingArchive, txfToken)) {
+        this._archivedTokens.set(tokenId, txfToken);
+        console.log(`📦 Imported remote archived token ${tokenId.slice(0, 8)}... (incremental update)`);
+      } else if (this.isIncrementalUpdate(txfToken, existingArchive)) {
+        // Local is more advanced - keep local
+        console.log(`📦 Kept local archived token ${tokenId.slice(0, 8)}... (local is more advanced)`);
+      } else {
+        // True fork - store remote as forked
+        const stateHash = this.getCurrentStateHash(txfToken);
+        this.storeForkedToken(tokenId, stateHash, txfToken);
+        console.log(`📦 Remote archived token ${tokenId.slice(0, 8)}... is a fork, stored as forked`);
+      }
+    } else {
+      // No local archive - accept remote
+      this._archivedTokens.set(tokenId, txfToken);
+      console.log(`📦 Imported remote archived token ${tokenId.slice(0, 8)}...`);
+    }
+  }
+
+  /**
+   * Import a forked token from remote (IPFS sync)
+   */
+  importForkedToken(key: string, txfToken: TxfToken): void {
+    if (!this._forkedTokens.has(key)) {
+      this._forkedTokens.set(key, txfToken);
+      console.log(`📦 Imported remote forked token ${key.slice(0, 20)}...`);
+    }
+  }
+
+  /**
+   * Merge remote archived tokens into local
+   * Returns number of tokens updated/added
+   */
+  mergeArchivedTokens(remoteArchived: Map<string, TxfToken>): number {
+    let mergedCount = 0;
+
+    for (const [tokenId, remoteTxf] of remoteArchived) {
+      const existingArchive = this._archivedTokens.get(tokenId);
+
+      if (!existingArchive) {
+        // New token - add to archive
+        this._archivedTokens.set(tokenId, remoteTxf);
+        mergedCount++;
+      } else if (this.isIncrementalUpdate(existingArchive, remoteTxf)) {
+        // Remote is incremental update - accept
+        this._archivedTokens.set(tokenId, remoteTxf);
+        mergedCount++;
+      } else if (!this.isIncrementalUpdate(remoteTxf, existingArchive)) {
+        // True fork - store remote as forked
+        const stateHash = this.getCurrentStateHash(remoteTxf);
+        this.storeForkedToken(tokenId, stateHash, remoteTxf);
+      }
+      // Otherwise local is more advanced - keep local
+    }
+
+    if (mergedCount > 0 && this._wallet) {
+      this.saveWallet(this._wallet);
+    }
+
+    return mergedCount;
+  }
+
+  /**
+   * Merge remote forked tokens into local (union merge)
+   * Returns number of tokens added
+   */
+  mergeForkedTokens(remoteForked: Map<string, TxfToken>): number {
+    let addedCount = 0;
+
+    for (const [key, remoteTxf] of remoteForked) {
+      if (!this._forkedTokens.has(key)) {
+        this._forkedTokens.set(key, remoteTxf);
+        addedCount++;
+      }
+    }
+
+    if (addedCount > 0 && this._wallet) {
+      this.saveWallet(this._wallet);
+    }
+
+    return addedCount;
+  }
+
+  /**
+   * Prune archived tokens to prevent unlimited growth
+   * Keeps most recently archived tokens up to maxCount
+   */
+  pruneArchivedTokens(maxCount: number = 100): void {
+    if (this._archivedTokens.size <= maxCount) return;
+
+    // Convert to array for sorting - we don't have timestamp on TxfToken
+    // so just keep arbitrary subset (could be improved by adding archive timestamp)
+    const entries = [...this._archivedTokens.entries()];
+    const toRemove = entries.slice(0, entries.length - maxCount);
+
+    for (const [tokenId] of toRemove) {
+      this._archivedTokens.delete(tokenId);
+    }
+
+    if (this._wallet) {
+      this.saveWallet(this._wallet);
+    }
+    console.log(`📦 Pruned archived tokens to ${this._archivedTokens.size}`);
+  }
+
+  /**
+   * Prune forked tokens to prevent unlimited growth
+   */
+  pruneForkedTokens(maxCount: number = 50): void {
+    if (this._forkedTokens.size <= maxCount) return;
+
+    const entries = [...this._forkedTokens.entries()];
+    const toRemove = entries.slice(0, entries.length - maxCount);
+
+    for (const [key] of toRemove) {
+      this._forkedTokens.delete(key);
+    }
+
+    if (this._wallet) {
+      this.saveWallet(this._wallet);
+    }
+    console.log(`📦 Pruned forked tokens to ${this._forkedTokens.size}`);
   }
 }

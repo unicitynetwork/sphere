@@ -10,15 +10,25 @@ import type { NametagData } from "../../../../../repositories/WalletRepository";
 // ==========================================
 
 /**
+ * Tombstone entry for tracking spent token states
+ * Tracks both tokenId AND stateHash to allow same token to return with new state
+ */
+export interface TombstoneEntry {
+  tokenId: string;    // 64-char hex token ID
+  stateHash: string;  // State hash that was spent (with "0000" prefix)
+  timestamp: number;  // When tombstoned (epoch ms)
+}
+
+/**
  * Complete storage data structure for IPFS
  * Contains metadata, nametag, tombstones, and all tokens keyed by their IDs
  */
 export interface TxfStorageData {
   _meta: TxfMeta;
   _nametag?: NametagData;
-  _tombstones?: string[];  // Array of deleted token IDs (prevents zombie tokens)
+  _tombstones?: TombstoneEntry[];  // State-hash-aware tombstones (spent token states)
   // Dynamic keys for tokens: _<tokenId>
-  [key: string]: TxfToken | TxfMeta | NametagData | string[] | undefined;
+  [key: string]: TxfToken | TxfMeta | NametagData | TombstoneEntry[] | undefined;
 }
 
 /**
@@ -178,15 +188,43 @@ export interface MergeResult {
 // Utility Types
 // ==========================================
 
+// Key prefixes for special storage types
+const ARCHIVED_PREFIX = "_archived_";
+const FORKED_PREFIX = "_forked_";
+
 /**
- * Check if a key is a token key (starts with _ but not reserved)
+ * Check if a key is an archived token key
  */
-export function isTokenKey(key: string): boolean {
+export function isArchivedKey(key: string): boolean {
+  return key.startsWith(ARCHIVED_PREFIX);
+}
+
+/**
+ * Check if a key is a forked token key
+ */
+export function isForkedKey(key: string): boolean {
+  return key.startsWith(FORKED_PREFIX);
+}
+
+/**
+ * Check if a key is an active token key (not archived, forked, or reserved)
+ */
+export function isActiveTokenKey(key: string): boolean {
   return key.startsWith("_") &&
+         !key.startsWith(ARCHIVED_PREFIX) &&
+         !key.startsWith(FORKED_PREFIX) &&
          key !== "_meta" &&
          key !== "_nametag" &&
          key !== "_tombstones" &&
          key !== "_integrity";
+}
+
+/**
+ * Check if a key is a token key (starts with _ but not reserved)
+ * NOTE: This now only returns true for ACTIVE tokens (excludes archived/forked)
+ */
+export function isTokenKey(key: string): boolean {
+  return isActiveTokenKey(key);
 }
 
 /**
@@ -201,6 +239,45 @@ export function tokenIdFromKey(key: string): string {
  */
 export function keyFromTokenId(tokenId: string): string {
   return `_${tokenId}`;
+}
+
+/**
+ * Create archived token key from token ID
+ */
+export function archivedKeyFromTokenId(tokenId: string): string {
+  return `${ARCHIVED_PREFIX}${tokenId}`;
+}
+
+/**
+ * Extract token ID from archived key
+ */
+export function tokenIdFromArchivedKey(key: string): string {
+  return key.startsWith(ARCHIVED_PREFIX) ? key.substring(ARCHIVED_PREFIX.length) : key;
+}
+
+/**
+ * Create forked token key from token ID and state hash
+ */
+export function forkedKeyFromTokenIdAndState(tokenId: string, stateHash: string): string {
+  return `${FORKED_PREFIX}${tokenId}_${stateHash}`;
+}
+
+/**
+ * Parse forked key into tokenId and stateHash
+ * Returns null if key is not a valid forked key
+ */
+export function parseForkedKey(key: string): { tokenId: string; stateHash: string } | null {
+  if (!key.startsWith(FORKED_PREFIX)) return null;
+  const remainder = key.substring(FORKED_PREFIX.length);
+  // Format: tokenId_stateHash
+  // tokenId is 64 chars, stateHash starts with "0000" (68+ chars)
+  // Find underscore after 64-char tokenId
+  const underscoreIndex = remainder.indexOf("_");
+  if (underscoreIndex === -1 || underscoreIndex < 64) return null;
+  return {
+    tokenId: remainder.substring(0, underscoreIndex),
+    stateHash: remainder.substring(underscoreIndex + 1),
+  };
 }
 
 /**
