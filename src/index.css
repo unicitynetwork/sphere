@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "katex/dist/katex.min.css";
 
 /* Dark mode variant for Tailwind v4 */
 @custom-variant dark (&:where(.dark, .dark *));
