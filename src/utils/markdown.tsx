@@ -237,7 +237,7 @@ function parseHeader(line: string, keyPrefix: string): React.ReactNode {
 // Supports: **bold**, *italic*, _italic_, `code`, ```code blocks```, # headers, tables,
 // unordered lists (* or - followed by space), HTML tags: <br>, <b>, <strong>, <i>, <em>, <code>, <a href="">
 // Links: [text](url), plain URLs (https://... http://...)
-export function parseMarkdown(text: string): React.ReactNode {
+export function MarkdownContent({ text }: { text: string }) {
   const parts: React.ReactNode[] = [];
   let key = 0;
 

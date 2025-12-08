@@ -7,6 +7,7 @@ export type ChatMode = 'global' | 'dm';
  * Used for persistent user preferences and context across sessions
  */
 export interface MemoryState {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any;
 }
 

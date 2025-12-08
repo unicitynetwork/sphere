@@ -217,7 +217,8 @@ export class WalletRepository {
         this._wallet = wallet;
         this._currentAddress = address;
         this._nametag = parsed.nametag || null;
-        this.refreshWallet();
+        // Don't call refreshWallet() here - loading is a read operation, not a write
+        // refreshWallet() should only be called when data actually changes
 
         console.log(`Loaded wallet for address ${address} with ${tokens.length} tokens${this._nametag ? `, nametag: ${this._nametag.name}` : ""}`);
         return wallet;

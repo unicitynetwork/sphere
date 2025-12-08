@@ -1,6 +1,6 @@
 import { Sparkles, Copy, Check } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { parseMarkdown } from '../../../utils/markdown';
+import { MarkdownContent } from '../../../utils/markdown';
 
 function AnimatedDots({ color }: { color: string }) {
   return (
@@ -107,7 +107,7 @@ export function ChatBubble({
 
         {/* Main content - only show if there's actual content */}
         {content && content.trim() && (
-          <div className="leading-relaxed">{parseMarkdown(content)}</div>
+          <div className="leading-relaxed"><MarkdownContent text={content} /></div>
         )}
 
         {/* Custom content (cards, buttons, etc.) */}

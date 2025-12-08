@@ -53,13 +53,12 @@ export const useWallet = () => {
       const storageService = IpfsStorageService.getInstance(identityManager);
       storageService.startAutoSync();
     }
-  }, []);
+  }, [identityManager]);
 
   const identityQuery = useQuery({
     queryKey: KEYS.IDENTITY,
     queryFn: async () => {
       const identity = await identityManager.getCurrentIdentity();
-      console.log("🔑 Identity query result:", identity ? `address: ${identity.address.slice(0, 20)}...` : "null");
       return identity;
     },
     staleTime: 5000, // Allow refetch after 5 seconds instead of never
@@ -205,8 +204,15 @@ export const useWallet = () => {
       walletRepo.createWallet(identity.address);
       return identity;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["wallet"] });
+    onSuccess: async () => {
+      // Remove ALL wallet-related queries to prevent race conditions
+      await queryClient.removeQueries({ queryKey: KEYS.IDENTITY });
+      await queryClient.removeQueries({ queryKey: KEYS.TOKENS });
+      await queryClient.removeQueries({ queryKey: KEYS.NAMETAG });
+      await queryClient.removeQueries({ queryKey: KEYS.AGGREGATED });
+
+      // Now invalidate to trigger fresh fetch
+      await queryClient.invalidateQueries({ queryKey: KEYS.IDENTITY });
     },
   });
 

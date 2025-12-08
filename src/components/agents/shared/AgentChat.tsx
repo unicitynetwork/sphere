@@ -5,7 +5,7 @@ import type { AgentConfig } from '../../../config/activities';
 import { useAgentChat } from '../../../hooks/useAgentChat';
 import { useWallet } from '../../wallet/L3/hooks/useWallet';
 import { v4 as uuidv4 } from 'uuid';
-import { ChatContainer, ChatHeader, ChatBubble, ChatInput, TypingIndicator, QuickActions } from './index';
+import { ChatContainer, ChatHeader, ChatBubble, ChatInput, QuickActions } from './index';
 
 // Generic sidebar item
 export interface SidebarItem {
@@ -178,13 +178,13 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
   };
 
   // Get typing indicator color based on agent
-  const getIndicatorColor = () => {
-    if (agent.color.includes('indigo')) return 'bg-indigo-500';
-    if (agent.color.includes('emerald') || agent.color.includes('teal')) return 'bg-emerald-500';
-    if (agent.color.includes('orange') || agent.color.includes('red')) return 'bg-orange-500';
-    if (agent.color.includes('purple') || agent.color.includes('pink')) return 'bg-purple-500';
-    return 'bg-indigo-500';
-  };
+  // const getIndicatorColor = () => {
+  //   if (agent.color.includes('indigo')) return 'bg-indigo-500';
+  //   if (agent.color.includes('emerald') || agent.color.includes('teal')) return 'bg-emerald-500';
+  //   if (agent.color.includes('orange') || agent.color.includes('red')) return 'bg-orange-500';
+  //   if (agent.color.includes('purple') || agent.color.includes('pink')) return 'bg-purple-500';
+  //   return 'bg-indigo-500';
+  // };
 
   // Reset state when agent changes
   useEffect(() => {
@@ -226,7 +226,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     if (sidebarConfig) {
       localStorage.setItem(sidebarConfig.storageKey, JSON.stringify(sidebarConfig.items));
     }
-  }, [sidebarConfig?.items, sidebarConfig?.storageKey]);
+  }, [sidebarConfig?.items, sidebarConfig?.storageKey, sidebarConfig]);
 
   // Greeting message
   useEffect(() => {

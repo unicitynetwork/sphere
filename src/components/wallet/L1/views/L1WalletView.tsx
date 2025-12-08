@@ -105,7 +105,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         setSelectedAddress(addressFromIndex);
       }
     }
-  }, [wallet]);
+  }, [selectedAddress, wallet]);
 
   // Vesting progress for UI - show loading only on initial load, not on refetch
   const vestingProgress = isLoadingVesting

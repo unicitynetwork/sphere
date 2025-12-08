@@ -130,14 +130,19 @@ export function CreateWalletFlow() {
   };
 
   const handleCreateKeys = async () => {
+    // Prevent double-clicking
+    if (isBusy) return;
+
     setIsBusy(true);
     setError(null);
     try {
+      // Always create new wallet (overwrites existing if any)
       await createWallet();
-      // Go to address selection instead of nametag
-      await goToAddressSelection();
+      // Go directly to nametag step
+      setStep('nametag');
     } catch (e: any) {
       setError("Failed to generate keys: " + e.message);
+    } finally {
       setIsBusy(false);
     }
   };

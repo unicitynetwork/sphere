@@ -31,7 +31,7 @@ export function NewConversationModal({
       } else {
         setError('Could not start conversation. Please check the nametag or public key.');
       }
-    } catch (e) {
+    } catch {
       setError('Failed to start conversation. Please try again.');
     } finally {
       setIsLoading(false);

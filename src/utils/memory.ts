@@ -6,9 +6,7 @@
  * Chat history remains in-memory in the useAgentChat hook.
  */
 
-export interface MemoryState {
-    [key: string]: any;
-}
+import type { MemoryState } from "../types";
 
 const MEMORY_KEY_PREFIX = 'unicity_agent_memory';
 
