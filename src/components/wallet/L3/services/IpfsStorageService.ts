@@ -14,10 +14,12 @@ import { WalletRepository, type NametagData } from "../../../../repositories/Wal
 import { IdentityManager } from "./IdentityManager";
 import type { Token } from "../data/model";
 import type { TxfStorageData, TxfMeta, TxfToken, TombstoneEntry } from "./types/TxfTypes";
+import { isTokenKey, tokenIdFromKey } from "./types/TxfTypes";
 import { buildTxfStorageData, parseTxfStorageData, txfToToken, tokenToTxf, getCurrentStateHash } from "./TxfSerializer";
 import { getTokenValidationService } from "./TokenValidationService";
 import { getConflictResolutionService } from "./ConflictResolutionService";
 import { getSyncCoordinator } from "./SyncCoordinator";
+import { getTokenBackupService } from "./TokenBackupService";
 // Note: retryWithBackoff was used for DHT publish, now handled by HTTP primary path
 import { getBootstrapPeers, getConfiguredCustomPeers, getBackendPeerId, getAllBackendGatewayUrls, IPNS_RESOLUTION_CONFIG, IPFS_CONFIG } from "../../../../config/ipfs.config";
 
@@ -151,6 +153,7 @@ export class IpfsStorageService {
 
   private isInitializing = false;
   private isSyncing = false;
+  private pendingSync = false; // Track if sync was requested while another sync was running
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
   private lastSync: StorageResult | null = null;
   private autoSyncEnabled = false;
@@ -249,6 +252,16 @@ export class IpfsStorageService {
     window.dispatchEvent(
       new CustomEvent("ipfs-storage-event", { detail: event })
     );
+
+    // Update sync timestamp on successful storage completion
+    // This is used by TokenBackupService to determine if backup is needed
+    if (event.type === "storage:completed") {
+      try {
+        getTokenBackupService().updateSyncTimestamp();
+      } catch {
+        // Ignore errors from backup service
+      }
+    }
 
     // Call registered callbacks (for future Nostr integration)
     for (const callback of this.eventCallbacks) {
@@ -675,8 +688,13 @@ export class IpfsStorageService {
         `📦 Publishing to IPNS: ${this.cachedIpnsName?.slice(0, 16)}... -> ${cid.toString().slice(0, 16)}...`
       );
 
-      // Increment sequence number for new record
-      this.ipnsSequenceNumber++;
+      // Use max of local and known remote sequence + 1 to ensure we're always ahead
+      // This handles the case where another device published with a higher sequence
+      const baseSeq = this.ipnsSequenceNumber > this.lastKnownRemoteSequence
+        ? this.ipnsSequenceNumber
+        : this.lastKnownRemoteSequence;
+      this.ipnsSequenceNumber = baseSeq + 1n;
+      console.log(`📦 IPNS sequence: local=${this.ipnsSequenceNumber - 1n}, remote=${this.lastKnownRemoteSequence}, using=${this.ipnsSequenceNumber}`);
 
       // 1. Create and sign IPNS record (once - used for both paths)
       const record = await createIPNSRecord(
@@ -928,7 +946,42 @@ export class IpfsStorageService {
       // Trigger wallet refresh
       window.dispatchEvent(new Event("wallet-updated"));
     } else {
-      console.log(`📦 Remote version ${remoteVersion} not newer than local ${localVersion}, skipping`);
+      // Local version is same or higher, BUT remote might have new tokens we don't have
+      // (e.g., Browser 2 received token via Nostr while Browser 1 was offline)
+      console.log(`📦 Remote version ${remoteVersion} not newer than local ${localVersion}, checking for new tokens...`);
+
+      // Still import remote data - importRemoteData handles deduplication
+      const importedCount = await this.importRemoteData(remoteData);
+
+      if (importedCount > 0) {
+        console.log(`📦 Imported ${importedCount} new token(s) from remote despite lower version`);
+
+        // Trigger wallet refresh
+        window.dispatchEvent(new Event("wallet-updated"));
+      }
+
+      // Only sync if local differs from remote (has unique tokens or better versions)
+      // This prevents unnecessary re-publishing when local now matches remote
+      if (this.localDiffersFromRemote(remoteData)) {
+        console.log(`📦 Local differs from remote, scheduling sync to publish merged state`);
+        this.scheduleSync();
+
+        // Emit event to notify UI
+        await this.emitEvent({
+          type: "storage:completed",
+          timestamp: Date.now(),
+          data: {
+            cid: result.cid,
+            tokenCount: importedCount,
+          },
+        });
+      } else {
+        console.log(`📦 Local now matches remote after import, no sync needed`);
+
+        // Update local tracking to match remote (we're in sync)
+        this.setLastCid(result.cid);
+        this.setVersionCounter(remoteVersion);
+      }
     }
   }
 
@@ -1502,6 +1555,138 @@ export class IpfsStorageService {
   }
 
   // ==========================================
+  // Sync Decision Helpers
+  // ==========================================
+
+  /**
+   * Compare two TXF tokens and determine which is "better"
+   * Returns: "local" if local wins, "remote" if remote wins, "equal" if identical
+   *
+   * CRITICAL: Committed transactions ALWAYS beat pending transactions!
+   * This prevents a device with 3 pending (unsubmittable) transactions from
+   * overwriting a device with 1 committed transaction.
+   *
+   * Rules:
+   * 1) Committed beats pending (committed transactions always win over pending-only)
+   * 2) Longer COMMITTED chain wins (not total chain length!)
+   * 3) More proofs wins (including genesis proof)
+   * 4) Identical state hashes = equal
+   * 5) Deterministic tiebreaker for forks
+   */
+  private compareTokenVersions(localTxf: TxfToken, remoteTxf: TxfToken): "local" | "remote" | "equal" {
+    // Helper to count COMMITTED transactions (those with inclusion proof)
+    const countCommitted = (txf: TxfToken): number => {
+      return txf.transactions.filter(tx => tx.inclusionProof !== null).length;
+    };
+
+    const localCommitted = countCommitted(localTxf);
+    const remoteCommitted = countCommitted(remoteTxf);
+
+    // 1. COMMITTED transactions ALWAYS beat pending
+    // Token with committed transactions beats token with only pending transactions
+    const localHasPending = localTxf.transactions.some(tx => tx.inclusionProof === null);
+    const remoteHasPending = remoteTxf.transactions.some(tx => tx.inclusionProof === null);
+
+    if (localCommitted > 0 && remoteCommitted === 0 && remoteHasPending) {
+      // Local has committed, remote has only pending - local wins
+      console.log(`📦 compareTokenVersions: Local wins (committed=${localCommitted} beats pending-only remote)`);
+      return "local";
+    }
+    if (remoteCommitted > 0 && localCommitted === 0 && localHasPending) {
+      // Remote has committed, local has only pending - remote wins
+      console.log(`📦 compareTokenVersions: Remote wins (committed=${remoteCommitted} beats pending-only local)`);
+      return "remote";
+    }
+
+    // 2. Compare COMMITTED chain lengths (not total length!)
+    if (localCommitted > remoteCommitted) {
+      console.log(`📦 compareTokenVersions: Local wins (${localCommitted} committed > ${remoteCommitted} committed)`);
+      return "local";
+    }
+    if (remoteCommitted > localCommitted) {
+      console.log(`📦 compareTokenVersions: Remote wins (${remoteCommitted} committed > ${localCommitted} committed)`);
+      return "remote";
+    }
+
+    // 3. Same committed count - check total proofs (including genesis)
+    const countProofs = (txf: TxfToken): number => {
+      let count = txf.genesis?.inclusionProof ? 1 : 0;
+      count += txf.transactions.filter(tx => tx.inclusionProof !== null).length;
+      return count;
+    };
+
+    const localProofs = countProofs(localTxf);
+    const remoteProofs = countProofs(remoteTxf);
+
+    if (localProofs > remoteProofs) return "local";
+    if (remoteProofs > localProofs) return "remote";
+
+    // 4. Check if last transaction states differ (fork detection)
+    const localStateHash = getCurrentStateHash(localTxf);
+    const remoteStateHash = getCurrentStateHash(remoteTxf);
+
+    if (localStateHash === remoteStateHash) {
+      return "equal"; // Identical tokens
+    }
+
+    // 5. Deterministic tiebreaker for forks (use genesis hash)
+    const localGenesisHash = localTxf._integrity?.genesisDataJSONHash || "";
+    const remoteGenesisHash = remoteTxf._integrity?.genesisDataJSONHash || "";
+
+    if (localGenesisHash > remoteGenesisHash) return "local";
+    if (remoteGenesisHash > localGenesisHash) return "remote";
+
+    return "local"; // Ultimate fallback: prefer local
+  }
+
+  /**
+   * Check if local differs from remote in any way that requires sync
+   * Returns true if we need to sync local changes to remote
+   */
+  private localDiffersFromRemote(remoteData: TxfStorageData): boolean {
+    const walletRepo = WalletRepository.getInstance();
+    const localTokens = walletRepo.getTokens();
+
+    // Extract remote tokens as TxfToken map
+    const remoteTokenMap = new Map<string, TxfToken>();
+    for (const key of Object.keys(remoteData)) {
+      if (isTokenKey(key)) {
+        const tokenId = tokenIdFromKey(key);
+        const remoteTxf = remoteData[key] as TxfToken;
+        if (remoteTxf?.genesis?.data?.tokenId) {
+          remoteTokenMap.set(tokenId, remoteTxf);
+        }
+      }
+    }
+
+    // Check each local token
+    for (const token of localTokens) {
+      const localTxf = tokenToTxf(token);
+      if (!localTxf) continue;
+
+      const tokenId = localTxf.genesis.data.tokenId;
+      const remoteTxf = remoteTokenMap.get(tokenId);
+
+      if (!remoteTxf) {
+        // Local has token that remote doesn't
+        console.log(`📦 Local has token ${tokenId.slice(0, 8)}... not in remote`);
+        return true;
+      }
+
+      // Compare versions - if local is better, we need to sync
+      const comparison = this.compareTokenVersions(localTxf, remoteTxf);
+      if (comparison === "local") {
+        const localCommitted = localTxf.transactions.filter(tx => tx.inclusionProof !== null).length;
+        const remoteCommitted = remoteTxf.transactions.filter(tx => tx.inclusionProof !== null).length;
+        console.log(`📦 Local token ${tokenId.slice(0, 8)}... is better than remote (local: ${localCommitted} committed, remote: ${remoteCommitted} committed)`);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  // ==========================================
   // Data Import Methods
   // ==========================================
 
@@ -1606,7 +1791,7 @@ export class IpfsStorageService {
     }
 
     // ==========================================
-    // IMPORT NEW TOKENS FROM REMOTE
+    // IMPORT/UPDATE TOKENS FROM REMOTE
     // ==========================================
 
     // Build combined tombstone lookup (tokenId:stateHash -> true)
@@ -1615,28 +1800,23 @@ export class IpfsStorageService {
       allTombstoneKeys.add(`${t.tokenId}:${t.stateHash}`);
     }
 
-    // Import tokens not in local storage (and not tombstoned by state hash)
-    // Re-get local tokens as they may have changed after restore
-    const currentLocalTokenIds = new Set((walletRepo.getWallet()?.tokens || []).map(t => t.id));
-
-    for (const token of remoteTokens) {
-      // Skip if already in local
-      if (currentLocalTokenIds.has(token.id)) {
-        continue;
+    // Build local token map for comparison (re-get as they may have changed after restore)
+    const currentLocalTokens = walletRepo.getWallet()?.tokens || [];
+    const localTokenMap = new Map<string, Token>();
+    for (const token of currentLocalTokens) {
+      const txf = tokenToTxf(token);
+      if (txf) {
+        localTokenMap.set(txf.genesis.data.tokenId, token);
       }
+    }
 
-      // Extract tokenId and stateHash from incoming token to check against tombstones
-      let tokenId = token.id;
-      let stateHash = "";
-      if (token.jsonData) {
-        try {
-          const txf = JSON.parse(token.jsonData) as TxfToken;
-          tokenId = txf.genesis?.data?.tokenId || token.id;
-          stateHash = getCurrentStateHash(txf);
-        } catch {
-          // Use token.id as fallback
-        }
-      }
+    for (const remoteToken of remoteTokens) {
+      // Extract tokenId and stateHash from remote token
+      const remoteTxf = tokenToTxf(remoteToken);
+      if (!remoteTxf) continue;
+
+      const tokenId = remoteTxf.genesis.data.tokenId;
+      const stateHash = getCurrentStateHash(remoteTxf);
 
       // Skip if this specific state is tombstoned
       const tombstoneKey = `${tokenId}:${stateHash}`;
@@ -1645,9 +1825,49 @@ export class IpfsStorageService {
         continue;
       }
 
-      walletRepo.addToken(token);
-      console.log(`📦 Imported token ${tokenId.slice(0, 8)}... from remote`);
-      importedCount++;
+      const localToken = localTokenMap.get(tokenId);
+
+      if (!localToken) {
+        // NEW token - import it
+        walletRepo.addToken(remoteToken);
+        console.log(`📦 Imported new token ${tokenId.slice(0, 8)}... from remote`);
+        importedCount++;
+      } else {
+        // Token EXISTS in both - compare versions
+        const localTxf = tokenToTxf(localToken);
+        if (!localTxf) continue;
+
+        const comparison = this.compareTokenVersions(localTxf, remoteTxf);
+
+        if (comparison === "remote") {
+          // Remote is BETTER - update local with remote version
+          const localLen = localTxf.transactions.length;
+          const remoteLen = remoteTxf.transactions.length;
+          console.log(`📦 Updating token ${tokenId.slice(0, 8)}... from remote (remote: ${remoteLen} txns > local: ${localLen} txns)`);
+
+          // Archive local version before replacing (in case of fork)
+          const localStateHash = getCurrentStateHash(localTxf);
+          if (localStateHash !== stateHash) {
+            // Different state = fork, archive the losing local version
+            walletRepo.storeForkedToken(tokenId, localStateHash, localTxf);
+            console.log(`📦 Archived forked local version of ${tokenId.slice(0, 8)}... (state ${localStateHash.slice(0, 8)}...)`);
+          }
+
+          // Update with remote version
+          walletRepo.updateToken(remoteToken);
+          importedCount++;
+        } else if (comparison === "local") {
+          // Local is better - keep local, but archive remote if it's a fork
+          const remoteStateHash = getCurrentStateHash(remoteTxf);
+          const localStateHash = getCurrentStateHash(localTxf);
+          if (remoteStateHash !== localStateHash) {
+            // Different state = fork, archive the remote version
+            walletRepo.storeForkedToken(tokenId, remoteStateHash, remoteTxf);
+            console.log(`📦 Archived forked remote version of ${tokenId.slice(0, 8)}... (state ${remoteStateHash.slice(0, 8)}...)`);
+          }
+        }
+        // If "equal", tokens are identical - nothing to do
+      }
     }
 
     // ==========================================
@@ -1693,8 +1913,16 @@ export class IpfsStorageService {
 
   /**
    * Schedule a debounced sync
+   * If sync is currently running, marks pendingSync flag for execution after current sync completes
    */
   private scheduleSync(): void {
+    // If a sync is already running, mark pending so it will run after completion
+    if (this.isSyncing) {
+      console.log(`📦 Sync in progress - marking pending sync for after completion`);
+      this.pendingSync = true;
+      return;
+    }
+
     if (this.syncTimer) {
       clearTimeout(this.syncTimer);
     }
@@ -1817,9 +2045,34 @@ export class IpfsStorageService {
         version: remoteVersion,
       };
     } else if (remoteVersion < localVersion) {
-      // Local is newer - need to update IPNS
-      console.log(`📦 Local is newer (v${localVersion} > v${remoteVersion}), updating IPNS...`);
-      return this.syncNow();
+      // Local is newer - BUT remote might have new tokens we don't have
+      // (e.g., Browser 2 received token via Nostr while Browser 1 was offline)
+      console.log(`📦 Local is newer (v${localVersion} > v${remoteVersion}), checking for new remote tokens first...`);
+
+      // Import any new tokens from remote before pushing local state
+      const importedCount = await this.importRemoteData(remoteData);
+      if (importedCount > 0) {
+        console.log(`📦 Imported ${importedCount} new token(s) from remote before updating IPNS`);
+        window.dispatchEvent(new Event("wallet-updated"));
+      }
+
+      // Only sync if local differs from remote (has unique tokens or better versions)
+      if (this.localDiffersFromRemote(remoteData)) {
+        console.log(`📦 Local differs from remote, syncing merged state...`);
+        return this.syncNow();
+      } else {
+        console.log(`📦 Local now matches remote after import, no sync needed`);
+        // Update local tracking to match remote
+        this.setLastCid(cidToFetch);
+        this.setVersionCounter(remoteVersion);
+        return {
+          success: true,
+          cid: cidToFetch,
+          ipnsName: this.cachedIpnsName || undefined,
+          timestamp: Date.now(),
+          version: remoteVersion,
+        };
+      }
     } else {
       // Same version - remote is in sync
       // Still update lastCid to match IPNS if resolved
@@ -2236,6 +2489,16 @@ export class IpfsStorageService {
       this.isSyncing = false;
       // Release cross-tab lock
       coordinator.releaseLock();
+
+      // Check if a sync was requested while we were busy
+      if (this.pendingSync) {
+        console.log(`📦 Processing pending sync request that arrived during sync`);
+        this.pendingSync = false;
+        // Use setTimeout to avoid deep recursion and allow event loop to process
+        setTimeout(() => {
+          this.scheduleSync();
+        }, 100);
+      }
     }
   }
 

@@ -503,6 +503,71 @@ export class WalletRepository {
     this.refreshWallet();
   }
 
+  /**
+   * Update an existing token with a new version
+   * Used when remote has a better version (more transactions/proofs)
+   */
+  updateToken(token: Token): void {
+    console.log("💾 Repository: Updating token...", token.id);
+    if (!this._wallet) {
+      console.error("💾 Repository: Wallet not initialized!");
+      return;
+    }
+
+    // Find the existing token by genesis tokenId
+    let existingIndex = -1;
+    let existingToken: Token | null = null;
+
+    for (let i = 0; i < this._wallet.tokens.length; i++) {
+      const existing = this._wallet.tokens[i];
+      // Compare by token ID from jsonData (genesis.data.tokenId)
+      if (existing.jsonData && token.jsonData) {
+        try {
+          const existingTxf = JSON.parse(existing.jsonData);
+          const incomingTxf = JSON.parse(token.jsonData);
+          if (existingTxf?.genesis?.data?.tokenId === incomingTxf?.genesis?.data?.tokenId) {
+            existingIndex = i;
+            existingToken = existing;
+            break;
+          }
+        } catch {
+          // Continue checking
+        }
+      }
+      // Fallback: compare by token.id
+      if (existing.id === token.id) {
+        existingIndex = i;
+        existingToken = existing;
+        break;
+      }
+    }
+
+    if (existingIndex === -1 || !existingToken) {
+      console.warn(`💾 Repository: Token ${token.id} not found for update, adding instead`);
+      this.addToken(token, true); // skipHistory since it's an update
+      return;
+    }
+
+    // Replace the token at the same position
+    const updatedTokens = [...this._wallet.tokens];
+    updatedTokens[existingIndex] = token;
+
+    const updatedWallet = new Wallet(
+      this._wallet.id,
+      this._wallet.name,
+      this._wallet.address,
+      updatedTokens
+    );
+
+    this.saveWallet(updatedWallet);
+
+    // Archive the updated token
+    this.archiveToken(token);
+
+    console.log(`💾 Repository: Updated token ${token.id.slice(0, 8)}...`);
+    this.refreshWallet();
+  }
+
   removeToken(tokenId: string, recipientNametag?: string, skipHistory: boolean = false): void {
     if (!this._wallet) return;
 
