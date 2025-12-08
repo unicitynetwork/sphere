@@ -1010,14 +1010,31 @@ export class IpfsStorageService {
       if (result.best) {
         const localSeq = this.ipnsSequenceNumber;
 
-        if (result.best.sequence > localSeq && result.best.sequence > this.lastKnownRemoteSequence) {
+        // Check for higher sequence number
+        const hasHigherSequence = result.best.sequence > localSeq &&
+                                   result.best.sequence > this.lastKnownRemoteSequence;
+
+        // Also check for CID mismatch at same sequence (race condition between devices)
+        // This can happen when two devices publish with the same sequence number
+        const localCid = this.getLastCid();
+        const hasDifferentCid = localCid && result.best.cid !== localCid &&
+                                 result.best.sequence >= localSeq;
+
+        if (hasHigherSequence) {
           console.log(
             `📦 IPNS poll detected higher sequence: remote=${result.best.sequence}, local=${localSeq}`
           );
           await this.handleHigherSequenceDiscovered(result.best);
+        } else if (hasDifferentCid) {
+          console.log(
+            `📦 IPNS poll detected different CID at same sequence: ` +
+            `remote=${result.best.cid.slice(0, 16)}... != local=${localCid?.slice(0, 16)}...`
+          );
+          await this.handleHigherSequenceDiscovered(result.best);
         } else {
           console.log(
-            `📦 IPNS poll: no updates (remote seq=${result.best.sequence}, local seq=${localSeq})`
+            `📦 IPNS poll: no updates (remote seq=${result.best.sequence}, local seq=${localSeq}, ` +
+            `cid match=${result.best.cid === localCid})`
           );
         }
       }
