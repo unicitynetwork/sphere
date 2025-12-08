@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft, Plus, ChevronDown, Check, Upload } from 'lucide-react';
+import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft, Plus, ChevronDown, Check, Upload, FileText, X } from 'lucide-react';
 import { useWallet } from '../hooks/useWallet';
 import { WalletRepository } from '../../../../repositories/WalletRepository';
 import { IdentityManager } from '../services/IdentityManager';
@@ -15,7 +15,6 @@ import {
   isWebSocketConnected
 } from '../../L1/sdk';
 import { WalletScanModal } from '../../L1/components/modals/WalletScanModal';
-import { ImportWalletModal } from '../../L1/components/modals/ImportWalletModal';
 import { LoadPasswordModal } from '../../L1/components/modals/LoadPasswordModal';
 
 // Type for derived address info with nametag status
@@ -35,7 +34,7 @@ const identityManager = IdentityManager.getInstance(SESSION_KEY);
 export function CreateWalletFlow() {
   const { identity, createWallet, restoreWallet, mintNametag, nametag, getUnifiedKeyManager } = useWallet();
 
-  const [step, setStep] = useState<'start' | 'restore' | 'addressSelection' | 'nametag' | 'processing'>('start');
+  const [step, setStep] = useState<'start' | 'restoreMethod' | 'restore' | 'importFile' | 'addressSelection' | 'nametag' | 'processing'>('start');
   const [nametagInput, setNametagInput] = useState('');
   const [seedWords, setSeedWords] = useState<string[]>(Array(12).fill(''));
   const [error, setError] = useState<string | null>(null);
@@ -47,13 +46,17 @@ export function CreateWalletFlow() {
   const [showAddressDropdown, setShowAddressDropdown] = useState(false);
 
   // Wallet import and scanning state (for .dat and BIP32 .txt files)
-  const [showRestoreMethodModal, setShowRestoreMethodModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
   const [showScanModal, setShowScanModal] = useState(false);
   const [showLoadPasswordModal, setShowLoadPasswordModal] = useState(false);
   const [pendingWallet, setPendingWallet] = useState<L1Wallet | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [initialScanCount, setInitialScanCount] = useState(10);
+
+  // Import file screen state
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [scanCount, setScanCount] = useState(10);
+  const [needsScanning, setNeedsScanning] = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
 
   // Connect to L1 WebSocket on mount (needed for wallet scanning)
   useEffect(() => {
@@ -262,9 +265,8 @@ export function CreateWalletFlow() {
     }
   };
 
-  // Handle import from your ImportWalletModal
-  const handleImportFromModal = async (file: File, scanCount?: number) => {
-    setShowImportModal(false);
+  // Handle import from file
+  const handleImportFromFile = async (file: File, scanCountParam?: number) => {
     setIsBusy(true);
     setError(null);
 
@@ -282,11 +284,11 @@ export function CreateWalletFlow() {
         console.log("📦 .dat file imported, showing scan modal:", {
           hasWallet: !!result.wallet,
           hasMasterKey: !!result.wallet.masterPrivateKey,
-          scanCount: scanCount || 100
+          scanCount: scanCountParam || 100
         });
         // Show scan modal - don't save wallet yet, let user select addresses
         setPendingWallet(result.wallet);
-        setInitialScanCount(scanCount || 100);
+        setInitialScanCount(scanCountParam || 100);
         setShowScanModal(true);
         setIsBusy(false);
         return;
@@ -297,7 +299,7 @@ export function CreateWalletFlow() {
       // Check if encrypted
       if (content.includes("ENCRYPTED MASTER KEY")) {
         setPendingFile(file);
-        setInitialScanCount(scanCount || 10);
+        setInitialScanCount(scanCountParam || 10);
         setShowLoadPasswordModal(true);
         setIsBusy(false);
         return;
@@ -318,10 +320,10 @@ export function CreateWalletFlow() {
           hasWallet: !!result.wallet,
           hasMasterKey: !!result.wallet.masterPrivateKey,
           hasChainCode: !!result.wallet.masterChainCode,
-          scanCount: scanCount || 10
+          scanCount: scanCountParam || 10
         });
         setPendingWallet(result.wallet);
-        setInitialScanCount(scanCount || 10);
+        setInitialScanCount(scanCountParam || 10);
         setShowScanModal(true);
         setIsBusy(false);
         return;
@@ -580,10 +582,71 @@ export function CreateWalletFlow() {
     }
   };
 
+  // Check if file needs scanning
+  const checkIfNeedsScanning = async (file: File) => {
+    try {
+      // .dat files always need scanning
+      if (file.name.endsWith(".dat")) {
+        setNeedsScanning(true);
+        setScanCount(10);
+        return;
+      }
+
+      // For .txt files, check if BIP32 or standard
+      const content = await file.text();
+      const isBIP32 = content.includes("MASTER CHAIN CODE") ||
+                      content.includes("WALLET TYPE: BIP32") ||
+                      content.includes("WALLET TYPE: Alpha descriptor");
+
+      setNeedsScanning(isBIP32);
+      setScanCount(10);
+    } catch (err) {
+      console.error("Error checking file type:", err);
+      setNeedsScanning(true); // Default to showing scan option
+    }
+  };
+
+  // Handle file selection
+  const handleFileSelect = async (file: File) => {
+    setSelectedFile(file);
+    await checkIfNeedsScanning(file);
+  };
+
+  // Handle drag and drop
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+
+    const file = e.dataTransfer.files[0];
+    if (file && (file.name.endsWith(".txt") || file.name.endsWith(".dat"))) {
+      await handleFileSelect(file);
+    }
+  };
+
+  // Trigger file import
+  const handleConfirmImport = () => {
+    if (!selectedFile) return;
+    handleImportFromFile(selectedFile, scanCount);
+  };
+
   // Go back to start screen (e.g., from restore step)
   const goToStart = () => {
     setStep('start');
     setSeedWords(Array(12).fill(''));
+    setSelectedFile(null);
+    setScanCount(10);
+    setNeedsScanning(true);
+    setIsDragging(false);
     setError(null);
   };
 
@@ -673,7 +736,7 @@ export function CreateWalletFlow() {
             </motion.button>
 
             <motion.button
-              onClick={() => setShowRestoreMethodModal(true)}
+              onClick={() => setStep('restoreMethod')}
               disabled={isBusy}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -755,7 +818,7 @@ export function CreateWalletFlow() {
             {/* Buttons */}
             <div className="flex gap-3">
               <motion.button
-                onClick={goToStart}
+                onClick={() => setStep('restoreMethod')}
                 disabled={isBusy}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
@@ -1182,113 +1245,274 @@ export function CreateWalletFlow() {
           </motion.div>
         )}
 
-      </AnimatePresence>
-
-      {/* Restore Method Selection Modal */}
-      <AnimatePresence>
-        {showRestoreMethodModal && (
-          <>
-            {/* Backdrop */}
+        {step === 'restoreMethod' && (
+          <motion.div
+            key="restoreMethod"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            transition={{ duration: 0.3 }}
+            className="relative z-10 w-full max-w-[320px] md:max-w-[400px]"
+          >
+            {/* Icon */}
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowRestoreMethodModal(false)}
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
-            />
-
-            {/* Modal */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 z-50 flex items-center justify-center p-4"
+              className="relative w-16 h-16 md:w-20 md:h-20 mx-auto mb-6"
+              whileHover={{ scale: 1.05 }}
             >
-              <div className="bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl w-full max-w-md p-6 border border-neutral-200 dark:border-neutral-800">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-xl md:text-2xl font-black text-neutral-900 dark:text-white">
-                    Restore Wallet
-                  </h3>
-                  <button
-                    onClick={() => setShowRestoreMethodModal(false)}
-                    className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
-                  >
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-
-                <p className="text-neutral-500 dark:text-neutral-400 text-sm mb-6">
-                  Choose how you want to restore your wallet
-                </p>
-
-                <div className="space-y-3">
-                  {/* Recovery Phrase Option */}
-                  <motion.button
-                    onClick={() => {
-                      setShowRestoreMethodModal(false);
-                      setStep('restore');
-                    }}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="w-full p-4 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 hover:border-blue-500/50 dark:hover:border-blue-500/50 transition-all text-left group"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center group-hover:bg-blue-500/20 transition-colors">
-                        <KeyRound className="w-6 h-6 text-blue-500" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-bold text-neutral-900 dark:text-white mb-1">
-                          Recovery Phrase
-                        </div>
-                        <div className="text-sm text-neutral-500 dark:text-neutral-400">
-                          Use your 12-word mnemonic phrase
-                        </div>
-                      </div>
-                      <ArrowRight className="w-5 h-5 text-neutral-400 group-hover:text-blue-500 transition-colors" />
-                    </div>
-                  </motion.button>
-
-                  {/* Import from File Option */}
-                  <motion.button
-                    onClick={() => {
-                      setShowRestoreMethodModal(false);
-                      setShowImportModal(true);
-                    }}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="w-full p-4 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 hover:border-orange-500/50 dark:hover:border-orange-500/50 transition-all text-left group"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-lg bg-orange-500/10 flex items-center justify-center group-hover:bg-orange-500/20 transition-colors">
-                        <Upload className="w-6 h-6 text-orange-500" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-bold text-neutral-900 dark:text-white mb-1">
-                          Import from File
-                        </div>
-                        <div className="text-sm text-neutral-500 dark:text-neutral-400">
-                          Import wallet from .dat or .txt file
-                        </div>
-                      </div>
-                      <ArrowRight className="w-5 h-5 text-neutral-400 group-hover:text-orange-500 transition-colors" />
-                    </div>
-                  </motion.button>
-                </div>
+              <div className="absolute inset-0 bg-blue-500/30 rounded-2xl md:rounded-3xl blur-xl" />
+              <div className="relative w-full h-full rounded-2xl md:rounded-3xl bg-linear-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-2xl shadow-blue-500/30">
+                <KeyRound className="w-8 h-8 md:w-10 md:h-10 text-white" />
               </div>
             </motion.div>
-          </>
-        )}
-      </AnimatePresence>
 
-      {/* Import Wallet Modal - your implementation */}
-      <ImportWalletModal
-        show={showImportModal}
-        onImport={handleImportFromModal}
-        onCancel={() => setShowImportModal(false)}
-      />
+            <h2 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white mb-2 md:mb-3 tracking-tight">
+              Restore Wallet
+            </h2>
+            <p className="text-neutral-500 dark:text-neutral-400 text-xs md:text-sm mb-6 md:mb-8 mx-auto leading-relaxed">
+              Choose how you want to restore your wallet
+            </p>
+
+            <div className="space-y-3 mb-6">
+              {/* Recovery Phrase Option */}
+              <motion.button
+                onClick={() => setStep('restore')}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="w-full p-4 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 hover:border-blue-500/50 dark:hover:border-blue-500/50 transition-all text-left group"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center group-hover:bg-blue-500/20 transition-colors">
+                    <KeyRound className="w-6 h-6 text-blue-500" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-bold text-neutral-900 dark:text-white mb-1">
+                      Recovery Phrase
+                    </div>
+                    <div className="text-sm text-neutral-500 dark:text-neutral-400">
+                      Use your 12-word mnemonic phrase
+                    </div>
+                  </div>
+                  <ArrowRight className="w-5 h-5 text-neutral-400 group-hover:text-blue-500 transition-colors" />
+                </div>
+              </motion.button>
+
+              {/* Import from File Option */}
+              <motion.button
+                onClick={() => setStep('importFile')}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="w-full p-4 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 hover:border-orange-500/50 dark:hover:border-orange-500/50 transition-all text-left group"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-lg bg-orange-500/10 flex items-center justify-center group-hover:bg-orange-500/20 transition-colors">
+                    <Upload className="w-6 h-6 text-orange-500" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-bold text-neutral-900 dark:text-white mb-1">
+                      Import from File
+                    </div>
+                    <div className="text-sm text-neutral-500 dark:text-neutral-400">
+                      Import wallet from .dat or .txt file
+                    </div>
+                  </div>
+                  <ArrowRight className="w-5 h-5 text-neutral-400 group-hover:text-orange-500 transition-colors" />
+                </div>
+              </motion.button>
+            </div>
+
+            {/* Back Button */}
+            <motion.button
+              onClick={goToStart}
+              disabled={isBusy}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="w-full py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 text-sm md:text-base font-bold border-2 border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4 md:w-5 md:h-5" />
+              Back
+            </motion.button>
+
+            {error && (
+              <motion.p
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-3 md:mt-4 text-red-500 dark:text-red-400 text-xs md:text-sm bg-red-500/10 border border-red-500/20 p-2 md:p-3 rounded-lg"
+              >
+                {error}
+              </motion.p>
+            )}
+          </motion.div>
+        )}
+
+        {step === 'importFile' && (
+          <motion.div
+            key="importFile"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            transition={{ duration: 0.3 }}
+            className="relative z-10 w-full max-w-[320px] md:max-w-[400px]"
+          >
+            {/* Icon */}
+            <motion.div
+              className="relative w-16 h-16 md:w-20 md:h-20 mx-auto mb-6"
+              whileHover={{ scale: 1.05 }}
+            >
+              <div className="absolute inset-0 bg-orange-500/30 rounded-2xl md:rounded-3xl blur-xl" />
+              <div className="relative w-full h-full rounded-2xl md:rounded-3xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-2xl shadow-orange-500/30">
+                <Upload className="w-8 h-8 md:w-10 md:h-10 text-white" />
+              </div>
+            </motion.div>
+
+            <h2 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white mb-2 md:mb-3 tracking-tight">
+              Import Wallet
+            </h2>
+            <p className="text-neutral-500 dark:text-neutral-400 text-xs md:text-sm mb-6 md:mb-8 mx-auto leading-relaxed">
+              Select a wallet file to import
+            </p>
+
+            {!selectedFile ? (
+              <>
+                {/* File Upload Area */}
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={`w-full border-2 border-dashed rounded-xl p-8 md:p-10 text-center transition-colors mb-6 ${
+                    isDragging
+                      ? "border-orange-500 bg-orange-500/10"
+                      : "border-neutral-300 dark:border-neutral-600 hover:border-orange-400 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
+                  }`}
+                >
+                  <Upload className={`w-12 h-12 md:w-14 md:h-14 mx-auto mb-4 ${isDragging ? "text-orange-500" : "text-neutral-400"}`} />
+                  <p className="text-sm md:text-base text-neutral-700 dark:text-neutral-300 font-medium mb-2">
+                    Select wallet file
+                  </p>
+                  <p className="text-xs md:text-sm text-neutral-400 dark:text-neutral-500 mb-3">
+                    .txt or .dat
+                  </p>
+                  <label className="inline-block cursor-pointer">
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".txt,.dat"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleFileSelect(file);
+                      }}
+                    />
+                    <span className="inline-flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium rounded-lg transition-colors">
+                      <Upload className="w-4 h-4" />
+                      Choose File
+                    </span>
+                  </label>
+                  <p className="text-[10px] md:text-xs text-neutral-400 dark:text-neutral-600 mt-3 hidden sm:block">
+                    or drag & drop here
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Selected File Display */}
+                <div className="p-4 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 rounded-xl mb-4">
+                  <div className="flex items-center gap-3">
+                    <FileText className="w-6 h-6 text-orange-500 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm md:text-base text-neutral-900 dark:text-white font-medium truncate">
+                        {selectedFile.name}
+                      </p>
+                      <p className="text-xs text-neutral-500">
+                        {(selectedFile.size / 1024).toFixed(1)} KB
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setSelectedFile(null)}
+                      className="p-1.5 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-lg transition-colors"
+                    >
+                      <X className="w-4 h-4 text-neutral-400" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Scan Count (for BIP32/.dat files) */}
+                {needsScanning ? (
+                  <div className="p-4 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 rounded-xl mb-4">
+                    <p className="text-xs md:text-sm text-neutral-700 dark:text-neutral-300 mb-2 font-medium">
+                      How many addresses to scan?
+                    </p>
+                    <input
+                      type="number"
+                      value={scanCount}
+                      onChange={(e) => setScanCount(Math.max(1, parseInt(e.target.value) || 10))}
+                      className="w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 rounded-lg text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                      min={1}
+                    />
+                  </div>
+                ) : (
+                  <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl mb-4">
+                    <p className="text-xs md:text-sm text-emerald-700 dark:text-emerald-300 font-medium">
+                      Addresses will be imported from file
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Buttons */}
+            <div className="flex gap-3">
+              <motion.button
+                onClick={() => {
+                  setSelectedFile(null);
+                  setStep('restoreMethod');
+                }}
+                disabled={isBusy}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="flex-1 py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 text-sm md:text-base font-bold border-2 border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4 md:w-5 md:h-5" />
+                Back
+              </motion.button>
+
+              {selectedFile && (
+                <motion.button
+                  onClick={handleConfirmImport}
+                  disabled={isBusy}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="flex-2 relative py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-linear-to-r from-orange-500 to-orange-600 text-white text-sm md:text-base font-bold shadow-xl shadow-orange-500/30 flex items-center justify-center gap-2 md:gap-3 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden group"
+                >
+                  <div className="absolute inset-0 bg-linear-to-r from-orange-400 to-orange-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <span className="relative z-10 flex items-center gap-2 md:gap-3">
+                    {isBusy ? (
+                      <>
+                        <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" />
+                        Importing...
+                      </>
+                    ) : (
+                      <>
+                        Import
+                        <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />
+                      </>
+                    )}
+                  </span>
+                </motion.button>
+              )}
+            </div>
+
+            {error && (
+              <motion.p
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-3 md:mt-4 text-red-500 dark:text-red-400 text-xs md:text-sm bg-red-500/10 border border-red-500/20 p-2 md:p-3 rounded-lg"
+              >
+                {error}
+              </motion.p>
+            )}
+          </motion.div>
+        )}
+
+      </AnimatePresence>
 
       {/* Password Modal for encrypted files */}
       <LoadPasswordModal
