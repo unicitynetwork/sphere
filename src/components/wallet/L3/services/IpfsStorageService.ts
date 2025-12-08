@@ -19,7 +19,7 @@ import { getTokenValidationService } from "./TokenValidationService";
 import { getConflictResolutionService } from "./ConflictResolutionService";
 import { getSyncCoordinator } from "./SyncCoordinator";
 // Note: retryWithBackoff was used for DHT publish, now handled by HTTP primary path
-import { getBootstrapPeers, getConfiguredCustomPeers, getBackendPeerId, getAllBackendGatewayUrls } from "../../../../config/ipfs.config";
+import { getBootstrapPeers, getConfiguredCustomPeers, getBackendPeerId, getAllBackendGatewayUrls, IPNS_RESOLUTION_CONFIG } from "../../../../config/ipfs.config";
 
 // Configure @noble/ed25519 to use sync sha512 (required for getPublicKey without WebCrypto)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -102,6 +102,26 @@ interface SerializedToken {
   iconUrl?: string;
 }
 
+/**
+ * Result of IPNS resolution from a single gateway
+ */
+interface IpnsGatewayResult {
+  cid: string;
+  sequence: bigint;
+  gateway: string;
+  recordData: Uint8Array;
+}
+
+/**
+ * Result of progressive IPNS resolution across multiple gateways
+ */
+interface IpnsProgressiveResult {
+  best: IpnsGatewayResult | null;
+  allResults: IpnsGatewayResult[];
+  respondedCount: number;
+  totalGateways: number;
+}
+
 // ==========================================
 // Constants
 // ==========================================
@@ -137,6 +157,11 @@ export class IpfsStorageService {
   private boundSyncHandler: (() => void) | null = null;
   private connectionMaintenanceInterval: ReturnType<typeof setInterval> | null = null;
 
+  // IPNS polling state
+  private ipnsPollingInterval: ReturnType<typeof setInterval> | null = null;
+  private boundVisibilityHandler: (() => void) | null = null;
+  private lastKnownRemoteSequence: bigint = 0n;
+
   private constructor(identityManager: IdentityManager) {
     this.identityManager = identityManager;
   }
@@ -167,6 +192,9 @@ export class IpfsStorageService {
     this.autoSyncEnabled = true;
     console.log("📦 IPFS auto-sync enabled");
 
+    // Set up IPNS polling with visibility-based control
+    this.setupVisibilityListener();
+
     // On startup, run IPNS-based sync to discover remote state
     // This resolves IPNS, verifies remote content, and merges if needed
     this.syncFromIpns().catch(console.error);
@@ -182,6 +210,9 @@ export class IpfsStorageService {
       this.boundSyncHandler = null;
     }
     this.autoSyncEnabled = false;
+
+    // Clean up IPNS polling and visibility listener
+    this.cleanupVisibilityListener();
 
     if (this.syncTimer) {
       clearTimeout(this.syncTimer);
@@ -634,55 +665,314 @@ export class IpfsStorageService {
     }
   }
 
+  // ==========================================
+  // Progressive IPNS Resolution (Multi-Gateway)
+  // ==========================================
+
   /**
-   * Resolve IPNS name to CID using DHT
-   * Uses low-level ipns package to fetch and parse records via DHT routing
-   * Returns the CID that our IPNS name points to, or null if resolution fails
+   * Fetch IPNS record from a single HTTP gateway
+   * Returns the CID and sequence number, or null if failed
    */
-  private async resolveIpns(): Promise<string | null> {
-    if (!this.helia || !this.ipnsKeyPair) {
+  private async resolveIpnsFromGateway(gatewayUrl: string): Promise<IpnsGatewayResult | null> {
+    if (!this.cachedIpnsName) {
       return null;
     }
 
-    const IPNS_RESOLVE_TIMEOUT = 30000; // 30 seconds - DHT can be slow
-
     try {
-      console.log(`📦 Resolving IPNS: ${this.cachedIpnsName?.slice(0, 16)}...`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        IPNS_RESOLUTION_CONFIG.perGatewayTimeoutMs
+      );
 
-      // Create the routing key from our public key
-      const routingKey = multihashToIPNSRoutingKey(this.ipnsKeyPair.publicKey.toMultihash());
+      // Use Kubo's routing/get API to fetch the raw IPNS record
+      const response = await fetch(
+        `${gatewayUrl}/api/v0/routing/get?arg=/ipns/${this.cachedIpnsName}`,
+        {
+          method: "POST",
+          signal: controller.signal,
+        }
+      );
 
-      // Fetch the record from DHT with timeout
-      const recordData = await Promise.race([
-        this.helia.routing.get(routingKey),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("IPNS resolve timeout")), IPNS_RESOLVE_TIMEOUT)
-        ),
-      ]);
+      clearTimeout(timeoutId);
 
-      // Unmarshal the IPNS record
-      const record = unmarshalIPNSRecord(recordData);
-
-      // Extract the value (path) from the record
-      // The value is typically "/ipfs/CID" and is already a string
-      const valueStr = record.value;
-      console.log(`📦 IPNS record value: ${valueStr}`);
-
-      // Extract CID from path (remove "/ipfs/" prefix)
-      const cidMatch = valueStr.match(/^\/ipfs\/(.+)$/);
-      if (!cidMatch) {
-        console.warn(`📦 IPNS value is not an IPFS path: ${valueStr}`);
+      if (!response.ok) {
+        console.debug(`📦 Gateway ${new URL(gatewayUrl).hostname} returned ${response.status}`);
         return null;
       }
 
-      const cidString = cidMatch[1];
-      console.log(`📦 IPNS resolved to: ${cidString.slice(0, 16)}...`);
-      return cidString;
+      // The response is the raw marshalled IPNS record
+      const recordData = new Uint8Array(await response.arrayBuffer());
+      const record = unmarshalIPNSRecord(recordData);
+
+      // Extract CID from value path
+      const cidMatch = record.value.match(/^\/ipfs\/(.+)$/);
+      if (!cidMatch) {
+        console.debug(`📦 Gateway ${new URL(gatewayUrl).hostname} returned invalid IPNS value: ${record.value}`);
+        return null;
+      }
+
+      return {
+        cid: cidMatch[1],
+        sequence: record.sequence,
+        gateway: gatewayUrl,
+        recordData,
+      };
     } catch (error) {
-      // Non-fatal - can fall back to local lastCid
-      console.warn(`📦 IPNS resolution failed (non-fatal):`, error);
+      const hostname = new URL(gatewayUrl).hostname;
+      if (error instanceof Error && error.name === "AbortError") {
+        console.debug(`📦 Gateway ${hostname} timeout`);
+      } else {
+        console.debug(`📦 Gateway ${hostname} error:`, error);
+      }
       return null;
     }
+  }
+
+  /**
+   * Resolve IPNS progressively from all gateways
+   * Returns best result after initial timeout, continues collecting late responses
+   * Calls onLateHigherSequence if a late response has higher sequence
+   */
+  private async resolveIpnsProgressively(
+    onLateHigherSequence?: (result: IpnsGatewayResult) => void
+  ): Promise<IpnsProgressiveResult> {
+    const gatewayUrls = getAllBackendGatewayUrls();
+    if (gatewayUrls.length === 0 || !this.cachedIpnsName) {
+      return { best: null, allResults: [], respondedCount: 0, totalGateways: 0 };
+    }
+
+    console.log(`📦 Progressive IPNS resolution from ${gatewayUrls.length} gateways...`);
+
+    const results: IpnsGatewayResult[] = [];
+
+    // Create promises for all gateway requests
+    const gatewayPromises = gatewayUrls.map(async (url) => {
+      const result = await this.resolveIpnsFromGateway(url);
+      if (result) {
+        results.push(result);
+        console.log(`📦 Response from ${new URL(url).hostname}: seq=${result.sequence}`);
+      }
+      return result;
+    });
+
+    // Wait for initial timeout to collect responses
+    await Promise.race([
+      Promise.allSettled(gatewayPromises),
+      new Promise((resolve) => setTimeout(resolve, IPNS_RESOLUTION_CONFIG.initialTimeoutMs)),
+    ]);
+
+    // Find best result (highest sequence) from collected results
+    const findBest = (arr: IpnsGatewayResult[]): IpnsGatewayResult | null => {
+      if (arr.length === 0) return null;
+      return arr.reduce((best, current) =>
+        current.sequence > best.sequence ? current : best
+      );
+    };
+
+    const initialBest = findBest(results);
+    const initialCount = results.length;
+    const initialSeq = initialBest?.sequence ?? 0n;
+
+    console.log(
+      `📦 Initial timeout: ${initialCount}/${gatewayUrls.length} responded, ` +
+      `best seq=${initialSeq.toString()}`
+    );
+
+    // Continue waiting for late responses in background
+    if (onLateHigherSequence && initialCount < gatewayUrls.length) {
+      // Don't await - let this run in background
+      Promise.allSettled(gatewayPromises).then(() => {
+        // Find the new best after all responses
+        const finalBest = findBest(results);
+        // Check if any late response has higher sequence than initial best
+        if (finalBest && finalBest.sequence > initialSeq) {
+          console.log(
+            `📦 Late response with higher sequence: seq=${finalBest.sequence} ` +
+            `from ${new URL(finalBest.gateway).hostname} (was seq=${initialSeq})`
+          );
+          onLateHigherSequence(finalBest);
+        }
+      });
+    }
+
+    return {
+      best: initialBest,
+      allResults: [...results], // Snapshot at initial timeout
+      respondedCount: initialCount,
+      totalGateways: gatewayUrls.length,
+    };
+  }
+
+  /**
+   * Handle discovery of a higher IPNS sequence number
+   * Fetches the new content and merges with local state
+   */
+  private async handleHigherSequenceDiscovered(result: IpnsGatewayResult): Promise<void> {
+    console.log(`📦 Handling higher sequence discovery: seq=${result.sequence}, cid=${result.cid.slice(0, 16)}...`);
+
+    // Don't process if already syncing
+    if (this.isSyncing) {
+      console.log(`📦 Sync in progress, deferring higher sequence handling`);
+      return;
+    }
+
+    // Update last known remote sequence
+    this.lastKnownRemoteSequence = result.sequence;
+
+    // Fetch the content from IPFS
+    const remoteData = await this.fetchRemoteContent(result.cid);
+    if (!remoteData) {
+      console.warn(`📦 Failed to fetch content for higher sequence CID: ${result.cid.slice(0, 16)}...`);
+      return;
+    }
+
+    // Compare versions
+    const localVersion = this.getVersionCounter();
+    const remoteVersion = remoteData._meta.version;
+
+    if (remoteVersion > localVersion) {
+      console.log(`📦 Remote version ${remoteVersion} > local ${localVersion}, importing...`);
+
+      // Import the remote data
+      const importedCount = await this.importRemoteData(remoteData);
+
+      // Update local tracking
+      this.setVersionCounter(remoteVersion);
+      this.setLastCid(result.cid);
+
+      console.log(`📦 Imported ${importedCount} token(s) from late-arriving higher sequence`);
+
+      // Emit event to notify UI
+      await this.emitEvent({
+        type: "storage:completed",
+        timestamp: Date.now(),
+        data: {
+          cid: result.cid,
+          tokenCount: importedCount,
+        },
+      });
+
+      // Trigger wallet refresh
+      window.dispatchEvent(new Event("wallet-updated"));
+    } else {
+      console.log(`📦 Remote version ${remoteVersion} not newer than local ${localVersion}, skipping`);
+    }
+  }
+
+  // ==========================================
+  // IPNS Polling (Background Re-fetch)
+  // ==========================================
+
+  /**
+   * Start periodic IPNS polling to detect cross-device updates
+   * Only runs when tab is visible
+   */
+  private startIpnsPolling(): void {
+    if (this.ipnsPollingInterval) {
+      return; // Already running
+    }
+
+    const poll = async () => {
+      if (!this.cachedIpnsName || this.isSyncing) {
+        return;
+      }
+
+      console.log(`📦 IPNS poll: checking for remote updates...`);
+
+      const result = await this.resolveIpnsProgressively();
+
+      if (result.best) {
+        const localSeq = this.ipnsSequenceNumber;
+
+        if (result.best.sequence > localSeq && result.best.sequence > this.lastKnownRemoteSequence) {
+          console.log(
+            `📦 IPNS poll detected higher sequence: remote=${result.best.sequence}, local=${localSeq}`
+          );
+          await this.handleHigherSequenceDiscovered(result.best);
+        } else {
+          console.log(
+            `📦 IPNS poll: no updates (remote seq=${result.best.sequence}, local seq=${localSeq})`
+          );
+        }
+      }
+    };
+
+    // Calculate random interval with jitter
+    const getRandomInterval = () => {
+      const { pollingIntervalMinMs, pollingIntervalMaxMs } = IPNS_RESOLUTION_CONFIG;
+      return pollingIntervalMinMs + Math.random() * (pollingIntervalMaxMs - pollingIntervalMinMs);
+    };
+
+    // Schedule next poll with jitter
+    const scheduleNextPoll = () => {
+      const interval = getRandomInterval();
+      this.ipnsPollingInterval = setTimeout(async () => {
+        await poll();
+        scheduleNextPoll();
+      }, interval);
+    };
+
+    // Start polling
+    scheduleNextPoll();
+    console.log(`📦 IPNS polling started (interval: ${IPNS_RESOLUTION_CONFIG.pollingIntervalMinMs/1000}-${IPNS_RESOLUTION_CONFIG.pollingIntervalMaxMs/1000}s)`);
+
+    // Run first poll after a short delay
+    setTimeout(poll, 5000);
+  }
+
+  /**
+   * Stop IPNS polling (when tab becomes hidden)
+   */
+  private stopIpnsPolling(): void {
+    if (this.ipnsPollingInterval) {
+      clearTimeout(this.ipnsPollingInterval);
+      this.ipnsPollingInterval = null;
+      console.log(`📦 IPNS polling stopped`);
+    }
+  }
+
+  /**
+   * Handle tab visibility changes
+   * Pauses polling when hidden, resumes when visible
+   */
+  private handleVisibilityChange = (): void => {
+    if (document.visibilityState === "visible") {
+      console.log(`📦 Tab visible, resuming IPNS polling`);
+      this.startIpnsPolling();
+    } else {
+      console.log(`📦 Tab hidden, pausing IPNS polling`);
+      this.stopIpnsPolling();
+    }
+  };
+
+  /**
+   * Set up visibility change listener for polling control
+   */
+  private setupVisibilityListener(): void {
+    if (this.boundVisibilityHandler) {
+      return; // Already set up
+    }
+
+    this.boundVisibilityHandler = this.handleVisibilityChange;
+    document.addEventListener("visibilitychange", this.boundVisibilityHandler);
+    console.log(`📦 Visibility listener registered`);
+
+    // Start polling if currently visible
+    if (document.visibilityState === "visible") {
+      this.startIpnsPolling();
+    }
+  }
+
+  /**
+   * Remove visibility listener and stop polling
+   */
+  private cleanupVisibilityListener(): void {
+    if (this.boundVisibilityHandler) {
+      document.removeEventListener("visibilitychange", this.boundVisibilityHandler);
+      this.boundVisibilityHandler = null;
+    }
+    this.stopIpnsPolling();
   }
 
   // ==========================================
@@ -1015,15 +1305,16 @@ export class IpfsStorageService {
 
   /**
    * Sync from IPNS on startup - resolves IPNS and merges with local state
-   * This ensures we have the latest state from DHT before making changes
+   * Uses progressive multi-gateway resolution for conflict detection
    *
    * Flow:
    * 0. Retry any pending IPNS publishes from previous failed syncs
-   * 1. Resolve IPNS to get remote CID
+   * 1. Resolve IPNS progressively from all gateways (highest sequence wins)
    * 2. Compare with local CID - if different, fetch remote content
    * 3. Version comparison: remote > local → import; local > remote → sync to update IPNS
    * 4. Always verify remote is fetchable (handles interrupted syncs)
    * 5. If fetch fails, fall back to normal sync (republish local)
+   * 6. Late-arriving higher sequences trigger automatic merge
    */
   async syncFromIpns(): Promise<StorageResult> {
     console.log(`📦 Starting IPNS-based sync...`);
@@ -1037,9 +1328,23 @@ export class IpfsStorageService {
     // 0. Retry any pending IPNS publishes from previous failed syncs
     await this.retryPendingIpnsPublish();
 
-    // 1. Resolve IPNS to get remote CID from DHT
-    const remoteCid = await this.resolveIpns();
+    // 1. Resolve IPNS progressively from all gateways
+    // Late arrivals with higher sequence will trigger handleHigherSequenceDiscovered
+    const resolution = await this.resolveIpnsProgressively(
+      (lateResult) => this.handleHigherSequenceDiscovered(lateResult)
+    );
+
+    const remoteCid = resolution.best?.cid || null;
     const localCid = this.getLastCid();
+
+    // Update last known remote sequence
+    if (resolution.best) {
+      this.lastKnownRemoteSequence = resolution.best.sequence;
+      console.log(
+        `📦 IPNS resolved: seq=${resolution.best.sequence}, ` +
+        `${resolution.respondedCount}/${resolution.totalGateways} gateways responded`
+      );
+    }
 
     console.log(`📦 IPNS sync: remote=${remoteCid?.slice(0, 16) || 'none'}..., local=${localCid?.slice(0, 16) || 'none'}...`);
 

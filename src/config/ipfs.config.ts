@@ -96,6 +96,23 @@ export const IPFS_CONFIG = {
 };
 
 /**
+ * IPNS resolution configuration
+ * Controls progressive multi-peer IPNS record collection
+ */
+export const IPNS_RESOLUTION_CONFIG = {
+  /** Wait this long for initial responses before selecting best record */
+  initialTimeoutMs: 10000,
+  /** Maximum wait for all gateway responses (late arrivals handled separately) */
+  maxWaitMs: 30000,
+  /** Minimum polling interval for background IPNS re-fetch */
+  pollingIntervalMinMs: 45000,
+  /** Maximum polling interval (jitter applied between min and max) */
+  pollingIntervalMaxMs: 75000,
+  /** Per-gateway request timeout */
+  perGatewayTimeoutMs: 25000,
+};
+
+/**
  * Get the backend gateway URL for API calls
  * Uses HTTPS on secure pages, HTTP otherwise
  */

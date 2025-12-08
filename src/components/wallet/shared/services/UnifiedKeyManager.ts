@@ -484,19 +484,6 @@ export class UnifiedKeyManager {
   }
 
   /**
-   * Derive a deterministic nonce for L3 identity creation
-   * Uses HMAC-SHA256 to derive nonce from private key
-   */
-  deriveL3Nonce(privateKey: string, index: number): string {
-    const input = `unicity-nonce-${index}`;
-    const nonce = CryptoJS.HmacSHA256(
-      CryptoJS.enc.Utf8.parse(input),
-      CryptoJS.enc.Hex.parse(privateKey)
-    ).toString();
-    return nonce;
-  }
-
-  /**
    * Export wallet to txt format (compatible with webwallet)
    */
   exportToTxt(): string {
