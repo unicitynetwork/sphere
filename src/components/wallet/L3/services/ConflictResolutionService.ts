@@ -53,7 +53,6 @@ export class ConflictResolutionService {
       baseMeta = {
         ...remote._meta,
         version: remoteVersion + 1, // Increment for merged version
-        timestamp: Date.now(),
       };
       baseTokens = this.extractTokens(remote);
       otherTokens = this.extractTokens(local);
@@ -64,39 +63,21 @@ export class ConflictResolutionService {
       baseMeta = {
         ...local._meta,
         version: localVersion + 1,
-        timestamp: Date.now(),
       };
       baseTokens = this.extractTokens(local);
       otherTokens = this.extractTokens(remote);
       baseIsLocal = true;
       console.log(`📦 Local is newer, using local as base`);
     } else {
-      // Same version - merge based on timestamp
-      const localTs = local._meta.timestamp;
-      const remoteTs = remote._meta.timestamp;
-
-      if (remoteTs > localTs) {
-        baseMeta = {
-          ...remote._meta,
-          version: remoteVersion + 1,
-          timestamp: Date.now(),
-        };
-        baseTokens = this.extractTokens(remote);
-        otherTokens = this.extractTokens(local);
-        baseIsLocal = false;
-      } else {
-        baseMeta = {
-          ...local._meta,
-          version: localVersion + 1,
-          timestamp: Date.now(),
-        };
-        baseTokens = this.extractTokens(local);
-        otherTokens = this.extractTokens(remote);
-        baseIsLocal = true;
-      }
-      console.log(
-        `📦 Same version, using ${baseIsLocal ? "local" : "remote"} as base (newer timestamp)`
-      );
+      // Same version - use local as base (local wins on tie)
+      baseMeta = {
+        ...local._meta,
+        version: localVersion + 1,
+      };
+      baseTokens = this.extractTokens(local);
+      otherTokens = this.extractTokens(remote);
+      baseIsLocal = true;
+      console.log(`📦 Same version, using local as base (local wins on tie)`);
     }
 
     // Merge tokens

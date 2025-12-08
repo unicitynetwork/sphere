@@ -74,8 +74,10 @@ export function getBootstrapPeers(): string[] {
     }
   });
 
-  // Custom peers first (prioritized), then defaults as fallback
-  return [...customPeers, ...DEFAULT_BOOTSTRAP_PEERS];
+  // Custom peers first (prioritized), then 1 emergency fallback
+  // We limit fallback to reduce traffic - full list was causing excessive connections
+  const fallbackPeer = DEFAULT_BOOTSTRAP_PEERS[0]; // Just one fallback
+  return [...customPeers, fallbackPeer];
 }
 
 /**
@@ -90,7 +92,7 @@ export function getConfiguredCustomPeers(): IpfsPeer[] {
  */
 export const IPFS_CONFIG = {
   connectionTimeout: 10000, // 10s timeout per peer
-  maxConnections: 50,
+  maxConnections: 10,  // Reduced from 50 - we only connect to Unicity peers + 1 fallback
   enableAutoSync: true,
   syncIntervalMs: 5 * 60 * 1000, // 5 minutes
 };

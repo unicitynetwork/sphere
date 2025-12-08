@@ -23,10 +23,10 @@ export interface TxfStorageData {
 
 /**
  * Storage metadata
+ * Note: timestamp is excluded to ensure CID stability (same content = same CID)
  */
 export interface TxfMeta {
   version: number;           // Monotonic counter (increments each sync)
-  timestamp: number;         // Unix timestamp of last sync
   address: string;           // Wallet L3 address
   ipnsName: string;          // IPNS name for this wallet
   formatVersion: "2.0";      // TXF format version

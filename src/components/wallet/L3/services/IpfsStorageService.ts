@@ -9,7 +9,7 @@ import { sha256 } from "@noble/hashes/sha256";
 import { sha512 } from "@noble/hashes/sha512";
 import * as ed from "@noble/ed25519";
 import type { CID } from "multiformats/cid";
-import type { PrivateKey } from "@libp2p/interface";
+import type { PrivateKey, ConnectionGater, PeerId } from "@libp2p/interface";
 import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
 import type { IdentityManager } from "./IdentityManager";
 import type { Token } from "../data/model";
@@ -19,7 +19,7 @@ import { getTokenValidationService } from "./TokenValidationService";
 import { getConflictResolutionService } from "./ConflictResolutionService";
 import { getSyncCoordinator } from "./SyncCoordinator";
 // Note: retryWithBackoff was used for DHT publish, now handled by HTTP primary path
-import { getBootstrapPeers, getConfiguredCustomPeers, getBackendPeerId, getAllBackendGatewayUrls, IPNS_RESOLUTION_CONFIG } from "../../../../config/ipfs.config";
+import { getBootstrapPeers, getConfiguredCustomPeers, getBackendPeerId, getAllBackendGatewayUrls, IPNS_RESOLUTION_CONFIG, IPFS_CONFIG } from "../../../../config/ipfs.config";
 
 // Configure @noble/ed25519 to use sync sha512 (required for getPublicKey without WebCrypto)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -338,16 +338,21 @@ export class IpfsStorageService {
       const bootstrapPeers = getBootstrapPeers();
       const customPeerCount = getConfiguredCustomPeers().length;
 
-      console.log("📦 Initializing Helia with custom peers...");
-      console.log(`📦 Bootstrap peers: ${bootstrapPeers.length} total (${customPeerCount} custom, ${bootstrapPeers.length - customPeerCount} default)`);
+      console.log("📦 Initializing Helia with restricted peer connections...");
+      console.log(`📦 Bootstrap peers: ${bootstrapPeers.length} total (${customPeerCount} custom, ${bootstrapPeers.length - customPeerCount} fallback)`);
+
+      // Create connection gater to restrict connections to bootstrap peers only
+      const connectionGater = this.createConnectionGater(bootstrapPeers);
 
       this.helia = await createHelia({
         libp2p: {
+          connectionGater,
           peerDiscovery: [
             bootstrap({ list: bootstrapPeers }),
+            // No mDNS - don't discover local network peers
           ],
           connectionManager: {
-            maxConnections: 50,
+            maxConnections: IPFS_CONFIG.maxConnections,
           },
         },
       });
@@ -450,6 +455,64 @@ export class IpfsStorageService {
       localStorage.removeItem(oldCidKey);
       console.log(`📦 Migrated CID key: ${oldIpnsName} -> ${newIpnsName}`);
     }
+  }
+
+  // ==========================================
+  // Connection Gater (Peer Filtering)
+  // ==========================================
+
+  /**
+   * Create a connection gater that only allows connections to bootstrap peers.
+   * This restricts libp2p from connecting to random DHT-discovered peers,
+   * reducing browser traffic significantly.
+   *
+   * @param bootstrapPeers - List of bootstrap multiaddrs containing allowed peer IDs
+   */
+  private createConnectionGater(bootstrapPeers: string[]): ConnectionGater {
+    // Extract peer IDs from bootstrap multiaddrs
+    const allowedPeerIds = new Set(
+      bootstrapPeers.map((addr) => {
+        const match = addr.match(/\/p2p\/([^/]+)$/);
+        return match ? match[1] : null;
+      }).filter((id): id is string => id !== null)
+    );
+
+    console.log(`📦 Connection gater: allowing ${allowedPeerIds.size} peer(s)`);
+
+    return {
+      // Allow dialing any multiaddr (peer filtering happens at connection level)
+      denyDialMultiaddr: async () => false,
+
+      // Block outbound connections to non-allowed peers
+      denyDialPeer: async (peerId: PeerId) => {
+        const peerIdStr = peerId.toString();
+        const denied = !allowedPeerIds.has(peerIdStr);
+        if (denied) {
+          console.debug(`📦 Blocked dial to non-bootstrap peer: ${peerIdStr.slice(0, 16)}...`);
+        }
+        return denied;
+      },
+
+      // Allow inbound connections (rare in browser, but don't block)
+      denyInboundConnection: async () => false,
+
+      // Block outbound connections to non-allowed peers
+      denyOutboundConnection: async (peerId: PeerId) => {
+        const peerIdStr = peerId.toString();
+        return !allowedPeerIds.has(peerIdStr);
+      },
+
+      // Allow encrypted connections (peer already passed connection check)
+      denyInboundEncryptedConnection: async () => false,
+      denyOutboundEncryptedConnection: async () => false,
+
+      // Allow upgraded connections
+      denyInboundUpgradedConnection: async () => false,
+      denyOutboundUpgradedConnection: async () => false,
+
+      // Allow all multiaddrs for allowed peers
+      filterMultiaddrForPeer: async () => true,
+    };
   }
 
   // ==========================================
@@ -1524,7 +1587,6 @@ export class IpfsStorageService {
               // Build local storage data for comparison (include tombstones)
               const localMeta: Omit<TxfMeta, "formatVersion"> = {
                 version: localVersion,
-                timestamp: Date.now(),
                 address: wallet.address,
                 ipnsName: this.cachedIpnsName || "",
               };
@@ -1572,10 +1634,18 @@ export class IpfsStorageService {
               this.setVersionCounter(mergeResult.merged._meta.version);
             } else {
               // Remote is in sync - check if local has any changes worth uploading
-              const localTokenIds = validTokens.map(t => t.id).sort().join(",");
-              // TXF format stores tokens as _tokenId keys
+              // Extract genesis token IDs from local tokens (same as buildTxfStorageData uses)
+              const localTokenIds = validTokens.map(t => {
+                try {
+                  const txf = JSON.parse(t.jsonData || "{}");
+                  return txf.genesis?.data?.tokenId || t.id;
+                } catch {
+                  return t.id;
+                }
+              }).sort().join(",");
+              // TXF format stores tokens as _tokenId keys (genesis token IDs)
               const remoteTokenIds = Object.keys(remoteTxf)
-                .filter(k => k.startsWith("_") && k !== "_meta" && k !== "_nametag")
+                .filter(k => k.startsWith("_") && k !== "_meta" && k !== "_nametag" && k !== "_tombstones")
                 .map(k => k.slice(1))
                 .sort()
                 .join(",");
@@ -1609,7 +1679,6 @@ export class IpfsStorageService {
       const tombstones = walletRepo.getTombstones();
       const meta: Omit<TxfMeta, "formatVersion"> = {
         version: newVersion,
-        timestamp: Date.now(),
         address: wallet.address,
         ipnsName: this.cachedIpnsName || "",
         lastCid: this.getLastCid() || undefined,
