@@ -159,7 +159,7 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   const mathBlocks: string[] = [];
   const mathPlaceholder = '\u0000MATH';  // Unique placeholder that markdown won't match
 
-  let processedText = text.replace(
+  const processedText = text.replace(
     /(?<!\\)((?:\\\\)*)\\\((.+?)\\\)/g,
     (match, backslashes, latex) => {
       if (backslashes && backslashes.length % 2 === 1) {
