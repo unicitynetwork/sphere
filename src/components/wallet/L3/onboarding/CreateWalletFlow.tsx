@@ -283,6 +283,12 @@ export function CreateWalletFlow() {
             path: addr.path || `m/44'/0'/0'/0/${addr.index}`,
             hasNametag: !!existingNametag,
             existingNametag: existingNametag?.name,
+            // Enable IPNS nametag fetching for addresses without local nametag
+            // IMPORTANT: Use l3Identity.privateKey (from UnifiedKeyManager) for IPNS derivation,
+            // NOT addr.privateKey (L1 wallet). The IPNS name is tied to the L3 identity key,
+            // which comes from a fixed BIP32 path (m/44'/0'/0'/0/{index}).
+            privateKey: existingNametag ? undefined : l3Identity.privateKey,
+            ipnsLoading: !existingNametag,
           });
         }
 
