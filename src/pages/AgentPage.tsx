@@ -60,6 +60,23 @@ export function AgentPage() {
     }
   }, [agentId]);
 
+  // Auto-switch to wallet panel when payment request is received (mobile only)
+  useEffect(() => {
+    const handlePaymentRequest = () => {
+      const isMobile = window.innerWidth < 1024;
+      if (isMobile) {
+        console.log("💰 Payment request received, switching to wallet panel...");
+        scrollToPanel('wallet');
+      }
+    };
+
+    window.addEventListener('payment-requests-updated', handlePaymentRequest);
+
+    return () => {
+      window.removeEventListener('payment-requests-updated', handlePaymentRequest);
+    };
+  }, []);
+
   // Redirect to chat if invalid agent
   if (!currentAgent) {
     return <Navigate to="/agents/chat" replace />;

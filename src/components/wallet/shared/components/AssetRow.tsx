@@ -26,6 +26,7 @@ export function AssetRow({ asset, showBalances, delay, onClick }: AssetRowProps)
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: delay }}
+      layout
       whileHover={{ x: 4, backgroundColor: 'var(--color-surface-hover)' }}
       onClick={onClick}
       className="p-3 rounded-xl transition-all cursor-pointer group border border-transparent hover:border-neutral-200/50 dark:hover:border-white/5"

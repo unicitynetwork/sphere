@@ -115,7 +115,7 @@ export class NostrService {
 
     console.log("📡 Connecting to Nostr relays...");
     try {
-      await this.client.connect(UNICITY_RELAYS[0]);
+      await this.client.connect(...UNICITY_RELAYS);
       this.isConnected = true;
       console.log("✅ Connected to Nostr relays");
 

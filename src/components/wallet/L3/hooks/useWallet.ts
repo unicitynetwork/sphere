@@ -85,6 +85,16 @@ export const useWallet = () => {
     enabled: !!identityQuery.data?.address,
   });
 
+  // Ensure registry is loaded before aggregating assets
+  const registryQuery = useQuery({
+    queryKey: KEYS.REGISTRY,
+    queryFn: async () => {
+      await registryService.ensureInitialized();
+      return true;
+    },
+    staleTime: Infinity, // Registry doesn't change during session
+  });
+
   const pricesQuery = useQuery({
     queryKey: KEYS.PRICES,
     queryFn: ApiService.fetchPrices,
@@ -125,8 +135,13 @@ export const useWallet = () => {
     queryKey: [
       ...KEYS.AGGREGATED,
       tokensQuery.dataUpdatedAt,
+      // Don't include pricesQuery.dataUpdatedAt to avoid refetch on price updates
+      // Prices will update automatically when pricesQuery.data changes
     ],
     queryFn: async () => {
+      // Wait for registry to be ready
+      await registryService.ensureInitialized();
+
       const tokens = tokensQuery.data || [];
       const prices = pricesQuery.data || {};
       const groupedTokens: Record<string, Token[]> = {};
@@ -195,7 +210,8 @@ export const useWallet = () => {
         return valB - valA;
       });
     },
-    enabled: !!tokensQuery.data,
+    // Wait for both registry, tokens, and prices to be ready
+    enabled: !!registryQuery.data && !!tokensQuery.data && !!pricesQuery.data,
   });
 
   const createWalletMutation = useMutation({
