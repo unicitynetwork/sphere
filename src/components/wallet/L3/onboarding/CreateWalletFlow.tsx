@@ -74,6 +74,9 @@ export function CreateWalletFlow() {
   const [needsScanning, setNeedsScanning] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
 
+  // State for IPNS nametag fetching on Complete Setup screen
+  const [ipnsFetchingNametag, setIpnsFetchingNametag] = useState(false);
+
   // Connect to L1 WebSocket on mount (needed for wallet scanning)
   useEffect(() => {
     if (!isWebSocketConnected()) {
@@ -82,6 +85,47 @@ export function CreateWalletFlow() {
       });
     }
   }, []);
+
+  // Effect: Fetch nametag from IPNS when identity exists but nametag doesn't
+  // This allows auto-proceeding if the nametag was published from another device
+  useEffect(() => {
+    // Only run on 'start' step when identity exists but no nametag
+    if (step !== 'start' || !identity || nametag || ipnsFetchingNametag) return;
+
+    const fetchNametag = async () => {
+      setIpnsFetchingNametag(true);
+      console.log('🔍 [Complete Setup] Checking IPNS for existing nametag...');
+
+      try {
+        const result = await fetchNametagFromIpns(identity.privateKey);
+
+        if (result.nametag && result.nametagData) {
+          console.log(`🔍 [Complete Setup] Found nametag: ${result.nametag}`);
+
+          // Save nametag to localStorage
+          WalletRepository.saveNametagForAddress(identity.address, {
+            name: result.nametagData.name,
+            token: result.nametagData.token,
+            timestamp: result.nametagData.timestamp || Date.now(),
+            format: result.nametagData.format || "TXF",
+            version: "1.0",
+          });
+
+          // Reload to proceed to wallet with the found nametag
+          console.log('✅ [Complete Setup] Nametag found, proceeding to wallet...');
+          window.location.reload();
+        } else {
+          console.log('🔍 [Complete Setup] No nametag found in IPNS');
+          setIpnsFetchingNametag(false);
+        }
+      } catch (error) {
+        console.warn('🔍 [Complete Setup] IPNS fetch error:', error);
+        setIpnsFetchingNametag(false);
+      }
+    };
+
+    fetchNametag();
+  }, [step, identity, nametag, ipnsFetchingNametag]);
 
   // Effect: Fetch nametags from IPNS in parallel when addresses are derived
   useEffect(() => {
@@ -938,13 +982,27 @@ export function CreateWalletFlow() {
             </h2>
             <p className="text-neutral-500 dark:text-neutral-400 text-xs md:text-sm mb-6 md:mb-8 mx-auto leading-relaxed">
               {identity && !nametag
-                ? <>Your wallet is ready. Create a <span className="text-orange-500 dark:text-orange-400 font-semibold">Unicity ID</span> to complete setup.</>
+                ? ipnsFetchingNametag
+                  ? <>Checking for existing <span className="text-orange-500 dark:text-orange-400 font-semibold">Unicity ID</span>...</>
+                  : <>Your wallet is ready. Create a <span className="text-orange-500 dark:text-orange-400 font-semibold">Unicity ID</span> to complete setup.</>
                 : <>Create a new secure wallet to start using the <span className="text-orange-500 dark:text-orange-400 font-semibold">Unicity Network</span></>
               }
             </p>
 
+            {/* Show loading indicator while checking IPNS */}
+            {identity && !nametag && ipnsFetchingNametag && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="flex items-center justify-center gap-2 text-neutral-500 dark:text-neutral-400 text-sm mb-4"
+              >
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Looking for existing Unicity ID...</span>
+              </motion.div>
+            )}
+
             {/* Show "Continue Setup" if identity exists but no nametag */}
-            {identity && !nametag && (
+            {identity && !nametag && !ipnsFetchingNametag && (
               <motion.button
                 onClick={() => setStep('nametag')}
                 disabled={isBusy}
@@ -962,7 +1020,7 @@ export function CreateWalletFlow() {
             )}
 
             {/* Divider when showing continue option */}
-            {identity && !nametag && (
+            {identity && !nametag && !ipnsFetchingNametag && (
               <div className="flex items-center gap-3 my-4">
                 <div className="flex-1 h-px bg-neutral-200 dark:bg-neutral-700" />
                 <span className="text-xs text-neutral-400 dark:text-neutral-500">or start fresh</span>
