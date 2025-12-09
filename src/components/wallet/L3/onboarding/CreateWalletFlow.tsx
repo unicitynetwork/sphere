@@ -266,11 +266,6 @@ export function CreateWalletFlow() {
         for (let i = 0; i < l1Wallet.addresses.length; i++) {
           const addr = l1Wallet.addresses[i];
 
-          if (!addr.privateKey) {
-            console.warn(`Skipping address ${addr.address} - no private key`);
-            continue;
-          }
-
           // Use sequential index i for L3 derivation (0, 1, 2...)
           // This matches how deriveIdentityFromUnifiedWallet works
           const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(i);
@@ -451,6 +446,13 @@ export function CreateWalletFlow() {
           // If has mnemonic, restore via restoreWallet (which sets up UnifiedKeyManager)
           if (result.mnemonic) {
             await restoreWallet(result.mnemonic);
+
+            // Reset selected address index to 0 for clean import
+            localStorage.setItem("l3_selected_address_index", "0");
+
+            // Save wallet with firstAddress to storage so goToAddressSelection uses it
+            saveWalletToStorage("main", result.wallet);
+
             // Go to address selection after restoring from mnemonic
             await goToAddressSelection();
             return;
@@ -739,6 +741,13 @@ export function CreateWalletFlow() {
         // If has mnemonic, restore via restoreWallet
         if (result.mnemonic) {
           await restoreWallet(result.mnemonic);
+
+          // Reset selected address index to 0 for clean import
+          localStorage.setItem("l3_selected_address_index", "0");
+
+          // Save wallet with firstAddress to storage so goToAddressSelection uses it
+          saveWalletToStorage("main", result.wallet);
+
           // Go to address selection after restoring from mnemonic
           await goToAddressSelection();
           return;
@@ -831,9 +840,11 @@ export function CreateWalletFlow() {
       if (file.name.endsWith(".json") || isJSONWalletFormat(content)) {
         try {
           const json = JSON.parse(content);
-          // JSON files with BIP32 need scanning, others don't
+          // JSON files with mnemonic don't need scanning - restore directly from seed
+          // JSON files with BIP32 but no mnemonic need scanning
+          const hasMnemonic = !!json.mnemonic || !!json.encrypted?.mnemonic;
           const isBIP32 = json.derivationMode === "bip32" || json.chainCode;
-          setNeedsScanning(isBIP32);
+          setNeedsScanning(!hasMnemonic && isBIP32);
           setScanCount(10);
         } catch {
           setNeedsScanning(true);

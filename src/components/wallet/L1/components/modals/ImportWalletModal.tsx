@@ -52,9 +52,11 @@ export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModa
       if (file.name.endsWith(".json") || isJSONWalletFormat(content)) {
         try {
           const json = JSON.parse(content);
-          // JSON files with BIP32 need scanning, others don't
+          // JSON files with mnemonic don't need scanning - restore directly from seed
+          // JSON files with BIP32 but no mnemonic need scanning
+          const hasMnemonic = !!json.mnemonic || !!json.encrypted?.mnemonic;
           const isBIP32 = json.derivationMode === "bip32" || json.chainCode;
-          setNeedsScanning(isBIP32);
+          setNeedsScanning(!hasMnemonic && isBIP32);
           setScanCount(10);
         } catch {
           setNeedsScanning(true);
