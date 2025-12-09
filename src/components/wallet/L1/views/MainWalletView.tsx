@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { TransactionPlan, VestingMode, VestingBalances } from "../sdk";
-import { vestingState } from "../sdk/vestingState";
 import {
   QRModal,
   SaveWalletModal,
