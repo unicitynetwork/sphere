@@ -982,45 +982,45 @@ export function CreateWalletFlow() {
             </h2>
             <p className="text-neutral-500 dark:text-neutral-400 text-xs md:text-sm mb-6 md:mb-8 mx-auto leading-relaxed">
               {identity && !nametag
-                ? ipnsFetchingNametag
-                  ? <>Checking for existing <span className="text-orange-500 dark:text-orange-400 font-semibold">Unicity ID</span>...</>
-                  : <>Your wallet is ready. Create a <span className="text-orange-500 dark:text-orange-400 font-semibold">Unicity ID</span> to complete setup.</>
+                ? <>Your wallet is ready. Create a <span className="text-orange-500 dark:text-orange-400 font-semibold">Unicity ID</span> to complete setup.</>
                 : <>Create a new secure wallet to start using the <span className="text-orange-500 dark:text-orange-400 font-semibold">Unicity Network</span></>
               }
             </p>
 
-            {/* Show loading indicator while checking IPNS */}
-            {identity && !nametag && ipnsFetchingNametag && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex items-center justify-center gap-2 text-neutral-500 dark:text-neutral-400 text-sm mb-4"
-              >
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Looking for existing Unicity ID...</span>
-              </motion.div>
-            )}
-
             {/* Show "Continue Setup" if identity exists but no nametag */}
-            {identity && !nametag && !ipnsFetchingNametag && (
-              <motion.button
-                onClick={() => setStep('nametag')}
-                disabled={isBusy}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                transition={{ duration: 0.1 }}
-                className="relative w-full py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-linear-to-r from-emerald-500 to-emerald-600 text-white text-sm md:text-base font-bold shadow-xl shadow-emerald-500/30 flex items-center justify-center gap-2 md:gap-3 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden group mb-3"
-              >
-                <div className="absolute inset-0 bg-linear-to-r from-emerald-400 to-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                <span className="relative z-10 flex items-center gap-2 md:gap-3">
-                  <ShieldCheck className="w-4 h-4 md:w-5 md:h-5" />
-                  Continue Setup
-                </span>
-              </motion.button>
+            {identity && !nametag && (
+              <>
+                <motion.button
+                  onClick={() => setStep('nametag')}
+                  disabled={isBusy}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  transition={{ duration: 0.1 }}
+                  className="relative w-full py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-linear-to-r from-emerald-500 to-emerald-600 text-white text-sm md:text-base font-bold shadow-xl shadow-emerald-500/30 flex items-center justify-center gap-2 md:gap-3 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden group mb-3"
+                >
+                  <div className="absolute inset-0 bg-linear-to-r from-emerald-400 to-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <span className="relative z-10 flex items-center gap-2 md:gap-3">
+                    <ShieldCheck className="w-4 h-4 md:w-5 md:h-5" />
+                    Continue Setup
+                  </span>
+                </motion.button>
+
+                {/* Show loading indicator while checking IPNS */}
+                {ipnsFetchingNametag && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="flex items-center justify-center gap-2 text-neutral-500 dark:text-neutral-400 text-xs mb-2"
+                  >
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Checking for existing Unicity ID...</span>
+                  </motion.div>
+                )}
+              </>
             )}
 
             {/* Divider when showing continue option */}
-            {identity && !nametag && !ipnsFetchingNametag && (
+            {identity && !nametag && (
               <div className="flex items-center gap-3 my-4">
                 <div className="flex-1 h-px bg-neutral-200 dark:bg-neutral-700" />
                 <span className="text-xs text-neutral-400 dark:text-neutral-500">or start fresh</span>
