@@ -10,18 +10,17 @@ import {
   ExternalLink,
   Check,
   Plus,
-  X,
   ArrowRightLeft,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { TransactionPlan, VestingMode, VestingBalances } from "../sdk";
-import { vestingState } from "../sdk/vestingState";
 import {
   QRModal,
   SaveWalletModal,
   DeleteConfirmationModal,
   TransactionConfirmationModal,
   BridgeModal,
+  SendModal,
 } from "../components/modals";
 import { VestingSelector } from "../components/VestingSelector";
 
@@ -114,16 +113,18 @@ export function MainWalletView({
 }: MainWalletViewProps) {
   const [showQR, setShowQR] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [destination, setDestination] = useState("");
-  const [amount, setAmount] = useState("");
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [showSendForm, setShowSendForm] = useState(false);
+  const [showSendModal, setShowSendModal] = useState(false);
   const [showBridgeModal, setShowBridgeModal] = useState(false);
+  const [pendingDestination, setPendingDestination] = useState("");
+  const [pendingAmount, setPendingAmount] = useState("");
 
-  const handleSend = async () => {
+  const handleSendFromModal = async (destination: string, amount: string) => {
+    setPendingDestination(destination);
+    setPendingAmount(amount);
     await onSendTransaction(destination, amount);
     setShowConfirmation(true);
   };
@@ -131,8 +132,6 @@ export function MainWalletView({
   const handleConfirmSend = async () => {
     await onConfirmSend();
     setShowConfirmation(false);
-    setDestination("");
-    setAmount("");
   };
 
   const handleSave = (filename: string, password?: string) => {
@@ -150,8 +149,8 @@ export function MainWalletView({
       <TransactionConfirmationModal
         show={showConfirmation}
         txPlan={txPlan}
-        destination={destination}
-        amount={amount}
+        destination={pendingDestination}
+        amount={pendingAmount}
         isSending={isSending}
         onConfirm={handleConfirmSend}
         onCancel={() => setShowConfirmation(false)}
@@ -326,12 +325,12 @@ export function MainWalletView({
           <motion.button
             whileHover={{ scale: 1.02, y: -2 }}
             whileTap={{ scale: 0.98 }}
-            onClick={() => setShowSendForm(!showSendForm)}
+            onClick={() => setShowSendModal(true)}
             className="relative px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-linear-to-br from-green-600 to-green-700 text-white text-xs sm:text-sm shadow-xl shadow-green-500/20 flex items-center justify-center gap-1.5 sm:gap-2 overflow-hidden group"
           >
             <div className="absolute inset-0 bg-linear-to-r from-transparent via-white/10 to-transparent translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000" />
-            {showSendForm ? <X className="w-3.5 h-3.5 sm:w-4 sm:h-4 relative z-10" /> : <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4 relative z-10" />}
-            <span className="relative z-10">{showSendForm ? "Cancel" : "Send"}</span>
+            <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4 relative z-10" />
+            <span className="relative z-10">Send</span>
           </motion.button>
         </div>
       </div>
@@ -354,101 +353,18 @@ export function MainWalletView({
         </p>
       </div>
 
-      {/* Send Form */}
-      <AnimatePresence mode="wait">
-        {showSendForm ? (
-          <motion.div
-            key="send-form"
-            initial={{ opacity: 0, y: -20, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            transition={{ type: "spring", duration: 0.3, bounce: 0.1 }}
-            className="px-6 mb-4"
-          >
-            <div className="flex flex-col gap-3 bg-neutral-100/50 dark:bg-neutral-900/50 p-4 rounded-xl border border-neutral-200/50 dark:border-neutral-800/50 backdrop-blur-sm">
-              <div className="relative">
-                <input
-                  placeholder="Destination Address"
-                  className="w-full px-3 py-2 bg-neutral-200/50 dark:bg-neutral-800/50 rounded-lg text-neutral-800 dark:text-neutral-200 placeholder-neutral-400 dark:placeholder-neutral-500 border border-neutral-300/50 dark:border-neutral-700/50 focus:border-green-500 focus:bg-neutral-200 dark:focus:bg-neutral-800 outline-none transition-all"
-                  value={destination}
-                  onChange={(e) => setDestination(e.target.value)}
-                />
-              </div>
-
-              <div className="relative">
-                <input
-                  placeholder="Amount (ALPHA)"
-                  type="number"
-                  step="any"
-                  className="w-full px-3 py-2 pr-32 bg-neutral-200/50 dark:bg-neutral-800/50 rounded-lg text-neutral-800 dark:text-neutral-200 placeholder-neutral-400 dark:placeholder-neutral-500 border border-neutral-300/50 dark:border-neutral-700/50 focus:border-green-500 focus:bg-neutral-200 dark:focus:bg-neutral-800 outline-none transition-all"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                />
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const filteredBalance = Number(vestingState.getBalance(selectedAddress)) / 1e8;
-                      setAmount(String(Math.floor(filteredBalance * 0.25 * 1e8) / 1e8));
-                    }}
-                    className="px-2 py-1 text-[10px] font-medium bg-neutral-300 dark:bg-neutral-700 hover:bg-neutral-400 dark:hover:bg-neutral-600 text-neutral-600 dark:text-neutral-300 rounded transition-colors"
-                  >
-                    25%
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const filteredBalance = Number(vestingState.getBalance(selectedAddress)) / 1e8;
-                      setAmount(String(Math.floor(filteredBalance * 0.5 * 1e8) / 1e8));
-                    }}
-                    className="px-2 py-1 text-[10px] font-medium bg-neutral-300 dark:bg-neutral-700 hover:bg-neutral-400 dark:hover:bg-neutral-600 text-neutral-600 dark:text-neutral-300 rounded transition-colors"
-                  >
-                    50%
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const filteredBalance = Number(vestingState.getBalance(selectedAddress)) / 1e8;
-                      setAmount(String(filteredBalance));
-                    }}
-                    className="px-2 py-1 text-[10px] font-medium bg-green-600 hover:bg-green-500 text-white rounded transition-colors"
-                  >
-                    MAX
-                  </button>
-                </div>
-              </div>
-
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleSend}
-                className="px-4 py-3 bg-linear-to-br from-green-500 to-green-600 rounded-xl text-white font-semibold flex items-center justify-center gap-2 shadow-lg shadow-green-500/20 hover:shadow-green-500/30 transition-shadow"
-              >
-                <Send className="w-4 h-4" /> Send Transaction
-              </motion.button>
-            </div>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="history-button"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            transition={{ type: "spring", duration: 0.3, bounce: 0.1 }}
-            className="px-3 sm:px-4 lg:px-6 mb-2 sm:mb-3"
-          >
-            <motion.button
-              onClick={onShowHistory}
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.99 }}
-              className="w-full px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-neutral-100/50 dark:bg-neutral-800/50 text-neutral-600 dark:text-neutral-300 text-xs sm:text-sm border border-neutral-200/50 dark:border-neutral-700/50 flex items-center justify-center gap-1.5 sm:gap-2 hover:bg-neutral-200 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-white transition-colors"
-            >
-              <History className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              Transaction History
-            </motion.button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Transaction History Button */}
+      <div className="px-3 sm:px-4 lg:px-6 mb-2 sm:mb-3">
+        <motion.button
+          onClick={onShowHistory}
+          whileHover={{ scale: 1.01 }}
+          whileTap={{ scale: 0.99 }}
+          className="w-full px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-neutral-100/50 dark:bg-neutral-800/50 text-neutral-600 dark:text-neutral-300 text-xs sm:text-sm border border-neutral-200/50 dark:border-neutral-700/50 flex items-center justify-center gap-1.5 sm:gap-2 hover:bg-neutral-200 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-white transition-colors"
+        >
+          <History className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          Transaction History
+        </motion.button>
+      </div>
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -508,6 +424,13 @@ export function MainWalletView({
         address={selectedAddress}
         privateKey={selectedPrivateKey}
         onClose={() => setShowBridgeModal(false)}
+      />
+
+      <SendModal
+        show={showSendModal}
+        selectedAddress={selectedAddress}
+        onClose={() => setShowSendModal(false)}
+        onSend={handleSendFromModal}
       />
     </div>
   );

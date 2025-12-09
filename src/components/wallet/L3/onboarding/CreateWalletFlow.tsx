@@ -1,12 +1,23 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft, Upload, Plus, ChevronDown, Check } from 'lucide-react';
+import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft, Plus, ChevronDown, Check, Upload, FileText, X } from 'lucide-react';
 import { useWallet } from '../hooks/useWallet';
 import { WalletRepository } from '../../../../repositories/WalletRepository';
 import { IdentityManager } from '../services/IdentityManager';
 import { UnifiedKeyManager } from '../../shared/services/UnifiedKeyManager';
 import { fetchNametagFromIpns } from '../services/IpnsNametagFetcher';
+import {
+  importWallet as importWalletFromFile,
+  type Wallet as L1Wallet,
+  type ScannedAddress,
+  saveWalletToStorage,
+  loadWalletFromStorage,
+  connect as connectL1,
+  isWebSocketConnected
+} from '../../L1/sdk';
+import { WalletScanModal } from '../../L1/components/modals/WalletScanModal';
+import { LoadPasswordModal } from '../../L1/components/modals/LoadPasswordModal';
 
 // Type for derived address info with nametag status
 interface DerivedAddressInfo {
@@ -37,17 +48,38 @@ const identityManager = IdentityManager.getInstance(SESSION_KEY);
 export function CreateWalletFlow() {
   const { identity, createWallet, restoreWallet, mintNametag, nametag, getUnifiedKeyManager } = useWallet();
 
-  const [step, setStep] = useState<'start' | 'restore' | 'addressSelection' | 'nametag' | 'processing'>('start');
+  const [step, setStep] = useState<'start' | 'restoreMethod' | 'restore' | 'importFile' | 'addressSelection' | 'nametag' | 'processing'>('start');
   const [nametagInput, setNametagInput] = useState('');
   const [seedWords, setSeedWords] = useState<string[]>(Array(12).fill(''));
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Address selection state
   const [derivedAddresses, setDerivedAddresses] = useState<DerivedAddressInfo[]>([]);
   const [selectedAddressIndex, setSelectedAddressIndex] = useState<number>(0);
   const [showAddressDropdown, setShowAddressDropdown] = useState(false);
+
+  // Wallet import and scanning state (for .dat and BIP32 .txt files)
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [showLoadPasswordModal, setShowLoadPasswordModal] = useState(false);
+  const [pendingWallet, setPendingWallet] = useState<L1Wallet | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [initialScanCount, setInitialScanCount] = useState(10);
+
+  // Import file screen state
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [scanCount, setScanCount] = useState(10);
+  const [needsScanning, setNeedsScanning] = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Connect to L1 WebSocket on mount (needed for wallet scanning)
+  useEffect(() => {
+    if (!isWebSocketConnected()) {
+      connectL1().catch(err => {
+        console.warn("Failed to connect to L1 WebSocket:", err);
+      });
+    }
+  }, []);
 
   // Effect: Fetch nametags from IPNS in parallel when addresses are derived
   useEffect(() => {
@@ -219,9 +251,51 @@ export function CreateWalletFlow() {
     setIsBusy(true);
     setError(null);
     try {
-      const addresses = await deriveAndCheckAddresses(10); // Derive 10 addresses upfront
-      setDerivedAddresses(addresses);
-      setSelectedAddressIndex(0);
+      // Check if L1 wallet exists in storage with addresses
+      const l1Wallet = loadWalletFromStorage("main");
+
+      if (l1Wallet && l1Wallet.addresses && l1Wallet.addresses.length > 0) {
+        // Use addresses from L1 wallet storage
+        console.log(`📋 Loading ${l1Wallet.addresses.length} addresses from L1 wallet storage`);
+        const results: DerivedAddressInfo[] = [];
+
+        // For each L1 address, derive L3 identity using sequential index (not L1's index)
+        // This ensures we can find existing nametags that were created with deriveIdentityFromUnifiedWallet
+        for (let i = 0; i < l1Wallet.addresses.length; i++) {
+          const addr = l1Wallet.addresses[i];
+
+          if (!addr.privateKey) {
+            console.warn(`Skipping address ${addr.address} - no private key`);
+            continue;
+          }
+
+          // Use sequential index i for L3 derivation (0, 1, 2...)
+          // This matches how deriveIdentityFromUnifiedWallet works
+          const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(i);
+          const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+
+          console.log(`🔍 Address ${i}: L1=${addr.address.slice(0, 20)}... L3=${l3Identity.address.slice(0, 20)}... hasNametag=${!!existingNametag} nametag=${existingNametag?.name}`);
+
+          results.push({
+            index: i, // Use sequential index for L3
+            l1Address: addr.address,
+            l3Address: l3Identity.address,
+            path: addr.path || `m/44'/0'/0'/0/${addr.index}`,
+            hasNametag: !!existingNametag,
+            existingNametag: existingNametag?.name,
+          });
+        }
+
+        setDerivedAddresses(results);
+        setSelectedAddressIndex(0);
+      } else {
+        // No L1 wallet addresses - derive from UnifiedKeyManager
+        console.log("📋 No L1 wallet addresses found, deriving from UnifiedKeyManager");
+        const addresses = await deriveAndCheckAddresses(10); // Derive 10 addresses upfront
+        setDerivedAddresses(addresses);
+        setSelectedAddressIndex(0);
+      }
+
       setStep('addressSelection');
     } catch (e: any) {
       setError("Failed to derive addresses: " + e.message);
@@ -231,6 +305,9 @@ export function CreateWalletFlow() {
   };
 
   const handleCreateKeys = async () => {
+    // Prevent double-clicking
+    if (isBusy) return;
+
     setIsBusy(true);
     setError(null);
     try {
@@ -243,10 +320,11 @@ export function CreateWalletFlow() {
       }
 
       await createWallet();
-      // Go to address selection instead of nametag
-      await goToAddressSelection();
+      // Go directly to nametag step
+      setStep('nametag');
     } catch (e: any) {
       setError("Failed to generate keys: " + e.message);
+    } finally {
       setIsBusy(false);
     }
   };
@@ -303,10 +381,8 @@ export function CreateWalletFlow() {
     }
   };
 
-  const handleFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
+  // Handle import from file
+  const handleImportFromFile = async (file: File, scanCountParam?: number) => {
     setIsBusy(true);
     setError(null);
 
@@ -319,15 +395,72 @@ export function CreateWalletFlow() {
         UnifiedKeyManager.resetInstance();
       }
 
+      // Clear any existing L1 wallet from storage before importing new one
+      // This prevents showing old addresses when importing a different wallet
+      localStorage.removeItem("wallet_main");
+
+      // For .dat files, use direct SDK import and show scan modal
+      if (file.name.endsWith(".dat")) {
+        const result = await importWalletFromFile(file);
+        if (!result.success || !result.wallet) {
+          throw new Error(result.error || "Import failed");
+        }
+        console.log("📦 .dat file imported, showing scan modal:", {
+          hasWallet: !!result.wallet,
+          hasMasterKey: !!result.wallet.masterPrivateKey,
+          scanCount: scanCountParam || 100
+        });
+        // Show scan modal - don't save wallet yet, let user select addresses
+        setPendingWallet(result.wallet);
+        setInitialScanCount(scanCountParam || 100);
+        setShowScanModal(true);
+        setIsBusy(false);
+        return;
+      }
+
       const content = await file.text();
+
+      // Check if encrypted
+      if (content.includes("ENCRYPTED MASTER KEY")) {
+        setPendingFile(file);
+        setInitialScanCount(scanCountParam || 10);
+        setShowLoadPasswordModal(true);
+        setIsBusy(false);
+        return;
+      }
+
+      // Check if this is a BIP32 wallet that needs scanning
+      const isBIP32 = content.includes("MASTER CHAIN CODE") ||
+                      content.includes("WALLET TYPE: BIP32") ||
+                      content.includes("WALLET TYPE: Alpha descriptor");
+
+      if (isBIP32 && content.includes("MASTER PRIVATE KEY")) {
+        // For BIP32 .txt files, import and show scan modal
+        const result = await importWalletFromFile(file);
+        if (!result.success || !result.wallet) {
+          throw new Error(result.error || "Import failed");
+        }
+        console.log("📦 BIP32 .txt file imported, showing scan modal:", {
+          hasWallet: !!result.wallet,
+          hasMasterKey: !!result.wallet.masterPrivateKey,
+          hasChainCode: !!result.wallet.masterChainCode,
+          scanCount: scanCountParam || 10
+        });
+        setPendingWallet(result.wallet);
+        setInitialScanCount(scanCountParam || 10);
+        setShowScanModal(true);
+        setIsBusy(false);
+        return;
+      }
+
+      // For other formats, try to import as mnemonic or simple wallet
       let imported = false;
 
-      // Try to parse as JSON first (wallet backup file with mnemonic)
+      // Try to parse as JSON first
       try {
         const json = JSON.parse(content);
         let mnemonic: string | null = null;
 
-        // Support various JSON wallet file formats
         if (json.mnemonic) {
           mnemonic = json.mnemonic;
         } else if (json.seed) {
@@ -343,15 +476,14 @@ export function CreateWalletFlow() {
           imported = true;
         }
       } catch {
-        // Not JSON - continue to try other formats
+        // Not JSON - continue
       }
 
-      // Try plain text mnemonic (12 or 24 words)
+      // Try plain text mnemonic
       if (!imported) {
         const trimmed = content.trim();
         const words = trimmed.split(/\s+/);
         if (words.length === 12 || words.length === 24) {
-          // Check if all words are lowercase alpha (likely a mnemonic)
           const isMnemonic = words.every(w => /^[a-z]+$/.test(w.toLowerCase()));
           if (isMnemonic) {
             await restoreWallet(trimmed);
@@ -360,47 +492,285 @@ export function CreateWalletFlow() {
         }
       }
 
-      // Try L1 wallet file format (MASTER PRIVATE KEY / ENCRYPTED MASTER KEY)
-      if (!imported) {
-        if (content.includes("MASTER PRIVATE KEY") || content.includes("ENCRYPTED MASTER KEY")) {
-          if (content.includes("ENCRYPTED MASTER KEY")) {
-            throw new Error("Encrypted wallet files require password. Please decrypt the file first or use the L1 wallet tab to import.");
-          }
-
-          // Use UnifiedKeyManager to import L1 wallet file
-          const keyManager = getUnifiedKeyManager();
-          await keyManager.importFromFileContent(content);
-
-          // Verify the import was successful
-          const walletInfo = keyManager.getWalletInfo();
-          if (!walletInfo.address0) {
-            throw new Error("Wallet import failed - could not derive address");
-          }
-
-          console.log("✅ Wallet file imported successfully:", walletInfo);
-          imported = true;
+      // Try L1 wallet file format (simple wallet without chain code)
+      // Standard wallets import directly without scanning
+      if (!imported && content.includes("MASTER PRIVATE KEY")) {
+        // Import wallet through SDK to parse addresses from file
+        const result = await importWalletFromFile(file);
+        if (!result.success || !result.wallet) {
+          throw new Error(result.error || "Import failed");
         }
+
+        console.log("✅ Standard wallet imported with addresses:", {
+          addresses: result.wallet.addresses.length,
+          hasPrivateKeys: result.wallet.addresses.every(a => a.privateKey)
+        });
+
+        // Import master key into UnifiedKeyManager
+        const keyManager = getUnifiedKeyManager();
+        await keyManager.importFromFileContent(content);
+
+        // Save wallet with all addresses to L1 storage
+        if (result.wallet.addresses.length > 0) {
+          saveWalletToStorage("main", result.wallet);
+        }
+
+        imported = true;
       }
 
       if (!imported) {
-        throw new Error("Could not import wallet from file. Supported formats: mnemonic (12/24 words), JSON with mnemonic, or L1 wallet backup file.");
+        throw new Error("Could not import wallet from file");
       }
 
-      // Go to address selection for ALL import types
+      // Go to address selection (for mnemonic imports only)
       await goToAddressSelection();
     } catch (e: any) {
       setError(e.message || "Failed to import wallet from file");
       setIsBusy(false);
-    } finally {
-      // Reset file input
-      event.target.value = "";
     }
+  };
+
+  // Handle scanned address selection from L1 wallet scan modal
+  const onSelectScannedAddress = async (scannedAddr: ScannedAddress) => {
+    if (!pendingWallet) return;
+
+    try {
+      setIsBusy(true);
+      setError(null);
+
+      console.log(`✅ Selected address #${scannedAddr.index} with ${scannedAddr.balance.toFixed(8)} ALPHA`);
+
+      // Add the scanned address to L1 wallet and save it
+      const walletWithAddress: L1Wallet = {
+        ...pendingWallet,
+        addresses: [{
+          index: scannedAddr.index,
+          address: scannedAddr.address,
+          privateKey: scannedAddr.privateKey,
+          publicKey: scannedAddr.publicKey,
+          path: scannedAddr.path,
+          createdAt: new Date().toISOString(),
+        }],
+      };
+
+      // Save L1 wallet to storage
+      saveWalletToStorage("main", walletWithAddress);
+
+      // Import the wallet into UnifiedKeyManager
+      const keyManager = getUnifiedKeyManager();
+      if (pendingWallet.masterPrivateKey && pendingWallet.masterChainCode) {
+        await keyManager.importWithMode(
+          pendingWallet.masterPrivateKey,
+          pendingWallet.masterChainCode,
+          "bip32"
+        );
+      } else if (pendingWallet.masterPrivateKey) {
+        await keyManager.importWithMode(
+          pendingWallet.masterPrivateKey,
+          null,
+          "wif_hmac"
+        );
+      }
+
+      setShowScanModal(false);
+      setPendingWallet(null);
+
+      // Go to address selection to choose L3 identity
+      // User will see address #0 (the one they selected) in the dropdown
+      await goToAddressSelection();
+    } catch (e: any) {
+      setError(e.message || "Failed to import wallet");
+      setIsBusy(false);
+    }
+  };
+
+  // Handle loading all scanned addresses
+  const onSelectAllScannedAddresses = async (scannedAddresses: ScannedAddress[]) => {
+    if (!pendingWallet || scannedAddresses.length === 0) return;
+
+    try {
+      setIsBusy(true);
+      setError(null);
+
+      // Add all scanned addresses to L1 wallet
+      const walletWithAddresses: L1Wallet = {
+        ...pendingWallet,
+        addresses: scannedAddresses.map((addr) => ({
+          index: addr.index,
+          address: addr.address,
+          privateKey: addr.privateKey,
+          publicKey: addr.publicKey,
+          path: addr.path,
+          createdAt: new Date().toISOString(),
+          isChange: addr.isChange,
+        })),
+      };
+
+      // Calculate total balance for logging
+      const totalBalance = scannedAddresses.reduce((sum, addr) => sum + addr.balance, 0);
+      console.log(`✅ Loaded ${scannedAddresses.length} addresses with ${totalBalance.toFixed(8)} ALPHA total`);
+
+      // Save L1 wallet to storage with ALL addresses
+      saveWalletToStorage("main", walletWithAddresses);
+
+      // Import the wallet into UnifiedKeyManager
+      const keyManager = getUnifiedKeyManager();
+      if (pendingWallet.masterPrivateKey && pendingWallet.masterChainCode) {
+        await keyManager.importWithMode(
+          pendingWallet.masterPrivateKey,
+          pendingWallet.masterChainCode,
+          "bip32"
+        );
+      } else if (pendingWallet.masterPrivateKey) {
+        await keyManager.importWithMode(
+          pendingWallet.masterPrivateKey,
+          null,
+          "wif_hmac"
+        );
+      }
+
+      setShowScanModal(false);
+      setPendingWallet(null);
+
+      // Go to address selection to choose which L1 address to use for L3 identity
+      // This will show all the scanned addresses in the dropdown
+      await goToAddressSelection();
+    } catch (e: any) {
+      setError(e.message || "Failed to import wallet");
+      setIsBusy(false);
+    }
+  };
+
+  // Cancel scan modal
+  const onCancelScan = () => {
+    setShowScanModal(false);
+    setPendingWallet(null);
+  };
+
+  // Handle password confirmation for encrypted files
+  const onConfirmLoadWithPassword = async (password: string) => {
+    if (!pendingFile) return;
+
+    try {
+      setIsBusy(true);
+      setError(null);
+      setShowLoadPasswordModal(false);
+
+      // Import with password
+      const result = await importWalletFromFile(pendingFile, password);
+      if (!result.success || !result.wallet) {
+        throw new Error(result.error || "Import failed");
+      }
+
+      setPendingFile(null);
+
+      // Check if BIP32 wallet - show scan modal
+      if (result.wallet.masterChainCode || result.wallet.isImportedAlphaWallet) {
+        setPendingWallet(result.wallet);
+        // initialScanCount already set when showing password modal
+        setShowScanModal(true);
+        setIsBusy(false);
+      } else {
+        // Standard wallet - import master key and save addresses from file
+        console.log("✅ Standard encrypted wallet imported with addresses:", {
+          addresses: result.wallet.addresses.length,
+          hasPrivateKeys: result.wallet.addresses.every(a => a.privateKey)
+        });
+
+        const keyManager = getUnifiedKeyManager();
+        if (result.wallet.masterPrivateKey && result.wallet.masterChainCode) {
+          await keyManager.importWithMode(
+            result.wallet.masterPrivateKey,
+            result.wallet.masterChainCode,
+            "bip32"
+          );
+        } else if (result.wallet.masterPrivateKey) {
+          await keyManager.importWithMode(
+            result.wallet.masterPrivateKey,
+            null,
+            "wif_hmac"
+          );
+        }
+
+        // Save wallet with all addresses to L1 storage
+        if (result.wallet.addresses.length > 0) {
+          saveWalletToStorage("main", result.wallet);
+        }
+
+        // Go to address selection
+        await goToAddressSelection();
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to decrypt wallet");
+      setIsBusy(false);
+    }
+  };
+
+  // Check if file needs scanning
+  const checkIfNeedsScanning = async (file: File) => {
+    try {
+      // .dat files always need scanning
+      if (file.name.endsWith(".dat")) {
+        setNeedsScanning(true);
+        setScanCount(10);
+        return;
+      }
+
+      // For .txt files, check if BIP32 or standard
+      const content = await file.text();
+      const isBIP32 = content.includes("MASTER CHAIN CODE") ||
+                      content.includes("WALLET TYPE: BIP32") ||
+                      content.includes("WALLET TYPE: Alpha descriptor");
+
+      setNeedsScanning(isBIP32);
+      setScanCount(10);
+    } catch (err) {
+      console.error("Error checking file type:", err);
+      setNeedsScanning(true); // Default to showing scan option
+    }
+  };
+
+  // Handle file selection
+  const handleFileSelect = async (file: File) => {
+    setSelectedFile(file);
+    await checkIfNeedsScanning(file);
+  };
+
+  // Handle drag and drop
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+
+    const file = e.dataTransfer.files[0];
+    if (file && (file.name.endsWith(".txt") || file.name.endsWith(".dat"))) {
+      await handleFileSelect(file);
+    }
+  };
+
+  // Trigger file import
+  const handleConfirmImport = () => {
+    if (!selectedFile) return;
+    handleImportFromFile(selectedFile, scanCount);
   };
 
   // Go back to start screen (e.g., from restore step)
   const goToStart = () => {
     setStep('start');
     setSeedWords(Array(12).fill(''));
+    setSelectedFile(null);
+    setScanCount(10);
+    setNeedsScanning(true);
+    setIsDragging(false);
     setError(null);
   };
 
@@ -490,7 +860,7 @@ export function CreateWalletFlow() {
             </motion.button>
 
             <motion.button
-              onClick={() => setStep('restore')}
+              onClick={() => setStep('restoreMethod')}
               disabled={isBusy}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -500,26 +870,6 @@ export function CreateWalletFlow() {
               <KeyRound className="w-4 h-4 md:w-5 md:h-5" />
               Restore Wallet
             </motion.button>
-
-            <motion.button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isBusy}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              transition={{ duration: 0.1 }}
-              className="relative w-full py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 text-sm md:text-base font-bold border-2 border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 md:gap-3 disabled:opacity-50 disabled:cursor-not-allowed mt-3 hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
-            >
-              <Upload className="w-4 h-4 md:w-5 md:h-5" />
-              Import from File
-            </motion.button>
-
-            <input
-              type="file"
-              ref={fileInputRef}
-              className="hidden"
-              accept=".json,.txt"
-              onChange={handleFileImport}
-            />
 
             {error && (
               <motion.p
@@ -592,7 +942,7 @@ export function CreateWalletFlow() {
             {/* Buttons */}
             <div className="flex gap-3">
               <motion.button
-                onClick={goToStart}
+                onClick={() => setStep('restoreMethod')}
                 disabled={isBusy}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
@@ -713,7 +1063,7 @@ export function CreateWalletFlow() {
                     <div className="max-h-64 overflow-y-auto">
                       {derivedAddresses.map((addr, idx) => (
                         <button
-                          key={addr.index}
+                          key={addr.l1Address}
                           onClick={() => {
                             setSelectedAddressIndex(idx);
                             setShowAddressDropdown(false);
@@ -1029,7 +1379,294 @@ export function CreateWalletFlow() {
           </motion.div>
         )}
 
+        {step === 'restoreMethod' && (
+          <motion.div
+            key="restoreMethod"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            transition={{ duration: 0.3 }}
+            className="relative z-10 w-full max-w-[320px] md:max-w-[400px]"
+          >
+            {/* Icon */}
+            <motion.div
+              className="relative w-16 h-16 md:w-20 md:h-20 mx-auto mb-6"
+              whileHover={{ scale: 1.05 }}
+            >
+              <div className="absolute inset-0 bg-blue-500/30 rounded-2xl md:rounded-3xl blur-xl" />
+              <div className="relative w-full h-full rounded-2xl md:rounded-3xl bg-linear-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-2xl shadow-blue-500/30">
+                <KeyRound className="w-8 h-8 md:w-10 md:h-10 text-white" />
+              </div>
+            </motion.div>
+
+            <h2 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white mb-2 md:mb-3 tracking-tight">
+              Restore Wallet
+            </h2>
+            <p className="text-neutral-500 dark:text-neutral-400 text-xs md:text-sm mb-6 md:mb-8 mx-auto leading-relaxed">
+              Choose how you want to restore your wallet
+            </p>
+
+            <div className="space-y-3 mb-6">
+              {/* Recovery Phrase Option */}
+              <motion.button
+                onClick={() => setStep('restore')}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="w-full p-4 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 hover:border-blue-500/50 dark:hover:border-blue-500/50 transition-all text-left group"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center group-hover:bg-blue-500/20 transition-colors">
+                    <KeyRound className="w-6 h-6 text-blue-500" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-bold text-neutral-900 dark:text-white mb-1">
+                      Recovery Phrase
+                    </div>
+                    <div className="text-sm text-neutral-500 dark:text-neutral-400">
+                      Use your 12-word mnemonic phrase
+                    </div>
+                  </div>
+                  <ArrowRight className="w-5 h-5 text-neutral-400 group-hover:text-blue-500 transition-colors" />
+                </div>
+              </motion.button>
+
+              {/* Import from File Option */}
+              <motion.button
+                onClick={() => setStep('importFile')}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="w-full p-4 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 hover:border-orange-500/50 dark:hover:border-orange-500/50 transition-all text-left group"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-lg bg-orange-500/10 flex items-center justify-center group-hover:bg-orange-500/20 transition-colors">
+                    <Upload className="w-6 h-6 text-orange-500" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-bold text-neutral-900 dark:text-white mb-1">
+                      Import from File
+                    </div>
+                    <div className="text-sm text-neutral-500 dark:text-neutral-400">
+                      Import wallet from .dat or .txt file
+                    </div>
+                  </div>
+                  <ArrowRight className="w-5 h-5 text-neutral-400 group-hover:text-orange-500 transition-colors" />
+                </div>
+              </motion.button>
+            </div>
+
+            {/* Back Button */}
+            <motion.button
+              onClick={goToStart}
+              disabled={isBusy}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="w-full py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 text-sm md:text-base font-bold border-2 border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4 md:w-5 md:h-5" />
+              Back
+            </motion.button>
+
+            {error && (
+              <motion.p
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-3 md:mt-4 text-red-500 dark:text-red-400 text-xs md:text-sm bg-red-500/10 border border-red-500/20 p-2 md:p-3 rounded-lg"
+              >
+                {error}
+              </motion.p>
+            )}
+          </motion.div>
+        )}
+
+        {step === 'importFile' && (
+          <motion.div
+            key="importFile"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            transition={{ duration: 0.3 }}
+            className="relative z-10 w-full max-w-[320px] md:max-w-[400px]"
+          >
+            {/* Icon */}
+            <motion.div
+              className="relative w-16 h-16 md:w-20 md:h-20 mx-auto mb-6"
+              whileHover={{ scale: 1.05 }}
+            >
+              <div className="absolute inset-0 bg-orange-500/30 rounded-2xl md:rounded-3xl blur-xl" />
+              <div className="relative w-full h-full rounded-2xl md:rounded-3xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-2xl shadow-orange-500/30">
+                <Upload className="w-8 h-8 md:w-10 md:h-10 text-white" />
+              </div>
+            </motion.div>
+
+            <h2 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white mb-2 md:mb-3 tracking-tight">
+              Import Wallet
+            </h2>
+            <p className="text-neutral-500 dark:text-neutral-400 text-xs md:text-sm mb-6 md:mb-8 mx-auto leading-relaxed">
+              Select a wallet file to import
+            </p>
+
+            {!selectedFile ? (
+              <>
+                {/* File Upload Area */}
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={`w-full border-2 border-dashed rounded-xl p-8 md:p-10 text-center transition-colors mb-6 ${
+                    isDragging
+                      ? "border-orange-500 bg-orange-500/10"
+                      : "border-neutral-300 dark:border-neutral-600 hover:border-orange-400 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
+                  }`}
+                >
+                  <Upload className={`w-12 h-12 md:w-14 md:h-14 mx-auto mb-4 ${isDragging ? "text-orange-500" : "text-neutral-400"}`} />
+                  <p className="text-sm md:text-base text-neutral-700 dark:text-neutral-300 font-medium mb-2">
+                    Select wallet file
+                  </p>
+                  <p className="text-xs md:text-sm text-neutral-400 dark:text-neutral-500 mb-3">
+                    .txt or .dat
+                  </p>
+                  <label className="inline-block cursor-pointer">
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".txt,.dat"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleFileSelect(file);
+                      }}
+                    />
+                    <span className="inline-flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium rounded-lg transition-colors">
+                      <Upload className="w-4 h-4" />
+                      Choose File
+                    </span>
+                  </label>
+                  <p className="text-[10px] md:text-xs text-neutral-400 dark:text-neutral-600 mt-3 hidden sm:block">
+                    or drag & drop here
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Selected File Display */}
+                <div className="p-4 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 rounded-xl mb-4">
+                  <div className="flex items-center gap-3">
+                    <FileText className="w-6 h-6 text-orange-500 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm md:text-base text-neutral-900 dark:text-white font-medium truncate">
+                        {selectedFile.name}
+                      </p>
+                      <p className="text-xs text-neutral-500">
+                        {(selectedFile.size / 1024).toFixed(1)} KB
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setSelectedFile(null)}
+                      className="p-1.5 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-lg transition-colors"
+                    >
+                      <X className="w-4 h-4 text-neutral-400" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Scan Count (for BIP32/.dat files) */}
+                {needsScanning ? (
+                  <div className="p-4 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 rounded-xl mb-4">
+                    <p className="text-xs md:text-sm text-neutral-700 dark:text-neutral-300 mb-2 font-medium">
+                      How many addresses to scan?
+                    </p>
+                    <input
+                      type="number"
+                      value={scanCount}
+                      onChange={(e) => setScanCount(Math.max(1, parseInt(e.target.value) || 10))}
+                      className="w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 rounded-lg text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                      min={1}
+                    />
+                  </div>
+                ) : (
+                  <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl mb-4">
+                    <p className="text-xs md:text-sm text-emerald-700 dark:text-emerald-300 font-medium">
+                      Addresses will be imported from file
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Buttons */}
+            <div className="flex gap-3">
+              <motion.button
+                onClick={() => {
+                  setSelectedFile(null);
+                  setStep('restoreMethod');
+                }}
+                disabled={isBusy}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="flex-1 py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 text-sm md:text-base font-bold border-2 border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4 md:w-5 md:h-5" />
+                Back
+              </motion.button>
+
+              {selectedFile && (
+                <motion.button
+                  onClick={handleConfirmImport}
+                  disabled={isBusy}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="flex-2 relative py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-linear-to-r from-orange-500 to-orange-600 text-white text-sm md:text-base font-bold shadow-xl shadow-orange-500/30 flex items-center justify-center gap-2 md:gap-3 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden group"
+                >
+                  <div className="absolute inset-0 bg-linear-to-r from-orange-400 to-orange-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <span className="relative z-10 flex items-center gap-2 md:gap-3">
+                    {isBusy ? (
+                      <>
+                        <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" />
+                        Importing...
+                      </>
+                    ) : (
+                      <>
+                        Import
+                        <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />
+                      </>
+                    )}
+                  </span>
+                </motion.button>
+              )}
+            </div>
+
+            {error && (
+              <motion.p
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-3 md:mt-4 text-red-500 dark:text-red-400 text-xs md:text-sm bg-red-500/10 border border-red-500/20 p-2 md:p-3 rounded-lg"
+              >
+                {error}
+              </motion.p>
+            )}
+          </motion.div>
+        )}
+
       </AnimatePresence>
+
+      {/* Password Modal for encrypted files */}
+      <LoadPasswordModal
+        show={showLoadPasswordModal}
+        onConfirm={onConfirmLoadWithPassword}
+        onCancel={() => {
+          setShowLoadPasswordModal(false);
+          setPendingFile(null);
+        }}
+      />
+
+      {/* Wallet Scan Modal for .dat and BIP32 .txt files */}
+      <WalletScanModal
+        show={showScanModal}
+        wallet={pendingWallet}
+        initialScanCount={initialScanCount}
+        onSelectAddress={onSelectScannedAddress}
+        onSelectAll={onSelectAllScannedAddresses}
+        onCancel={onCancelScan}
+      />
     </div>
   );
 }

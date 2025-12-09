@@ -92,7 +92,6 @@ export class NametagService {
         );
 
         if (published) {
-          this.setActiveNametag(nametag);
           return { status: "success", token: sdkToken };
         } else {
           return {
@@ -232,11 +231,6 @@ export class NametagService {
 
     // Store nametag via WalletRepository (per-identity, not global)
     walletRepo.setNametag(nametagData);
-  }
-
-  setActiveNametag(_nametag: string) {
-    // No-op: nametag is now stored per-identity in WalletRepository
-    // The active nametag is simply the identity's nametag
   }
 
   getActiveNametag(): string | null {

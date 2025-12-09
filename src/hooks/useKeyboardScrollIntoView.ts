@@ -9,6 +9,7 @@ import { type RefObject } from 'react';
  *
  * @param _inputRef - Reference to the input/textarea element (unused)
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function useKeyboardScrollIntoView(_inputRef: RefObject<HTMLElement | null>) {
   // No-op: Browser handles this automatically with interactive-widget=resizes-content
 }

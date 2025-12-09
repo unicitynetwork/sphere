@@ -41,38 +41,167 @@ function CodeBlock({ code, language, keyPrefix }: { code: string; language?: str
   );
 }
 
-// Parse inline markdown and HTML (bold, italic, code, br, links, images, plain URLs)
-function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  let key = 0;
+// Math block component for LaTeX formulas using KaTeX
+function MathBlock({
+  latex,
+  displayMode,
+  keyPrefix
+}: {
+  latex: string;
+  displayMode: boolean;
+  keyPrefix: string
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [html, setHtml] = useState<string>('');
 
-  // Combined regex for markdown and HTML:
-  // 1: **bold**, 2: *italic* (strict - no spaces after/before asterisks), 3: _italic_, 4: `code`
-  // 5: <br> or <br/>, 6: <b>text</b>, 7: <strong>text</strong>
-  // 8: <i>text</i>, 9: <em>text</em>, 10: <code>text</code>
-  // 11: <a href="url">text</a>, 12: [text](url) markdown links
-  // 15: ![alt](url) markdown images (including base64 data URLs)
-  // 17: plain URLs (https://... or http://...)
-  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(([^)]+)\)|!\[([^\]]*)\]\(([^)]+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"]))/gi;
+  React.useEffect(() => {
+    try {
+      import('katex').then((katex) => {
+        const rendered = katex.default.renderToString(latex, {
+          displayMode,
+          throwOnError: false,
+          errorColor: '#ef4444',
+          strict: false,
+          trust: false,
+        });
+        setHtml(rendered);
+        setError(null);
+      }).catch((err) => {
+        setError(err instanceof Error ? err.message : 'Failed to load KaTeX');
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to render LaTeX');
+    }
+  }, [latex, displayMode]);
+
+  if (error) {
+    return (
+      <div
+        key={keyPrefix}
+        className={`my-2 p-3 rounded-lg border-2 border-red-400 dark:border-red-600 bg-red-50 dark:bg-red-900/20 ${
+          displayMode ? 'block' : 'inline-block'
+        }`}
+      >
+        <div className="flex items-start gap-2 text-sm">
+          <span className="text-red-600 dark:text-red-400 font-mono">⚠</span>
+          <div className="flex-1">
+            <div className="text-red-700 dark:text-red-300 font-semibold mb-1">
+              LaTeX Error
+            </div>
+            <pre className="text-xs text-neutral-600 dark:text-neutral-400 font-mono overflow-x-auto">
+              {latex}
+            </pre>
+            {error && (
+              <div className="text-xs text-red-600 dark:text-red-400 mt-1">
+                {error}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      key={keyPrefix}
+      className={`my-2 ${displayMode ? 'text-center overflow-x-auto' : 'inline'}`}
+      dangerouslySetInnerHTML={{ __html: html }}
+      role="math"
+      aria-label={`Math formula: ${latex}`}
+    />
+  );
+}
+
+// Helper to replace math placeholders with MathBlock components
+function replaceMathPlaceholders(
+  text: string,
+  mathBlocks: string[],
+  keyPrefix: string,
+  startKey: number
+): React.ReactNode[] {
+  const mathPlaceholder = '\u0000MATH';
+  const parts: React.ReactNode[] = [];
+  const pattern = new RegExp(`${mathPlaceholder}(\\d+)\u0000`, 'g');
+
   let lastIndex = 0;
   let match;
+  let key = startKey;
 
-  while ((match = regex.exec(text)) !== null) {
+  while ((match = pattern.exec(text)) !== null) {
     if (match.index > lastIndex) {
       parts.push(text.slice(lastIndex, match.index));
     }
 
+    const mathIndex = parseInt(match[1], 10);
+    parts.push(
+      <MathBlock
+        key={`${keyPrefix}-math-${key++}`}
+        latex={mathBlocks[mathIndex]}
+        displayMode={false}
+        keyPrefix={`math-inline-${key}`}
+      />
+    );
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts.length > 0 ? parts : [text];
+}
+
+// Parse inline markdown and HTML (bold, italic, code, br, links, images, plain URLs)
+function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
+  // FIRST PASS: Extract inline math and replace with safe tokens that won't be matched by markdown regex
+  const mathBlocks: string[] = [];
+  const mathPlaceholder = '\u0000MATH';  // Unique placeholder that markdown won't match
+
+  const processedText = text.replace(
+    /(?<!\\)((?:\\\\)*)\\\((.+?)\\\)/g,
+    (match, backslashes, latex) => {
+      if (backslashes && backslashes.length % 2 === 1) {
+        // Escaped, remove one backslash
+        return match.slice(1);
+      }
+      // Store math and return placeholder
+      const index = mathBlocks.push(latex) - 1;
+      return `${mathPlaceholder}${index}\u0000`;
+    }
+  );
+
+  const parts: React.ReactNode[] = [];
+  let key = 0;
+
+  // SECOND PASS: Process markdown - math placeholders won't be captured by markdown patterns
+  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(([^)]+)\)|!\[([^\]]*)\]\(([^)]+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"]))/gi;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(processedText)) !== null) {
+    // Process text before match (may contain math placeholders)
+    if (match.index > lastIndex) {
+      const textBefore = processedText.slice(lastIndex, match.index);
+      parts.push(...replaceMathPlaceholders(textBefore, mathBlocks, keyPrefix, key));
+      key += mathBlocks.length;
+    }
+
     if (match[2]) {
-      // **bold**
-      parts.push(<strong key={`${keyPrefix}-strong-${key++}`}>{match[2]}</strong>);
+      // **bold** - just render the text content (which may include math placeholders)
+      const content = replaceMathPlaceholders(match[2], mathBlocks, `${keyPrefix}-bold`, key);
+      parts.push(<strong key={`${keyPrefix}-strong-${key++}`}>{content}</strong>);
     } else if (match[3]) {
       // *italic*
-      parts.push(<em key={`${keyPrefix}-em-${key++}`}>{match[3]}</em>);
+      const content = replaceMathPlaceholders(match[3], mathBlocks, `${keyPrefix}-italic`, key);
+      parts.push(<em key={`${keyPrefix}-em-${key++}`}>{content}</em>);
     } else if (match[4]) {
       // _italic_
-      parts.push(<em key={`${keyPrefix}-em2-${key++}`}>{match[4]}</em>);
+      const content = replaceMathPlaceholders(match[4], mathBlocks, `${keyPrefix}-italic2`, key);
+      parts.push(<em key={`${keyPrefix}-em2-${key++}`}>{content}</em>);
     } else if (match[5]) {
-      // `code`
+      // `code` - don't process math inside code blocks
       parts.push(
         <code key={`${keyPrefix}-code-${key++}`} className="bg-neutral-200 dark:bg-neutral-700/50 text-neutral-900 dark:text-neutral-200 px-1.5 py-0.5 rounded text-sm font-mono">
           {match[5]}
@@ -83,18 +212,22 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
       parts.push(<br key={`${keyPrefix}-br-${key++}`} />);
     } else if (match[6]) {
       // <b>text</b>
-      parts.push(<strong key={`${keyPrefix}-b-${key++}`}>{match[6]}</strong>);
+      const content = replaceMathPlaceholders(match[6], mathBlocks, `${keyPrefix}-b`, key);
+      parts.push(<strong key={`${keyPrefix}-b-${key++}`}>{content}</strong>);
     } else if (match[7]) {
       // <strong>text</strong>
-      parts.push(<strong key={`${keyPrefix}-strong2-${key++}`}>{match[7]}</strong>);
+      const content = replaceMathPlaceholders(match[7], mathBlocks, `${keyPrefix}-strong`, key);
+      parts.push(<strong key={`${keyPrefix}-strong2-${key++}`}>{content}</strong>);
     } else if (match[8]) {
       // <i>text</i>
-      parts.push(<em key={`${keyPrefix}-i-${key++}`}>{match[8]}</em>);
+      const content = replaceMathPlaceholders(match[8], mathBlocks, `${keyPrefix}-i`, key);
+      parts.push(<em key={`${keyPrefix}-i-${key++}`}>{content}</em>);
     } else if (match[9]) {
       // <em>text</em>
-      parts.push(<em key={`${keyPrefix}-em3-${key++}`}>{match[9]}</em>);
+      const content = replaceMathPlaceholders(match[9], mathBlocks, `${keyPrefix}-em`, key);
+      parts.push(<em key={`${keyPrefix}-em3-${key++}`}>{content}</em>);
     } else if (match[10]) {
-      // <code>text</code>
+      // <code>text</code> - don't process math inside code blocks
       parts.push(
         <code key={`${keyPrefix}-code2-${key++}`} className="bg-neutral-200 dark:bg-neutral-700/50 text-neutral-900 dark:text-neutral-200 px-1.5 py-0.5 rounded text-sm font-mono">
           {match[10]}
@@ -102,16 +235,18 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
       );
     } else if (match[11] && match[12]) {
       // <a href="url">text</a>
+      const content = replaceMathPlaceholders(match[12], mathBlocks, `${keyPrefix}-a`, key);
       parts.push(
         <a key={`${keyPrefix}-a-${key++}`} href={match[11]} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 underline">
-          {match[12]}
+          {content}
         </a>
       );
     } else if (match[13] && match[14]) {
       // [text](url) markdown link
+      const content = replaceMathPlaceholders(match[13], mathBlocks, `${keyPrefix}-link`, key);
       parts.push(
         <a key={`${keyPrefix}-link-${key++}`} href={match[14]} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 underline">
-          {match[13]}
+          {content}
         </a>
       );
     } else if (match[16]) {
@@ -146,8 +281,10 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
     lastIndex = match.index + match[0].length;
   }
 
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
+  // Process remaining text (may contain math placeholders)
+  if (lastIndex < processedText.length) {
+    const remaining = processedText.slice(lastIndex);
+    parts.push(...replaceMathPlaceholders(remaining, mathBlocks, keyPrefix, key));
   }
 
   return parts.length > 0 ? parts : [text];
@@ -237,7 +374,7 @@ function parseHeader(line: string, keyPrefix: string): React.ReactNode {
 // Supports: **bold**, *italic*, _italic_, `code`, ```code blocks```, # headers, tables,
 // unordered lists (* or - followed by space), HTML tags: <br>, <b>, <strong>, <i>, <em>, <code>, <a href="">
 // Links: [text](url), plain URLs (https://... http://...)
-export function parseMarkdown(text: string): React.ReactNode {
+export function MarkdownContent({ text }: { text: string }) {
   const parts: React.ReactNode[] = [];
   let key = 0;
 
@@ -246,6 +383,97 @@ export function parseMarkdown(text: string): React.ReactNode {
 
   while (i < lines.length) {
     const line = lines[i];
+
+    // Check for display math block start \[
+    if (line.includes('\\[')) {
+      const startMatch = line.match(/\\\\?\[/);
+
+      if (startMatch && startMatch[0] === '\\[') {
+        // Not escaped, process as math block
+        const beforeMath = line.slice(0, startMatch.index);
+        const afterStart = line.slice(startMatch.index! + 2);
+
+        // Add any content before \[
+        if (beforeMath.trim()) {
+          parts.push(
+            <p key={`p-${key++}`} className="leading-relaxed">
+              {parseInline(beforeMath, `line-${key}`)}
+            </p>
+          );
+        }
+
+        // Collect math content until \]
+        const mathLines: string[] = [];
+        let mathLine = afterStart;
+        let foundEnd = false;
+
+        while (i < lines.length) {
+          const endMatch = mathLine.match(/\\\\?\]/);
+
+          if (endMatch && endMatch[0] === '\\]') {
+            // Found unescaped \]
+            mathLines.push(mathLine.slice(0, endMatch.index));
+            const afterMath = mathLine.slice(endMatch.index! + 2);
+            foundEnd = true;
+
+            // Render the math block
+            const latex = mathLines.join('\n').trim();
+            parts.push(
+              <MathBlock
+                key={`math-${key++}`}
+                latex={latex}
+                displayMode={true}
+                keyPrefix={`mathblock-${key}`}
+              />
+            );
+
+            // Process remaining content on this line
+            if (afterMath.trim()) {
+              parts.push(
+                <p key={`p-${key++}`} className="leading-relaxed">
+                  {parseInline(afterMath, `line-${key}`)}
+                </p>
+              );
+            }
+
+            i++;
+            break;
+          } else {
+            // No end found on this line
+            mathLines.push(mathLine);
+            i++;
+            if (i < lines.length) {
+              mathLine = lines[i];
+            } else {
+              foundEnd = false;
+              break;
+            }
+          }
+        }
+
+        if (!foundEnd) {
+          // No closing \], treat as regular text
+          const fullText = '\\[' + mathLines.join('\n');
+          parts.push(
+            <p key={`p-${key++}`} className="leading-relaxed">
+              {parseInline(fullText, `line-${key}`)}
+            </p>
+          );
+        }
+
+        continue;
+      } else if (startMatch && startMatch[0] === '\\\\[') {
+        // Escaped \[, remove one backslash
+        const unescaped = line.replace('\\\\[', '\\[');
+        parts.push(
+          <p key={`p-${key++}`} className="leading-relaxed">
+            {parseInline(unescaped, `line-${key}`)}
+          </p>
+        );
+        i++;
+        continue;
+      }
+    }
 
     // Check for code block start
     if (line.trim().startsWith('```')) {
@@ -273,6 +501,18 @@ export function parseMarkdown(text: string): React.ReactNode {
         i++;
         continue;
       }
+    }
+
+    // Check for horizontal rule (---, ***, or ___)
+    if (line.trim().match(/^([-*_])\1{2,}$/)) {
+      parts.push(
+        <hr
+          key={`hr-${key++}`}
+          className="my-4 border-t border-neutral-300 dark:border-neutral-700"
+        />
+      );
+      i++;
+      continue;
     }
 
     // Check if this is the start of a table

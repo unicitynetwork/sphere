@@ -298,7 +298,8 @@ export class WalletRepository {
           }
         }
 
-        this.refreshWallet();
+        // Don't call refreshWallet() here - loading is a read operation, not a write
+        // refreshWallet() should only be called when data actually changes
 
         const archiveInfo = this._archivedTokens.size > 0 ? `, ${this._archivedTokens.size} archived` : "";
         const forkedInfo = this._forkedTokens.size > 0 ? `, ${this._forkedTokens.size} forked` : "";

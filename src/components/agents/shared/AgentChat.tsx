@@ -5,7 +5,7 @@ import type { AgentConfig } from '../../../config/activities';
 import { useAgentChat } from '../../../hooks/useAgentChat';
 import { useWallet } from '../../wallet/L3/hooks/useWallet';
 import { v4 as uuidv4 } from 'uuid';
-import { ChatContainer, ChatHeader, ChatBubble, ChatInput, TypingIndicator, QuickActions } from './index';
+import { ChatContainer, ChatHeader, ChatBubble, ChatInput, QuickActions } from './index';
 
 // Generic sidebar item
 export interface SidebarItem {
@@ -177,15 +177,6 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     }
   };
 
-  // Get typing indicator color based on agent
-  const getIndicatorColor = () => {
-    if (agent.color.includes('indigo')) return 'bg-indigo-500';
-    if (agent.color.includes('emerald') || agent.color.includes('teal')) return 'bg-emerald-500';
-    if (agent.color.includes('orange') || agent.color.includes('red')) return 'bg-orange-500';
-    if (agent.color.includes('purple') || agent.color.includes('pink')) return 'bg-purple-500';
-    return 'bg-indigo-500';
-  };
-
   // Reset state when agent changes
   useEffect(() => {
     if (currentAgentId.current !== agent.id) {
@@ -226,7 +217,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     if (sidebarConfig) {
       localStorage.setItem(sidebarConfig.storageKey, JSON.stringify(sidebarConfig.items));
     }
-  }, [sidebarConfig?.items, sidebarConfig?.storageKey]);
+  }, [sidebarConfig?.items, sidebarConfig?.storageKey, sidebarConfig]);
 
   // Greeting message
   useEffect(() => {
@@ -492,51 +483,46 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
       {/* Messages area */}
       <div ref={messagesContainerRef} className="overflow-y-auto p-4 space-y-4 min-h-0">
         <AnimatePresence initial={false}>
-          {extendedMessages.map((message) => (
-            <ChatBubble
-              key={message.id}
-              role={message.role}
-              content={message.content}
-              agentName={agent.name}
-              agentColor={agent.color}
-              thinking={message.thinking}
-              showCopy={true}
-              isCopied={copiedId === message.id}
-              onCopy={() => handleCopy(message.content, message.id)}
-            >
-              {/* Custom card content */}
-              {message.cardData && renderMessageCard && renderMessageCard(message.cardData, message)}
+          {extendedMessages.map((message) => {
+            // Determine if this message is currently streaming
+            const isLastMessage = message.id === extendedMessages[extendedMessages.length - 1]?.id;
+            const messageIsStreaming = isTyping && isLastMessage;
 
-              {/* Additional message actions */}
-              {renderMessageActions && renderMessageActions(message)}
+            return (
+              <ChatBubble
+                key={message.id}
+                role={message.role}
+                content={message.content}
+                agentName={agent.name}
+                agentColor={agent.color}
+                thinking={message.thinking}
+                showCopy={true}
+                isCopied={copiedId === message.id}
+                onCopy={() => handleCopy(message.content, message.id)}
+                isStreaming={messageIsStreaming}
+                currentStatus={messageIsStreaming ? currentStatus : null}
+              >
+                {/* Custom card content */}
+                {message.cardData && renderMessageCard && renderMessageCard(message.cardData, message)}
 
-              {/* Action button */}
-              {message.showActionButton && message.cardData && actionConfig && (
-                <motion.button
-                  onClick={() => handleAction(message.cardData!)}
-                  className={`mt-2 w-full py-3 rounded-xl bg-linear-to-r ${agent.color} text-white font-medium`}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  {getActionLabel(message.cardData)}
-                </motion.button>
-              )}
-            </ChatBubble>
-          ))}
+                {/* Additional message actions */}
+                {renderMessageActions && renderMessageActions(message)}
+
+                {/* Action button */}
+                {message.showActionButton && message.cardData && actionConfig && (
+                  <motion.button
+                    onClick={() => handleAction(message.cardData!)}
+                    className={`mt-2 w-full py-3 rounded-xl bg-linear-to-r ${agent.color} text-white font-medium`}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    {getActionLabel(message.cardData)}
+                  </motion.button>
+                )}
+              </ChatBubble>
+            );
+          })}
         </AnimatePresence>
-
-        {/* Typing indicator */}
-        {isTyping && (() => {
-          if (useMockMode) {
-            return <TypingIndicator color={getIndicatorColor()} />;
-          }
-          // For streaming mode, only show if last message is empty assistant
-          const lastMsg = extendedMessages[extendedMessages.length - 1];
-          const showIndicator = lastMsg?.role === 'assistant' && !lastMsg.content;
-          return showIndicator ? (
-            <TypingIndicator color={getIndicatorColor()} status={currentStatus} />
-          ) : null;
-        })()}
       </div>
 
       {/* Bottom section - always at bottom */}

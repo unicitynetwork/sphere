@@ -6,6 +6,13 @@ import { HashRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeInitializer } from './components/theme'
 import { ServicesProvider } from './contexts/ServicesProvider'
+import mixpanel from 'mixpanel-browser'
+
+mixpanel.init('19d06212425213a4eeb34337016d0186', {
+  autocapture: true,
+  record_sessions_percent: 100,
+  api_host: 'https://api-eu.mixpanel.com',
+})
 
 const queryClient = new QueryClient({
   defaultOptions: {
