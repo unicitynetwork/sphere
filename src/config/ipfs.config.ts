@@ -106,10 +106,14 @@ export const IPNS_RESOLUTION_CONFIG = {
   initialTimeoutMs: 10000,
   /** Maximum wait for all gateway responses (late arrivals handled separately) */
   maxWaitMs: 30000,
-  /** Minimum polling interval for background IPNS re-fetch */
+  /** Minimum polling interval for background IPNS re-fetch (active tab) */
   pollingIntervalMinMs: 45000,
-  /** Maximum polling interval (jitter applied between min and max) */
+  /** Maximum polling interval (jitter applied between min and max, active tab) */
   pollingIntervalMaxMs: 75000,
+  /** Minimum polling interval when tab is inactive/hidden (4 minutes) */
+  inactivePollingIntervalMinMs: 240000,
+  /** Maximum polling interval when tab is inactive/hidden (4.5 minutes with jitter) */
+  inactivePollingIntervalMaxMs: 270000,
   /** Per-gateway request timeout */
   perGatewayTimeoutMs: 25000,
 };

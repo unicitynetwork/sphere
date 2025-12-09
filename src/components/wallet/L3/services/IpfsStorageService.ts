@@ -164,6 +164,7 @@ export class IpfsStorageService {
   private ipnsPollingInterval: ReturnType<typeof setInterval> | null = null;
   private boundVisibilityHandler: (() => void) | null = null;
   private lastKnownRemoteSequence: bigint = 0n;
+  private isTabVisible: boolean = true; // Track tab visibility for adaptive polling
 
   private constructor(identityManager: IdentityManager) {
     this.identityManager = identityManager;
@@ -1043,10 +1044,12 @@ export class IpfsStorageService {
       await this.runSpentTokenSanityCheck();
     };
 
-    // Calculate random interval with jitter
+    // Calculate random interval with jitter (uses longer interval when tab is inactive)
     const getRandomInterval = () => {
-      const { pollingIntervalMinMs, pollingIntervalMaxMs } = IPNS_RESOLUTION_CONFIG;
-      return pollingIntervalMinMs + Math.random() * (pollingIntervalMaxMs - pollingIntervalMinMs);
+      const config = IPNS_RESOLUTION_CONFIG;
+      const minMs = this.isTabVisible ? config.pollingIntervalMinMs : config.inactivePollingIntervalMinMs;
+      const maxMs = this.isTabVisible ? config.pollingIntervalMaxMs : config.inactivePollingIntervalMaxMs;
+      return minMs + Math.random() * (maxMs - minMs);
     };
 
     // Schedule next poll with jitter
@@ -1060,7 +1063,10 @@ export class IpfsStorageService {
 
     // Start polling
     scheduleNextPoll();
-    console.log(`📦 IPNS polling started (interval: ${IPNS_RESOLUTION_CONFIG.pollingIntervalMinMs/1000}-${IPNS_RESOLUTION_CONFIG.pollingIntervalMaxMs/1000}s)`);
+    const intervalDesc = this.isTabVisible
+      ? `${IPNS_RESOLUTION_CONFIG.pollingIntervalMinMs/1000}-${IPNS_RESOLUTION_CONFIG.pollingIntervalMaxMs/1000}s`
+      : `${IPNS_RESOLUTION_CONFIG.inactivePollingIntervalMinMs/1000}-${IPNS_RESOLUTION_CONFIG.inactivePollingIntervalMaxMs/1000}s (inactive)`;
+    console.log(`📦 IPNS polling started (interval: ${intervalDesc})`);
 
     // Run first poll after a short delay
     setTimeout(poll, 5000);
@@ -1079,15 +1085,21 @@ export class IpfsStorageService {
 
   /**
    * Handle tab visibility changes
-   * Pauses polling when hidden, resumes when visible
+   * Adjusts polling interval based on tab visibility (slower when inactive)
    */
   private handleVisibilityChange = (): void => {
-    if (document.visibilityState === "visible") {
-      console.log(`📦 Tab visible, resuming IPNS polling`);
-      this.startIpnsPolling();
-    } else {
-      console.log(`📦 Tab hidden, pausing IPNS polling`);
+    const wasVisible = this.isTabVisible;
+    this.isTabVisible = document.visibilityState === "visible";
+
+    if (this.isTabVisible !== wasVisible) {
+      // Restart polling with new interval
       this.stopIpnsPolling();
+      if (this.isTabVisible) {
+        console.log(`📦 Tab visible, switching to active polling interval (45-75s)`);
+      } else {
+        console.log(`📦 Tab hidden, switching to slower polling interval (4-4.5 min)`);
+      }
+      this.startIpnsPolling();
     }
   };
 
@@ -1099,14 +1111,15 @@ export class IpfsStorageService {
       return; // Already set up
     }
 
+    // Initialize visibility state
+    this.isTabVisible = document.visibilityState === "visible";
+
     this.boundVisibilityHandler = this.handleVisibilityChange;
     document.addEventListener("visibilitychange", this.boundVisibilityHandler);
-    console.log(`📦 Visibility listener registered`);
+    console.log(`📦 Visibility listener registered (tab ${this.isTabVisible ? "visible" : "hidden"})`);
 
-    // Start polling if currently visible
-    if (document.visibilityState === "visible") {
-      this.startIpnsPolling();
-    }
+    // Always start polling (with appropriate interval based on visibility)
+    this.startIpnsPolling();
   }
 
   /**
