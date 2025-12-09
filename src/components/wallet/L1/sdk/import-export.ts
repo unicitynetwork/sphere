@@ -5,10 +5,30 @@ import CryptoJS from "crypto-js";
 import { hexToWIF } from "./crypto";
 import { createBech32 } from "./bech32";
 import { deriveKeyAtPath } from "./address";
-import type { Wallet, WalletAddress, RestoreWalletResult, ExportOptions } from "./types";
+import type {
+  Wallet,
+  WalletAddress,
+  RestoreWalletResult,
+  ExportOptions,
+  WalletJSON,
+  WalletJSONSource,
+  WalletJSONDerivationMode,
+  WalletJSONAddress,
+  WalletJSONExportOptions,
+  WalletJSONImportResult,
+} from "./types";
 
 // Re-export types
-export type { RestoreWalletResult, ExportOptions };
+export type {
+  RestoreWalletResult,
+  ExportOptions,
+  WalletJSON,
+  WalletJSONSource,
+  WalletJSONDerivationMode,
+  WalletJSONAddress,
+  WalletJSONExportOptions,
+  WalletJSONImportResult,
+};
 
 // Elliptic for key derivation
 import elliptic from "elliptic";
@@ -20,7 +40,7 @@ const ec = new elliptic.ec("secp256k1");
 function hexToBytes(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
   }
   return bytes;
 }
@@ -855,4 +875,530 @@ export function downloadWalletFile(
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }, 100);
+}
+
+// ==========================================
+// JSON Export/Import Functions (v1.0)
+// ==========================================
+
+const JSON_WALLET_VERSION = "1.0" as const;
+const JSON_WALLET_WARNING = "Keep this file secure! Anyone with this data can access your funds.";
+const PBKDF2_ITERATIONS = 100000;
+const PBKDF2_SALT_PREFIX = "unicity_wallet_json_";
+
+/**
+ * Generate a random salt for encryption
+ */
+function generateSalt(): string {
+  const randomBytes = new Uint8Array(16);
+  crypto.getRandomValues(randomBytes);
+  return PBKDF2_SALT_PREFIX + bytesToHex(randomBytes);
+}
+
+/**
+ * Derive encryption key from password using PBKDF2
+ */
+function deriveEncryptionKey(password: string, salt: string): string {
+  return CryptoJS.PBKDF2(password, salt, {
+    keySize: 256 / 32,
+    iterations: PBKDF2_ITERATIONS,
+    hasher: CryptoJS.algo.SHA256,
+  }).toString();
+}
+
+/**
+ * Encrypt sensitive data with password
+ */
+function encryptWithPassword(data: string, password: string, salt: string): string {
+  const key = deriveEncryptionKey(password, salt);
+  return CryptoJS.AES.encrypt(data, key).toString();
+}
+
+/**
+ * Decrypt data with password
+ */
+function decryptWithPassword(encrypted: string, password: string, salt: string): string | null {
+  try {
+    const key = deriveEncryptionKey(password, salt);
+    const decrypted = CryptoJS.AES.decrypt(encrypted, key);
+    const result = decrypted.toString(CryptoJS.enc.Utf8);
+    return result || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Determine derivation mode from wallet
+ */
+function determineDerivationMode(wallet: Wallet): WalletJSONDerivationMode {
+  if (wallet.isBIP32 || wallet.isImportedAlphaWallet) {
+    return "bip32";
+  }
+  if (wallet.chainCode || wallet.masterChainCode) {
+    return "bip32";
+  }
+  return "wif_hmac";
+}
+
+/**
+ * Determine source type from wallet
+ */
+function determineSource(
+  wallet: Wallet,
+  mnemonic?: string,
+  importSource?: "dat" | "file"
+): WalletJSONSource {
+  // If mnemonic is provided, it's from mnemonic
+  if (mnemonic) {
+    return "mnemonic";
+  }
+
+  // If imported from dat file
+  if (importSource === "dat") {
+    if (wallet.descriptorPath) {
+      return "dat_descriptor";
+    }
+    if (wallet.isBIP32 || wallet.chainCode || wallet.masterChainCode) {
+      return "dat_hd";
+    }
+    return "dat_legacy";
+  }
+
+  // Imported from txt file
+  if (wallet.chainCode || wallet.masterChainCode) {
+    return "file_bip32";
+  }
+  return "file_standard";
+}
+
+/**
+ * Generate address from master key for JSON export
+ */
+function generateAddressForExport(
+  masterKey: string,
+  chainCode: string | null | undefined,
+  derivationMode: WalletJSONDerivationMode,
+  index: number,
+  descriptorPath?: string | null
+): WalletJSONAddress {
+  const witnessVersion = 0;
+
+  if (derivationMode === "bip32" && chainCode) {
+    // BIP32 derivation
+    const basePath = descriptorPath || "44'/0'/0'";
+    const fullPath = `m/${basePath}/0/${index}`;
+    const derived = deriveKeyAtPath(masterKey, chainCode, fullPath);
+    const keyPair = ec.keyFromPrivate(derived.privateKey);
+    const publicKey = keyPair.getPublic(true, "hex");
+    const sha256 = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKey));
+    const ripemd = CryptoJS.RIPEMD160(sha256);
+    const address = createBech32("alpha", witnessVersion, hexToBytes(ripemd.toString()));
+
+    return {
+      address,
+      publicKey,
+      path: fullPath,
+      index,
+    };
+  } else {
+    // WIF HMAC derivation
+    const derivationPath = `m/44'/0'/${index}'`;
+    const hmacInput = CryptoJS.enc.Hex.parse(masterKey);
+    const hmac = CryptoJS.HmacSHA512(hmacInput, CryptoJS.enc.Utf8.parse(derivationPath)).toString();
+    const childKey = hmac.substring(0, 64);
+    const keyPair = ec.keyFromPrivate(childKey);
+    const publicKey = keyPair.getPublic(true, "hex");
+    const sha256 = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKey));
+    const ripemd = CryptoJS.RIPEMD160(sha256);
+    const address = createBech32("alpha", witnessVersion, hexToBytes(ripemd.toString()));
+
+    return {
+      address,
+      publicKey,
+      path: derivationPath,
+      index,
+    };
+  }
+}
+
+export interface ExportToJSONParams {
+  /** The wallet to export */
+  wallet: Wallet;
+  /** BIP39 mnemonic phrase (if available) */
+  mnemonic?: string;
+  /** Source of import: "dat" for wallet.dat, "file" for txt file */
+  importSource?: "dat" | "file";
+  /** Export options */
+  options?: WalletJSONExportOptions;
+}
+
+/**
+ * Export wallet to JSON format
+ *
+ * Supports all wallet types:
+ * - Mnemonic-based (new BIP32 standard)
+ * - File import with chain code (BIP32)
+ * - File import without chain code (HMAC)
+ * - wallet.dat import (descriptor/HD/legacy)
+ */
+export function exportWalletToJSON(params: ExportToJSONParams): WalletJSON {
+  const { wallet, mnemonic, importSource, options = {} } = params;
+  const { password, includeAllAddresses = false, addressCount = 1 } = options;
+
+  if (!wallet || !wallet.masterPrivateKey) {
+    throw new Error("Invalid wallet - missing master private key");
+  }
+
+  const chainCode = wallet.chainCode || wallet.masterChainCode || undefined;
+  const derivationMode = determineDerivationMode(wallet);
+  const source = determineSource(wallet, mnemonic, importSource);
+
+  // Generate first address for verification
+  const firstAddress = generateAddressForExport(
+    wallet.masterPrivateKey,
+    chainCode,
+    derivationMode,
+    0,
+    wallet.descriptorPath
+  );
+
+  // Build base JSON structure
+  const json: WalletJSON = {
+    version: JSON_WALLET_VERSION,
+    generated: new Date().toISOString(),
+    warning: JSON_WALLET_WARNING,
+    masterPrivateKey: wallet.masterPrivateKey,
+    derivationMode,
+    source,
+    firstAddress,
+  };
+
+  // Add chain code if available
+  if (chainCode) {
+    json.chainCode = chainCode;
+  }
+
+  // Add mnemonic if available (and not encrypted)
+  if (mnemonic && !password) {
+    json.mnemonic = mnemonic;
+  }
+
+  // Add descriptor path for BIP32 wallets
+  if (wallet.descriptorPath) {
+    json.descriptorPath = wallet.descriptorPath;
+  }
+
+  // Handle encryption
+  if (password) {
+    const salt = generateSalt();
+    json.encrypted = {
+      masterPrivateKey: encryptWithPassword(wallet.masterPrivateKey, password, salt),
+      salt,
+      iterations: PBKDF2_ITERATIONS,
+    };
+
+    if (mnemonic) {
+      json.encrypted.mnemonic = encryptWithPassword(mnemonic, password, salt);
+    }
+
+    // Remove plaintext sensitive data when encrypted
+    delete (json as Partial<WalletJSON>).masterPrivateKey;
+    delete (json as Partial<WalletJSON>).mnemonic;
+  }
+
+  // Add additional addresses if requested
+  if (includeAllAddresses && wallet.addresses.length > 0) {
+    json.addresses = wallet.addresses.map((addr, idx) => ({
+      address: addr.address,
+      publicKey: addr.publicKey || "",
+      path: addr.path || `m/44'/0'/${idx}'`,
+      index: addr.index,
+      isChange: addr.isChange,
+    }));
+  } else if (addressCount > 1) {
+    const additionalAddresses: WalletJSONAddress[] = [];
+    for (let i = 1; i < addressCount; i++) {
+      additionalAddresses.push(
+        generateAddressForExport(
+          wallet.masterPrivateKey,
+          chainCode,
+          derivationMode,
+          i,
+          wallet.descriptorPath
+        )
+      );
+    }
+    if (additionalAddresses.length > 0) {
+      json.addresses = additionalAddresses;
+    }
+  }
+
+  return json;
+}
+
+/**
+ * Import wallet from JSON format
+ *
+ * Supports:
+ * - New JSON format (v1.0)
+ * - Encrypted JSON files
+ * - All source types (mnemonic, file_bip32, file_standard, dat_*)
+ */
+export async function importWalletFromJSON(
+  jsonContent: string,
+  password?: string
+): Promise<WalletJSONImportResult> {
+  try {
+    const json = JSON.parse(jsonContent) as WalletJSON;
+
+    // Validate version
+    if (json.version !== "1.0") {
+      return {
+        success: false,
+        error: `Unsupported wallet JSON version: ${json.version}. Expected 1.0`,
+      };
+    }
+
+    let masterPrivateKey: string;
+    let mnemonic: string | undefined;
+
+    // Handle encrypted wallet
+    if (json.encrypted) {
+      if (!password) {
+        return {
+          success: false,
+          error: "This wallet is encrypted. Please provide a password.",
+        };
+      }
+
+      const decryptedKey = decryptWithPassword(
+        json.encrypted.masterPrivateKey,
+        password,
+        json.encrypted.salt
+      );
+
+      if (!decryptedKey) {
+        return {
+          success: false,
+          error: "Failed to decrypt wallet. The password may be incorrect.",
+        };
+      }
+
+      masterPrivateKey = decryptedKey;
+
+      // Decrypt mnemonic if present
+      if (json.encrypted.mnemonic) {
+        const decryptedMnemonic = decryptWithPassword(
+          json.encrypted.mnemonic,
+          password,
+          json.encrypted.salt
+        );
+        if (decryptedMnemonic) {
+          mnemonic = decryptedMnemonic;
+        }
+      }
+    } else {
+      // Unencrypted wallet
+      if (!json.masterPrivateKey) {
+        return {
+          success: false,
+          error: "Invalid wallet JSON - missing master private key",
+        };
+      }
+      masterPrivateKey = json.masterPrivateKey;
+      mnemonic = json.mnemonic;
+    }
+
+    // Validate private key
+    if (!isValidPrivateKey(masterPrivateKey)) {
+      return {
+        success: false,
+        error: "Invalid master private key in wallet JSON",
+      };
+    }
+
+    // Verify first address matches
+    const verifyAddress = generateAddressForExport(
+      masterPrivateKey,
+      json.chainCode,
+      json.derivationMode,
+      0,
+      json.descriptorPath
+    );
+
+    if (verifyAddress.address !== json.firstAddress.address) {
+      return {
+        success: false,
+        error: `Wallet verification failed: derived address (${verifyAddress.address}) does not match expected (${json.firstAddress.address})`,
+      };
+    }
+
+    // Determine wallet properties based on source
+    const isBIP32 = json.derivationMode === "bip32";
+    const isImportedAlphaWallet = json.source.startsWith("dat_") || json.source === "file_bip32";
+
+    // Build wallet object
+    const wallet: Wallet = {
+      masterPrivateKey,
+      addresses: [],
+      isEncrypted: false,
+      childPrivateKey: null,
+      isBIP32,
+      isImportedAlphaWallet,
+    };
+
+    if (json.chainCode) {
+      wallet.chainCode = json.chainCode;
+      wallet.masterChainCode = json.chainCode;
+    }
+
+    if (json.descriptorPath) {
+      wallet.descriptorPath = json.descriptorPath;
+    }
+
+    // Add addresses
+    wallet.addresses.push({
+      address: json.firstAddress.address,
+      publicKey: json.firstAddress.publicKey,
+      path: json.firstAddress.path,
+      index: json.firstAddress.index ?? 0,
+      isChange: json.firstAddress.isChange,
+      createdAt: new Date().toISOString(),
+    });
+
+    if (json.addresses) {
+      for (const addr of json.addresses) {
+        wallet.addresses.push({
+          address: addr.address,
+          publicKey: addr.publicKey,
+          path: addr.path,
+          index: addr.index ?? wallet.addresses.length,
+          isChange: addr.isChange,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    return {
+      success: true,
+      wallet,
+      source: json.source,
+      derivationMode: json.derivationMode,
+      hasMnemonic: !!mnemonic,
+      mnemonic, // Return decrypted mnemonic if available
+      message: `Wallet imported successfully from JSON (source: ${json.source}, mode: ${json.derivationMode})`,
+    };
+  } catch (e) {
+    if (e instanceof SyntaxError) {
+      return {
+        success: false,
+        error: "Invalid JSON format. Please provide a valid wallet JSON file.",
+      };
+    }
+    return {
+      success: false,
+      error: `Error importing wallet: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+}
+
+/**
+ * Download wallet as JSON file
+ */
+export function downloadWalletJSON(
+  json: WalletJSON,
+  filename: string = "alpha_wallet_backup.json"
+): void {
+  const content = JSON.stringify(json, null, 2);
+  const blob = new Blob([content], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  const finalFilename = filename.endsWith(".json") ? filename : filename + ".json";
+  a.download = finalFilename;
+  document.body.appendChild(a);
+  a.click();
+
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 100);
+}
+
+/**
+ * Check if file content is JSON wallet format
+ */
+export function isJSONWalletFormat(content: string): boolean {
+  try {
+    const json = JSON.parse(content);
+    return json.version === "1.0" && (json.masterPrivateKey || json.encrypted);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Universal wallet import function
+ * Automatically detects format (JSON, txt, dat) and imports accordingly
+ */
+export async function importWalletUniversal(
+  file: File,
+  password?: string
+): Promise<WalletJSONImportResult> {
+  try {
+    // Check file extension
+    const filename = file.name.toLowerCase();
+
+    // Handle wallet.dat files
+    if (filename.endsWith(".dat")) {
+      const result = await importWallet(file, password);
+      if (result.success) {
+        return {
+          success: true,
+          wallet: result.wallet,
+          source: result.wallet.descriptorPath ? "dat_descriptor" : "dat_hd",
+          derivationMode: "bip32",
+          hasMnemonic: false,
+          message: result.message,
+        };
+      }
+      return {
+        success: false,
+        error: result.error,
+      };
+    }
+
+    // Read file content
+    const content = await file.text();
+
+    // Try JSON format first
+    if (filename.endsWith(".json") || isJSONWalletFormat(content)) {
+      return importWalletFromJSON(content, password);
+    }
+
+    // Fall back to txt format
+    const result = await importWallet(file, password);
+    if (result.success) {
+      const hasChainCode = !!(result.wallet.chainCode || result.wallet.masterChainCode);
+      return {
+        success: true,
+        wallet: result.wallet,
+        source: hasChainCode ? "file_bip32" : "file_standard",
+        derivationMode: hasChainCode ? "bip32" : "wif_hmac",
+        hasMnemonic: false,
+        message: result.message,
+      };
+    }
+    return {
+      success: false,
+      error: result.error,
+    };
+  } catch (e) {
+    return {
+      success: false,
+      error: `Error importing wallet: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
 }

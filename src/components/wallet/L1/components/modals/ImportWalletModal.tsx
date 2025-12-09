@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Upload, FileText, X } from "lucide-react";
+import { Upload, FileText, FileJson, X } from "lucide-react";
+import { isJSONWalletFormat } from "../../sdk/import-export";
 
 interface ImportWalletModalProps {
   show: boolean;
@@ -30,7 +31,7 @@ export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModa
     setIsDragging(false);
 
     const file = e.dataTransfer.files[0];
-    if (file && (file.name.endsWith(".txt") || file.name.endsWith(".dat"))) {
+    if (file && (file.name.endsWith(".txt") || file.name.endsWith(".dat") || file.name.endsWith(".json"))) {
       setSelectedFile(file);
       await checkIfNeedsScanning(file);
     }
@@ -45,8 +46,23 @@ export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModa
         return;
       }
 
-      // For .txt files, check if BIP32 or standard
       const content = await file.text();
+
+      // JSON wallet files - check format and derivation mode
+      if (file.name.endsWith(".json") || isJSONWalletFormat(content)) {
+        try {
+          const json = JSON.parse(content);
+          // JSON files with BIP32 need scanning, others don't
+          const isBIP32 = json.derivationMode === "bip32" || json.chainCode;
+          setNeedsScanning(isBIP32);
+          setScanCount(10);
+        } catch {
+          setNeedsScanning(true);
+        }
+        return;
+      }
+
+      // For .txt files, check if BIP32 or standard
       const isBIP32 = content.includes("MASTER CHAIN CODE") ||
                       content.includes("WALLET TYPE: BIP32") ||
                       content.includes("WALLET TYPE: Alpha descriptor");
@@ -128,7 +144,7 @@ export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModa
                 Select wallet file
               </p>
               <p className="text-xs text-neutral-400 dark:text-neutral-500">
-                .txt or .dat
+                .json, .txt or .dat
               </p>
               <p className="text-[10px] text-neutral-400 dark:text-neutral-600 mt-2 hidden sm:block">
                 or drag & drop here
@@ -139,7 +155,7 @@ export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModa
               type="file"
               ref={fileInputRef}
               className="hidden"
-              accept=".txt,.dat"
+              accept=".json,.txt,.dat"
               onChange={handleFileSelect}
             />
           </>
@@ -148,7 +164,11 @@ export function ImportWalletModal({ show, onImport, onCancel }: ImportWalletModa
             {/* Selected file */}
             <div className="p-3 bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 rounded-lg mb-3">
               <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-blue-500 shrink-0" />
+                {selectedFile.name.endsWith(".json") ? (
+                  <FileJson className="w-5 h-5 text-blue-500 shrink-0" />
+                ) : (
+                  <FileText className="w-5 h-5 text-blue-500 shrink-0" />
+                )}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-neutral-900 dark:text-white font-medium truncate">
                     {selectedFile.name}

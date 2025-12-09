@@ -81,6 +81,8 @@ interface MainWalletViewProps {
   onSelectAddress: (address: string) => void;
   onShowHistory: () => void;
   onSaveWallet: (filename: string, password?: string) => void;
+  /** Whether mnemonic is available for export */
+  hasMnemonic?: boolean;
   onDeleteWallet: () => void;
   onSendTransaction: (destination: string, amount: string) => Promise<void>;
   txPlan: TransactionPlan | null;
@@ -102,6 +104,7 @@ export function MainWalletView({
   onSelectAddress,
   onShowHistory,
   onSaveWallet,
+  hasMnemonic,
   onDeleteWallet,
   onSendTransaction,
   txPlan,
@@ -407,6 +410,7 @@ export function MainWalletView({
         show={showSaveModal}
         onConfirm={handleSave}
         onCancel={() => setShowSaveModal(false)}
+        hasMnemonic={hasMnemonic}
       />
 
       <DeleteConfirmationModal

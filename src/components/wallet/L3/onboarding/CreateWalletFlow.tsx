@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft, Plus, ChevronDown, Check, Upload, FileText, X } from 'lucide-react';
+import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft, Plus, ChevronDown, Check, Upload, FileText, FileJson, X } from 'lucide-react';
 import { useWallet } from '../hooks/useWallet';
 import { WalletRepository } from '../../../../repositories/WalletRepository';
 import { IdentityManager } from '../services/IdentityManager';
@@ -9,6 +9,8 @@ import { UnifiedKeyManager } from '../../shared/services/UnifiedKeyManager';
 import { fetchNametagFromIpns } from '../services/IpnsNametagFetcher';
 import {
   importWallet as importWalletFromFile,
+  importWalletFromJSON,
+  isJSONWalletFormat,
   type Wallet as L1Wallet,
   type ScannedAddress,
   saveWalletToStorage,
@@ -426,7 +428,68 @@ export function CreateWalletFlow() {
 
       const content = await file.text();
 
-      // Check if encrypted
+      // Handle JSON wallet files (new v1.0 format)
+      if (file.name.endsWith(".json") || isJSONWalletFormat(content)) {
+        try {
+          const json = JSON.parse(content);
+
+          // Check if encrypted JSON
+          if (json.encrypted) {
+            setPendingFile(file);
+            setInitialScanCount(scanCountParam || 10);
+            setShowLoadPasswordModal(true);
+            setIsBusy(false);
+            return;
+          }
+
+          // Import unencrypted JSON
+          const result = await importWalletFromJSON(content);
+          if (!result.success || !result.wallet) {
+            throw new Error(result.error || "Import failed");
+          }
+
+          // If has mnemonic, restore via restoreWallet (which sets up UnifiedKeyManager)
+          if (result.mnemonic) {
+            await restoreWallet(result.mnemonic);
+            // Go to address selection after restoring from mnemonic
+            await goToAddressSelection();
+            return;
+          }
+
+          // Check if BIP32 needs scanning
+          const isJsonBIP32 = result.derivationMode === "bip32" || result.wallet.chainCode;
+          if (isJsonBIP32) {
+            // Import master key into UnifiedKeyManager first
+            const keyManager = getUnifiedKeyManager();
+            const chainCode = result.wallet.chainCode || result.wallet.masterChainCode || null;
+            await keyManager.importWithMode(result.wallet.masterPrivateKey, chainCode, result.derivationMode || "bip32");
+
+            setPendingWallet(result.wallet);
+            setInitialScanCount(scanCountParam || 10);
+            setShowScanModal(true);
+            setIsBusy(false);
+            return;
+          }
+
+          // Standard JSON wallet - save and use directly
+          const keyManager = getUnifiedKeyManager();
+          await keyManager.importWithMode(result.wallet.masterPrivateKey, null, "wif_hmac");
+
+          saveWalletToStorage("main", result.wallet);
+
+          // Go to address selection
+          await goToAddressSelection();
+          return;
+        } catch (e) {
+          // If JSON parsing fails but it looked like JSON, throw error
+          if (file.name.endsWith(".json")) {
+            throw new Error(`Invalid JSON wallet file: ${e instanceof Error ? e.message : String(e)}`);
+          }
+          // Otherwise continue to try other formats
+        }
+      }
+
+      // Check if encrypted TXT file
       if (content.includes("ENCRYPTED MASTER KEY")) {
         setPendingFile(file);
         setInitialScanCount(scanCountParam || 10);
@@ -662,7 +725,47 @@ export function CreateWalletFlow() {
       setError(null);
       setShowLoadPasswordModal(false);
 
-      // Import with password
+      const content = await pendingFile.text();
+
+      // Check if this is an encrypted JSON file
+      if (pendingFile.name.endsWith(".json") || isJSONWalletFormat(content)) {
+        const result = await importWalletFromJSON(content, password);
+        if (!result.success || !result.wallet) {
+          throw new Error(result.error || "Import failed");
+        }
+
+        setPendingFile(null);
+
+        // If has mnemonic, restore via restoreWallet
+        if (result.mnemonic) {
+          await restoreWallet(result.mnemonic);
+          // Go to address selection after restoring from mnemonic
+          await goToAddressSelection();
+          return;
+        }
+
+        // Check if BIP32 needs scanning
+        const isBIP32 = result.derivationMode === "bip32" || result.wallet.chainCode;
+        if (isBIP32) {
+          const keyManager = getUnifiedKeyManager();
+          const chainCode = result.wallet.chainCode || result.wallet.masterChainCode || null;
+          await keyManager.importWithMode(result.wallet.masterPrivateKey, chainCode, result.derivationMode || "bip32");
+
+          setPendingWallet(result.wallet);
+          setShowScanModal(true);
+          setIsBusy(false);
+          return;
+        }
+
+        // Standard JSON wallet
+        const keyManager = getUnifiedKeyManager();
+        await keyManager.importWithMode(result.wallet.masterPrivateKey, null, "wif_hmac");
+        saveWalletToStorage("main", result.wallet);
+        await goToAddressSelection();
+        return;
+      }
+
+      // Handle TXT files with password
       const result = await importWalletFromFile(pendingFile, password);
       if (!result.success || !result.wallet) {
         throw new Error(result.error || "Import failed");
@@ -722,8 +825,23 @@ export function CreateWalletFlow() {
         return;
       }
 
-      // For .txt files, check if BIP32 or standard
       const content = await file.text();
+
+      // JSON wallet files - check format and derivation mode
+      if (file.name.endsWith(".json") || isJSONWalletFormat(content)) {
+        try {
+          const json = JSON.parse(content);
+          // JSON files with BIP32 need scanning, others don't
+          const isBIP32 = json.derivationMode === "bip32" || json.chainCode;
+          setNeedsScanning(isBIP32);
+          setScanCount(10);
+        } catch {
+          setNeedsScanning(true);
+        }
+        return;
+      }
+
+      // For .txt files, check if BIP32 or standard
       const isBIP32 = content.includes("MASTER CHAIN CODE") ||
                       content.includes("WALLET TYPE: BIP32") ||
                       content.includes("WALLET TYPE: Alpha descriptor");
@@ -758,7 +876,7 @@ export function CreateWalletFlow() {
     setIsDragging(false);
 
     const file = e.dataTransfer.files[0];
-    if (file && (file.name.endsWith(".txt") || file.name.endsWith(".dat"))) {
+    if (file && (file.name.endsWith(".txt") || file.name.endsWith(".dat") || file.name.endsWith(".json"))) {
       await handleFileSelect(file);
     }
   };
@@ -1452,7 +1570,7 @@ export function CreateWalletFlow() {
                       Import from File
                     </div>
                     <div className="text-sm text-neutral-500 dark:text-neutral-400">
-                      Import wallet from .dat or .txt file
+                      Import wallet from .json, .dat or .txt file
                     </div>
                   </div>
                   <ArrowRight className="w-5 h-5 text-neutral-400 group-hover:text-orange-500 transition-colors" />
@@ -1529,13 +1647,13 @@ export function CreateWalletFlow() {
                     Select wallet file
                   </p>
                   <p className="text-xs md:text-sm text-neutral-400 dark:text-neutral-500 mb-3">
-                    .txt or .dat
+                    .json, .txt or .dat
                   </p>
                   <label className="inline-block cursor-pointer">
                     <input
                       type="file"
                       className="hidden"
-                      accept=".txt,.dat"
+                      accept=".json,.txt,.dat"
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) handleFileSelect(file);
@@ -1556,7 +1674,11 @@ export function CreateWalletFlow() {
                 {/* Selected File Display */}
                 <div className="p-4 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 rounded-xl mb-4">
                   <div className="flex items-center gap-3">
-                    <FileText className="w-6 h-6 text-orange-500 shrink-0" />
+                    {selectedFile.name.endsWith(".json") ? (
+                      <FileJson className="w-6 h-6 text-orange-500 shrink-0" />
+                    ) : (
+                      <FileText className="w-6 h-6 text-orange-500 shrink-0" />
+                    )}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm md:text-base text-neutral-900 dark:text-white font-medium truncate">
                         {selectedFile.name}

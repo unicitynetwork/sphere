@@ -10,6 +10,8 @@ import {
   broadcast,
   saveWalletToStorage,
   importWallet as importWalletFromFile,
+  importWalletFromJSON,
+  isJSONWalletFormat,
   type VestingMode,
   type TransactionPlan,
   type Wallet,
@@ -20,6 +22,7 @@ import { NoWalletView, HistoryView, MainWalletView } from ".";
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { WalletScanModal, ImportWalletModal, LoadPasswordModal } from "../components/modals";
+import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 
 type ViewMode = "main" | "history";
 
@@ -58,7 +61,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     createWallet,
     importWallet,
     deleteWallet,
-    exportWallet,
     analyzeTransaction,
     setVestingMode,
     invalidateWallet,
@@ -155,6 +157,66 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
       const content = await file.text();
 
+      // Handle JSON wallet files
+      if (file.name.endsWith(".json") || isJSONWalletFormat(content)) {
+        // Check if encrypted
+        try {
+          const json = JSON.parse(content);
+          if (json.encrypted) {
+            // Encrypted JSON - show password modal
+            setPendingFile(file);
+            setInitialScanCount(scanCount || 10);
+            setShowLoadPasswordModal(true);
+            return;
+          }
+        } catch {
+          // Not valid JSON, continue with error
+          throw new Error("Invalid JSON wallet file");
+        }
+
+        // Unencrypted JSON - import directly
+        const result = await importWalletFromJSON(content);
+        if (!result.success || !result.wallet) {
+          throw new Error(result.error || "Import failed");
+        }
+
+        // If has mnemonic, restore via UnifiedKeyManager
+        if (result.mnemonic) {
+          const keyManager = UnifiedKeyManager.getInstance("user-pin-1234");
+          await keyManager.createFromMnemonic(result.mnemonic);
+
+          // Reset selected address index to 0 for clean import
+          localStorage.setItem("l3_selected_address_index", "0");
+
+          // Save wallet and use directly (no scanning needed for mnemonic wallets)
+          await saveWalletToStorage("main", result.wallet);
+          await invalidateWallet();
+          if (result.wallet.addresses.length > 0) {
+            setSelectedAddress(result.wallet.addresses[0].address);
+          }
+          showMessage("success", "Wallet Loaded", "Wallet loaded successfully with recovery phrase!");
+          return;
+        }
+
+        // No mnemonic - check if BIP32 needs scanning
+        const isBIP32 = result.derivationMode === "bip32" || result.wallet.chainCode;
+        if (isBIP32) {
+          setPendingWallet(result.wallet);
+          setInitialScanCount(scanCount || 10);
+          setShowScanModal(true);
+        } else {
+          // Standard wallet - save and use directly
+          await saveWalletToStorage("main", result.wallet);
+          await invalidateWallet();
+          if (result.wallet.addresses.length > 0) {
+            setSelectedAddress(result.wallet.addresses[0].address);
+          }
+          showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
+        }
+        return;
+      }
+
+      // Handle TXT files
       if (content.includes("ENCRYPTED MASTER KEY")) {
         setPendingFile(file);
         setInitialScanCount(scanCount || 10);
@@ -261,7 +323,55 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     if (!pendingFile) return;
 
     try {
-      // First, import without saving to check if it's BIP32
+      const content = await pendingFile.text();
+
+      // Check if this is an encrypted JSON file
+      if (pendingFile.name.endsWith(".json") || isJSONWalletFormat(content)) {
+        const result = await importWalletFromJSON(content, password);
+        if (!result.success || !result.wallet) {
+          throw new Error(result.error || "Import failed");
+        }
+
+        setShowLoadPasswordModal(false);
+        setPendingFile(null);
+
+        // If has mnemonic, restore via UnifiedKeyManager
+        if (result.mnemonic) {
+          const keyManager = UnifiedKeyManager.getInstance("user-pin-1234");
+          await keyManager.createFromMnemonic(result.mnemonic);
+
+          // Reset selected address index to 0 for clean import
+          localStorage.setItem("l3_selected_address_index", "0");
+
+          // Save wallet and use directly (no scanning needed for mnemonic wallets)
+          await saveWalletToStorage("main", result.wallet);
+          await invalidateWallet();
+          if (result.wallet.addresses.length > 0) {
+            setSelectedAddress(result.wallet.addresses[0].address);
+          }
+          showMessage("success", "Wallet Loaded", "Wallet loaded successfully with recovery phrase!");
+          return;
+        }
+
+        // No mnemonic - check if BIP32 needs scanning
+        const isBIP32 = result.derivationMode === "bip32" || result.wallet.chainCode;
+        if (isBIP32) {
+          setPendingWallet(result.wallet);
+          // initialScanCount already set when showing password modal
+          setShowScanModal(true);
+        } else {
+          // Standard wallet - save and use directly
+          await saveWalletToStorage("main", result.wallet);
+          await invalidateWallet();
+          if (result.wallet.addresses.length > 0) {
+            setSelectedAddress(result.wallet.addresses[0].address);
+          }
+          showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
+        }
+        return;
+      }
+
+      // Handle TXT files with password
       const result = await importWalletFromFile(pendingFile, password);
       if (!result.success || !result.wallet) {
         throw new Error(result.error || "Import failed");
@@ -316,18 +426,30 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     }
   };
 
-  // Save wallet
+  // Check if mnemonic is available for export
+  const hasMnemonic = (() => {
+    try {
+      const keyManager = UnifiedKeyManager.getInstance("user-pin-1234");
+      return keyManager.getMnemonic() !== null;
+    } catch {
+      return false;
+    }
+  })();
+
+  // Save wallet as JSON (only JSON format supported)
   const onSaveWallet = (filename: string, password?: string) => {
     if (!wallet) {
       showMessage("warning", "No Wallet", "No wallet to save");
       return;
     }
 
-    const result = exportWallet(wallet, filename, password);
-    if (result.success) {
-      showMessage("success", "Wallet Saved", "Wallet saved successfully!");
-    } else {
-      showMessage("error", "Save Error", "Error saving wallet: " + result.error);
+    try {
+      // Use UnifiedKeyManager for JSON export (includes mnemonic if available)
+      const keyManager = UnifiedKeyManager.getInstance("user-pin-1234");
+      keyManager.downloadJSON(filename, { password });
+      showMessage("success", "Wallet Saved", "Wallet saved as JSON successfully!");
+    } catch (err) {
+      showMessage("error", "Save Error", `Error saving wallet: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -521,6 +643,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         onSelectAddress={onSelectAddress}
         onShowHistory={onShowHistory}
         onSaveWallet={onSaveWallet}
+        hasMnemonic={hasMnemonic}
         onDeleteWallet={onDeleteWallet}
         onSendTransaction={onSendTransaction}
         txPlan={txPlan}
