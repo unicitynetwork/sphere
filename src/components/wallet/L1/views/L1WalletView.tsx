@@ -636,6 +636,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         selectedAddress={selectedAddress}
         selectedPrivateKey={selectedPrivateKey}
         addresses={addresses}
+        walletAddresses={wallet?.addresses}
         balance={balance}
         totalBalance={totalBalance}
         showBalances={showBalances}

@@ -11,9 +11,10 @@ import {
   Check,
   Plus,
   ArrowRightLeft,
+  Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { TransactionPlan, VestingMode, VestingBalances } from "../sdk";
+import type { TransactionPlan, VestingMode, VestingBalances, WalletAddress } from "../sdk";
 import {
   QRModal,
   SaveWalletModal,
@@ -23,6 +24,7 @@ import {
   SendModal,
 } from "../components/modals";
 import { VestingSelector } from "../components/VestingSelector";
+import { useAddressNametags } from "../hooks/useAddressNametags";
 
 // Animated balance display component
 function AnimatedBalance({ value, show }: { value: number; show: boolean }) {
@@ -74,6 +76,8 @@ interface MainWalletViewProps {
   selectedAddress: string;
   selectedPrivateKey: string;
   addresses: string[];
+  /** Full wallet addresses with index info for nametag fetching */
+  walletAddresses?: WalletAddress[];
   balance: number;
   totalBalance: number;
   showBalances: boolean;
@@ -97,6 +101,7 @@ export function MainWalletView({
   selectedAddress,
   selectedPrivateKey,
   addresses,
+  walletAddresses,
   balance,
   totalBalance,
   showBalances,
@@ -124,6 +129,9 @@ export function MainWalletView({
   const [showBridgeModal, setShowBridgeModal] = useState(false);
   const [pendingDestination, setPendingDestination] = useState("");
   const [pendingAmount, setPendingAmount] = useState("");
+
+  // Fetch nametags for all wallet addresses
+  const { nametagState } = useAddressNametags(walletAddresses);
 
   const handleSendFromModal = async (destination: string, amount: string) => {
     setPendingDestination(destination);
@@ -173,8 +181,29 @@ export function MainWalletView({
               onClick={() => setShowDropdown((prev) => !prev)}
               className="flex-1 bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 flex items-center justify-between hover:bg-neutral-200/50 dark:hover:bg-neutral-700/50 transition-colors"
             >
-              <span className="font-mono text-xs sm:text-sm">
-                {selectedAddress.slice(0, 12) + "..." + selectedAddress.slice(-8)}
+              <span className="text-xs sm:text-sm flex items-center gap-1.5">
+                {(() => {
+                  const nametagInfo = nametagState[selectedAddress];
+                  if (nametagInfo?.ipnsLoading) {
+                    return (
+                      <>
+                        <Loader2 className="w-3 h-3 animate-spin text-neutral-400" />
+                        <span className="font-mono">{selectedAddress.slice(0, 8)}...{selectedAddress.slice(-6)}</span>
+                      </>
+                    );
+                  }
+                  if (nametagInfo?.nametag) {
+                    return (
+                      <>
+                        <span className="font-medium text-blue-600 dark:text-blue-400">@{nametagInfo.nametag}</span>
+                        <span className="text-neutral-400 dark:text-neutral-500 font-mono text-[10px]">
+                          {selectedAddress.slice(0, 6)}...{selectedAddress.slice(-4)}
+                        </span>
+                      </>
+                    );
+                  }
+                  return <span className="font-mono">{selectedAddress.slice(0, 12)}...{selectedAddress.slice(-8)}</span>;
+                })()}
               </span>
               <ChevronDown className={`w-3 h-3 sm:w-4 sm:h-4 text-neutral-500 dark:text-neutral-400 transition-transform ${showDropdown ? "rotate-180" : ""}`} />
             </button>
@@ -233,32 +262,49 @@ export function MainWalletView({
                   transition={{ duration: 0.2 }}
                   className="absolute z-20 mt-2 w-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl max-h-52 overflow-y-auto custom-scrollbar"
                 >
-                  {addresses.map((a) => (
-                    <div
-                      key={a}
-                      className={`flex items-center gap-2 px-3 py-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer ${
-                        a === selectedAddress ? "bg-neutral-100 dark:bg-neutral-800/50" : ""
-                      }`}
-                      onClick={() => {
-                        onSelectAddress(a);
-                        setShowDropdown(false);
-                      }}
-                    >
-                      <span className="flex-1 text-left text-xs text-neutral-700 dark:text-neutral-200 font-mono truncate">
-                        {a}
-                      </span>
-                      <a
-                        href={`https://www.unicity.network/address/${a}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-1 text-blue-500 dark:text-blue-400 hover:text-blue-400 dark:hover:text-blue-300 transition-colors"
-                        title="View in explorer"
-                        onClick={(e) => e.stopPropagation()}
+                  {addresses.map((a) => {
+                    const nametagInfo = nametagState[a];
+                    return (
+                      <div
+                        key={a}
+                        className={`flex items-center gap-2 px-3 py-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer ${
+                          a === selectedAddress ? "bg-neutral-100 dark:bg-neutral-800/50" : ""
+                        }`}
+                        onClick={() => {
+                          onSelectAddress(a);
+                          setShowDropdown(false);
+                        }}
                       >
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                  ))}
+                        <span className="flex-1 text-left text-xs dark:text-neutral-200">
+                          {nametagInfo?.ipnsLoading ? (
+                            <span className="flex items-center gap-1.5 text-neutral-400 dark:text-neutral-500">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <span className="font-mono">{a.slice(0, 8)}...{a.slice(-6)}</span>
+                            </span>
+                          ) : nametagInfo?.nametag ? (
+                            <span className="flex items-center gap-1.5">
+                              <span className="font-medium text-blue-600 dark:text-blue-400">@{nametagInfo.nametag}</span>
+                              <span className="text-neutral-400 dark:text-neutral-500 font-mono text-[10px]">
+                                {a.slice(0, 6)}...{a.slice(-4)}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="font-mono truncate text-neutral-700 dark:text-neutral-200">{a}</span>
+                          )}
+                        </span>
+                        <a
+                          href={`https://www.unicity.network/address/${a}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-1 text-blue-500 dark:text-blue-400 hover:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                          title="View in explorer"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    );
+                  })}
                 </motion.div>
               </>
             )}
