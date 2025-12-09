@@ -53,9 +53,9 @@ export async function fetchNametagFromIpns(
         nametag: result.name,
         nametagData: {
           name: result.name,
-          token: (result.data as any).token || {},
-          timestamp: (result.data as any).timestamp,
-          format: (result.data as any).format,
+          token: result.data.token || {},
+          timestamp: result.data.timestamp,
+          format: result.data.format,
         },
         source: "http",
       };
@@ -142,7 +142,11 @@ async function fetchViaHttpGateway(ipnsName: string): Promise<NametagFetchResult
 
 interface NametagFetchResult {
   name: string;
-  data: object;
+  data: {
+    token?: object;
+    timestamp?: number;
+    format?: string;
+  };
 }
 
 /**
@@ -183,7 +187,7 @@ async function tryGateway(
   let txfData;
   try {
     txfData = await contentResponse.json();
-  } catch (parseError) {
+  } catch {
     console.warn(`🔍 Failed to parse IPNS content as JSON for ${ipnsName}`);
     return null;
   }
