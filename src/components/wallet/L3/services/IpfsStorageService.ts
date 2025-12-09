@@ -1677,6 +1677,19 @@ export class IpfsStorageService {
     const walletRepo = WalletRepository.getInstance();
     const localTokens = walletRepo.getTokens();
 
+    // Check if local nametag differs from remote
+    const localNametag = walletRepo.getNametag();
+    const remoteNametag = remoteData._nametag;
+
+    if (localNametag && !remoteNametag) {
+      console.log(`📦 Local has nametag "${localNametag.name}" not in remote`);
+      return true;
+    }
+    if (localNametag && remoteNametag && localNametag.name !== remoteNametag.name) {
+      console.log(`📦 Local nametag "${localNametag.name}" differs from remote "${remoteNametag.name}"`);
+      return true;
+    }
+
     // Extract remote tokens as TxfToken map
     const remoteTokenMap = new Map<string, TxfToken>();
     for (const key of Object.keys(remoteData)) {
@@ -2017,9 +2030,10 @@ export class IpfsStorageService {
       const ipnsResolutionFailed = resolution.respondedCount === 0;
       const localWallet = WalletRepository.getInstance();
       const localTokenCount = localWallet.getTokens().length;
+      const localNametag = localWallet.getNametag();
 
-      if (ipnsResolutionFailed && localTokenCount === 0) {
-        // IPNS resolution failed AND we have no local tokens
+      if (ipnsResolutionFailed && localTokenCount === 0 && !localNametag) {
+        // IPNS resolution failed AND we have no local tokens AND no nametag
         // This is likely a wallet restore - DO NOT overwrite remote!
         console.warn(`📦 IPNS resolution failed (0/${resolution.totalGateways} responded) and no local tokens`);
         console.warn(`📦 Skipping upload to prevent overwriting existing remote tokens`);
