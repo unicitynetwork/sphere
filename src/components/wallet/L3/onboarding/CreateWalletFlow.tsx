@@ -1058,6 +1058,19 @@ export function CreateWalletFlow() {
                       newWords[index] = e.target.value;
                       setSeedWords(newWords);
                     }}
+                    onPaste={(e) => {
+                      const pastedText = e.clipboardData.getData('text').trim();
+                      const words = pastedText.split(/\s+/).filter(w => w.length > 0);
+                      // If pasted text contains multiple words, fill all fields
+                      if (words.length > 1) {
+                        e.preventDefault();
+                        const newWords = Array(12).fill('');
+                        words.slice(0, 12).forEach((word, i) => {
+                          newWords[i] = word.toLowerCase();
+                        });
+                        setSeedWords(newWords);
+                      }
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && index < 11) {
                         const nextInput = e.currentTarget.parentElement?.nextElementSibling?.querySelector('input');
