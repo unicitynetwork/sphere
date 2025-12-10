@@ -7,6 +7,7 @@ import { WalletRepository } from '../../../../repositories/WalletRepository';
 import { IdentityManager } from '../services/IdentityManager';
 import { UnifiedKeyManager } from '../../shared/services/UnifiedKeyManager';
 import { fetchNametagFromIpns } from '../services/IpnsNametagFetcher';
+import { IpfsStorageService } from '../services/IpfsStorageService';
 import {
   importWallet as importWalletFromFile,
   importWalletFromJSON,
@@ -76,6 +77,9 @@ export function CreateWalletFlow() {
 
   // State for IPNS nametag fetching on Complete Setup screen
   const [ipnsFetchingNametag, setIpnsFetchingNametag] = useState(false);
+
+  // State for processing status message
+  const [processingStatus, setProcessingStatus] = useState('');
 
   // Connect to L1 WebSocket on mount (needed for wallet scanning)
   useEffect(() => {
@@ -351,6 +355,37 @@ export function CreateWalletFlow() {
     }
   };
 
+  // Helper: Verify nametag is available via IPNS with retry (30s timeout)
+  const verifyNametagInIpnsWithRetry = async (
+    privateKey: string,
+    expectedNametag: string,
+    timeoutMs: number = 30000
+  ): Promise<boolean> => {
+    const startTime = Date.now();
+    const retryInterval = 3000; // 3 seconds between retries
+
+    while (Date.now() - startTime < timeoutMs) {
+      try {
+        console.log(`🔄 IPNS verification attempt for "${expectedNametag}"...`);
+        const result = await fetchNametagFromIpns(privateKey);
+        if (result.nametag === expectedNametag) {
+          return true; // Verified!
+        }
+        console.log(`🔄 IPNS returned "${result.nametag || 'null'}", expected "${expectedNametag}"`);
+      } catch (error) {
+        console.log('🔄 IPNS verification attempt failed, retrying...', error);
+      }
+
+      // Wait before next retry (unless we've exceeded timeout)
+      const remainingTime = timeoutMs - (Date.now() - startTime);
+      if (remainingTime > retryInterval) {
+        await new Promise(resolve => setTimeout(resolve, retryInterval));
+      }
+    }
+
+    return false; // Timeout reached
+  };
+
   const handleCreateKeys = async () => {
     // Prevent double-clicking
     if (isBusy) return;
@@ -385,11 +420,47 @@ export function CreateWalletFlow() {
 
     try {
       const cleanTag = nametagInput.trim().replace('@', '');
+
+      // Step 1: Mint nametag on blockchain and save to localStorage
+      setProcessingStatus('Minting Unicity ID on blockchain...');
+      console.log('🏷️ Step 1: Minting nametag on blockchain...');
       await mintNametag(cleanTag);
-      // Successfully minted nametag - reload to reinitialize with new nametag
+      console.log('✅ Nametag minted and saved to localStorage');
+
+      // Step 2: Sync to IPFS storage
+      setProcessingStatus('Syncing to IPFS storage...');
+      console.log('🏷️ Step 2: Syncing to IPFS...');
+      try {
+        const ipfsService = IpfsStorageService.getInstance(identityManager);
+        await ipfsService.syncNow();
+        console.log('✅ IPFS sync completed');
+      } catch (syncError) {
+        console.warn('⚠️ IPFS sync failed, continuing anyway:', syncError);
+      }
+
+      // Step 3: Verify nametag can be fetched from IPNS (30s timeout with retries)
+      setProcessingStatus('Verifying IPFS availability...');
+      console.log('🏷️ Step 3: Verifying nametag in IPNS (30s timeout)...');
+      const currentIdentity = await identityManager.getCurrentIdentity();
+      if (!currentIdentity) {
+        console.warn('⚠️ Could not get current identity for verification, proceeding anyway');
+      }
+      const verified = currentIdentity
+        ? await verifyNametagInIpnsWithRetry(currentIdentity.privateKey, cleanTag, 30000)
+        : false;
+
+      if (!verified) {
+        console.warn('⚠️ IPNS verification timed out after 30s, proceeding anyway');
+      } else {
+        console.log(`✅ Verified nametag "${cleanTag}" available via IPNS`);
+      }
+
+      // Step 4: Successfully completed - reload to reinitialize with new nametag
       // This ensures React Query refreshes and the app transitions to main wallet view
+      console.log('🏷️ Step 4: All steps completed, reloading...');
       window.location.reload();
     } catch (e: any) {
+      console.error('❌ Nametag minting failed:', e);
       setError(e.message || "Minting failed");
       setStep('nametag');
     } finally {
@@ -1538,40 +1609,53 @@ export function CreateWalletFlow() {
               Setting up Profile...
             </motion.h3>
 
-            {/* Progress Steps */}
+            {/* Dynamic Progress Status */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.3 }}
               className="space-y-2 md:space-y-2.5 text-xs md:text-sm"
             >
-              {[
-                { text: "Minting Nametag on Blockchain", delay: 0.4 },
-                { text: "Registering on Nostr Relay", delay: 0.6 },
-                { text: "Finalizing Wallet", delay: 0.8 }
-              ].map((step, index) => (
+              {/* Current status indicator */}
+              <motion.div
+                key={processingStatus}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="flex items-center gap-2 md:gap-3 text-neutral-700 dark:text-neutral-300 bg-orange-50 dark:bg-orange-900/20 px-3 md:px-4 py-2.5 md:py-3 rounded-lg backdrop-blur-sm border border-orange-200 dark:border-orange-700/30"
+              >
                 <motion.div
-                  key={index}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: step.delay }}
-                  className="flex items-center gap-2 md:gap-3 text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800/30 px-3 md:px-4 py-2 md:py-2.5 rounded-lg backdrop-blur-sm border border-neutral-200 dark:border-neutral-700/30"
-                >
-                  <motion.div
-                    animate={{
-                      scale: [1, 1.2, 1],
-                      opacity: [0.5, 1, 0.5]
-                    }}
-                    transition={{
-                      duration: 1.5,
-                      repeat: Infinity,
-                      delay: step.delay
-                    }}
-                    className="w-1.5 h-1.5 md:w-2 md:h-2 rounded-full bg-orange-500 dark:bg-orange-400 shrink-0"
-                  />
-                  <span className="text-left">{step.text}</span>
-                </motion.div>
-              ))}
+                  animate={{
+                    scale: [1, 1.2, 1],
+                    opacity: [0.5, 1, 0.5]
+                  }}
+                  transition={{
+                    duration: 1.5,
+                    repeat: Infinity
+                  }}
+                  className="w-2 h-2 md:w-2.5 md:h-2.5 rounded-full bg-orange-500 dark:bg-orange-400 shrink-0"
+                />
+                <span className="text-left font-medium">
+                  {processingStatus || 'Initializing...'}
+                </span>
+              </motion.div>
+
+              {/* Step indicators */}
+              <div className="flex items-center justify-center gap-2 mt-4">
+                <div className={`w-2 h-2 rounded-full transition-colors ${
+                  processingStatus.includes('Minting') ? 'bg-orange-500' :
+                  processingStatus.includes('Syncing') || processingStatus.includes('Verifying') ? 'bg-emerald-500' :
+                  'bg-neutral-300 dark:bg-neutral-600'
+                }`} />
+                <div className={`w-2 h-2 rounded-full transition-colors ${
+                  processingStatus.includes('Syncing') ? 'bg-orange-500' :
+                  processingStatus.includes('Verifying') ? 'bg-emerald-500' :
+                  'bg-neutral-300 dark:bg-neutral-600'
+                }`} />
+                <div className={`w-2 h-2 rounded-full transition-colors ${
+                  processingStatus.includes('Verifying') ? 'bg-orange-500' :
+                  'bg-neutral-300 dark:bg-neutral-600'
+                }`} />
+              </div>
             </motion.div>
 
             <motion.p
@@ -1580,7 +1664,9 @@ export function CreateWalletFlow() {
               transition={{ delay: 1 }}
               className="mt-4 md:mt-5 text-[10px] md:text-xs text-neutral-400 dark:text-neutral-500"
             >
-              This may take a few moments...
+              {processingStatus.includes('Verifying')
+                ? 'Verifying IPFS storage (up to 30 seconds)...'
+                : 'This may take a few moments...'}
             </motion.p>
           </motion.div>
         )}

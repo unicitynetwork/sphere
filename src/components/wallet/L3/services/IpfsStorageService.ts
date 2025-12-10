@@ -2019,6 +2019,13 @@ export class IpfsStorageService {
 
     console.log(`📦 IPNS sync: remote=${remoteCid?.slice(0, 16) || 'none'}..., local=${localCid?.slice(0, 16) || 'none'}...`);
 
+    // Track if IPNS needs recovery (IPNS resolution returned nothing but we have local data)
+    // In this case, we need to force IPNS republish even if CID is unchanged
+    const ipnsNeedsRecovery = !remoteCid && !!localCid;
+    if (ipnsNeedsRecovery) {
+      console.log(`📦 IPNS recovery needed - IPNS empty but local CID exists`);
+    }
+
     // 2. Determine which CID to fetch
     const cidToFetch = remoteCid || localCid;
 
@@ -2060,8 +2067,9 @@ export class IpfsStorageService {
 
     if (!remoteData) {
       // Could not fetch remote content - republish local
+      // Force IPNS publish if IPNS was empty (recovery scenario)
       console.warn(`📦 Failed to fetch remote content (CID: ${cidToFetch.slice(0, 16)}...), will republish local`);
-      return this.syncNow();
+      return this.syncNow({ forceIpnsPublish: ipnsNeedsRecovery });
     }
 
     // 5. Compare versions and decide action
@@ -2080,6 +2088,12 @@ export class IpfsStorageService {
       this.setLastCid(cidToFetch);
 
       console.log(`📦 Imported ${importedCount} token(s) from remote, now at v${remoteVersion}`);
+
+      // If IPNS needs recovery, force publish even though we just imported
+      if (ipnsNeedsRecovery) {
+        console.log(`📦 Content imported but IPNS needs recovery - publishing to IPNS`);
+        return this.syncNow({ forceIpnsPublish: true });
+      }
 
       return {
         success: true,
@@ -2103,12 +2117,19 @@ export class IpfsStorageService {
       // Only sync if local differs from remote (has unique tokens or better versions)
       if (this.localDiffersFromRemote(remoteData)) {
         console.log(`📦 Local differs from remote, syncing merged state...`);
-        return this.syncNow();
+        return this.syncNow({ forceIpnsPublish: ipnsNeedsRecovery });
       } else {
         console.log(`📦 Local now matches remote after import, no sync needed`);
         // Update local tracking to match remote
         this.setLastCid(cidToFetch);
         this.setVersionCounter(remoteVersion);
+
+        // If IPNS needs recovery, force publish even though content is synced
+        if (ipnsNeedsRecovery) {
+          console.log(`📦 Content synced but IPNS needs recovery - publishing to IPNS`);
+          return this.syncNow({ forceIpnsPublish: true });
+        }
+
         return {
           success: true,
           cid: cidToFetch,
@@ -2126,6 +2147,13 @@ export class IpfsStorageService {
       }
 
       console.log(`📦 Versions match (v${remoteVersion}), remote verified accessible`);
+
+      // If IPNS needs recovery, force publish even though content is synced
+      if (ipnsNeedsRecovery) {
+        console.log(`📦 Content synced but IPNS needs recovery - publishing to IPNS`);
+        return this.syncNow({ forceIpnsPublish: true });
+      }
+
       return {
         success: true,
         cid: cidToFetch,
@@ -2139,8 +2167,10 @@ export class IpfsStorageService {
   /**
    * Perform immediate sync to IPFS with TXF format and validation
    * Uses SyncCoordinator for cross-tab coordination to prevent race conditions
+   * @param options.forceIpnsPublish Force IPNS publish even if CID unchanged (for recovery when IPNS expired)
    */
-  async syncNow(): Promise<StorageResult> {
+  async syncNow(options?: { forceIpnsPublish?: boolean }): Promise<StorageResult> {
+    const { forceIpnsPublish = false } = options || {};
     // Use SyncCoordinator to acquire distributed lock across browser tabs
     const coordinator = getSyncCoordinator();
 
@@ -2330,9 +2360,10 @@ export class IpfsStorageService {
                 .sort()
                 .join(",");
 
-              if (localTokenIds === remoteTokenIds) {
+              if (localTokenIds === remoteTokenIds && !forceIpnsPublish) {
                 // No changes - remote was verified accessible by startup syncFromIpns()
                 // Skip re-upload for this wallet-updated event
+                // BUT: don't skip if forceIpnsPublish is set (IPNS recovery needed)
                 console.log(`📦 Remote is in sync (v${remoteVersion}) - no changes to upload`);
                 this.isSyncing = false;
                 coordinator.releaseLock(); // Release cross-tab lock on early return
@@ -2344,6 +2375,9 @@ export class IpfsStorageService {
                   version: remoteVersion,
                   tokenCount: validTokens.length,
                 };
+              }
+              if (localTokenIds === remoteTokenIds && forceIpnsPublish) {
+                console.log(`📦 Remote is in sync but IPNS recovery needed - continuing to publish IPNS`);
               }
               console.log(`📦 Remote version matches but local has token changes - uploading...`);
             }
@@ -2448,11 +2482,15 @@ export class IpfsStorageService {
         console.warn(`📦 Could not announce to DHT (non-fatal):`, provideError);
       }
 
-      // 4.5. Publish to IPNS only if CID changed
+      // 4.5. Publish to IPNS only if CID changed (or forced for IPNS recovery)
       const previousCid = this.getLastCid();
       let ipnsPublished = false;
       let ipnsPublishPending = false;
-      if (cidString !== previousCid) {
+      const shouldPublishIpns = cidString !== previousCid || forceIpnsPublish;
+      if (shouldPublishIpns) {
+        if (forceIpnsPublish && cidString === previousCid) {
+          console.log(`📦 Forcing IPNS republish (CID unchanged but IPNS may be expired)`);
+        }
         const ipnsResult = await this.publishToIpns(cid);
         if (ipnsResult) {
           ipnsPublished = true;
