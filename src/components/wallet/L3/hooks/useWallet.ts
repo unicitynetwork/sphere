@@ -85,6 +85,10 @@ export const useWallet = () => {
     enabled: !!identityQuery.data?.address,
   });
 
+  const checkNametagAvailability = async(nametag: string): Promise<boolean> => {
+    return await nametagService.isNametagAvailable(nametag);
+  }
+
   // Ensure registry is loaded before aggregating assets
   const registryQuery = useQuery({
     queryKey: KEYS.REGISTRY,
@@ -581,5 +585,6 @@ export const useWallet = () => {
     getSeedPhrase,
     getL1Address,
     getUnifiedKeyManager,
+    checkNametagAvailability,
   };
 };
