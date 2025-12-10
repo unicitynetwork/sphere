@@ -13,7 +13,14 @@ interface ChatHeaderProps {
   sidebarCollapsed?: boolean;
 }
 
-export function ChatHeader({ agent, rightContent, onToggleSidebar, onExpandSidebar, showMenuButton, sidebarCollapsed }: ChatHeaderProps) {
+export function ChatHeader({
+  agent,
+  rightContent,
+  onToggleSidebar,
+  onExpandSidebar,
+  showMenuButton,
+  sidebarCollapsed,
+}: ChatHeaderProps) {
   const navigate = useNavigate();
   const [showAgentPicker, setShowAgentPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -113,7 +120,13 @@ export function ChatHeader({ agent, rightContent, onToggleSidebar, onExpandSideb
             </div>
           </div>
         </div>
-        {rightContent}
+
+        {/* Right side: custom content */}
+        {rightContent && (
+          <div className="flex items-center gap-2">
+            {rightContent}
+          </div>
+        )}
       </div>
     </div>
   );

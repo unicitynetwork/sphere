@@ -1,15 +1,9 @@
 import { useState } from 'react';
-import { Trophy, X, Wallet, CheckCircle } from 'lucide-react';
+import { X, Wallet, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../config/activities';
-import { v4 as uuidv4 } from 'uuid';
 import { mockMatches, type Match } from '../../data/agentsMockData';
-import { AgentChat, type SidebarItem } from './shared';
-
-// Bet item for sidebar
-interface BetItem extends SidebarItem {
-  status: 'pending' | 'won' | 'lost';
-}
+import { AgentChat } from './shared';
 
 // Match card data
 interface MatchCardData {
@@ -21,11 +15,6 @@ interface SportChatProps {
 }
 
 export function SportChat({ agent }: SportChatProps) {
-  const [bets, setBets] = useState<BetItem[]>(() => {
-    const stored = localStorage.getItem('sphere_sport_bets');
-    return stored ? JSON.parse(stored) : [];
-  });
-
   // Custom bet modal state
   const [showBetModal, setShowBetModal] = useState(false);
   const [pendingMatch, setPendingMatch] = useState<Match | null>(null);
@@ -72,17 +61,10 @@ export function SportChat({ agent }: SportChatProps) {
     setBetStep('processing');
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    const newBet: BetItem = {
-      id: uuidv4(),
-      title: `${pendingMatch.team1} vs ${pendingMatch.team2}`,
-      image: pendingMatch.image,
-      timestamp: Date.now(),
-      status: 'pending',
-      amount: parseFloat(betAmount),
-    };
-    setBets(prev => [newBet, ...prev]);
-
     setBetStep('success');
+
+    // TODO: Add bet to backend when ready
+
     await new Promise(resolve => setTimeout(resolve, 1500));
     setShowBetModal(false);
     setPendingMatch(null);
@@ -94,26 +76,8 @@ export function SportChat({ agent }: SportChatProps) {
   };
 
   return (
-    <AgentChat<MatchCardData, BetItem>
+    <AgentChat<MatchCardData>
       agent={agent}
-      sidebarConfig={{
-        title: 'My Bets',
-        emptyText: 'No bets yet',
-        emptyIcon: <Trophy className="w-8 h-8 mx-auto opacity-50" />,
-        items: bets,
-        setItems: setBets,
-        storageKey: 'sphere_sport_bets',
-        renderItem: (bet) => (
-          <>
-            <img src={bet.image} alt="" className="w-12 h-12 rounded-lg object-cover" />
-            <div className="flex-1 min-w-0">
-              <p className="text-neutral-900 dark:text-white text-sm font-medium truncate">{bet.title}</p>
-              <p className="text-emerald-600 dark:text-emerald-400 text-xs">{bet.amount} USDT</p>
-              <p className="text-neutral-500 text-xs">{new Date(bet.timestamp).toLocaleDateString()}</p>
-            </div>
-          </>
-        ),
-      }}
       getMockResponse={getMockResponse}
       renderMessageCard={(cardData) => (
         <div className="mt-4 rounded-xl overflow-hidden border border-neutral-300 dark:border-neutral-600/50">
@@ -133,30 +97,6 @@ export function SportChat({ agent }: SportChatProps) {
       actionConfig={{
         label: 'Place Bet',
         onAction: handlePlaceBet,
-      }}
-      detailsConfig={{
-        title: 'Bet Details',
-        renderContent: (bet) => (
-          <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700">
-            <img src={bet.image} alt="" className="w-full h-40 object-cover" />
-            <div className="p-4 bg-neutral-100 dark:bg-neutral-800">
-              <p className="text-neutral-900 dark:text-white font-medium text-lg">{bet.title}</p>
-              <div className="flex items-center justify-between mt-4">
-                <p className="text-emerald-600 dark:text-emerald-400 text-xl font-bold">{bet.amount} USDT</p>
-                <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                  bet.status === 'won' ? 'bg-green-500/20 text-green-400' :
-                  bet.status === 'lost' ? 'bg-red-500/20 text-red-400' :
-                  'bg-yellow-500/20 text-yellow-400'
-                }`}>
-                  {bet.status.charAt(0).toUpperCase() + bet.status.slice(1)}
-                </span>
-              </div>
-              <p className="text-neutral-500 text-sm mt-3">
-                {new Date(bet.timestamp).toLocaleString()}
-              </p>
-            </div>
-          </div>
-        ),
       }}
       bgGradient={{ from: 'bg-emerald-500/5', to: 'bg-teal-500/5' }}
       additionalContent={
