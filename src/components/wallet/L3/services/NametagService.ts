@@ -40,6 +40,14 @@ export class NametagService {
     return NametagService.instance;
   }
 
+  async isNametagAvailable(nametag: string): Promise<boolean> {
+    const client = ServiceProvider.stateTransitionClient;
+    const rootTrustBase = ServiceProvider.getRootTrustBase();
+    const nametagTokenId = await TokenId.fromNameTag(nametag);
+
+    return await !client.isMinted(rootTrustBase, nametagTokenId);
+  }
+
   async mintNametagAndPublish(nametag: string): Promise<MintResult> {
     try {
       const cleanTag = nametag.replace("@unicity", "").replace("@", "").trim();
