@@ -22,6 +22,13 @@ import {
   generateAddressFromMasterKey,
   generateHDAddress,
 } from "../../L1/sdk/address";
+import {
+  exportWalletToJSON,
+  downloadWalletJSON,
+  importWalletFromJSON,
+  type WalletJSON,
+  type WalletJSONExportOptions,
+} from "../../L1/sdk/import-export";
 
 const ec = new elliptic.ec("secp256k1");
 
@@ -484,19 +491,6 @@ export class UnifiedKeyManager {
   }
 
   /**
-   * Derive a deterministic nonce for L3 identity creation
-   * Uses HMAC-SHA256 to derive nonce from private key
-   */
-  deriveL3Nonce(privateKey: string, index: number): string {
-    const input = `unicity-nonce-${index}`;
-    const nonce = CryptoJS.HmacSHA256(
-      CryptoJS.enc.Utf8.parse(input),
-      CryptoJS.enc.Hex.parse(privateKey)
-    ).toString();
-    return nonce;
-  }
-
-  /**
    * Export wallet to txt format (compatible with webwallet)
    */
   exportToTxt(): string {
@@ -524,6 +518,109 @@ export class UnifiedKeyManager {
     }
 
     return output;
+  }
+
+  /**
+   * Export wallet to JSON format (new standard)
+   *
+   * This is the recommended export format as it:
+   * - Preserves mnemonic phrase if available
+   * - Supports encryption with password
+   * - Includes verification address
+   * - Maintains source and derivation mode information
+   */
+  exportToJSON(options: WalletJSONExportOptions = {}): WalletJSON {
+    if (!this.masterKey) {
+      throw new Error("Wallet not initialized");
+    }
+
+    // Build addresses array for export
+    const address0 = this.deriveAddress(0);
+    const addresses = [{
+      address: address0.l1Address,
+      publicKey: address0.publicKey,
+      path: address0.path,
+      index: address0.index,
+    }];
+
+    // Add more addresses if requested
+    const addressCount = options.addressCount || 1;
+    for (let i = 1; i < addressCount; i++) {
+      const addr = this.deriveAddress(i);
+      addresses.push({
+        address: addr.l1Address,
+        publicKey: addr.publicKey,
+        path: addr.path,
+        index: addr.index,
+      });
+    }
+
+    // Build wallet object for export
+    const wallet = {
+      masterPrivateKey: this.masterKey,
+      chainCode: this.chainCode || undefined,
+      masterChainCode: this.chainCode || undefined,
+      addresses,
+      isBIP32: this.derivationMode === "bip32",
+      isImportedAlphaWallet: this.source === "file",
+      descriptorPath: this.derivationMode === "bip32" ? "44'/0'/0'" : null,
+    };
+
+    return exportWalletToJSON({
+      wallet,
+      mnemonic: this.mnemonic || undefined,
+      importSource: this.source === "file" ? "file" : undefined,
+      options,
+    });
+  }
+
+  /**
+   * Download wallet as JSON file
+   */
+  downloadJSON(filename?: string, options: WalletJSONExportOptions = {}): void {
+    const json = this.exportToJSON(options);
+    const defaultFilename = this.mnemonic
+      ? "alpha_wallet_mnemonic_backup.json"
+      : "alpha_wallet_backup.json";
+    downloadWalletJSON(json, filename || defaultFilename);
+  }
+
+  /**
+   * Import wallet from JSON content
+   * Returns the mnemonic if present in the JSON (for recovery purposes)
+   */
+  async importFromJSON(
+    jsonContent: string,
+    password?: string
+  ): Promise<{ success: boolean; mnemonic?: string; error?: string }> {
+    const result = await importWalletFromJSON(jsonContent, password);
+
+    if (!result.success || !result.wallet) {
+      return { success: false, error: result.error };
+    }
+
+    // If mnemonic is available (either plaintext or decrypted), use createFromMnemonic
+    if (result.mnemonic) {
+      try {
+        await this.createFromMnemonic(result.mnemonic);
+        console.log("🔐 Wallet restored from JSON with mnemonic");
+        return { success: true, mnemonic: result.mnemonic };
+      } catch (e) {
+        return {
+          success: false,
+          error: `Failed to restore from mnemonic: ${e instanceof Error ? e.message : String(e)}`,
+        };
+      }
+    }
+
+    // Otherwise, import as file-based wallet (no mnemonic available)
+    const chainCode = result.wallet.chainCode || result.wallet.masterChainCode || null;
+    const mode = result.derivationMode || (chainCode ? "bip32" : "wif_hmac");
+
+    await this.importWithMode(result.wallet.masterPrivateKey, chainCode, mode);
+    console.log(`🔐 Wallet restored from JSON (source: ${result.source}, mode: ${mode})`);
+
+    return { success: true };
   }
 
   /**

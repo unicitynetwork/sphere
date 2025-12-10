@@ -1,7 +1,5 @@
 import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
-import { TokenId } from "@unicitylabs/state-transition-sdk/lib/token/TokenId";
 import { TokenType } from "@unicitylabs/state-transition-sdk/lib/token/TokenType";
-import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
 import * as bip39 from "bip39";
 import CryptoJS from "crypto-js";
 import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
@@ -15,9 +13,16 @@ const UNICITY_TOKEN_TYPE_HEX =
   "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9ef0efbe397867509";
 const DEFAULT_SESSION_KEY = "user-pin-1234";
 
+/**
+ * User identity for L3 Unicity wallet.
+ *
+ * NOTE: The wallet address is derived using UnmaskedPredicateReference (no nonce/salt).
+ * This creates a stable, reusable DirectAddress from publicKey + tokenType.
+ * The SDK's UnmaskedPredicate (which uses salt) is only used for token ownership
+ * predicates during transfers, where the salt comes from the transaction itself.
+ */
 export interface UserIdentity {
   privateKey: string;
-  nonce: string;
   publicKey: string;
   address: string;
   mnemonic?: string;
@@ -99,19 +104,15 @@ export class IdentityManager {
     }
 
     const derived = keyManager.deriveAddress(index);
-    const nonce = keyManager.deriveL3Nonce(derived.privateKey, index);
-
     const secret = Buffer.from(derived.privateKey, "hex");
-    const nonceBuffer = Buffer.from(nonce, "hex");
 
-    const l3Address = await this.deriveL3Address(secret, nonceBuffer);
+    const l3Address = await this.deriveL3Address(secret);
 
     const signingService = await SigningService.createFromSecret(secret);
     const publicKey = Buffer.from(signingService.publicKey).toString("hex");
 
     const identity: UserIdentity = {
       privateKey: derived.privateKey,
-      nonce: nonce,
       publicKey: publicKey,
       address: l3Address,
       mnemonic: mnemonic || keyManager.getMnemonic() || undefined,
@@ -128,32 +129,21 @@ export class IdentityManager {
   }
 
   /**
-   * Derive identity from a raw private key and index
+   * Derive identity from a raw private key
    * Useful for external integrations
    */
-  async deriveIdentityFromPrivateKey(
-    privateKey: string,
-    index: number = 0
-  ): Promise<UserIdentity> {
-    const nonce = CryptoJS.HmacSHA256(
-      CryptoJS.enc.Utf8.parse(`unicity-nonce-${index}`),
-      CryptoJS.enc.Hex.parse(privateKey)
-    ).toString();
-
+  async deriveIdentityFromPrivateKey(privateKey: string): Promise<UserIdentity> {
     const secret = Buffer.from(privateKey, "hex");
-    const nonceBuffer = Buffer.from(nonce, "hex");
 
-    const l3Address = await this.deriveL3Address(secret, nonceBuffer);
+    const l3Address = await this.deriveL3Address(secret);
 
     const signingService = await SigningService.createFromSecret(secret);
     const publicKey = Buffer.from(signingService.publicKey).toString("hex");
 
     return {
       privateKey,
-      nonce,
       publicKey,
       address: l3Address,
-      addressIndex: index,
     };
   }
 
@@ -175,26 +165,26 @@ export class IdentityManager {
   }
 
   /**
-   * Derive L3 Unicity address from secret and nonce
+   * Derive L3 Unicity address from secret
+   * Uses UnmaskedPredicateReference (no nonce) for a stable, reusable address
    */
-  private async deriveL3Address(secret: Buffer, nonce: Buffer): Promise<string> {
+  private async deriveL3Address(secret: Buffer): Promise<string> {
     try {
       const signingService = await SigningService.createFromSecret(secret);
 
       const tokenTypeBytes = Buffer.from(UNICITY_TOKEN_TYPE_HEX, "hex");
       const tokenType = new TokenType(tokenTypeBytes);
 
-      const tokenId = new TokenId(Buffer.alloc(32));
-
-      const predicate = await UnmaskedPredicate.create(
-        tokenId,
+      // Use UnmaskedPredicateReference for stable wallet address (no nonce)
+      // This matches getWalletAddress() and is the correct approach per SDK
+      const predicateRef = UnmaskedPredicateReference.create(
         tokenType,
-        signingService,
-        HashAlgorithm.SHA256,
-        nonce
+        signingService.algorithm,
+        signingService.publicKey,
+        HashAlgorithm.SHA256
       );
 
-      return (await (await predicate.getReference()).toAddress()).toString();
+      return (await (await predicateRef).toAddress()).toString();
     } catch (error) {
       console.error("Error deriving address", error);
       throw error;
@@ -244,6 +234,8 @@ export class IdentityManager {
         Buffer.from(UNICITY_TOKEN_TYPE_HEX, "hex")
       );
 
+      // UnmaskedPredicateReference creates a stable, reusable DirectAddress
+      // This does NOT use nonce - the address is derived only from publicKey + tokenType
       const predicateRef = UnmaskedPredicateReference.create(
         tokenType,
         signingService.algorithm,

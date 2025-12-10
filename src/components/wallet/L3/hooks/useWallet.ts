@@ -85,6 +85,19 @@ export const useWallet = () => {
     enabled: !!identityQuery.data?.address,
   });
 
+  // Initialize IPFS storage service ONLY when fully authenticated
+  // This prevents race condition where old wallet data is synced while user is on onboarding screen
+  useEffect(() => {
+    const identity = identityQuery.data;
+    const nametag = nametagQuery.data;
+
+    // Only start auto-sync when user is fully authenticated (has both identity AND nametag)
+    if (identity && nametag) {
+      const storageService = IpfsStorageService.getInstance(identityManager);
+      storageService.startAutoSync();
+    }
+  }, [identityQuery.data, nametagQuery.data, identityManager]);
+
   // Ensure registry is loaded before aggregating assets
   const registryQuery = useQuery({
     queryKey: KEYS.REGISTRY,

@@ -159,7 +159,7 @@ export class NostrService {
     });
   }
 
-  private handleSubscriptionEvent(event: Event, isWalletEvent: boolean) {
+  private async handleSubscriptionEvent(event: Event, isWalletEvent: boolean) {
     // Deduplicate by event ID (persistent storage - works across page reloads)
     if (this.isEventProcessed(event.id)) {
       console.log(`⏭️ Event ${event.id.slice(0, 8)} already processed (persistent check), skipping`);
@@ -179,13 +179,19 @@ export class NostrService {
 
     console.log(`📥 Processing ${isWalletEvent ? 'wallet' : 'chat'} event kind=${event.kind}`);
 
-    // Mark as processed BEFORE handling to prevent race conditions
-    this.markEventAsProcessed(event.id);
+    // Process the event and only mark as processed AFTER successful handling
+    // This prevents token loss if browser closes during processing
+    const success = await this.handleIncomingEvent(event);
 
-    this.handleIncomingEvent(event);
+    if (success) {
+      this.markEventAsProcessed(event.id);
+      console.log(`✅ Event ${event.id.slice(0, 8)} processed successfully`);
+    } else {
+      console.warn(`⚠️ Event ${event.id.slice(0, 8)} processing failed, will retry on next connect`);
+    }
 
-    // Update lastSync only for wallet events
-    if (isWalletEvent) {
+    // Update lastSync only for wallet events that were successfully processed
+    if (isWalletEvent && success) {
       this.updateLastSync(event.created_at);
     }
   }
@@ -256,19 +262,22 @@ export class NostrService {
     return this.processedEventIds.has(eventId);
   }
 
-  private async handleIncomingEvent(event: Event) {
+  private async handleIncomingEvent(event: Event): Promise<boolean> {
     console.log(
       `Received event kind=${event.kind} from=${event.pubkey.slice(0, 16)}`
     );
     if (event.kind === EventKinds.TOKEN_TRANSFER) {
-      this.handleTokenTransfer(event);
+      return await this.handleTokenTransfer(event);
     } else if (event.kind === EventKinds.GIFT_WRAP) {
       console.log("Received NIP-17 gift-wrapped message");
       this.handleGiftWrappedMessage(event);
+      return true; // Chat messages always succeed (stored in local chat repo)
     } else if (event.kind === EventKinds.PAYMENT_REQUEST) {
       this.handlePaymentRequest(event);
+      return true; // Payment requests are in-memory only
     } else {
       console.log(`Unhandled event kind - ${event.kind}`);
+      return true; // Unknown events - don't retry
     }
   }
 
@@ -350,12 +359,12 @@ export class NostrService {
     return this.paymentRequests;
   }
 
-  private async handleTokenTransfer(event: Event) {
+  private async handleTokenTransfer(event: Event): Promise<boolean> {
     try {
       const keyManager = await this.getKeyManager();
       if (!keyManager) {
         console.error("KeyManager is undefined");
-        return;
+        return false;
       }
 
       const tokenJson = await TokenTransferProtocol.parseTokenTransfer(
@@ -377,16 +386,18 @@ export class NostrService {
           payloadObj = JSON.parse(tokenJson);
         } catch (error) {
           console.warn("Failed to parse JSON:", error);
-          return;
+          return false;
         }
-        this.handleProperTokenTransfer(payloadObj, event.pubkey);
+        return await this.handleProperTokenTransfer(payloadObj, event.pubkey);
       }
+      return false; // Unknown transfer format
     } catch (error) {
       console.error("Failed to handle token transfer", error);
+      return false;
     }
   }
 
-  private async handleProperTokenTransfer(payloadObj: Record<string, any>, senderPubkey: string) {
+  private async handleProperTokenTransfer(payloadObj: Record<string, any>, senderPubkey: string): Promise<boolean> {
     try {
       let sourceTokenInput = payloadObj["sourceToken"];
       let transferTxInput = payloadObj["transferTx"];
@@ -409,15 +420,16 @@ export class NostrService {
 
       if (!sourceTokenInput || !transferTxInput) {
         console.error("Missing sourceToken or transferTx in payload");
-        return;
+        return false;
       }
 
       const sourceToken = await Token.fromJSON(sourceTokenInput);
       const transferTx = await TransferTransaction.fromJSON(transferTxInput);
 
-      this.finalizeTransfer(sourceToken, transferTx, senderPubkey);
+      return await this.finalizeTransfer(sourceToken, transferTx, senderPubkey);
     } catch (error) {
       console.error("Error handling proper token transfer", error);
+      return false;
     }
   }
 
@@ -425,7 +437,7 @@ export class NostrService {
     sourceToken: Token<any>,
     transferTx: TransferTransaction,
     senderPubkey: string
-  ) {
+  ): Promise<boolean> {
     try {
       const recipientAddress = transferTx.data.recipient;
       console.log(`Recipient address: ${recipientAddress}`);
@@ -441,7 +453,7 @@ export class NostrService {
 
         if (allNametags.length === 0) {
           console.error("No nametags configured for this wallet");
-          return;
+          return false;
         }
 
         let myNametagToken: Token<any> | null = null;
@@ -457,7 +469,7 @@ export class NostrService {
           console.error("Transfer is not for any of my nametags!");
           console.error(`Got: ${recipientAddress.address}`);
           console.error(`My nametags: ${allNametags.toString()}`);
-          return;
+          return false;
         }
 
         console.log("Transfer is for my nametag!");
@@ -468,7 +480,7 @@ export class NostrService {
           console.error(
             "No wallet identity found, can't finalize the transfer!"
           );
-          return;
+          return false;
         }
 
         const secret = Buffer.from(identity.privateKey, "hex");
@@ -498,19 +510,20 @@ export class NostrService {
         );
 
         console.log("Token finalized successfully!");
-        this.saveReceivedToken(finalizedToken, senderPubkey);
+        return this.saveReceivedToken(finalizedToken, senderPubkey);
       } else {
         console.log(
           "Transfer is to DIRECT address - saving without finalization"
         );
-        this.saveReceivedToken(sourceToken, senderPubkey);
+        return this.saveReceivedToken(sourceToken, senderPubkey);
       }
     } catch (error) {
       console.error("Error occured while finalizing transfer:", error);
+      return false;
     }
   }
 
-  private saveReceivedToken(token: Token<any>, senderPubkey: string) {
+  private saveReceivedToken(token: Token<any>, senderPubkey: string): boolean {
     let amount = undefined;
     let coinId = undefined;
     let symbol = undefined;
@@ -558,7 +571,7 @@ export class NostrService {
 
     if (!coinId || amount === "0" || coinId === "0" || coinId === "undefined") {
       console.error("❌ Invalid token data. Skipping.");
-      return;
+      return false;
     }
 
     if (coinId) {
@@ -587,6 +600,8 @@ export class NostrService {
     });
 
     walletRepo.addToken(uiToken);
+    console.log(`💾 Token saved to wallet: ${uiToken.id}`);
+    return true;
   }
 
   async queryPubkeyByNametag(nametag: string): Promise<string | null> {

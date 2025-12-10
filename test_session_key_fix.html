@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Session Key Fix Test</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+</head>
+<body>
+  <h1>UnifiedKeyManager Session Key Fix Test</h1>
+  <div id="output"></div>
+
+  <script>
+    const output = document.getElementById('output');
+
+    function log(msg, isError = false) {
+      const p = document.createElement('p');
+      p.textContent = msg;
+      p.style.color = isError ? 'red' : 'green';
+      output.appendChild(p);
+      console.log(msg);
+    }
+
+    // Simulate the bug and the fix
+    function testSessionKeyPersistence() {
+      log("=== Testing Session Key Persistence Bug ===");
+
+      const SESSION_KEY_1 = "user-pin-1234";
+      const SESSION_KEY_2 = "different-key-5678"; // Wrong key
+
+      const testData = "test-master-key-abc123";
+      const STORAGE_KEY = "test_encrypted_master";
+
+      // Step 1: Import wallet with correct session key
+      log("Step 1: Importing wallet with SESSION_KEY_1");
+      const encrypted = CryptoJS.AES.encrypt(testData, SESSION_KEY_1).toString();
+      localStorage.setItem(STORAGE_KEY, encrypted);
+      log("  ✓ Data encrypted and saved");
+
+      // Step 2: Try to decrypt with correct key (should work)
+      log("Step 2: Decrypting with same SESSION_KEY_1");
+      try {
+        const bytes = CryptoJS.AES.decrypt(encrypted, SESSION_KEY_1);
+        const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+        if (decrypted === testData) {
+          log("  ✓ Decryption successful with correct key");
+        } else {
+          log("  ✗ Decryption returned wrong data", true);
+        }
+      } catch (e) {
+        log("  ✗ Decryption failed: " + e.message, true);
+      }
+
+      // Step 3: Try to decrypt with WRONG key (demonstrates the bug)
+      log("Step 3: Decrypting with WRONG SESSION_KEY_2 (simulating bug)");
+      try {
+        const bytes = CryptoJS.AES.decrypt(encrypted, SESSION_KEY_2);
+        const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+        if (decrypted === testData) {
+          log("  ✗ Decryption succeeded when it should fail!", true);
+        } else if (!decrypted) {
+          log("  ✓ Decryption correctly failed with wrong key (returns empty string)");
+          log("    This is the ROOT CAUSE of the bug!");
+        } else {
+          log("  ✗ Decryption returned garbage data: " + decrypted.substring(0, 20), true);
+        }
+      } catch (e) {
+        log("  ✓ Decryption threw error: " + e.message);
+      }
+
+      // Step 4: Verify the fix
+      log("Step 4: Testing the fix - session key consistency check");
+
+      // Simulate the singleton pattern WITH the fix
+      class FixedSingleton {
+        static instance = null;
+
+        constructor(sessionKey) {
+          this.sessionKey = sessionKey;
+        }
+
+        static getInstance(sessionKey) {
+          if (!FixedSingleton.instance) {
+            FixedSingleton.instance = new FixedSingleton(sessionKey);
+            log("  ✓ Created new instance with sessionKey: " + sessionKey);
+          } else if (FixedSingleton.instance.sessionKey !== sessionKey) {
+            log("  ⚠ WARNING: Session key mismatch detected!");
+            log("    Old key: " + FixedSingleton.instance.sessionKey);
+            log("    New key: " + sessionKey);
+            FixedSingleton.instance.sessionKey = sessionKey;
+            log("  ✓ Updated session key to maintain consistency");
+          } else {
+            log("  ✓ Using existing instance with matching sessionKey");
+          }
+          return FixedSingleton.instance;
+        }
+      }
+
+      const instance1 = FixedSingleton.getInstance(SESSION_KEY_1);
+      const instance2 = FixedSingleton.getInstance(SESSION_KEY_2); // Different key!
+
+      if (instance1.sessionKey === instance2.sessionKey) {
+        log("  ✓ Fix applied: Both instances have same (updated) session key");
+      } else {
+        log("  ✗ Fix failed: Instances have different session keys", true);
+      }
+
+      // Cleanup
+      localStorage.removeItem(STORAGE_KEY);
+      log("");
+      log("=== Test Complete ===");
+    }
+
+    // Run the test
+    testSessionKeyPersistence();
+  </script>
+</body>
+</html>

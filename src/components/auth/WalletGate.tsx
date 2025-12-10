@@ -1,8 +1,10 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
 import { useWallet } from "../wallet/L3/hooks/useWallet";
 import { CreateWalletFlow } from "../wallet/L3/onboarding/CreateWalletFlow";
+import { NostrPinPublisher } from "../wallet/L3/services/NostrPinPublisher";
+import { NOSTR_PIN_CONFIG } from "../../config/nostrPin.config";
 
 interface WalletGateProps {
   children: ReactNode;
@@ -82,6 +84,21 @@ export function WalletGate({ children }: WalletGateProps) {
 
   const isLoading = isLoadingIdentity || (!!identity && isLoadingNametag);
   const isAuthenticated = !!identity && !!nametag;
+
+  // Start NostrPinPublisher when authenticated
+  // This enables automatic CID announcements to Nostr for pinning
+  useEffect(() => {
+    if (isAuthenticated && NOSTR_PIN_CONFIG.enabled) {
+      const publisher = NostrPinPublisher.getInstance();
+      publisher.start().catch((err) => {
+        console.error("Failed to start NostrPinPublisher:", err);
+      });
+
+      return () => {
+        publisher.stop();
+      };
+    }
+  }, [isAuthenticated]);
 
   if (isLoading) {
     return <LoadingScreen />;
