@@ -29,10 +29,11 @@ export class RegistryService {
 
     private definitionsById: Map<string, TokenDefinition> = new Map();
     private isInitialized = false;
+    private initPromise: Promise<void> | null = null;
 
     private constructor() {
         this.loadFromBundled();
-        this.init();
+        this.initPromise = this.init();
     }
 
     static getInstance(): RegistryService {
@@ -64,10 +65,19 @@ export class RegistryService {
 
         if (!cachedData || isStale) {
             console.log("Registry: Cache stale or missing, fetching from GitHub...");
-            this.fetchAndCacheRegistry();
+            await this.fetchAndCacheRegistry();
         }
-        
+
         this.isInitialized = true;
+    }
+
+    /**
+     * Ensure registry is initialized before use
+     */
+    async ensureInitialized(): Promise<void> {
+        if (this.initPromise) {
+            await this.initPromise;
+        }
     }
 
     private loadFromBundled() {

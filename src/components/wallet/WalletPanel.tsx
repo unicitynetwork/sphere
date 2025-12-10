@@ -1,5 +1,5 @@
 import { Wallet, Eye, EyeOff, Layers, Network, Copy, Check } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { L1WalletView } from './L1/views/L1WalletView';
 import { L3WalletView } from './L3/views/L3WalletView';
@@ -33,6 +33,20 @@ export function WalletPanel() {
       console.error('Failed to copy nametag:', err);
     }
   };
+
+  // Auto-switch to L3 when payment request is received
+  useEffect(() => {
+    const handlePaymentRequest = () => {
+      console.log("💰 Payment request received, switching to L3...");
+      handleLayerChange('L3');
+    };
+
+    window.addEventListener('payment-requests-updated', handlePaymentRequest);
+
+    return () => {
+      window.removeEventListener('payment-requests-updated', handlePaymentRequest);
+    };
+  }, []);
 
   return (
     <div className="bg-white/60 dark:bg-neutral-900/90 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden h-full relative lg:shadow-xl dark:lg:shadow-2xl flex flex-col transition-all duration-500 theme-transition">
@@ -125,7 +139,7 @@ export function WalletPanel() {
         <motion.div
           initial={false}
           animate={{ x: activeLayer === 'L1' ? '0%' : '-100%' }}
-          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
           className="absolute inset-0"
           style={{ pointerEvents: activeLayer === 'L1' ? 'auto' : 'none' }}
         >
@@ -134,7 +148,7 @@ export function WalletPanel() {
         <motion.div
           initial={false}
           animate={{ x: activeLayer === 'L3' ? '0%' : '100%' }}
-          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
           className="absolute inset-0"
           style={{ pointerEvents: activeLayer === 'L3' ? 'auto' : 'none' }}
         >

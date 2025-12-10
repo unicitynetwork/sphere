@@ -49,7 +49,7 @@ import { v4 as uuidv4 } from "uuid";
 
 const UNICITY_RELAYS = [
   "wss://nostr-relay.testnet.unicity.network",
-  "ws://unicity-nostr-relay-20250927-alb-1919039002.me-central-1.elb.amazonaws.com:8080",
+  // "ws://unicity-nostr-relay-20250927-alb-1919039002.me-central-1.elb.amazonaws.com:8080",
 ];
 
 const STORAGE_KEY_LAST_SYNC = "unicity_nostr_last_sync";
@@ -115,7 +115,7 @@ export class NostrService {
 
     console.log("📡 Connecting to Nostr relays...");
     try {
-      await this.client.connect(UNICITY_RELAYS[0]);
+      await this.client.connect(...UNICITY_RELAYS);
       this.isConnected = true;
       console.log("✅ Connected to Nostr relays");
 
