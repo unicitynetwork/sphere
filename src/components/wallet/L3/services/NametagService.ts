@@ -41,11 +41,12 @@ export class NametagService {
   }
 
   async isNametagAvailable(nametag: string): Promise<boolean> {
-    const client = ServiceProvider.stateTransitionClient;
-    const rootTrustBase = ServiceProvider.getRootTrustBase();
     const nametagTokenId = await TokenId.fromNameTag(nametag);
-
-    return await !client.isMinted(rootTrustBase, nametagTokenId);
+    const isAlreadyMinted = await ServiceProvider.stateTransitionClient.isMinted(
+        ServiceProvider.getRootTrustBase(),
+        nametagTokenId
+    );
+    return !isAlreadyMinted;
   }
 
   async mintNametagAndPublish(nametag: string): Promise<MintResult> {

@@ -226,20 +226,17 @@ export function CreateWalletFlow() {
 
     setIsBusy(true);
     setError(null);
-    setStep('processing');
 
     try {
       const cleanTag = nametagInput.trim().replace('@', '');
 
       const isNametagAvailable = await checkNametagAvailability(cleanTag);
-      console.log(isNametagAvailable)
       if(!isNametagAvailable) {
-        console.log("Setting error")
         setError(`${cleanTag} already exists.`);
-        setStep('nametag')
         return;
       }
 
+      setStep('processing');
       await mintNametag(cleanTag);
       // Successfully minted nametag - reload to reinitialize with new nametag
       // This ensures React Query refreshes and the app transitions to main wallet view
