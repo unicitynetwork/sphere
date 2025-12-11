@@ -30,6 +30,7 @@ interface DerivedAddressInfo {
   path: string;
   hasNametag: boolean;
   existingNametag?: string;
+  isChange?: boolean;           // True if this is a change address (chain=1)
   // Full nametag data for localStorage persistence
   nametagData?: {
     name: string;
@@ -305,38 +306,50 @@ export function CreateWalletFlow() {
       const l1Wallet = loadWalletFromStorage("main");
 
       if (l1Wallet && l1Wallet.addresses && l1Wallet.addresses.length > 0) {
-        // Use addresses from L1 wallet storage
-        // Filter out change addresses - L3 identities only exist for external addresses
-        const externalAddresses = l1Wallet.addresses.filter(addr => !addr.isChange);
-        console.log(`📋 Loading ${externalAddresses.length} external addresses from L1 wallet storage (${l1Wallet.addresses.length - externalAddresses.length} change addresses skipped)`);
+        // Use ALL addresses from L1 wallet storage (both external and change)
+        // External and change addresses have DIFFERENT L3 identities
+        const allAddresses = l1Wallet.addresses;
+        const changeCount = allAddresses.filter(addr => addr.isChange).length;
+        console.log(`📋 Loading ${allAddresses.length} addresses from L1 wallet storage (${allAddresses.length - changeCount} external, ${changeCount} change)`);
         const results: DerivedAddressInfo[] = [];
 
-        // For each external L1 address, derive L3 identity using the address's actual index
-        // This matches how deriveIdentityFromUnifiedWallet works and ensures correct nametag lookup
-        for (const addr of externalAddresses) {
-          // Use the L1 address's actual index for L3 derivation
+        // For each L1 address, derive L3 identity using the address's actual index AND isChange flag
+        // External and change addresses have DIFFERENT L3 identities (different chain in BIP32 path)
+        for (const addr of allAddresses) {
+          // Use the L1 address's actual index AND isChange for L3 derivation
           // This is critical: addr.index corresponds to the BIP32 derivation index
+          // And isChange determines the chain (0=external, 1=change)
           const l3Index = addr.index;
-          const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(l3Index);
+          const isChange = addr.isChange ?? false;
+          const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(l3Index, undefined, isChange);
           const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
 
-          console.log(`🔍 Address ${l3Index}: L1=${addr.address.slice(0, 20)}... L3=${l3Identity.address.slice(0, 20)}... hasNametag=${!!existingNametag} nametag=${existingNametag?.name}`);
+          const chainLabel = isChange ? "change" : "external";
+          console.log(`🔍 Address ${l3Index} (${chainLabel}): L1=${addr.address.slice(0, 20)}... L3=${l3Identity.address.slice(0, 20)}... hasNametag=${!!existingNametag} nametag=${existingNametag?.name}`);
 
           results.push({
             index: l3Index, // Use the L1 address's actual index for L3
             l1Address: addr.address,
             l3Address: l3Identity.address,
-            path: addr.path || `m/44'/0'/0'/0/${addr.index}`,
+            path: addr.path || `m/44'/0'/0'/${isChange ? 1 : 0}/${addr.index}`,
             hasNametag: !!existingNametag,
             existingNametag: existingNametag?.name,
+            isChange,  // Track change status for UI display
             // Enable IPNS nametag fetching for addresses without local nametag
             // IMPORTANT: Use l3Identity.privateKey (from UnifiedKeyManager) for IPNS derivation,
-            // NOT addr.privateKey (L1 wallet). The IPNS name is tied to the L3 identity key,
-            // which comes from a fixed BIP32 path (m/44'/0'/0'/0/{index}).
+            // NOT addr.privateKey (L1 wallet). The IPNS name is tied to the L3 identity key.
             privateKey: existingNametag ? undefined : l3Identity.privateKey,
             ipnsLoading: !existingNametag,
           });
         }
+
+        // Sort addresses: external first (by index), then change (by index)
+        results.sort((a, b) => {
+          const aIsChange = a.isChange ? 1 : 0;
+          const bIsChange = b.isChange ? 1 : 0;
+          if (aIsChange !== bIsChange) return aIsChange - bIsChange;
+          return a.index - b.index;
+        });
 
         setDerivedAddresses(results);
         setSelectedAddressIndex(0);
@@ -1317,6 +1330,11 @@ export function CreateWalletFlow() {
                     <span className="text-sm md:text-base font-mono text-neutral-900 dark:text-white truncate">
                       {truncateAddress(derivedAddresses[selectedAddressIndex]?.l1Address || '')}
                     </span>
+                    {derivedAddresses[selectedAddressIndex]?.isChange && (
+                      <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[9px] font-bold rounded shrink-0">
+                        Change
+                      </span>
+                    )}
                     {derivedAddresses[selectedAddressIndex]?.ipnsLoading ? (
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-neutral-200 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs">
                         <Loader2 className="w-3 h-3 animate-spin" />
@@ -1366,6 +1384,11 @@ export function CreateWalletFlow() {
                           <span className="flex-1 text-sm font-mono text-neutral-900 dark:text-white truncate text-left">
                             {truncateAddress(addr.l1Address)}
                           </span>
+                          {addr.isChange && (
+                            <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[9px] font-bold rounded shrink-0">
+                              Change
+                            </span>
+                          )}
                           {addr.ipnsLoading ? (
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-neutral-200 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs">
                               <Loader2 className="w-3 h-3 animate-spin" />

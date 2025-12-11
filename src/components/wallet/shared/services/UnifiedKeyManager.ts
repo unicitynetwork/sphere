@@ -38,6 +38,10 @@ const STORAGE_KEY_ENCRYPTED_MASTER = "unified_wallet_master";
 const STORAGE_KEY_CHAIN_CODE = "unified_wallet_chaincode";
 const STORAGE_KEY_WALLET_SOURCE = "unified_wallet_source";
 const STORAGE_KEY_DERIVATION_MODE = "unified_wallet_derivation_mode";
+const STORAGE_KEY_BASE_PATH = "unified_wallet_base_path";
+
+// Default base path for BIP32 derivation
+const DEFAULT_BASE_PATH = "m/44'/0'/0'";
 
 export type WalletSource = "mnemonic" | "file" | "unknown";
 
@@ -55,6 +59,7 @@ export interface DerivedAddress {
   l1Address: string;
   index: number;
   path: string;
+  isChange?: boolean;
 }
 
 export interface WalletInfo {
@@ -78,6 +83,7 @@ export class UnifiedKeyManager {
   private masterKey: string | null = null;
   private chainCode: string | null = null;
   private derivationMode: DerivationMode = "bip32";
+  private basePath: string = DEFAULT_BASE_PATH;
   private source: WalletSource = "unknown";
   private sessionKey: string;
 
@@ -140,6 +146,7 @@ export class UnifiedKeyManager {
       const chainCode = localStorage.getItem(STORAGE_KEY_CHAIN_CODE);
       const source = localStorage.getItem(STORAGE_KEY_WALLET_SOURCE) as WalletSource;
       const derivationMode = localStorage.getItem(STORAGE_KEY_DERIVATION_MODE) as DerivationMode;
+      const storedBasePath = localStorage.getItem(STORAGE_KEY_BASE_PATH);
 
       console.log("🔐 UnifiedKeyManager initializing...", {
         hasMnemonic: !!encryptedMnemonic,
@@ -167,7 +174,8 @@ export class UnifiedKeyManager {
           this.chainCode = chainCode || null; // May be null for WIF HMAC mode
           this.source = source || "file";
           this.derivationMode = derivationMode || (chainCode ? "bip32" : "wif_hmac");
-          console.log("✅ Wallet initialized from file import");
+          this.basePath = storedBasePath || DEFAULT_BASE_PATH;
+          console.log(`✅ Wallet initialized from file import (basePath: ${this.basePath})`);
           return true;
         } else {
           console.error("❌ Failed to decrypt master key - session key mismatch?");
@@ -323,11 +331,13 @@ export class UnifiedKeyManager {
   /**
    * Import wallet with explicit derivation mode
    * Use this when you know the derivation mode the wallet was created with
+   * @param basePath - The BIP32 base path (e.g., "m/84'/1'/0'" from wallet.dat descriptor)
    */
   async importWithMode(
     masterKey: string,
     chainCode: string | null,
-    mode: DerivationMode
+    mode: DerivationMode,
+    basePath?: string
   ): Promise<void> {
     // Validate key
     try {
@@ -340,11 +350,12 @@ export class UnifiedKeyManager {
     this.masterKey = masterKey;
     this.chainCode = chainCode;
     this.derivationMode = mode;
+    this.basePath = basePath || DEFAULT_BASE_PATH;
     this.source = "file";
 
     this.saveToStorage();
 
-    console.log(`🔐 Unified wallet imported with ${mode} mode`);
+    console.log(`🔐 Unified wallet imported with ${mode} mode (basePath: ${this.basePath})`);
   }
 
   /**
@@ -364,18 +375,22 @@ export class UnifiedKeyManager {
   /**
    * Derive address at a specific index
    * Uses the appropriate derivation based on mode
+   * @param index - BIP32 address index
+   * @param isChange - True for change addresses (chain=1), false for external (chain=0)
    */
-  deriveAddress(index: number): DerivedAddress {
+  deriveAddress(index: number, isChange: boolean = false): DerivedAddress {
     if (!this.masterKey) {
       throw new Error("Wallet not initialized");
     }
 
     if (this.derivationMode === "bip32" && this.chainCode) {
-      // Standard BIP32 derivation: m/44'/0'/0'/0/{index}
+      // Standard BIP32 derivation using wallet's base path (e.g., m/84'/1'/0'/0/{index})
       const result = generateHDAddressBIP32(
         this.masterKey,
         this.chainCode,
-        index
+        index,
+        this.basePath,  // Use wallet's stored base path instead of hardcoded default
+        isChange  // Pass isChange to use correct chain (0=external, 1=change)
       );
 
       return {
@@ -384,9 +399,11 @@ export class UnifiedKeyManager {
         l1Address: result.address,
         index: result.index,
         path: result.path,
+        isChange,
       };
     } else if (this.derivationMode === "legacy_hmac" && this.chainCode) {
       // Legacy Sphere HMAC: HMAC-SHA512(chainCode, masterKey || index)
+      // Note: Legacy mode doesn't support change addresses, but we track the flag anyway
       const result = generateHDAddress(
         this.masterKey,
         this.chainCode,
@@ -399,9 +416,11 @@ export class UnifiedKeyManager {
         l1Address: result.address,
         index: result.index,
         path: result.path,
+        isChange,
       };
     } else {
       // WIF HMAC derivation: HMAC-SHA512(masterKey, "m/44'/0'/{index}'")
+      // Note: WIF mode doesn't support change addresses, but we track the flag anyway
       const result = generateAddressFromMasterKey(this.masterKey, index);
 
       return {
@@ -410,6 +429,7 @@ export class UnifiedKeyManager {
         l1Address: result.address,
         index: result.index,
         path: result.path,
+        isChange,
       };
     }
   }
@@ -447,6 +467,14 @@ export class UnifiedKeyManager {
    */
   getChainCodeHex(): string | null {
     return this.chainCode;
+  }
+
+  /**
+   * Get the base derivation path (e.g., "m/84'/1'/0'" from wallet.dat descriptor)
+   * Used for BIP32 address derivation
+   */
+  getBasePath(): string {
+    return this.basePath;
   }
 
   /**
@@ -563,7 +591,7 @@ export class UnifiedKeyManager {
       addresses,
       isBIP32: this.derivationMode === "bip32",
       isImportedAlphaWallet: this.source === "file",
-      descriptorPath: this.derivationMode === "bip32" ? "44'/0'/0'" : null,
+      descriptorPath: this.derivationMode === "bip32" ? this.basePath.replace(/^m\//, '') : null,
     };
 
     return exportWalletToJSON({
@@ -616,9 +644,13 @@ export class UnifiedKeyManager {
     // Otherwise, import as file-based wallet (no mnemonic available)
     const chainCode = result.wallet.chainCode || result.wallet.masterChainCode || null;
     const mode = result.derivationMode || (chainCode ? "bip32" : "wif_hmac");
+    // Get base path from wallet.dat descriptor (e.g., "84'/1'/0'" -> "m/84'/1'/0'")
+    const basePath = result.wallet.descriptorPath
+      ? `m/${result.wallet.descriptorPath}`
+      : undefined;
 
-    await this.importWithMode(result.wallet.masterPrivateKey, chainCode, mode);
-    console.log(`🔐 Wallet restored from JSON (source: ${result.source}, mode: ${mode})`);
+    await this.importWithMode(result.wallet.masterPrivateKey, chainCode, mode, basePath);
+    console.log(`🔐 Wallet restored from JSON (source: ${result.source}, mode: ${mode}, basePath: ${basePath || DEFAULT_BASE_PATH})`);
 
     return { success: true };
   }
@@ -631,6 +663,7 @@ export class UnifiedKeyManager {
     this.masterKey = null;
     this.chainCode = null;
     this.derivationMode = "bip32";
+    this.basePath = DEFAULT_BASE_PATH;
     this.source = "unknown";
 
     // Reset initialization state
@@ -643,6 +676,7 @@ export class UnifiedKeyManager {
     localStorage.removeItem(STORAGE_KEY_CHAIN_CODE);
     localStorage.removeItem(STORAGE_KEY_WALLET_SOURCE);
     localStorage.removeItem(STORAGE_KEY_DERIVATION_MODE);
+    localStorage.removeItem(STORAGE_KEY_BASE_PATH);
 
     console.log("🔐 Unified wallet cleared");
   }
@@ -680,6 +714,7 @@ export class UnifiedKeyManager {
 
     localStorage.setItem(STORAGE_KEY_WALLET_SOURCE, this.source);
     localStorage.setItem(STORAGE_KEY_DERIVATION_MODE, this.derivationMode);
+    localStorage.setItem(STORAGE_KEY_BASE_PATH, this.basePath);
   }
 
   private encrypt(data: string): string {

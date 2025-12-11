@@ -91,11 +91,16 @@ export class IdentityManager {
 
   /**
    * Derive identity from the UnifiedKeyManager at a specific index
-   * Uses standard BIP32 derivation: m/44'/0'/0'/0/{index}
+   * Uses standard BIP32 derivation: m/44'/0'/0'/{chain}/{index}
+   * where chain=0 for external addresses and chain=1 for change addresses
+   * @param index - BIP32 address index
+   * @param mnemonic - Optional mnemonic for saving
+   * @param isChange - True for change addresses (chain=1), false for external (chain=0)
    */
   async deriveIdentityFromUnifiedWallet(
     index: number = 0,
-    mnemonic?: string
+    mnemonic?: string,
+    isChange: boolean = false
   ): Promise<UserIdentity> {
     const keyManager = this.getUnifiedKeyManager();
 
@@ -103,7 +108,7 @@ export class IdentityManager {
       throw new Error("Unified wallet not initialized");
     }
 
-    const derived = keyManager.deriveAddress(index);
+    const derived = keyManager.deriveAddress(index, isChange);
     const secret = Buffer.from(derived.privateKey, "hex");
 
     const l3Address = await this.deriveL3Address(secret);

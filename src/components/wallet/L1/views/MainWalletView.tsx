@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   ArrowDownLeft,
   Send,
@@ -133,6 +133,25 @@ export function MainWalletView({
   // Fetch nametags for all wallet addresses
   const { nametagState } = useAddressNametags(walletAddresses);
 
+  // Sort addresses: external first (by index), then change (by index)
+  const sortedAddresses = useMemo(() => {
+    if (!walletAddresses || walletAddresses.length === 0) {
+      return addresses; // Fallback to original order if no wallet address info
+    }
+    // Create a map for quick lookup of wallet address info
+    const addrMap = new Map(walletAddresses.map(wa => [wa.address, wa]));
+    return [...addresses].sort((a, b) => {
+      const aInfo = addrMap.get(a);
+      const bInfo = addrMap.get(b);
+      // If no info, treat as external and sort by original order
+      const aIsChange = aInfo?.isChange ? 1 : 0;
+      const bIsChange = bInfo?.isChange ? 1 : 0;
+      if (aIsChange !== bIsChange) return aIsChange - bIsChange;
+      // Within same type, sort by index
+      return (aInfo?.index ?? 0) - (bInfo?.index ?? 0);
+    });
+  }, [addresses, walletAddresses]);
+
   const handleSendFromModal = async (destination: string, amount: string) => {
     setPendingDestination(destination);
     setPendingAmount(amount);
@@ -184,25 +203,53 @@ export function MainWalletView({
               <span className="text-xs sm:text-sm flex items-center gap-1.5">
                 {(() => {
                   const nametagInfo = nametagState[selectedAddress];
-                  if (nametagInfo?.ipnsLoading) {
+                  const selectedWalletInfo = walletAddresses?.find(wa => wa.address === selectedAddress);
+                  const isSelectedChange = selectedWalletInfo?.isChange;
+
+                  // Helper to render Change badge
+                  const ChangeBadge = isSelectedChange ? (
+                    <span className="px-1 py-0.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[9px] font-bold rounded shrink-0">
+                      Change
+                    </span>
+                  ) : null;
+
+                  if (!nametagInfo || nametagInfo.ipnsLoading) {
                     return (
                       <>
                         <Loader2 className="w-3 h-3 animate-spin text-neutral-400" />
                         <span className="font-mono">{selectedAddress.slice(0, 8)}...{selectedAddress.slice(-6)}</span>
+                        {ChangeBadge}
                       </>
                     );
                   }
-                  if (nametagInfo?.nametag) {
+                  if (nametagInfo.nametag) {
                     return (
                       <>
                         <span className="font-medium text-blue-600 dark:text-blue-400">@{nametagInfo.nametag}</span>
                         <span className="text-neutral-400 dark:text-neutral-500 font-mono text-[10px]">
                           {selectedAddress.slice(0, 6)}...{selectedAddress.slice(-4)}
                         </span>
+                        {ChangeBadge}
                       </>
                     );
                   }
-                  return <span className="font-mono">{selectedAddress.slice(0, 12)}...{selectedAddress.slice(-8)}</span>;
+                  if (nametagInfo.hasL3Inventory) {
+                    return (
+                      <>
+                        <span className="font-mono">{selectedAddress.slice(0, 12)}...{selectedAddress.slice(-8)}</span>
+                        <span className="px-1 py-0.5 bg-purple-500/20 text-purple-600 dark:text-purple-400 text-[9px] font-bold rounded">
+                          L3
+                        </span>
+                        {ChangeBadge}
+                      </>
+                    );
+                  }
+                  return (
+                    <>
+                      <span className="font-mono">{selectedAddress.slice(0, 12)}...{selectedAddress.slice(-8)}</span>
+                      {ChangeBadge}
+                    </>
+                  );
                 })()}
               </span>
               <ChevronDown className={`w-3 h-3 sm:w-4 sm:h-4 text-neutral-500 dark:text-neutral-400 transition-transform ${showDropdown ? "rotate-180" : ""}`} />
@@ -262,8 +309,10 @@ export function MainWalletView({
                   transition={{ duration: 0.2 }}
                   className="absolute z-20 mt-2 w-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl max-h-52 overflow-y-auto custom-scrollbar"
                 >
-                  {addresses.map((a) => {
+                  {sortedAddresses.map((a) => {
                     const nametagInfo = nametagState[a];
+                    const walletAddrInfo = walletAddresses?.find(wa => wa.address === a);
+                    const isChangeAddr = walletAddrInfo?.isChange;
                     return (
                       <div
                         key={a}
@@ -276,22 +325,34 @@ export function MainWalletView({
                         }}
                       >
                         <span className="flex-1 text-left text-xs dark:text-neutral-200">
-                          {nametagInfo?.ipnsLoading ? (
+                          {!nametagInfo || nametagInfo.ipnsLoading ? (
                             <span className="flex items-center gap-1.5 text-neutral-400 dark:text-neutral-500">
                               <Loader2 className="w-3 h-3 animate-spin" />
                               <span className="font-mono">{a.slice(0, 8)}...{a.slice(-6)}</span>
                             </span>
-                          ) : nametagInfo?.nametag ? (
+                          ) : nametagInfo.nametag ? (
                             <span className="flex items-center gap-1.5">
                               <span className="font-medium text-blue-600 dark:text-blue-400">@{nametagInfo.nametag}</span>
                               <span className="text-neutral-400 dark:text-neutral-500 font-mono text-[10px]">
                                 {a.slice(0, 6)}...{a.slice(-4)}
                               </span>
                             </span>
+                          ) : nametagInfo.hasL3Inventory ? (
+                            <span className="flex items-center gap-1.5">
+                              <span className="font-mono truncate text-neutral-700 dark:text-neutral-200">{a}</span>
+                              <span className="px-1 py-0.5 bg-purple-500/20 text-purple-600 dark:text-purple-400 text-[9px] font-bold rounded shrink-0">
+                                L3
+                              </span>
+                            </span>
                           ) : (
                             <span className="font-mono truncate text-neutral-700 dark:text-neutral-200">{a}</span>
                           )}
                         </span>
+                        {isChangeAddr && (
+                          <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[9px] font-bold rounded shrink-0">
+                            Change
+                          </span>
+                        )}
                         <a
                           href={`https://www.unicity.network/address/${a}`}
                           target="_blank"
