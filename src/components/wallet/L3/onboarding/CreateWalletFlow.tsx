@@ -306,23 +306,24 @@ export function CreateWalletFlow() {
 
       if (l1Wallet && l1Wallet.addresses && l1Wallet.addresses.length > 0) {
         // Use addresses from L1 wallet storage
-        console.log(`📋 Loading ${l1Wallet.addresses.length} addresses from L1 wallet storage`);
+        // Filter out change addresses - L3 identities only exist for external addresses
+        const externalAddresses = l1Wallet.addresses.filter(addr => !addr.isChange);
+        console.log(`📋 Loading ${externalAddresses.length} external addresses from L1 wallet storage (${l1Wallet.addresses.length - externalAddresses.length} change addresses skipped)`);
         const results: DerivedAddressInfo[] = [];
 
-        // For each L1 address, derive L3 identity using sequential index (not L1's index)
-        // This ensures we can find existing nametags that were created with deriveIdentityFromUnifiedWallet
-        for (let i = 0; i < l1Wallet.addresses.length; i++) {
-          const addr = l1Wallet.addresses[i];
-
-          // Use sequential index i for L3 derivation (0, 1, 2...)
-          // This matches how deriveIdentityFromUnifiedWallet works
-          const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(i);
+        // For each external L1 address, derive L3 identity using the address's actual index
+        // This matches how deriveIdentityFromUnifiedWallet works and ensures correct nametag lookup
+        for (const addr of externalAddresses) {
+          // Use the L1 address's actual index for L3 derivation
+          // This is critical: addr.index corresponds to the BIP32 derivation index
+          const l3Index = addr.index;
+          const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(l3Index);
           const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
 
-          console.log(`🔍 Address ${i}: L1=${addr.address.slice(0, 20)}... L3=${l3Identity.address.slice(0, 20)}... hasNametag=${!!existingNametag} nametag=${existingNametag?.name}`);
+          console.log(`🔍 Address ${l3Index}: L1=${addr.address.slice(0, 20)}... L3=${l3Identity.address.slice(0, 20)}... hasNametag=${!!existingNametag} nametag=${existingNametag?.name}`);
 
           results.push({
-            index: i, // Use sequential index for L3
+            index: l3Index, // Use the L1 address's actual index for L3
             l1Address: addr.address,
             l3Address: l3Identity.address,
             path: addr.path || `m/44'/0'/0'/0/${addr.index}`,
@@ -579,7 +580,9 @@ export function CreateWalletFlow() {
             // Import master key into UnifiedKeyManager first
             const keyManager = getUnifiedKeyManager();
             const chainCode = result.wallet.chainCode || result.wallet.masterChainCode || null;
-            await keyManager.importWithMode(result.wallet.masterPrivateKey, chainCode, result.derivationMode || "bip32");
+            // Get basePath from descriptorPath (e.g., "84'/1'/0'" -> "m/84'/1'/0'")
+            const basePath = result.wallet.descriptorPath ? `m/${result.wallet.descriptorPath}` : undefined;
+            await keyManager.importWithMode(result.wallet.masterPrivateKey, chainCode, result.derivationMode || "bip32", basePath);
 
             setPendingWallet(result.wallet);
             setInitialScanCount(scanCountParam || 10);
@@ -742,13 +745,15 @@ export function CreateWalletFlow() {
       // Save L1 wallet to storage
       saveWalletToStorage("main", walletWithAddress);
 
-      // Import the wallet into UnifiedKeyManager
+      // Import the wallet into UnifiedKeyManager with basePath preserved
       const keyManager = getUnifiedKeyManager();
+      const basePath = pendingWallet.descriptorPath ? `m/${pendingWallet.descriptorPath}` : undefined;
       if (pendingWallet.masterPrivateKey && pendingWallet.masterChainCode) {
         await keyManager.importWithMode(
           pendingWallet.masterPrivateKey,
           pendingWallet.masterChainCode,
-          "bip32"
+          "bip32",
+          basePath
         );
       } else if (pendingWallet.masterPrivateKey) {
         await keyManager.importWithMode(
@@ -799,13 +804,15 @@ export function CreateWalletFlow() {
       // Save L1 wallet to storage with ALL addresses
       saveWalletToStorage("main", walletWithAddresses);
 
-      // Import the wallet into UnifiedKeyManager
+      // Import the wallet into UnifiedKeyManager with basePath preserved
       const keyManager = getUnifiedKeyManager();
+      const basePath = pendingWallet.descriptorPath ? `m/${pendingWallet.descriptorPath}` : undefined;
       if (pendingWallet.masterPrivateKey && pendingWallet.masterChainCode) {
         await keyManager.importWithMode(
           pendingWallet.masterPrivateKey,
           pendingWallet.masterChainCode,
-          "bip32"
+          "bip32",
+          basePath
         );
       } else if (pendingWallet.masterPrivateKey) {
         await keyManager.importWithMode(
@@ -873,7 +880,9 @@ export function CreateWalletFlow() {
         if (isBIP32) {
           const keyManager = getUnifiedKeyManager();
           const chainCode = result.wallet.chainCode || result.wallet.masterChainCode || null;
-          await keyManager.importWithMode(result.wallet.masterPrivateKey, chainCode, result.derivationMode || "bip32");
+          // Get basePath from descriptorPath (e.g., "84'/1'/0'" -> "m/84'/1'/0'")
+          const basePath = result.wallet.descriptorPath ? `m/${result.wallet.descriptorPath}` : undefined;
+          await keyManager.importWithMode(result.wallet.masterPrivateKey, chainCode, result.derivationMode || "bip32", basePath);
 
           setPendingWallet(result.wallet);
           setShowScanModal(true);
@@ -911,11 +920,13 @@ export function CreateWalletFlow() {
         });
 
         const keyManager = getUnifiedKeyManager();
+        const basePath = result.wallet.descriptorPath ? `m/${result.wallet.descriptorPath}` : undefined;
         if (result.wallet.masterPrivateKey && result.wallet.masterChainCode) {
           await keyManager.importWithMode(
             result.wallet.masterPrivateKey,
             result.wallet.masterChainCode,
-            "bip32"
+            "bip32",
+            basePath
           );
         } else if (result.wallet.masterPrivateKey) {
           await keyManager.importWithMode(
