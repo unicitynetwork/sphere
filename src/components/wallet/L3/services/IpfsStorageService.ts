@@ -165,6 +165,7 @@ export class IpfsStorageService {
   private boundVisibilityHandler: (() => void) | null = null;
   private lastKnownRemoteSequence: bigint = 0n;
   private isTabVisible: boolean = true; // Track tab visibility for adaptive polling
+  private currentIdentityAddress: string | null = null; // Track current identity for key re-derivation on switch
 
   private constructor(identityManager: IdentityManager) {
     this.identityManager = identityManager;
@@ -293,8 +294,29 @@ export class IpfsStorageService {
 
   /**
    * Lazy initialization of Helia and key derivation
+   * Detects identity changes and re-derives keys automatically
    */
   private async ensureInitialized(): Promise<boolean> {
+    // First, check if identity changed - we need to do this BEFORE the early return
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (!identity) {
+      console.warn("📦 No wallet identity - skipping IPFS init");
+      return false;
+    }
+
+    // If identity changed since last init, clear cached keys to force re-derivation
+    // This ensures we sync to the correct IPNS name when switching addresses
+    if (this.currentIdentityAddress && this.currentIdentityAddress !== identity.address) {
+      console.log(`📦 Identity changed: ${this.currentIdentityAddress.slice(0, 20)}... → ${identity.address.slice(0, 20)}...`);
+      console.log(`📦 Clearing cached IPNS keys for re-derivation`);
+      this.ed25519PrivateKey = null;
+      this.ed25519PublicKey = null;
+      this.ipnsKeyPair = null;
+      this.cachedIpnsName = null;
+      this.ipnsSequenceNumber = 0n;
+      // Keep helia alive - only re-derive cryptographic keys
+    }
+
     if (this.helia && this.ed25519PrivateKey) {
       return true;
     }
@@ -316,12 +338,7 @@ export class IpfsStorageService {
         return false;
       }
 
-      // 1. Get wallet identity
-      const identity = await this.identityManager.getCurrentIdentity();
-      if (!identity) {
-        console.warn("📦 No wallet identity - skipping IPFS init");
-        return false;
-      }
+      // Identity already fetched above, no need to fetch again
 
       // 2. Derive Ed25519 key from secp256k1 private key using HKDF
       const walletSecret = this.hexToBytes(identity.privateKey);
@@ -343,6 +360,7 @@ export class IpfsStorageService {
       const oldIpnsName = `ipns-${this.bytesToHex(this.ed25519PublicKey).slice(0, 32)}`;
       const newIpnsName = ipnsPeerId.toString();
       this.cachedIpnsName = newIpnsName;
+      this.currentIdentityAddress = identity.address; // Track which identity we initialized for
       this.migrateStorageKeys(oldIpnsName, newIpnsName);
 
       // Load last IPNS sequence number from storage
@@ -376,6 +394,7 @@ export class IpfsStorageService {
       console.log("📦 IPFS storage service initialized");
       console.log("📦 Browser Peer ID:", browserPeerId);
       console.log("📦 IPNS name:", this.cachedIpnsName);
+      console.log("📦 Identity address:", identity.address.slice(0, 30) + "...");
 
       // Extract bootstrap peer IDs for filtering connection logs
       const bootstrapPeerIds = new Set(
