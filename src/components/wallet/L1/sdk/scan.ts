@@ -116,6 +116,7 @@ export interface ScanProgress {
   found: number;
   totalBalance: number;
   foundAddresses: ScannedAddress[];
+  l1ScanComplete?: boolean;  // True when L1 balance scan is done (IPNS may still be running)
 }
 
 export interface ScanResult {
@@ -394,6 +395,17 @@ export async function scanWalletAddresses(
       await new Promise(resolve => setTimeout(resolve, 50));
     }
   }
+
+  // Report L1 scan complete (IPNS still running in background)
+  // This allows UI to show "Load Selected" button immediately
+  onProgress?.({
+    current: maxAddresses,
+    total: maxAddresses,
+    found: foundAddresses.length,
+    totalBalance,
+    foundAddresses: [...foundAddresses],
+    l1ScanComplete: true,
+  });
 
   // Wait for IPNS prefetch to complete (with 30s max timeout)
   console.log(`[Scan] Main scan complete. Waiting for IPNS prefetch to finish...`);

@@ -137,7 +137,11 @@ export function WalletScanModal({ show, wallet, initialScanCount = 100, onSelect
           <div>
             <h3 className="text-neutral-900 dark:text-white text-base font-bold">Scanning Wallet</h3>
             <p className="text-neutral-500 dark:text-neutral-400 text-xs">
-              {isScanning ? "Searching for addresses with balances..." : "Click addresses to select/deselect"}
+              {isScanning && !progress.l1ScanComplete
+                ? "Searching for addresses with balances..."
+                : isScanning
+                  ? "Resolving Unicity IDs..."
+                  : "Click addresses to select/deselect"}
             </p>
           </div>
         </div>
@@ -268,7 +272,7 @@ export function WalletScanModal({ show, wallet, initialScanCount = 100, onSelect
           >
             Cancel
           </button>
-          {isScanning ? (
+          {isScanning && !progress.l1ScanComplete ? (
             <button
               onClick={stopScan}
               className="flex-1 py-1.5 bg-red-600 rounded-lg text-white text-sm hover:bg-red-500 transition-colors"
