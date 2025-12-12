@@ -162,8 +162,6 @@ async function tryGateway(
   // The format parameter is needed because @helia/json stores content as DAG-JSON
   const ipnsUrl = `${gatewayUrl}/ipns/${ipnsName}?format=dag-json`;
 
-  console.log(`🔍 Trying IPNS gateway: ${ipnsUrl}`);
-
   let contentResponse: Response;
   try {
     contentResponse = await fetchWithTimeout(ipnsUrl, FETCH_TIMEOUT_MS);
@@ -176,10 +174,6 @@ async function tryGateway(
 
   // Check response status - 404/500 means IPNS name not found or resolution failed
   if (!contentResponse.ok) {
-    // Get error message from response body for debugging
-    const errorText = await contentResponse.text().catch(() => "");
-    const shortError = errorText.slice(0, 100);
-    console.log(`🔍 IPNS gateway returned ${contentResponse.status} for ${ipnsName}: ${shortError}`);
     return null;
   }
 
@@ -188,13 +182,11 @@ async function tryGateway(
   try {
     txfData = await contentResponse.json();
   } catch {
-    console.warn(`🔍 Failed to parse IPNS content as JSON for ${ipnsName}`);
     return null;
   }
 
   // TXF format has _nametag at top level
   if (txfData._nametag && typeof txfData._nametag.name === "string") {
-    console.log(`🔍 Found nametag in IPNS content: ${txfData._nametag.name}`);
     // Return full nametag data for localStorage persistence
     return {
       name: txfData._nametag.name,
@@ -202,8 +194,6 @@ async function tryGateway(
     };
   }
 
-  // No nametag in this storage
-  console.log(`🔍 No _nametag field in IPNS content for ${ipnsName}`);
   return null;
 }
 

@@ -178,6 +178,19 @@ export class IpfsStorageService {
     return IpfsStorageService.instance;
   }
 
+  /**
+   * Reset the singleton instance.
+   * Must be called when the user switches to a different identity/address
+   * so that the new identity's IPFS storage is used.
+   */
+  static async resetInstance(): Promise<void> {
+    if (IpfsStorageService.instance) {
+      console.log("📦 Resetting IpfsStorageService instance for identity switch...");
+      await IpfsStorageService.instance.shutdown();
+      IpfsStorageService.instance = null;
+    }
+  }
+
   // ==========================================
   // Lifecycle
   // ==========================================

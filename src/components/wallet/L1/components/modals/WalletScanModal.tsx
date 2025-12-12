@@ -210,6 +210,11 @@ export function WalletScanModal({ show, wallet, initialScanCount = 100, onSelect
                                 CHANGE
                               </span>
                             )}
+                            {addr.l3Nametag && (
+                              <span className="px-1 py-0.5 bg-purple-500/20 text-purple-600 dark:text-purple-400 text-[9px] font-bold rounded">
+                                {addr.l3Nametag}
+                              </span>
+                            )}
                           </div>
                           <div className="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono truncate">
                             {addr.address}

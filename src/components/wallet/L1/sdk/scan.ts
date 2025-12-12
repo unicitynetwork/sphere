@@ -74,32 +74,24 @@ const ACTIVE_SYNC_LIMIT = 10;
 /**
  * Get cached L3 info from localStorage (instant, no network)
  *
- * Uses the same derivation method as Select Address window (deriveIdentityFromUnifiedWallet)
- * to ensure consistent L3 addresses. This requires UnifiedKeyManager to be initialized
- * with the wallet's basePath before calling.
+ * Uses PATH as the single identifier for unambiguous address derivation.
+ * This ensures consistent L3 addresses regardless of whether the address
+ * is external or change.
  *
- * IMPORTANT: External (chain=0) and change (chain=1) addresses have DIFFERENT L3 identities!
- * External addresses derive L3 from m/{basePath}/0/{index}
- * Change addresses derive L3 from m/{basePath}/1/{index}
+ * @param path - Full BIP32 path like "m/84'/1'/0'/0/0" or "m/84'/1'/0'/1/3"
  */
 async function getCachedL3Info(
-  index: number,
-  isChange: boolean = false
+  path: string
 ): Promise<{
   nametag?: string;
   hasInventory: boolean;
   l3Address?: string;
   l3PrivateKey?: string;
 }> {
-  // External and change addresses have DIFFERENT L3 identities
-  // External: L3 from m/{basePath}/0/{index}
-  // Change: L3 from m/{basePath}/1/{index}
   try {
-    // Use same derivation as Select Address window (deriveIdentityFromUnifiedWallet)
-    // This ensures we look up nametags using the same L3 address derivation
-    const identityManager = IdentityManager.getInstance("scan-session");
-    // Pass isChange to derive the correct L3 identity (chain=0 for external, chain=1 for change)
-    const identity = await identityManager.deriveIdentityFromUnifiedWallet(index, undefined, isChange);
+    // Use path-based derivation for unambiguous L3 identity
+    const identityManager = IdentityManager.getInstance("user-pin-1234");
+    const identity = await identityManager.deriveIdentityFromPath(path);
     const l3Address = identity.address;
 
     // Check localStorage (instant)
@@ -165,6 +157,8 @@ export async function scanWalletAddresses(
     : ["m/44'/0'/0'"];                 // Default: BIP44 mainnet
 
   console.log(`[Scan] Using base path: ${basePaths[0]}`);
+  console.log(`[Scan] Master key prefix: ${wallet.masterPrivateKey.slice(0, 16)}...`);
+  console.log(`[Scan] Chain code prefix: ${chainCode.slice(0, 16)}...`);
 
   // Initialize UnifiedKeyManager with wallet's basePath before deriving L3 identities
   // This ensures getCachedL3Info uses the same derivation path as Select Address window
@@ -230,13 +224,14 @@ export async function scanWalletAddresses(
 
     // Fetch nametags in parallel (with 30s timeout for all)
     // When a nametag is found, immediately add the address to create a feeling of progress
-    const fetchPromises = addressesForIpnsFetch.map(async ({ privateKey, index, chain }) => {
+    const fetchPromises = addressesForIpnsFetch.map(async ({ privateKey, index, chain, basePath: addrBasePath }) => {
       try {
         const result = await fetchNametagFromIpns(privateKey);
         if (result.nametag) {
           ipnsNametagCache.set(privateKey, result.nametag);
           const chainLabel = chain === 1 ? "change" : "external";
-          console.log(`[Scan] Found nametag from IPNS for ${chainLabel} index ${index}: ${result.nametag}`);
+          const fullPath = `${addrBasePath}/${chain}/${index}`;
+          console.log(`[Scan] Found nametag from IPNS for ${chainLabel} index ${index} (path: ${fullPath}, key: ${privateKey.slice(0, 8)}...): ${result.nametag}`);
 
           // Progressive addition: Add address immediately if not already found
           // Check by privateKey since that uniquely identifies the address (same key = same address)
@@ -318,9 +313,8 @@ export async function scanWalletAddresses(
           const balance = await getBalance(addrInfo.address);
 
           // Get cached L3 info (from localStorage, instant)
-          // Uses deriveIdentityFromUnifiedWallet for consistency with Select Address window
-          // Pass isChange (chain === 1) to derive the correct L3 identity
-          const cachedL3 = await getCachedL3Info(i, chain === 1);
+          // Uses path-based derivation for unambiguous L3 identity
+          const cachedL3 = await getCachedL3Info(fullPath);
 
           // Check if we have a pre-fetched nametag from IPNS
           // Use the L1 private key since L3 uses the same key

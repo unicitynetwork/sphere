@@ -60,8 +60,11 @@ export function CreateWalletFlow() {
 
   // Address selection state
   const [derivedAddresses, setDerivedAddresses] = useState<DerivedAddressInfo[]>([]);
-  const [selectedAddressIndex, setSelectedAddressIndex] = useState<number>(0);
+  const [selectedAddressPath, setSelectedAddressPath] = useState<string | null>(null);
   const [showAddressDropdown, setShowAddressDropdown] = useState(false);
+
+  // Helper to get selected address by path
+  const selectedAddress = derivedAddresses.find((a) => a.path === selectedAddressPath) || derivedAddresses[0];
 
   // Wallet import and scanning state (for .dat and BIP32 .txt files)
   const [showScanModal, setShowScanModal] = useState(false);
@@ -151,12 +154,14 @@ export function CreateWalletFlow() {
       const fetchPromises = addressesToFetch.map(async (addr) => {
         try {
           const result = await fetchNametagFromIpns(addr.privateKey!);
-          console.log(`🔍 IPNS result for #${addr.index}: ${result.nametag || 'none'} (via ${result.source})`);
+          const chainLabel = addr.isChange ? 'change' : 'external';
+          console.log(`🔍 IPNS result for ${chainLabel} (path: ${addr.path}, key: ${addr.privateKey?.slice(0, 8)}...): ${result.nametag || 'none'} (via ${result.source})`);
 
           // Update state with fetched result
+          // Match by PATH - the only unambiguous identifier!
           setDerivedAddresses((prev) =>
             prev.map((a) =>
-              a.index === addr.index
+              a.path === addr.path
                 ? {
                     ...a,
                     ipnsName: result.ipnsName,
@@ -172,11 +177,13 @@ export function CreateWalletFlow() {
             )
           );
         } catch (error: any) {
-          console.warn(`🔍 IPNS fetch error for #${addr.index}:`, error.message);
+          const chainLabel = addr.isChange ? 'change' : 'external';
+          console.warn(`🔍 IPNS fetch error for ${chainLabel} (path: ${addr.path}):`, error.message);
           // Mark as failed but not loading
+          // Match by PATH - the only unambiguous identifier!
           setDerivedAddresses((prev) =>
             prev.map((a) =>
-              a.index === addr.index
+              a.path === addr.path
                 ? {
                     ...a,
                     ipnsLoading: false,
@@ -204,11 +211,15 @@ export function CreateWalletFlow() {
   // Helper: derive addresses and check for existing nametags
   const deriveAndCheckAddresses = async (count: number): Promise<DerivedAddressInfo[]> => {
     const keyManager = getUnifiedKeyManager();
+    const basePath = keyManager.getBasePath();
     const results: DerivedAddressInfo[] = [];
 
     for (let i = 0; i < count; i++) {
-      const derived = keyManager.deriveAddress(i);
-      const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(i);
+      // Build path and derive using path-based method - PATH is the single identifier
+      const path = `${basePath}/0/${i}`;
+      const derived = keyManager.deriveAddressFromPath(path);
+      // Use path-based derivation for unambiguous L3 identity
+      const l3Identity = await identityManager.deriveIdentityFromPath(path);
       const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
       const hasLocalNametag = !!existingNametag;
 
@@ -216,7 +227,7 @@ export function CreateWalletFlow() {
         index: i,
         l1Address: derived.l1Address,
         l3Address: l3Identity.address,
-        path: derived.path,
+        path: path, // PATH is the primary key!
         hasNametag: hasLocalNametag,
         existingNametag: existingNametag?.name,
         // Store private key for IPNS derivation (only if no local nametag)
@@ -235,8 +246,12 @@ export function CreateWalletFlow() {
     try {
       const nextIndex = derivedAddresses.length;
       const keyManager = getUnifiedKeyManager();
-      const derived = keyManager.deriveAddress(nextIndex);
-      const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(nextIndex);
+      const basePath = keyManager.getBasePath();
+      // Build path and derive using path-based method - PATH is the single identifier
+      const path = `${basePath}/0/${nextIndex}`;
+      const derived = keyManager.deriveAddressFromPath(path);
+      // Use path-based derivation for unambiguous L3 identity
+      const l3Identity = await identityManager.deriveIdentityFromPath(path);
       const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
       const hasLocalNametag = !!existingNametag;
 
@@ -244,7 +259,7 @@ export function CreateWalletFlow() {
         index: nextIndex,
         l1Address: derived.l1Address,
         l3Address: l3Identity.address,
-        path: derived.path,
+        path: path, // PATH is the primary key!
         hasNametag: hasLocalNametag,
         existingNametag: existingNametag?.name,
         // Store private key for IPNS derivation (only if no local nametag)
@@ -265,20 +280,28 @@ export function CreateWalletFlow() {
     setError(null);
 
     try {
-      const selected = derivedAddresses[selectedAddressIndex];
+      if (!selectedAddress) {
+        throw new Error("No address selected");
+      }
 
-      // Store selected index for future identity derivation
-      identityManager.setSelectedAddressIndex(selected.index);
+      // Store selected PATH for future identity derivation
+      // Path is the only unambiguous identifier
+      identityManager.setSelectedAddressPath(selectedAddress.path);
 
-      if (selected.hasNametag) {
+      // Reset IPFS service so it will be re-initialized with the new identity
+      // This is critical when user selects a different address than the one
+      // that was previously used to initialize the IPFS service
+      await IpfsStorageService.resetInstance();
+
+      if (selectedAddress.hasNametag) {
         // If nametag was fetched from IPNS, save it to localStorage before reload
-        if (selected.nametagData && selected.l3Address) {
+        if (selectedAddress.nametagData && selectedAddress.l3Address) {
           console.log("💾 Saving IPNS-fetched nametag to localStorage before reload...");
-          WalletRepository.saveNametagForAddress(selected.l3Address, {
-            name: selected.nametagData.name,
-            token: selected.nametagData.token,
-            timestamp: selected.nametagData.timestamp || Date.now(),
-            format: selected.nametagData.format || "TXF",
+          WalletRepository.saveNametagForAddress(selectedAddress.l3Address, {
+            name: selectedAddress.nametagData.name,
+            token: selectedAddress.nametagData.token,
+            timestamp: selectedAddress.nametagData.timestamp || Date.now(),
+            format: selectedAddress.nametagData.format || "TXF",
             version: "1.0",
           });
         }
@@ -315,23 +338,35 @@ export function CreateWalletFlow() {
 
         // For each L1 address, derive L3 identity using the address's actual index AND isChange flag
         // External and change addresses have DIFFERENT L3 identities (different chain in BIP32 path)
+        // Log UnifiedKeyManager state for debugging
+        const keyManager = getUnifiedKeyManager();
+        console.log(`🔍 [goToAddressSelection] UnifiedKeyManager state:`, {
+          basePath: keyManager.getBasePath(),
+          isInitialized: keyManager.isInitialized(),
+          masterKeyPrefix: keyManager.getMasterKeyHex()?.slice(0, 16) || 'unknown',
+        });
+
         for (const addr of allAddresses) {
-          // Use the L1 address's actual index AND isChange for L3 derivation
-          // This is critical: addr.index corresponds to the BIP32 derivation index
-          // And isChange determines the chain (0=external, 1=change)
-          const l3Index = addr.index;
-          const isChange = addr.isChange ?? false;
-          const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(l3Index, undefined, isChange);
+          // Use PATH for L3 derivation - the only unambiguous identifier
+          // Skip addresses without a path (should not happen in BIP32 wallets)
+          if (!addr.path) {
+            console.warn(`⚠️ Address ${addr.address.slice(0, 20)}... has no path, skipping`);
+            continue;
+          }
+
+          // Use path-based derivation for unambiguous L3 identity
+          const l3Identity = await identityManager.deriveIdentityFromPath(addr.path);
           const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
 
+          const isChange = addr.isChange ?? false;
           const chainLabel = isChange ? "change" : "external";
-          console.log(`🔍 Address ${l3Index} (${chainLabel}): L1=${addr.address.slice(0, 20)}... L3=${l3Identity.address.slice(0, 20)}... hasNametag=${!!existingNametag} nametag=${existingNametag?.name}`);
+          console.log(`🔍 Address (path: ${addr.path}, ${chainLabel}): L1=${addr.address.slice(0, 20)}... L3=${l3Identity.address.slice(0, 20)}... key=${l3Identity.privateKey.slice(0, 8)}... hasNametag=${!!existingNametag} nametag=${existingNametag?.name}`);
 
           results.push({
-            index: l3Index, // Use the L1 address's actual index for L3
+            index: addr.index, // Keep for display purposes only
             l1Address: addr.address,
             l3Address: l3Identity.address,
-            path: addr.path || `m/44'/0'/0'/${isChange ? 1 : 0}/${addr.index}`,
+            path: addr.path, // PATH is the primary key!
             hasNametag: !!existingNametag,
             existingNametag: existingNametag?.name,
             isChange,  // Track change status for UI display
@@ -352,13 +387,15 @@ export function CreateWalletFlow() {
         });
 
         setDerivedAddresses(results);
-        setSelectedAddressIndex(0);
+        // Select first address by default (using path, not index)
+        setSelectedAddressPath(results[0]?.path || null);
       } else {
         // No L1 wallet addresses - derive from UnifiedKeyManager
         console.log("📋 No L1 wallet addresses found, deriving from UnifiedKeyManager");
         const addresses = await deriveAndCheckAddresses(10); // Derive 10 addresses upfront
         setDerivedAddresses(addresses);
-        setSelectedAddressIndex(0);
+        // Select first address by default (using path, not index)
+        setSelectedAddressPath(addresses[0]?.path || null);
       }
 
       setStep('addressSelection');
@@ -576,8 +613,14 @@ export function CreateWalletFlow() {
           if (result.mnemonic) {
             await restoreWallet(result.mnemonic);
 
-            // Reset selected address index to 0 for clean import
-            localStorage.setItem("l3_selected_address_index", "0");
+            // Reset selected address path for clean import - use first address's path
+            const firstAddr = result.wallet.addresses[0];
+            if (firstAddr?.path) {
+              localStorage.setItem("l3_selected_address_path", firstAddr.path);
+            } else {
+              localStorage.removeItem("l3_selected_address_path");
+            }
+            localStorage.removeItem("l3_selected_address_index"); // Clean up legacy
 
             // Save wallet with firstAddress to storage so goToAddressSelection uses it
             saveWalletToStorage("main", result.wallet);
@@ -877,8 +920,14 @@ export function CreateWalletFlow() {
         if (result.mnemonic) {
           await restoreWallet(result.mnemonic);
 
-          // Reset selected address index to 0 for clean import
-          localStorage.setItem("l3_selected_address_index", "0");
+          // Reset selected address path for clean import - use first address's path
+          const firstAddr = result.wallet.addresses[0];
+          if (firstAddr?.path) {
+            localStorage.setItem("l3_selected_address_path", firstAddr.path);
+          } else {
+            localStorage.removeItem("l3_selected_address_path");
+          }
+          localStorage.removeItem("l3_selected_address_index"); // Clean up legacy
 
           // Save wallet with firstAddress to storage so goToAddressSelection uses it
           saveWalletToStorage("main", result.wallet);
@@ -1199,7 +1248,7 @@ export function CreateWalletFlow() {
             {/* 12-word grid */}
             <div className="grid grid-cols-3 gap-2 md:gap-3 mb-6">
               {Array.from({ length: 12 }).map((_, index) => (
-                <div key={index} className="relative">
+                <div key={`seed-input-${index}`} className="relative">
                   <span className="absolute left-2 md:left-3 top-1/2 -translate-y-1/2 text-[10px] md:text-xs text-neutral-400 dark:text-neutral-600 font-medium z-10">
                     {index + 1}.
                   </span>
@@ -1325,25 +1374,25 @@ export function CreateWalletFlow() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-neutral-400 dark:text-neutral-500">
-                      #{derivedAddresses[selectedAddressIndex]?.index ?? 0}
+                      #{selectedAddress?.index ?? 0}
                     </span>
                     <span className="text-sm md:text-base font-mono text-neutral-900 dark:text-white truncate">
-                      {truncateAddress(derivedAddresses[selectedAddressIndex]?.l1Address || '')}
+                      {truncateAddress(selectedAddress?.l1Address || '')}
                     </span>
-                    {derivedAddresses[selectedAddressIndex]?.isChange && (
+                    {selectedAddress?.isChange && (
                       <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[9px] font-bold rounded shrink-0">
                         Change
                       </span>
                     )}
-                    {derivedAddresses[selectedAddressIndex]?.ipnsLoading ? (
+                    {selectedAddress?.ipnsLoading ? (
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-neutral-200 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 text-xs">
                         <Loader2 className="w-3 h-3 animate-spin" />
                         Checking...
                       </span>
-                    ) : derivedAddresses[selectedAddressIndex]?.hasNametag ? (
+                    ) : selectedAddress?.hasNametag ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
                         <Check className="w-3 h-3" />
-                        {derivedAddresses[selectedAddressIndex]?.existingNametag}
+                        {selectedAddress?.existingNametag}
                       </span>
                     ) : null}
                   </div>
@@ -1367,15 +1416,15 @@ export function CreateWalletFlow() {
                     className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl overflow-hidden z-50"
                   >
                     <div className="max-h-64 overflow-y-auto">
-                      {derivedAddresses.map((addr, idx) => (
+                      {derivedAddresses.map((addr) => (
                         <button
                           key={addr.l1Address}
                           onClick={() => {
-                            setSelectedAddressIndex(idx);
+                            setSelectedAddressPath(addr.path);
                             setShowAddressDropdown(false);
                           }}
                           className={`w-full px-4 py-3 flex items-center gap-3 hover:bg-neutral-100 dark:hover:bg-neutral-700/50 transition-colors ${
-                            idx === selectedAddressIndex ? 'bg-purple-50 dark:bg-purple-900/20' : ''
+                            addr.path === selectedAddressPath ? 'bg-purple-50 dark:bg-purple-900/20' : ''
                           }`}
                         >
                           <span className="text-xs text-neutral-400 dark:text-neutral-500 w-6">
@@ -1400,7 +1449,7 @@ export function CreateWalletFlow() {
                               {addr.existingNametag}
                             </span>
                           ) : null}
-                          {idx === selectedAddressIndex && (
+                          {addr.path === selectedAddressPath && (
                             <div className="w-2 h-2 rounded-full bg-purple-500" />
                           )}
                         </button>
@@ -1426,7 +1475,7 @@ export function CreateWalletFlow() {
             <div className="mb-6 p-3 bg-neutral-100 dark:bg-neutral-800/50 rounded-lg border border-neutral-200 dark:border-neutral-700/50">
               <div className="text-xs text-neutral-500 dark:text-neutral-400 mb-1">L3 Unicity Address</div>
               <div className="text-xs font-mono text-neutral-700 dark:text-neutral-300 break-all">
-                {derivedAddresses[selectedAddressIndex]?.l3Address || '...'}
+                {selectedAddress?.l3Address || '...'}
               </div>
             </div>
 
@@ -1457,7 +1506,7 @@ export function CreateWalletFlow() {
                       <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" />
                       Loading...
                     </>
-                  ) : derivedAddresses[selectedAddressIndex]?.hasNametag ? (
+                  ) : selectedAddress?.hasNametag ? (
                     <>
                       Continue
                       <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />
@@ -1473,7 +1522,7 @@ export function CreateWalletFlow() {
             </div>
 
             {/* Info about nametag */}
-            {derivedAddresses[selectedAddressIndex]?.hasNametag && (
+            {selectedAddress?.hasNametag && (
               <motion.p
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
