@@ -152,6 +152,7 @@ export function BridgeModal({
       setError(null);
       setUnicityId("");
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show, address]);
 
   const checkBalance = async () => {

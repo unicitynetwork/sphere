@@ -291,12 +291,22 @@ export const PaymentRequestStatus = {
     PENDING: 'PENDING',
     ACCEPTED: 'ACCEPTED',
     REJECTED: 'REJECTED',
-    PAID: 'PAID'
+    PAID: 'PAID',
+    EXPIRED: 'EXPIRED'
 } as const
 
 export type PaymentRequestStatus = typeof PaymentRequestStatus[keyof typeof PaymentRequestStatus];
 
-export interface IncomingPaymentRequest {
+export const OutgoingPaymentRequestStatus = {
+    PENDING: 'PENDING',    // Waiting for response
+    PAID: 'PAID',          // Recipient paid (token transfer received with matching replyToEventId)
+    DECLINED: 'DECLINED',  // Recipient declined
+    EXPIRED: 'EXPIRED'     // Deadline passed without response
+} as const
+
+export type OutgoingPaymentRequestStatus = typeof OutgoingPaymentRequestStatus[keyof typeof OutgoingPaymentRequestStatus];
+
+export class IncomingPaymentRequest {
     id: string;
     senderPubkey: string;
     amount: bigint;
@@ -306,5 +316,106 @@ export interface IncomingPaymentRequest {
     recipientNametag: string;
     requestId: string;
     timestamp: number;
+    deadline?: number; // Deadline timestamp in milliseconds, undefined means no deadline
     status: PaymentRequestStatus;
+
+    constructor(data: {
+        id: string;
+        senderPubkey: string;
+        amount: bigint;
+        coinId: string;
+        symbol: string;
+        message?: string;
+        recipientNametag: string;
+        requestId: string;
+        timestamp: number;
+        deadline?: number;
+        status: PaymentRequestStatus;
+    }) {
+        this.id = data.id;
+        this.senderPubkey = data.senderPubkey;
+        this.amount = data.amount;
+        this.coinId = data.coinId;
+        this.symbol = data.symbol;
+        this.message = data.message;
+        this.recipientNametag = data.recipientNametag;
+        this.requestId = data.requestId;
+        this.timestamp = data.timestamp;
+        this.deadline = data.deadline;
+        this.status = data.status;
+    }
+
+    /**
+     * Check if the payment request has expired.
+     */
+    isExpired(): boolean {
+        return this.deadline !== undefined && Date.now() > this.deadline;
+    }
+
+    /**
+     * Get remaining time until deadline in milliseconds.
+     * Returns undefined if no deadline, 0 if expired.
+     */
+    getRemainingTimeMs(): number | undefined {
+        if (this.deadline === undefined) return undefined;
+        const remaining = this.deadline - Date.now();
+        return remaining > 0 ? remaining : 0;
+    }
+}
+
+export class OutgoingPaymentRequest {
+    eventId: string;
+    targetPubkey: string;
+    amount: bigint;
+    coinId: string;
+    symbol: string;
+    message?: string;
+    recipientNametag: string;
+    requestId: string;
+    timestamp: number;
+    deadline?: number; // Deadline timestamp in milliseconds, undefined means no deadline
+    status: OutgoingPaymentRequestStatus;
+
+    constructor(data: {
+        eventId: string;
+        targetPubkey: string;
+        amount: bigint;
+        coinId: string;
+        symbol: string;
+        message?: string;
+        recipientNametag: string;
+        requestId: string;
+        timestamp: number;
+        deadline?: number;
+        status: OutgoingPaymentRequestStatus;
+    }) {
+        this.eventId = data.eventId;
+        this.targetPubkey = data.targetPubkey;
+        this.amount = data.amount;
+        this.coinId = data.coinId;
+        this.symbol = data.symbol;
+        this.message = data.message;
+        this.recipientNametag = data.recipientNametag;
+        this.requestId = data.requestId;
+        this.timestamp = data.timestamp;
+        this.deadline = data.deadline;
+        this.status = data.status;
+    }
+
+    /**
+     * Check if the payment request has expired.
+     */
+    isExpired(): boolean {
+        return this.deadline !== undefined && Date.now() > this.deadline;
+    }
+
+    /**
+     * Get remaining time until deadline in milliseconds.
+     * Returns undefined if no deadline, 0 if expired.
+     */
+    getRemainingTimeMs(): number | undefined {
+        if (this.deadline === undefined) return undefined;
+        const remaining = this.deadline - Date.now();
+        return remaining > 0 ? remaining : 0;
+    }
 }

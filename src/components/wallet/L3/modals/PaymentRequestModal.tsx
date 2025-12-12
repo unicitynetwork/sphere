@@ -3,7 +3,7 @@ import { useIncomingPaymentRequests } from '../hooks/useIncomingPaymentRequests'
 import { type IncomingPaymentRequest, PaymentRequestStatus } from '../data/model';
 import { useWallet } from '../hooks/useWallet';
 import { AnimatePresence, motion } from 'framer-motion';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AmountFormatUtils } from '../utils/currency';
 
 interface PaymentRequestsModalProps {
@@ -28,6 +28,12 @@ export function PaymentRequestsModal({ isOpen, onClose }: PaymentRequestsModalPr
   };
 
   const handlePay = async (req: IncomingPaymentRequest) => {
+    // Double-check expiration before accepting
+    if (req.isExpired()) {
+      setErrors(prev => ({ ...prev, [req.id]: 'This payment request has expired' }));
+      return;
+    }
+
     setProcessingId(req.id);
     setErrors(prev => ({ ...prev, [req.id]: '' }));
     try {
@@ -194,7 +200,6 @@ interface RequestCardProps {
 function RequestCard({ req, error, onPay, onReject, isProcessing, isGlobalDisabled }: RequestCardProps) {
   const isPending = req.status === PaymentRequestStatus.PENDING;
   const amountDisplay = AmountFormatUtils.formatDisplayAmount(req.amount.toString(), req.coinId);
-  const timeAgo = getTimeAgo(req.timestamp);
 
   // Стиль статуса
   const statusConfig = {
@@ -202,6 +207,7 @@ function RequestCard({ req, error, onPay, onReject, isProcessing, isGlobalDisabl
     [PaymentRequestStatus.PAID]: { color: 'text-emerald-500', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: Check, label: 'Paid Successfully' },
     [PaymentRequestStatus.REJECTED]: { color: 'text-red-500', bg: 'bg-red-500/10', border: 'border-red-500/20', icon: XIcon, label: 'Request Declined' },
     [PaymentRequestStatus.PENDING]: { color: 'text-orange-500', bg: 'bg-orange-500/10', border: 'border-orange-500/20', icon: Clock, label: 'Awaiting Payment' },
+    [PaymentRequestStatus.EXPIRED]: { color: 'text-red-500', bg: 'bg-red-500/10', border: 'border-red-500/20', icon: Clock, label: 'Request Expired' },
   };
 
   const currentStatus = statusConfig[req.status];
@@ -234,8 +240,9 @@ function RequestCard({ req, error, onPay, onReject, isProcessing, isGlobalDisabl
               <span className="text-neutral-900 dark:text-white font-bold text-base">@{req.recipientNametag}</span>
             </div>
           </div>
-          <div className="bg-neutral-200/50 dark:bg-neutral-700/50 px-2.5 py-1 rounded-lg text-[10px] text-neutral-500 dark:text-neutral-400 font-medium">
-            {timeAgo}
+          <div className="flex flex-col items-end gap-1.5">
+            <TimeAgo timestamp={req.timestamp} />
+            {isPending && <DeadlineTimer req={req} />}
           </div>
         </div>
 
@@ -321,6 +328,156 @@ function RequestCard({ req, error, onPay, onReject, isProcessing, isGlobalDisabl
   );
 }
 
+
+// TimeAgo component with live updates
+function TimeAgo({ timestamp }: { timestamp: number }) {
+  const [timeAgo, setTimeAgo] = useState<string>(getTimeAgo(timestamp));
+
+  useEffect(() => {
+    // Update every 30 seconds
+    const interval = setInterval(() => {
+      setTimeAgo(getTimeAgo(timestamp));
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [timestamp]);
+
+  return (
+    <div className="bg-neutral-200/50 dark:bg-neutral-700/50 px-2.5 py-1 rounded-lg text-[10px] text-neutral-500 dark:text-neutral-400 font-medium">
+      {timeAgo}
+    </div>
+  );
+}
+
+// Format remaining time for deadline display as MM:SS
+const formatRemainingTime = (ms: number): string => {
+  const totalSeconds = Math.floor(ms / 1000);
+
+  if (totalSeconds >= 3600) {
+    // Show hours if >= 1 hour
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    return `${hours}:${minutes.toString().padStart(2, '0')}h`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+};
+
+// Deadline timer component with live countdown and circular progress
+function DeadlineTimer({ req }: { req: IncomingPaymentRequest }) {
+  const [remainingMs, setRemainingMs] = useState<number | undefined>(req.getRemainingTimeMs());
+  const initialMs = req.deadline ? req.deadline - req.timestamp : 0;
+
+  useEffect(() => {
+    if (!req.deadline) return;
+
+    const interval = setInterval(() => {
+      const remaining = req.getRemainingTimeMs();
+      setRemainingMs(remaining);
+
+      if (remaining === 0) {
+        clearInterval(interval);
+      }
+    }, 100); // Update every 100ms for smoother animation
+
+    return () => clearInterval(interval);
+  }, [req]);
+
+  if (!req.deadline || remainingMs === undefined) return null;
+
+  // Calculate progress (0 to 1)
+  const progress = initialMs > 0 ? remainingMs / initialMs : 0;
+
+  // Color and style based on urgency
+  const getUrgencyStyle = (ms: number) => {
+    if (ms < 10000) {
+      return {
+        text: 'text-red-500 font-bold',
+        bg: 'bg-red-500/10',
+        border: 'border-red-500/30',
+        ring: 'stroke-red-500',
+        glow: 'shadow-red-500/20',
+        pulse: true
+      };
+    }
+    if (ms < 30000) {
+      return {
+        text: 'text-orange-600 font-semibold',
+        bg: 'bg-orange-500/10',
+        border: 'border-orange-500/20',
+        ring: 'stroke-orange-500',
+        glow: 'shadow-orange-500/10',
+        pulse: false
+      };
+    }
+    if (ms < 60000) {
+      return {
+        text: 'text-orange-500 font-medium',
+        bg: 'bg-orange-400/10',
+        border: 'border-orange-400/20',
+        ring: 'stroke-orange-400',
+        glow: '',
+        pulse: false
+      };
+    }
+    return {
+      text: 'text-emerald-500 font-medium',
+      bg: 'bg-emerald-500/10',
+      border: 'border-emerald-500/20',
+      ring: 'stroke-emerald-500',
+      glow: '',
+      pulse: false
+    };
+  };
+
+  const style = getUrgencyStyle(remainingMs);
+  const circumference = 2 * Math.PI * 10; // radius = 10
+  const strokeDashoffset = circumference * (1 - progress);
+
+  return (
+    <motion.div
+      className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border ${style.bg} ${style.border} ${style.glow} shadow-sm transition-all duration-300`}
+      animate={style.pulse ? { scale: [1, 1.05, 1] } : {}}
+      transition={{ duration: 1, repeat: Infinity }}
+    >
+      {/* Circular progress with clock icon */}
+      <div className="relative w-5 h-5">
+        <svg className="absolute inset-0 -rotate-90" width="20" height="20">
+          {/* Background circle */}
+          <circle
+            cx="10"
+            cy="10"
+            r="9"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="text-neutral-200 dark:text-neutral-700 opacity-30"
+          />
+          {/* Progress circle */}
+          <circle
+            cx="10"
+            cy="10"
+            r="9"
+            fill="none"
+            strokeWidth="2"
+            className={`${style.ring} transition-all duration-300`}
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+          />
+        </svg>
+        <Clock className={`absolute inset-0 w-3 h-3 m-auto ${style.text}`} />
+      </div>
+
+      {/* Time display */}
+      <span className={`text-xs ${style.text} tabular-nums tracking-tight`}>
+        {remainingMs === 0 ? 'Expired' : formatRemainingTime(remainingMs)}
+      </span>
+    </motion.div>
+  );
+}
 
 const getTimeAgo = (timestamp: number) => {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);

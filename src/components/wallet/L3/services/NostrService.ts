@@ -41,9 +41,11 @@ import { ServiceProvider } from "./ServiceProvider";
 import { RegistryService } from "./RegistryService";
 import {
   PaymentRequestStatus,
+  OutgoingPaymentRequestStatus,
   TokenStatus,
   Token as UiToken,
-  type IncomingPaymentRequest,
+  IncomingPaymentRequest,
+  OutgoingPaymentRequest,
 } from "../data/model";
 import { v4 as uuidv4 } from "uuid";
 
@@ -64,6 +66,7 @@ export class NostrService {
   private isConnecting: boolean = false;
   private connectPromise: Promise<void> | null = null;
   private paymentRequests: IncomingPaymentRequest[] = [];
+  private outgoingPaymentRequests: OutgoingPaymentRequest[] = [];
   private chatRepository: ChatRepository;
   private dmListeners: ((message: ChatMessage) => void)[] = [];
 
@@ -120,6 +123,7 @@ export class NostrService {
       console.log("✅ Connected to Nostr relays");
 
       this.subscribeToPrivateEvents(keyManager.getPublicKeyHex());
+      this.startExpirationChecker();
     } catch (error) {
       console.error("❌ Failed to connect to Nostr", error);
     }
@@ -128,12 +132,13 @@ export class NostrService {
   private subscribeToPrivateEvents(publicKey: string) {
     if (!this.client) return;
 
-    // Subscribe to wallet events (token transfers, payment requests) with since filter
+    // Subscribe to wallet events (token transfers, payment requests, payment request responses) with since filter
     const lastSync = this.getOrInitLastSync();
     const walletFilter = new Filter();
     walletFilter.kinds = [
       EventKinds.TOKEN_TRANSFER,
       EventKinds.PAYMENT_REQUEST,
+      EventKinds.PAYMENT_REQUEST_RESPONSE,
     ];
     walletFilter["#p"] = [publicKey];
     walletFilter.since = lastSync;
@@ -267,6 +272,8 @@ export class NostrService {
       this.handleGiftWrappedMessage(event);
     } else if (event.kind === EventKinds.PAYMENT_REQUEST) {
       this.handlePaymentRequest(event);
+    } else if (event.kind === EventKinds.PAYMENT_REQUEST_RESPONSE) {
+      this.handlePaymentRequestResponse(event);
     } else {
       console.log(`Unhandled event kind - ${event.kind}`);
     }
@@ -286,7 +293,7 @@ export class NostrService {
       const def = registry.getCoinDefinition(request.coinId);
       const symbol = def?.symbol || "UNKNOWN";
 
-      const incomingRequest: IncomingPaymentRequest = {
+      const incomingRequest = new IncomingPaymentRequest({
         id: event.id,
         senderPubkey: event.pubkey,
         amount: request.amount,
@@ -296,17 +303,75 @@ export class NostrService {
         recipientNametag: request.recipientNametag,
         requestId: request.requestId,
         timestamp: event.created_at * 1000,
+        deadline: (request as any).deadline || undefined,
         status: PaymentRequestStatus.PENDING,
-      };
+      });
+
+      // Skip if already expired
+      if (incomingRequest.isExpired()) {
+        console.log(`⏭️ Payment request already expired, skipping: ${event.id.slice(0, 8)}...`);
+        return;
+      }
 
       if (!this.paymentRequests.find((r) => r.id === incomingRequest.id)) {
         this.paymentRequests.unshift(incomingRequest);
         this.notifyRequestsUpdated();
 
         console.log("📬 Payment Request received:", request);
+        if (incomingRequest.deadline) {
+          const remainingMs = incomingRequest.getRemainingTimeMs() || 0;
+          console.log(`   Deadline in ${Math.floor(remainingMs / 1000)} seconds`);
+        }
       }
     } catch (error) {
       console.error("Failed to handle payment request", error);
+    }
+  }
+
+  /**
+   * Handle incoming payment request response event (decline/expiration notification).
+   * This is received by the original requester when the recipient declines or the request expires.
+   */
+  private async handlePaymentRequestResponse(event: Event) {
+    try {
+      const keyManager = await this.getKeyManager();
+      if (!keyManager) return;
+
+      // Decrypt and parse using SDK PaymentRequestProtocol
+      const response = await PaymentRequestProtocol.parsePaymentRequestResponse(
+        event,
+        keyManager
+      );
+
+      console.log("📭 Payment request response received:");
+      console.log(`   Original Event ID: ${response.originalEventId}`);
+      console.log(`   Request ID: ${response.requestId}`);
+      console.log(`   Status: ${response.status}`);
+      console.log(`   Reason: ${response.reason || 'none'}`);
+
+      // Update the outgoing payment request status
+      const req = this.outgoingPaymentRequests.find(
+        (r) => r.eventId === response.originalEventId || r.requestId === response.requestId
+      );
+
+      if (req) {
+        const newStatus =
+          response.status === "DECLINED"
+            ? OutgoingPaymentRequestStatus.DECLINED
+            : OutgoingPaymentRequestStatus.EXPIRED;
+        req.status = newStatus;
+        this.notifyOutgoingRequestsUpdated();
+
+        const statusStr = response.status === "DECLINED" ? "declined" : "expired";
+        console.log(`📭 Payment request ${statusStr}: ${req.amount} ${req.symbol}`);
+        if (response.reason) {
+          console.log(`   Reason: ${response.reason}`);
+        }
+      } else {
+        console.warn(`Received response for unknown payment request: ${response.requestId}`);
+      }
+    } catch (error) {
+      console.error("Failed to handle payment request response", error);
     }
   }
 
@@ -314,8 +379,23 @@ export class NostrService {
     window.dispatchEvent(new CustomEvent("payment-requests-updated"));
   }
 
-  acceptPaymentRequest(request: IncomingPaymentRequest) {
+  private notifyOutgoingRequestsUpdated() {
+    window.dispatchEvent(new CustomEvent("outgoing-payment-requests-updated"));
+  }
+
+  acceptPaymentRequest(request: IncomingPaymentRequest): { success: boolean; error?: string } {
+    console.log(`Accepting payment request: ${request.requestId}`);
+
+    // Check if the request has expired
+    if (request.isExpired()) {
+      console.warn(`Cannot accept expired payment request: ${request.requestId}`);
+      this.updateRequestStatus(request.id, PaymentRequestStatus.EXPIRED);
+      return { success: false, error: "Payment request has expired" };
+    }
+
+    // Update status to ACCEPTED
     this.updateRequestStatus(request.id, PaymentRequestStatus.ACCEPTED);
+    return { success: true };
   }
 
   rejectPaymentRequest(request: IncomingPaymentRequest) {
@@ -336,6 +416,8 @@ export class NostrService {
       (p) => p.status === PaymentRequestStatus.PENDING
     );
     this.paymentRequests = currentList;
+    this.notifyRequestsUpdated();
+    console.log(`Cleared processed payment requests, ${currentList.length} pending remain`);
   }
 
   updateRequestStatus(id: string, status: PaymentRequestStatus) {
@@ -348,6 +430,108 @@ export class NostrService {
 
   getPaymentRequests(): IncomingPaymentRequest[] {
     return this.paymentRequests;
+  }
+
+  /**
+   * Check and update expired payment requests (both incoming and outgoing).
+   * Called periodically to handle deadline expiration.
+   */
+  checkExpiredPaymentRequests() {
+    let hasIncomingChanges = false;
+    let hasOutgoingChanges = false;
+
+    // Check incoming requests
+    for (let i = 0; i < this.paymentRequests.length; i++) {
+      const request = this.paymentRequests[i];
+      if (request.status === PaymentRequestStatus.PENDING && request.isExpired()) {
+        console.log(`⏰ Incoming payment request expired: ${request.requestId}`);
+        request.status = PaymentRequestStatus.EXPIRED;
+        hasIncomingChanges = true;
+      }
+    }
+
+    // Check outgoing requests
+    for (let i = 0; i < this.outgoingPaymentRequests.length; i++) {
+      const request = this.outgoingPaymentRequests[i];
+      if (request.status === OutgoingPaymentRequestStatus.PENDING && request.isExpired()) {
+        console.log(`⏰ Outgoing payment request expired: ${request.requestId}`);
+        request.status = OutgoingPaymentRequestStatus.EXPIRED;
+        hasOutgoingChanges = true;
+      }
+    }
+
+    if (hasIncomingChanges) {
+      this.notifyRequestsUpdated();
+    }
+    if (hasOutgoingChanges) {
+      this.notifyOutgoingRequestsUpdated();
+    }
+  }
+
+  /**
+   * Start periodic expiration checking for payment requests.
+   * Should be called when the service starts.
+   */
+  private expirationCheckInterval: NodeJS.Timeout | null = null;
+
+  startExpirationChecker() {
+    if (this.expirationCheckInterval) return; // Already running
+
+    console.log("🕐 Starting payment request expiration checker (every 5 seconds)");
+    this.expirationCheckInterval = setInterval(() => {
+      this.checkExpiredPaymentRequests();
+    }, 5000); // Check every 5 seconds
+  }
+
+  stopExpirationChecker() {
+    if (this.expirationCheckInterval) {
+      clearInterval(this.expirationCheckInterval);
+      this.expirationCheckInterval = null;
+      console.log("🛑 Stopped payment request expiration checker");
+    }
+  }
+
+  // ==================== Outgoing Payment Request Methods ====================
+
+  getOutgoingPaymentRequests(): OutgoingPaymentRequest[] {
+    return this.outgoingPaymentRequests;
+  }
+
+  /**
+   * Update outgoing payment request status by event ID or request ID.
+   */
+  updateOutgoingRequestStatus(
+    eventIdOrRequestId: string,
+    status: OutgoingPaymentRequestStatus
+  ) {
+    const req = this.outgoingPaymentRequests.find(
+      (r) => r.eventId === eventIdOrRequestId || r.requestId === eventIdOrRequestId
+    );
+    if (req) {
+      req.status = status;
+      this.notifyOutgoingRequestsUpdated();
+    }
+  }
+
+  /**
+   * Clear outgoing payment request from the list.
+   */
+  clearOutgoingPaymentRequest(eventId: string) {
+    const currentList = this.outgoingPaymentRequests.filter((p) => p.eventId !== eventId);
+    this.outgoingPaymentRequests = currentList;
+    this.notifyOutgoingRequestsUpdated();
+  }
+
+  /**
+   * Clear all processed (non-PENDING) outgoing payment requests from the list.
+   */
+  clearProcessedOutgoingPaymentRequests() {
+    const currentList = this.outgoingPaymentRequests.filter(
+      (p) => p.status === OutgoingPaymentRequestStatus.PENDING
+    );
+    this.outgoingPaymentRequests = currentList;
+    this.notifyOutgoingRequestsUpdated();
+    console.log(`Cleared processed outgoing payment requests, ${currentList.length} pending remain`);
   }
 
   private async handleTokenTransfer(event: Event) {
