@@ -430,7 +430,7 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
             <div className="absolute inset-0 bg-white/80 dark:bg-black/80 flex items-center justify-center rounded-lg z-10">
               <div className="flex flex-col items-center gap-2">
                 <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-                <span className="text-sm text-neutral-600 dark:text-neutral-400">Syncing from cloud...</span>
+                <span className="text-sm text-neutral-600 dark:text-neutral-400">Syncing from fog...</span>
               </div>
             </div>
           )}
