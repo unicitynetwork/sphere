@@ -140,6 +140,7 @@ export async function scanWalletAddresses(
 ): Promise<ScanResult> {
   const foundAddresses: ScannedAddress[] = [];
   let totalBalance = 0;
+  let l1ScanComplete = false;  // Track when L1 balance scan completes
 
   if (!wallet.masterPrivateKey) {
     throw new Error("No master private key in wallet");
@@ -272,6 +273,7 @@ export async function scanWalletAddresses(
               found: foundAddresses.length,
               totalBalance,
               foundAddresses: [...foundAddresses],
+              l1ScanComplete,  // Preserve L1 scan status
             });
           }
         }
@@ -396,8 +398,10 @@ export async function scanWalletAddresses(
     }
   }
 
-  // Report L1 scan complete (IPNS still running in background)
-  // This allows UI to show "Load Selected" button immediately
+  // Mark L1 scan as complete (IPNS may still be running in background)
+  l1ScanComplete = true;
+
+  // Report L1 scan complete - UI can now show "Load Selected" button
   onProgress?.({
     current: maxAddresses,
     total: maxAddresses,
@@ -460,6 +464,7 @@ export async function scanWalletAddresses(
       found: foundAddresses.length,
       totalBalance,
       foundAddresses: [...foundAddresses],
+      l1ScanComplete: true,  // L1 scan is definitely complete at this point
     });
   }
 
