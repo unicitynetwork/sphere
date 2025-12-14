@@ -713,7 +713,7 @@ export class IpfsStorageService {
       return null;
     }
 
-    const IPNS_LIFETIME = 24 * 60 * 60 * 1000; // 24 hours in ms
+    const IPNS_LIFETIME = 99 * 365 * 24 * 60 * 60 * 1000; // 99 years in ms
     const ipnsKeyPair = this.ipnsKeyPair;
 
     try {
