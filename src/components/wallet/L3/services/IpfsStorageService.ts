@@ -114,6 +114,8 @@ interface IpnsGatewayResult {
   sequence: bigint;
   gateway: string;
   recordData: Uint8Array;
+  /** Cached content from gateway path (avoids re-fetch) */
+  _cachedContent?: TxfStorageData;
 }
 
 /**
@@ -873,9 +875,74 @@ export class IpfsStorageService {
   }
 
   /**
-   * Resolve IPNS progressively from all gateways
-   * Returns best result after initial timeout, continues collecting late responses
-   * Calls onLateHigherSequence if a late response has higher sequence
+   * Resolve IPNS via gateway path (fast, ~30ms with cache)
+   * Uses /ipns/{name}?format=dag-json for cached resolution
+   * Returns CID and content directly, but no sequence number
+   */
+  private async resolveIpnsViaGatewayPath(
+    gatewayUrl: string
+  ): Promise<{ cid: string; content: TxfStorageData; latency: number } | null> {
+    if (!this.cachedIpnsName) {
+      return null;
+    }
+
+    const startTime = Date.now();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      IPNS_RESOLUTION_CONFIG.gatewayPathTimeoutMs
+    );
+
+    try {
+      const url = `${gatewayUrl}/ipns/${this.cachedIpnsName}?format=dag-json`;
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          Accept: "application/vnd.ipld.dag-json, application/json",
+        },
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        return null;
+      }
+
+      // Extract CID from X-Ipfs-Path header: "/ipfs/bafk..."
+      const ipfsPath = response.headers.get("X-Ipfs-Path");
+      const cidMatch = ipfsPath?.match(/^\/ipfs\/(.+)$/);
+      const cid = cidMatch?.[1] || "";
+
+      const content = await response.json() as TxfStorageData;
+      const latency = Date.now() - startTime;
+
+      if (!cid) {
+        console.debug(`📦 Gateway ${new URL(gatewayUrl).hostname} returned no X-Ipfs-Path header`);
+      }
+
+      return { cid, content, latency };
+    } catch (error) {
+      clearTimeout(timeoutId);
+      const hostname = new URL(gatewayUrl).hostname;
+      if (error instanceof Error && error.name === "AbortError") {
+        console.debug(`📦 Gateway path ${hostname} timeout`);
+      } else {
+        console.debug(`📦 Gateway path ${hostname} error:`, error);
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Resolve IPNS progressively from all gateways using dual-path racing
+   *
+   * Races both methods in parallel for each gateway:
+   * - Gateway path: /ipns/{name}?format=dag-json (fast ~30ms, returns content)
+   * - Routing API: /api/v0/routing/get (slow ~5s, returns sequence number)
+   *
+   * Returns best result after initial timeout, continues collecting late responses.
+   * Gateway path results include cached content to avoid re-fetch.
+   * Calls onLateHigherSequence if a late response has higher sequence.
    */
   private async resolveIpnsProgressively(
     onLateHigherSequence?: (result: IpnsGatewayResult) => void
@@ -885,18 +952,67 @@ export class IpfsStorageService {
       return { best: null, allResults: [], respondedCount: 0, totalGateways: 0 };
     }
 
-    console.log(`📦 Progressive IPNS resolution from ${gatewayUrls.length} gateways...`);
+    console.log(`📦 Racing IPNS resolution from ${gatewayUrls.length} gateways (gateway path + routing API)...`);
 
     const results: IpnsGatewayResult[] = [];
+    // Track which gateways have responded via gateway path (for fast results)
+    const gatewayPathResults = new Map<string, { cid: string; content: TxfStorageData; latency: number }>();
 
-    // Create promises for all gateway requests
+    // Create promises for each gateway - race both methods
     const gatewayPromises = gatewayUrls.map(async (url) => {
-      const result = await this.resolveIpnsFromGateway(url);
-      if (result) {
-        results.push(result);
-        console.log(`📦 Response from ${new URL(url).hostname}: seq=${result.sequence}`);
+      const hostname = new URL(url).hostname;
+
+      // Start both methods in parallel
+      const gatewayPathPromise = this.resolveIpnsViaGatewayPath(url);
+      const routingApiPromise = this.resolveIpnsFromGateway(url);
+
+      // Wait for both to settle (we want results from both if available)
+      const [gatewayPathResult, routingApiResult] = await Promise.allSettled([
+        gatewayPathPromise,
+        routingApiPromise,
+      ]);
+
+      // Process gateway path result (fast, has content, no sequence)
+      let fastCid: string | null = null;
+      let fastContent: TxfStorageData | null = null;
+      if (gatewayPathResult.status === "fulfilled" && gatewayPathResult.value) {
+        const { cid, content, latency } = gatewayPathResult.value;
+        if (cid) {
+          fastCid = cid;
+          fastContent = content;
+          gatewayPathResults.set(url, { cid, content, latency });
+          console.log(`📦 Gateway path ${hostname}: CID=${cid.slice(0, 16)}... (${latency}ms)`);
+        }
       }
-      return result;
+
+      // Process routing API result (slow, has sequence)
+      if (routingApiResult.status === "fulfilled" && routingApiResult.value) {
+        const result = routingApiResult.value;
+        // Merge cached content from gateway path if same CID
+        if (fastContent && fastCid === result.cid) {
+          result._cachedContent = fastContent;
+        }
+        results.push(result);
+        console.log(`📦 Routing API ${hostname}: seq=${result.sequence}, CID=${result.cid.slice(0, 16)}...`);
+        return result;
+      }
+
+      // If only gateway path succeeded (no routing result), create result with sequence 0
+      // This allows fast content fetch, sequence will be updated by late routing responses
+      if (fastCid && fastContent) {
+        const partialResult: IpnsGatewayResult = {
+          cid: fastCid,
+          sequence: 0n, // Unknown sequence - will be updated by late routing response
+          gateway: url,
+          recordData: new Uint8Array(),
+          _cachedContent: fastContent,
+        };
+        results.push(partialResult);
+        console.log(`📦 Gateway path only ${hostname}: CID=${fastCid.slice(0, 16)}... (seq unknown)`);
+        return partialResult;
+      }
+
+      return null;
     });
 
     // Wait for initial timeout to collect responses
@@ -905,21 +1021,29 @@ export class IpfsStorageService {
       new Promise((resolve) => setTimeout(resolve, IPNS_RESOLUTION_CONFIG.initialTimeoutMs)),
     ]);
 
-    // Find best result (highest sequence) from collected results
+    // Find best result (highest sequence, or first with content if no sequences)
     const findBest = (arr: IpnsGatewayResult[]): IpnsGatewayResult | null => {
       if (arr.length === 0) return null;
-      return arr.reduce((best, current) =>
-        current.sequence > best.sequence ? current : best
-      );
+      // Prefer results with known sequence (> 0)
+      const withSequence = arr.filter(r => r.sequence > 0n);
+      if (withSequence.length > 0) {
+        return withSequence.reduce((best, current) =>
+          current.sequence > best.sequence ? current : best
+        );
+      }
+      // Fall back to first result with cached content
+      const withContent = arr.find(r => r._cachedContent);
+      return withContent || arr[0];
     };
 
     const initialBest = findBest(results);
     const initialCount = results.length;
     const initialSeq = initialBest?.sequence ?? 0n;
+    const hasContent = !!initialBest?._cachedContent;
 
     console.log(
       `📦 Initial timeout: ${initialCount}/${gatewayUrls.length} responded, ` +
-      `best seq=${initialSeq.toString()}`
+      `best seq=${initialSeq.toString()}, hasContent=${hasContent}`
     );
 
     // Continue waiting for late responses in background
@@ -2120,7 +2244,17 @@ export class IpfsStorageService {
 
     // 4. Always try to fetch and verify remote content
     // This handles cases where previous sync was interrupted
-    const remoteData = await this.fetchRemoteContent(cidToFetch);
+    // Use cached content from gateway path if available (avoids re-fetch)
+    let remoteData: TxfStorageData | null = null;
+
+    if (resolution.best?._cachedContent && resolution.best.cid === cidToFetch) {
+      // Use cached content from gateway path resolution (fast path)
+      remoteData = resolution.best._cachedContent;
+      console.log(`📦 Using cached content from gateway path (avoided re-fetch)`);
+    } else {
+      // Fetch content via IPFS
+      remoteData = await this.fetchRemoteContent(cidToFetch);
+    }
 
     if (!remoteData) {
       // Could not fetch remote content - republish local

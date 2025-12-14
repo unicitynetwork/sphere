@@ -100,6 +100,13 @@ export const IPFS_CONFIG = {
 /**
  * IPNS resolution configuration
  * Controls progressive multi-peer IPNS record collection
+ *
+ * Two resolution methods are used in parallel (racing):
+ * 1. Gateway path (/ipns/{name}?format=dag-json) - Fast (~30ms), returns content directly
+ * 2. Routing API (/api/v0/routing/get) - Slower (~5s), returns IPNS record with sequence number
+ *
+ * The gateway path is preferred for speed, while the routing API provides
+ * authoritative sequence numbers for version tracking.
  */
 export const IPNS_RESOLUTION_CONFIG = {
   /** Wait this long for initial responses before selecting best record */
@@ -114,9 +121,30 @@ export const IPNS_RESOLUTION_CONFIG = {
   inactivePollingIntervalMinMs: 240000,
   /** Maximum polling interval when tab is inactive/hidden (4.5 minutes with jitter) */
   inactivePollingIntervalMaxMs: 270000,
-  /** Per-gateway request timeout */
+  /** Per-gateway request timeout (for routing API) */
   perGatewayTimeoutMs: 25000,
+  /** Gateway path resolution timeout (fast path) */
+  gatewayPathTimeoutMs: 5000,
 };
+
+/**
+ * TODO: IPNS Archiving Service Enhancement
+ * Location: /home/vrogojin/ipfs-storage (kubo docker image)
+ *
+ * Implement an IPNS archiving service that:
+ * 1. Archives N previous IPNS record versions (configurable, default 10)
+ * 2. API endpoint: GET /api/v0/ipns/archive/{name}
+ *    Returns: { records: [{ cid, sequence, timestamp, signature }] }
+ * 3. Enables recovery of tokens lost due to race conditions where empty
+ *    inventory overwrites populated one
+ * 4. Store in MongoDB alongside current IPNS implementation
+ *
+ * Recovery scenario:
+ * - Device A: tokens, publishes seq=11
+ * - Device B: empty wallet, IPNS resolution times out
+ * - Device B: publishes seq=1, overwrites Device A data
+ * - Archive service: allows recovery of seq=11 record
+ */
 
 /**
  * Get the backend gateway URL for API calls

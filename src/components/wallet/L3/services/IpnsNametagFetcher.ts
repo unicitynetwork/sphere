@@ -2,17 +2,22 @@
  * IPNS Nametag Fetcher
  *
  * Fetches nametag data from IPFS via IPNS resolution without requiring
- * full IpfsStorageService initialization. Uses HTTP gateway path format
- * (/ipns/{name}) which allows the gateway to handle IPNS resolution.
+ * full IpfsStorageService initialization. Uses dual-path racing for optimal speed:
+ *
+ * Two resolution methods raced in parallel:
+ * 1. Gateway path (/ipns/{name}?format=dag-json) - Fast (~30ms with cache)
+ * 2. Routing API (/api/v0/routing/get) - Slower (~5s) but more reliable
  *
  * Flow:
  *   1. Derive IPNS name from private key
- *   2. Fetch content via gateway: GET /ipns/{ipnsName}
- *   3. Parse TXF content and extract _nametag.name
+ *   2. Race both methods - gateway path and routing API
+ *   3. Return first successful result
+ *   4. Parse TXF content and extract _nametag.name
  */
 
 import { deriveIpnsNameFromPrivateKey } from "./IpnsUtils";
-import { getBackendGatewayUrl, getAllBackendGatewayUrls } from "../../../../config/ipfs.config";
+import { unmarshalIPNSRecord } from "ipns";
+import { getBackendGatewayUrl, getAllBackendGatewayUrls, IPNS_RESOLUTION_CONFIG } from "../../../../config/ipfs.config";
 
 export interface IpnsNametagResult {
   ipnsName: string;
@@ -26,9 +31,6 @@ export interface IpnsNametagResult {
   source: "http" | "none";
   error?: string;
 }
-
-// Timeout for HTTP gateway requests (IPNS resolution via DHT can be slow)
-const FETCH_TIMEOUT_MS = 30000;
 
 /**
  * Fetch nametag from IPFS using IPNS resolution
@@ -102,10 +104,13 @@ async function fetchWithTimeout(
 }
 
 /**
- * Fetch nametag via HTTP gateway
+ * Fetch nametag via HTTP gateway using dual-path racing
  *
- * Uses the IPNS gateway path format which allows the gateway to resolve IPNS
- * and serve the content directly. Tries multiple gateways for redundancy.
+ * Races both methods in parallel for each gateway:
+ * - Gateway path: /ipns/{name}?format=dag-json (fast ~30ms)
+ * - Routing API: /api/v0/routing/get (slow ~5s, more reliable)
+ *
+ * Returns first successful result from any gateway.
  */
 async function fetchViaHttpGateway(ipnsName: string): Promise<NametagFetchResult | null> {
   // Get all configured gateway URLs
@@ -118,26 +123,31 @@ async function fetchViaHttpGateway(ipnsName: string): Promise<NametagFetchResult
     gatewayUrls.push(fallbackUrl);
   }
 
-  // Try each gateway until one succeeds
-  let lastError: Error | null = null;
-  for (const gatewayUrl of gatewayUrls) {
-    try {
-      const nametag = await tryGateway(gatewayUrl, ipnsName);
-      if (nametag !== null) {
-        return nametag;
-      }
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      // Continue to next gateway
-    }
-  }
+  // Race both methods across all gateways
+  // Create promise for each gateway that races gateway path vs routing API
+  const racePromises = gatewayUrls.flatMap((gatewayUrl) => [
+    // Gateway path (fast)
+    tryGatewayPath(gatewayUrl, ipnsName).catch(() => null),
+    // Routing API (slow but reliable)
+    tryRoutingApi(gatewayUrl, ipnsName).catch(() => null),
+  ]);
 
-  // If all gateways failed, throw the last error
-  if (lastError) {
-    throw lastError;
+  // Use Promise.any to return first successful result
+  try {
+    const result = await Promise.any(
+      racePromises.map(async (p) => {
+        const result = await p;
+        if (result === null) {
+          throw new Error("No result");
+        }
+        return result;
+      })
+    );
+    return result;
+  } catch {
+    // All promises rejected - no result found
+    return null;
   }
-
-  return null;
 }
 
 interface NametagFetchResult {
@@ -150,11 +160,11 @@ interface NametagFetchResult {
 }
 
 /**
- * Try fetching from a single gateway using IPNS gateway path
+ * Try fetching from a single gateway using IPNS gateway path (fast path)
  * Uses /ipns/{name}?format=dag-json which lets the gateway resolve IPNS
  * and return DAG-JSON content (since @helia/json stores in this format)
  */
-async function tryGateway(
+async function tryGatewayPath(
   gatewayUrl: string,
   ipnsName: string
 ): Promise<NametagFetchResult | null> {
@@ -164,10 +174,10 @@ async function tryGateway(
 
   let contentResponse: Response;
   try {
-    contentResponse = await fetchWithTimeout(ipnsUrl, FETCH_TIMEOUT_MS);
+    contentResponse = await fetchWithTimeout(ipnsUrl, IPNS_RESOLUTION_CONFIG.gatewayPathTimeoutMs);
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error("IPNS gateway timeout");
+      throw new Error("IPNS gateway path timeout");
     }
     throw error;
   }
@@ -195,6 +205,90 @@ async function tryGateway(
   }
 
   return null;
+}
+
+/**
+ * Try fetching from a single gateway using routing API (slow but reliable)
+ * Uses /api/v0/routing/get to get raw IPNS record, then fetches content via CID
+ */
+async function tryRoutingApi(
+  gatewayUrl: string,
+  ipnsName: string
+): Promise<NametagFetchResult | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    IPNS_RESOLUTION_CONFIG.perGatewayTimeoutMs
+  );
+
+  try {
+    // 1. Resolve IPNS to CID via routing API
+    const routingUrl = `${gatewayUrl}/api/v0/routing/get?arg=/ipns/${ipnsName}`;
+    const routingResponse = await fetch(routingUrl, {
+      method: "POST",
+      signal: controller.signal,
+    });
+
+    if (!routingResponse.ok) {
+      return null;
+    }
+
+    // Parse routing response to get IPNS record
+    const json = await routingResponse.json() as { Extra?: string };
+    if (!json.Extra) {
+      return null;
+    }
+
+    // Decode base64 Extra field to get raw IPNS record
+    const recordData = Uint8Array.from(atob(json.Extra), c => c.charCodeAt(0));
+    const record = unmarshalIPNSRecord(recordData);
+
+    // Extract CID from value path
+    const cidMatch = record.value.match(/^\/ipfs\/(.+)$/);
+    if (!cidMatch) {
+      return null;
+    }
+
+    const cid = cidMatch[1];
+
+    // 2. Fetch content via CID
+    const contentUrl = `${gatewayUrl}/ipfs/${cid}?format=dag-json`;
+    const contentResponse = await fetch(contentUrl, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/vnd.ipld.dag-json, application/json",
+      },
+    });
+
+    if (!contentResponse.ok) {
+      return null;
+    }
+
+    // Parse TXF content and extract nametag
+    let txfData;
+    try {
+      txfData = await contentResponse.json();
+    } catch {
+      return null;
+    }
+
+    // TXF format has _nametag at top level
+    if (txfData._nametag && typeof txfData._nametag.name === "string") {
+      return {
+        name: txfData._nametag.name,
+        data: txfData._nametag,
+      };
+    }
+
+    return null;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("IPNS routing API timeout");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /**
