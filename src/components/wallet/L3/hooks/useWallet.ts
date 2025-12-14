@@ -536,12 +536,42 @@ export const useWallet = () => {
     const def = registryService.getCoinDefinition(coinId);
     const iconUrl = def ? registryService.getIconUrl(def) : undefined;
 
+    // Get SDK token JSON and validate TXF structure
+    const sdkJson = sdkToken.toJSON() as any;
+
+    // Ensure the JSON has required TXF structure (genesis, state)
+    // This is critical for IPFS sync to work properly
+    if (!sdkJson.genesis || !sdkJson.state) {
+      console.error(`❌ Change token missing required TXF fields!`, {
+        hasGenesis: !!sdkJson.genesis,
+        hasState: !!sdkJson.state,
+        keys: Object.keys(sdkJson),
+      });
+      // Still try to save - maybe the fields are named differently
+    } else {
+      console.log(`✅ Change token has valid TXF structure`);
+    }
+
+    // Ensure TXF compatibility fields exist
+    const txfJson = {
+      ...sdkJson,
+      version: sdkJson.version || "2.0",
+      transactions: sdkJson.transactions || [],
+      nametags: sdkJson.nametags || [],
+      _integrity: sdkJson._integrity || {
+        genesisDataJSONHash: "0000" + "0".repeat(60),
+      },
+    };
+
+    // Extract token ID for logging
+    const genesisTokenId = sdkJson.genesis?.data?.tokenId;
+
     const uiToken = new Token({
       id: uuidv4(),
       name: def?.symbol || "Change Token",
       symbol: def?.symbol || "UNK",
       type: "Fungible",
-      jsonData: JSON.stringify(sdkToken.toJSON()),
+      jsonData: JSON.stringify(txfJson),
       status: TokenStatus.CONFIRMED,
       amount: amount,
       coinId: coinId,
@@ -549,7 +579,7 @@ export const useWallet = () => {
       timestamp: Date.now(),
     });
 
-    console.log(`💾 Saving change token: ${amount} ${def?.symbol}`);
+    console.log(`💾 Saving change token: ${amount} ${def?.symbol}, tokenId: ${genesisTokenId?.slice(0, 8) || 'unknown'}...`);
     walletRepo.addToken(uiToken, true); // Skip history for change token
   };
 

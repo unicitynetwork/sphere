@@ -48,7 +48,12 @@ export function tokenToTxf(token: Token): TxfToken | null {
 
     // Validate it has the expected TXF structure
     if (!txfData.genesis || !txfData.state) {
-      console.warn(`Token ${token.id} jsonData is not in TXF format`);
+      console.warn(`Token ${token.id} jsonData is not in TXF format`, {
+        hasGenesis: !!txfData.genesis,
+        hasState: !!txfData.state,
+        topLevelKeys: Object.keys(txfData),
+        genesisKeys: txfData.genesis ? Object.keys(txfData.genesis) : [],
+      });
       return null;
     }
 
