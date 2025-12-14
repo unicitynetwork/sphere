@@ -35,7 +35,8 @@ export type StorageEventType =
   | "storage:started"
   | "storage:completed"
   | "storage:failed"
-  | "ipns:published";
+  | "ipns:published"
+  | "sync:state-changed";
 
 export interface StorageEvent {
   type: StorageEventType;
@@ -45,6 +46,7 @@ export interface StorageEvent {
     ipnsName?: string;
     tokenCount?: number;
     error?: string;
+    isSyncing?: boolean;
   };
 }
 
@@ -153,6 +155,7 @@ export class IpfsStorageService {
 
   private isInitializing = false;
   private isSyncing = false;
+  private isInitialSyncing = false;  // Tracks initial IPNS-based sync on startup
   private pendingSync = false; // Track if sync was requested while another sync was running
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
   private lastSync: StorageResult | null = null;
@@ -286,6 +289,23 @@ export class IpfsStorageService {
         console.error("📦 Storage event callback error:", error);
       }
     }
+  }
+
+  /**
+   * Emit sync state change event for React components to update UI in real-time
+   */
+  private emitSyncStateChange(): void {
+    const isSyncing = this.isSyncing || this.isInitialSyncing;
+    console.log(`📦 Sync state changed: isSyncing=${isSyncing}`);
+    window.dispatchEvent(
+      new CustomEvent("ipfs-storage-event", {
+        detail: {
+          type: "sync:state-changed",
+          timestamp: Date.now(),
+          data: { isSyncing },
+        } as StorageEvent,
+      })
+    );
   }
 
   // ==========================================
@@ -2022,11 +2042,16 @@ export class IpfsStorageService {
   async syncFromIpns(): Promise<StorageResult> {
     console.log(`📦 Starting IPNS-based sync...`);
 
-    const initialized = await this.ensureInitialized();
-    if (!initialized) {
-      console.warn(`📦 Not initialized, skipping IPNS sync`);
-      return { success: false, timestamp: Date.now(), error: "Not initialized" };
-    }
+    // Set initial syncing flag for UI feedback
+    this.isInitialSyncing = true;
+    this.emitSyncStateChange();
+
+    try {
+      const initialized = await this.ensureInitialized();
+      if (!initialized) {
+        console.warn(`📦 Not initialized, skipping IPNS sync`);
+        return { success: false, timestamp: Date.now(), error: "Not initialized" };
+      }
 
     // 0. Retry any pending IPNS publishes from previous failed syncs
     await this.retryPendingIpnsPublish();
@@ -2194,6 +2219,10 @@ export class IpfsStorageService {
         version: remoteVersion,
       };
     }
+    } finally {
+      this.isInitialSyncing = false;
+      this.emitSyncStateChange();
+    }
   }
 
   /**
@@ -2226,6 +2255,7 @@ export class IpfsStorageService {
     }
 
     this.isSyncing = true;
+    this.emitSyncStateChange();
 
     await this.emitEvent({
       type: "storage:started",
@@ -2398,6 +2428,7 @@ export class IpfsStorageService {
                 // BUT: don't skip if forceIpnsPublish is set (IPNS recovery needed)
                 console.log(`📦 Remote is in sync (v${remoteVersion}) - no changes to upload`);
                 this.isSyncing = false;
+                this.emitSyncStateChange();
                 coordinator.releaseLock(); // Release cross-tab lock on early return
                 return {
                   success: true,
@@ -2601,6 +2632,7 @@ export class IpfsStorageService {
       return result;
     } finally {
       this.isSyncing = false;
+      this.emitSyncStateChange();
       // Release cross-tab lock
       coordinator.releaseLock();
 
@@ -2872,7 +2904,7 @@ export class IpfsStorageService {
   getStatus(): StorageStatus {
     return {
       initialized: this.helia !== null,
-      isSyncing: this.isSyncing,
+      isSyncing: this.isSyncing || this.isInitialSyncing,
       lastSync: this.lastSync,
       ipnsName: this.cachedIpnsName,
       webCryptoAvailable: this.isWebCryptoAvailable(),
@@ -2892,7 +2924,7 @@ export class IpfsStorageService {
    * Check if currently syncing
    */
   isCurrentlySyncing(): boolean {
-    return this.isSyncing;
+    return this.isSyncing || this.isInitialSyncing;
   }
 
   // ==========================================
