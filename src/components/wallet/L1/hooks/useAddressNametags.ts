@@ -17,8 +17,9 @@ const FREQUENT_POLL_DURATION = 60000;    // 1 minute of frequent polling
  */
 export interface AddressWithNametag {
   address: string;
-  index: number;
-  isChange?: boolean;          // True if this is a change address (chain=1)
+  path: string;                // PRIMARY KEY - BIP32 derivation path
+  index: number;               // For display purposes only
+  isChange?: boolean;          // For display purposes only
   ipnsLoading: boolean;        // True while fetching from IPFS
   hasNametag: boolean;
   nametag?: string;
@@ -56,11 +57,9 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
   }, []);
 
   // Fetch a single address's nametag and check L3 inventory
-  // NOTE: isChange is CRITICAL - external and change addresses have DIFFERENT L3 identities!
+  // Uses PATH as the single identifier - no index/isChange ambiguity
   const fetchSingleNametag = useCallback(async (
-    _address: string,
-    index: number,
-    isChange: boolean = false
+    path: string  // Use path as the ONLY identifier
   ): Promise<{
     hasNametag: boolean;
     nametag?: string;
@@ -71,8 +70,8 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
   }> => {
     try {
       const identityManager = IdentityManager.getInstance(SESSION_KEY);
-      // Pass isChange to derive the correct L3 identity (chain=0 for external, chain=1 for change)
-      const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(index, undefined, isChange);
+      // Use path-based derivation for unambiguous L3 identity
+      const l3Identity = await identityManager.deriveIdentityFromPath(path);
       const l3Address = l3Identity.address;
       const result = await fetchNametagFromIpns(l3Identity.privateKey);
 
@@ -100,6 +99,7 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
   }, []);
 
   // Initialize and fetch nametags for addresses
+  // Uses PATH as the primary key for all lookups
   useEffect(() => {
     if (!addresses || addresses.length === 0) {
       setAddressesWithNametags([]);
@@ -107,9 +107,9 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
       return;
     }
 
-    // Find addresses that haven't been initialized yet
+    // Find addresses that haven't been initialized yet (use path as key)
     const newAddresses = addresses.filter(
-      addr => !initializedAddressesRef.current.has(addr.address)
+      addr => addr.path && !initializedAddressesRef.current.has(addr.path)
     );
 
     if (newAddresses.length === 0) {
@@ -118,17 +118,19 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
 
     console.log(`🔍 [L1] Initializing ${newAddresses.length} new addresses for nametag fetch...`);
 
-    // Mark as initialized immediately to prevent duplicate processing
-    newAddresses.forEach(addr => initializedAddressesRef.current.add(addr.address));
+    // Mark as initialized immediately to prevent duplicate processing (use path as key)
+    newAddresses.forEach(addr => {
+      if (addr.path) initializedAddressesRef.current.add(addr.path);
+    });
 
     // Add new addresses to state with loading state
-    // IMPORTANT: Use addr.index (BIP32 derivation index) AND addr.isChange for L3 derivation
-    // External and change addresses have DIFFERENT L3 identities (different chain in BIP32 path)
+    // PATH is the primary key - index and isChange are for display only
     const newStates: AddressWithNametag[] = newAddresses.map((addr) => {
       return {
         address: addr.address,
-        index: addr.index,  // Use actual BIP32 index, not sequential position
-        isChange: addr.isChange,  // Track change status for correct L3 derivation
+        path: addr.path!,  // PATH is the primary key
+        index: addr.index,  // For display only
+        isChange: addr.isChange,  // For display only
         ipnsLoading: true,
         hasNametag: false,
         nametag: undefined,
@@ -138,29 +140,29 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
 
     setAddressesWithNametags(prev => [...prev, ...newStates]);
 
-    // Fetch nametags for all addresses (external and change have DIFFERENT L3 identities)
+    // Fetch nametags using PATH as the identifier
     const fetchNewAddresses = async () => {
       for (const addr of newAddresses) {
         if (!mountedRef.current) return;
+        if (!addr.path) continue;
 
-        // Skip if already fetching
-        if (fetchInProgressRef.current.has(addr.address)) continue;
-        fetchInProgressRef.current.add(addr.address);
+        // Skip if already fetching (use path as key)
+        if (fetchInProgressRef.current.has(addr.path)) continue;
+        fetchInProgressRef.current.add(addr.path);
 
-        // Use actual BIP32 index AND isChange for L3 derivation
-        const l3Index = addr.index;
-        const isChange = addr.isChange ?? false;
-        console.log(`🔍 [L1] Fetching nametag for ${addr.address.slice(0, 12)}... (L3 index ${l3Index}, isChange=${isChange})`);
+        console.log(`🔍 [L1] Fetching nametag for ${addr.address.slice(0, 12)}... (path: ${addr.path})`);
 
-        const result = await fetchSingleNametag(addr.address, l3Index, isChange);
+        // Use path for L3 derivation - unambiguous!
+        const result = await fetchSingleNametag(addr.path);
 
         if (!mountedRef.current) return;
 
         console.log(`🔍 [L1] IPNS result for ${addr.address.slice(0, 12)}...: ${result.nametag || 'none'}`);
 
+        // Match by path - unambiguous!
         setAddressesWithNametags(prev =>
           prev.map(a =>
-            a.address === addr.address
+            a.path === addr.path
               ? {
                   ...a,
                   ipnsLoading: false,
@@ -176,7 +178,7 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
           )
         );
 
-        fetchInProgressRef.current.delete(addr.address);
+        fetchInProgressRef.current.delete(addr.path);
       }
     };
 
@@ -184,15 +186,16 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
   }, [addresses, fetchSingleNametag]);
 
   // Continuous polling for addresses without nametags
+  // Uses PATH as the key for all lookups
   useEffect(() => {
     const scheduleNextPoll = () => {
       if (pollTimerRef.current) {
         clearTimeout(pollTimerRef.current);
       }
 
-      // Find addresses that need polling (no nametag, not currently loading)
+      // Find addresses that need polling (no nametag, not currently loading) - use path as key
       const addressesNeedingPoll = addressesWithNametags.filter(
-        (addr) => !addr.hasNametag && !addr.ipnsLoading && addr.firstFetchTime && !fetchInProgressRef.current.has(addr.address)
+        (addr) => !addr.hasNametag && !addr.ipnsLoading && addr.firstFetchTime && !fetchInProgressRef.current.has(addr.path)
       );
 
       if (addressesNeedingPoll.length === 0) {
@@ -227,28 +230,31 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
 
           for (const addr of addressReadyForPoll) {
             if (!mountedRef.current) return;
-            if (fetchInProgressRef.current.has(addr.address)) continue;
+            // Use path as key
+            if (fetchInProgressRef.current.has(addr.path)) continue;
 
-            fetchInProgressRef.current.add(addr.address);
+            fetchInProgressRef.current.add(addr.path);
 
-            // Mark as loading
+            // Mark as loading - match by path
             setAddressesWithNametags((prev) =>
               prev.map((a) =>
-                a.address === addr.address ? { ...a, ipnsLoading: true } : a
+                a.path === addr.path ? { ...a, ipnsLoading: true } : a
               )
             );
 
-            const result = await fetchSingleNametag(addr.address, addr.index, addr.isChange ?? false);
+            // Use path for L3 derivation - unambiguous!
+            const result = await fetchSingleNametag(addr.path);
 
             if (!mountedRef.current) return;
 
             if (result.hasNametag) {
-              console.log(`✅ [L1] Found nametag for ${addr.address.slice(0, 12)}...: ${result.nametag} (isChange=${addr.isChange})`);
+              console.log(`✅ [L1] Found nametag for ${addr.address.slice(0, 12)}...: ${result.nametag} (path=${addr.path})`);
             }
 
+            // Match by path - unambiguous!
             setAddressesWithNametags((prev) =>
               prev.map((a) =>
-                a.address === addr.address
+                a.path === addr.path
                   ? {
                       ...a,
                       ipnsLoading: false,
@@ -264,7 +270,7 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
               )
             );
 
-            fetchInProgressRef.current.delete(addr.address);
+            fetchInProgressRef.current.delete(addr.path);
           }
 
           // Schedule next poll
@@ -302,27 +308,30 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
 
   /**
    * Force refresh nametag for a specific address
-   * @param isChange - True for change addresses (chain=1), false for external (chain=0)
+   * @param path - BIP32 derivation path (the ONLY identifier needed)
    */
-  const refreshNametag = useCallback(async (address: string, index: number, isChange: boolean = false) => {
-    if (fetchInProgressRef.current.has(address)) return;
+  const refreshNametag = useCallback(async (path: string) => {
+    // Use path as the key
+    if (fetchInProgressRef.current.has(path)) return;
 
-    fetchInProgressRef.current.add(address);
+    fetchInProgressRef.current.add(path);
 
-    // Mark as loading
+    // Mark as loading - match by path
     setAddressesWithNametags((prev) =>
       prev.map((a) =>
-        a.address === address
+        a.path === path
           ? { ...a, ipnsLoading: true, hasNametag: false, nametag: undefined }
           : a
       )
     );
 
-    const result = await fetchSingleNametag(address, index, isChange);
+    // Use path for L3 derivation - unambiguous!
+    const result = await fetchSingleNametag(path);
 
+    // Match by path - unambiguous!
     setAddressesWithNametags((prev) =>
       prev.map((a) =>
-        a.address === address
+        a.path === path
           ? {
               ...a,
               ipnsLoading: false,
@@ -338,7 +347,7 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
       )
     );
 
-    fetchInProgressRef.current.delete(address);
+    fetchInProgressRef.current.delete(path);
   }, [fetchSingleNametag]);
 
   // Convert to lookup object for easy access by address

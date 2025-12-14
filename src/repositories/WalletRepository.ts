@@ -94,6 +94,26 @@ export class WalletRepository {
   }
 
   /**
+   * Check if an address has tokens without loading the full wallet
+   * Static method for use during onboarding address selection
+   */
+  static checkTokensForAddress(address: string): boolean {
+    if (!address) return false;
+
+    const storageKey = `${STORAGE_KEY_PREFIX}${address}`;
+    try {
+      const json = localStorage.getItem(storageKey);
+      if (json) {
+        const parsed = JSON.parse(json) as StoredWallet;
+        return Array.isArray(parsed.tokens) && parsed.tokens.length > 0;
+      }
+    } catch (error) {
+      console.error("Error checking tokens for address:", error);
+    }
+    return false;
+  }
+
+  /**
    * Save nametag for an address without loading the full wallet
    * Used during onboarding when we fetch nametag from IPNS
    * Creates minimal wallet structure if needed

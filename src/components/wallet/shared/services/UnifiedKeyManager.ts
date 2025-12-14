@@ -373,15 +373,25 @@ export class UnifiedKeyManager {
   }
 
   /**
-   * Derive address at a specific index
-   * Uses the appropriate derivation based on mode
-   * @param index - BIP32 address index
-   * @param isChange - True for change addresses (chain=1), false for external (chain=0)
+   * Derive address from a full BIP32 path string
+   * This is the ONLY method for address derivation - PATH is the single identifier
+   * @param path - Full path like "m/84'/1'/0'/0/5" or "m/44'/0'/0'/1/3"
    */
-  deriveAddress(index: number, isChange: boolean = false): DerivedAddress {
+  deriveAddressFromPath(path: string): DerivedAddress {
     if (!this.masterKey) {
       throw new Error("Wallet not initialized");
     }
+
+    // Parse path to extract chain and index
+    // Matches: m/84'/1'/0'/0/5 or m/44'/0'/0'/1/3
+    const match = path.match(/m\/(\d+)'\/(\d+)'\/(\d+)'\/(\d+)\/(\d+)/);
+    if (!match) {
+      throw new Error(`Invalid BIP32 path: ${path}`);
+    }
+
+    const chain = parseInt(match[4], 10);  // 0=external, 1=change
+    const index = parseInt(match[5], 10);
+    const isChange = chain === 1;
 
     if (this.derivationMode === "bip32" && this.chainCode) {
       // Standard BIP32 derivation using wallet's base path (e.g., m/84'/1'/0'/0/{index})
@@ -435,6 +445,16 @@ export class UnifiedKeyManager {
   }
 
   /**
+   * Get the default address path (first external address)
+   * Returns path like "m/44'/0'/0'/0/0" based on wallet's base path
+   *
+   * Use this instead of hardcoding paths or using addresses[0]
+   */
+  getDefaultAddressPath(): string {
+    return `${this.basePath}/0/0`;
+  }
+
+  /**
    * Derive private key at a custom path
    */
   deriveKeyAtPath(path: string): { privateKey: string; chainCode: string } {
@@ -484,7 +504,7 @@ export class UnifiedKeyManager {
     let address0: string | null = null;
     try {
       if (this.masterKey) {
-        address0 = this.deriveAddress(0).l1Address;
+        address0 = this.deriveAddressFromPath(this.getDefaultAddressPath()).l1Address;
       }
     } catch {
       // Ignore errors
@@ -526,7 +546,7 @@ export class UnifiedKeyManager {
       throw new Error("Wallet not initialized");
     }
 
-    const address0 = this.deriveAddress(0);
+    const address0 = this.deriveAddressFromPath(this.getDefaultAddressPath());
 
     let output = `# Alpha Wallet Export\n`;
     output += `# Generated: ${new Date().toISOString()}\n`;
@@ -536,7 +556,7 @@ export class UnifiedKeyManager {
     output += `Master Private Key: ${this.masterKey}\n`;
     output += `Chain Code: ${this.chainCode}\n`;
     output += `\n`;
-    output += `# First address (m/44'/0'/0'/0/0):\n`;
+    output += `# First address (${this.getDefaultAddressPath()}):\n`;
     output += `Address: ${address0.l1Address}\n`;
     output += `Public Key: ${address0.publicKey}\n`;
 
@@ -562,8 +582,8 @@ export class UnifiedKeyManager {
       throw new Error("Wallet not initialized");
     }
 
-    // Build addresses array for export
-    const address0 = this.deriveAddress(0);
+    // Build addresses array for export using path-based derivation
+    const address0 = this.deriveAddressFromPath(this.getDefaultAddressPath());
     const addresses = [{
       address: address0.l1Address,
       publicKey: address0.publicKey,
@@ -574,7 +594,8 @@ export class UnifiedKeyManager {
     // Add more addresses if requested
     const addressCount = options.addressCount || 1;
     for (let i = 1; i < addressCount; i++) {
-      const addr = this.deriveAddress(i);
+      const path = `${this.basePath}/0/${i}`;  // External addresses only for export
+      const addr = this.deriveAddressFromPath(path);
       addresses.push({
         address: addr.l1Address,
         publicKey: addr.publicKey,

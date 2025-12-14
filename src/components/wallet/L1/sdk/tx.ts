@@ -7,6 +7,7 @@ import CryptoJS from "crypto-js";
 import elliptic from "elliptic";
 import type { Wallet, TransactionPlan, Transaction, UTXO } from "./types";
 import { vestingState } from "./vestingState";
+import { WalletAddressHelper } from "./addressHelpers";
 
 const ec = new elliptic.ec("secp256k1");
 
@@ -402,8 +403,9 @@ export async function createTransactionPlan(
     throw new Error("Invalid recipient address");
   }
 
-  // Use specified fromAddress or default to first address
-  const senderAddress = fromAddress || wallet.addresses[0].address;
+  // Use specified fromAddress or default to first external address
+  const defaultAddr = WalletAddressHelper.getDefault(wallet);
+  const senderAddress = fromAddress || defaultAddr.address;
   const amountSats = Math.floor(amountAlpha * SAT);
 
   // Check if we have classified UTXOs for vesting mode filtering

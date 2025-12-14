@@ -8,7 +8,9 @@ import { UnmaskedPredicateReference } from "@unicitylabs/state-transition-sdk/li
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 
 const STORAGE_KEY_ENC_SEED = "encrypted_seed";
-const STORAGE_KEY_SELECTED_INDEX = "l3_selected_address_index";
+const STORAGE_KEY_SELECTED_PATH = "l3_selected_address_path";
+// Legacy key - will be migrated to path-based
+const STORAGE_KEY_SELECTED_INDEX_LEGACY = "l3_selected_address_index";
 const UNICITY_TOKEN_TYPE_HEX =
   "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9ef0efbe397867509";
 const DEFAULT_SESSION_KEY = "user-pin-1234";
@@ -33,7 +35,6 @@ export interface UserIdentity {
 export class IdentityManager {
   private static instance: IdentityManager;
   private sessionKey: string;
-  private unifiedKeyManager: UnifiedKeyManager | null = null;
 
   private constructor(sessionKey: string) {
     this.sessionKey = sessionKey;
@@ -48,35 +49,38 @@ export class IdentityManager {
 
   /**
    * Get the UnifiedKeyManager instance
+   * NOTE: Always fetch fresh from singleton to avoid stale references after resetInstance()
    */
   getUnifiedKeyManager(): UnifiedKeyManager {
-    if (!this.unifiedKeyManager) {
-      this.unifiedKeyManager = UnifiedKeyManager.getInstance(this.sessionKey);
-    }
-    return this.unifiedKeyManager;
+    // Always get fresh instance from singleton - don't cache!
+    // UnifiedKeyManager.resetInstance() can make cached references stale
+    return UnifiedKeyManager.getInstance(this.sessionKey);
   }
 
   /**
-   * Get the selected address index for identity derivation
-   * Defaults to 0 if not set
+   * Get the selected address PATH for identity derivation
+   * Returns null if not set (caller should use default first address)
    */
-  getSelectedAddressIndex(): number {
-    const saved = localStorage.getItem(STORAGE_KEY_SELECTED_INDEX);
-    return saved ? parseInt(saved, 10) : 0;
+  getSelectedAddressPath(): string | null {
+    return localStorage.getItem(STORAGE_KEY_SELECTED_PATH);
   }
 
   /**
-   * Set the selected address index for identity derivation
+   * Set the selected address PATH for identity derivation
+   * @param path - Full BIP32 path like "m/84'/1'/0'/0/0"
    */
-  setSelectedAddressIndex(index: number): void {
-    localStorage.setItem(STORAGE_KEY_SELECTED_INDEX, index.toString());
+  setSelectedAddressPath(path: string): void {
+    localStorage.setItem(STORAGE_KEY_SELECTED_PATH, path);
+    // Clean up legacy index key
+    localStorage.removeItem(STORAGE_KEY_SELECTED_INDEX_LEGACY);
   }
 
   /**
-   * Clear the selected address index (for wallet reset)
+   * Clear the selected address path (for wallet reset)
    */
-  clearSelectedAddressIndex(): void {
-    localStorage.removeItem(STORAGE_KEY_SELECTED_INDEX);
+  clearSelectedAddressPath(): void {
+    localStorage.removeItem(STORAGE_KEY_SELECTED_PATH);
+    localStorage.removeItem(STORAGE_KEY_SELECTED_INDEX_LEGACY);
   }
 
   /**
@@ -86,29 +90,30 @@ export class IdentityManager {
   async generateNewIdentity(): Promise<UserIdentity> {
     const keyManager = this.getUnifiedKeyManager();
     const mnemonic = await keyManager.generateNew(12);
-    return this.deriveIdentityFromUnifiedWallet(0, mnemonic);
+    // Use path-based derivation - PATH is the single identifier
+    const basePath = keyManager.getBasePath();
+    const defaultPath = `${basePath}/0/0`;
+    const identity = await this.deriveIdentityFromPath(defaultPath);
+    // Save mnemonic for legacy compatibility
+    if (mnemonic) {
+      this.saveSeed(mnemonic);
+    }
+    return { ...identity, mnemonic };
   }
 
   /**
-   * Derive identity from the UnifiedKeyManager at a specific index
-   * Uses standard BIP32 derivation: m/44'/0'/0'/{chain}/{index}
-   * where chain=0 for external addresses and chain=1 for change addresses
-   * @param index - BIP32 address index
-   * @param mnemonic - Optional mnemonic for saving
-   * @param isChange - True for change addresses (chain=1), false for external (chain=0)
+   * Derive L3 identity from a BIP32 path
+   * This is the PREFERRED method - use path as the single identifier
+   * @param path - Full BIP32 path like "m/84'/1'/0'/0/0"
    */
-  async deriveIdentityFromUnifiedWallet(
-    index: number = 0,
-    mnemonic?: string,
-    isChange: boolean = false
-  ): Promise<UserIdentity> {
+  async deriveIdentityFromPath(path: string): Promise<UserIdentity> {
     const keyManager = this.getUnifiedKeyManager();
 
     if (!keyManager.isInitialized()) {
       throw new Error("Unified wallet not initialized");
     }
 
-    const derived = keyManager.deriveAddress(index, isChange);
+    const derived = keyManager.deriveAddressFromPath(path);
     const secret = Buffer.from(derived.privateKey, "hex");
 
     const l3Address = await this.deriveL3Address(secret);
@@ -116,21 +121,18 @@ export class IdentityManager {
     const signingService = await SigningService.createFromSecret(secret);
     const publicKey = Buffer.from(signingService.publicKey).toString("hex");
 
-    const identity: UserIdentity = {
+    // Parse path to get index for addressIndex field
+    const match = path.match(/\/(\d+)$/);
+    const index = match ? parseInt(match[1], 10) : 0;
+
+    return {
       privateKey: derived.privateKey,
       publicKey: publicKey,
       address: l3Address,
-      mnemonic: mnemonic || keyManager.getMnemonic() || undefined,
+      mnemonic: keyManager.getMnemonic() || undefined,
       l1Address: derived.l1Address,
       addressIndex: index,
     };
-
-    // Save mnemonic for legacy compatibility
-    if (identity.mnemonic) {
-      this.saveSeed(identity.mnemonic);
-    }
-
-    return identity;
   }
 
   /**
@@ -163,10 +165,19 @@ export class IdentityManager {
       throw new Error("Invalid recovery phrase. Please check your words and try again.");
     }
 
-    // Use UnifiedKeyManager for BIP32 derivation - no legacy fallback
+    // Use UnifiedKeyManager for BIP32 derivation - PATH is the single identifier
     const keyManager = this.getUnifiedKeyManager();
     await keyManager.createFromMnemonic(mnemonic);
-    return this.deriveIdentityFromUnifiedWallet(0, mnemonic);
+
+    // Use path-based derivation for the default first external address
+    const basePath = keyManager.getBasePath();
+    const defaultPath = `${basePath}/0/0`;
+    const identity = await this.deriveIdentityFromPath(defaultPath);
+
+    // Save mnemonic for legacy compatibility
+    this.saveSeed(mnemonic);
+
+    return { ...identity, mnemonic };
   }
 
   /**
@@ -211,8 +222,16 @@ export class IdentityManager {
     const initialized = await keyManager.initialize();
 
     if (initialized) {
-      const index = this.getSelectedAddressIndex(); // Use stored index instead of hardcoded 0
-      return this.deriveIdentityFromUnifiedWallet(index);
+      // Use path-based derivation (not index-based) - PATH is the ONLY reliable identifier
+      const selectedPath = this.getSelectedAddressPath();
+      if (selectedPath) {
+        return this.deriveIdentityFromPath(selectedPath);
+      }
+
+      // Fallback to first external address if no path stored
+      const basePath = keyManager.getBasePath();
+      const defaultPath = `${basePath}/0/0`;
+      return this.deriveIdentityFromPath(defaultPath);
     }
 
     // No wallet initialized - user must create or import a wallet

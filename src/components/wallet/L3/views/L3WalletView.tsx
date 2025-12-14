@@ -59,11 +59,6 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
     }
   }, [isSyncing, isIpfsEnabled, initialSyncComplete]);
 
-  // Reset initial sync flag when identity/address changes
-  useEffect(() => {
-    setInitialSyncComplete(false);
-    hasSyncStarted.current = false;
-  }, [identity?.address]);
 
   const totalValue = useMemo(() => {
     return assets.reduce((sum, asset) => sum + asset.getTotalFiatValue('USD'), 0);

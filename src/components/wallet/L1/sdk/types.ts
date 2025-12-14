@@ -195,3 +195,86 @@ export interface ClassificationResult {
   coinbaseHeight: number | null;
   error?: string;
 }
+
+// ==========================================
+// Path-based address utilities
+// ==========================================
+
+/**
+ * Parse BIP32 path components from a derivation path string
+ * @param path - Full path like "m/84'/1'/0'/0/5" or "m/44'/0'/0'/1/3"
+ * @returns { chain: number, index: number } where chain=0 is external, chain=1 is change
+ *          Returns null if path is invalid
+ *
+ * Examples:
+ *   "m/84'/1'/0'/0/5" -> { chain: 0, index: 5 } (external address 5)
+ *   "m/84'/1'/0'/1/3" -> { chain: 1, index: 3 } (change address 3)
+ */
+export function parsePathComponents(path: string): { chain: number; index: number } | null {
+  // Match paths like m/84'/1'/0'/0/5 or m/44'/0'/0'/1/3
+  const match = path.match(/m\/\d+'\/\d+'\/\d+'\/(\d+)\/(\d+)/);
+  if (!match) return null;
+  return { chain: parseInt(match[1], 10), index: parseInt(match[2], 10) };
+}
+
+/**
+ * Check if a BIP32 path represents a change address (chain=1)
+ * @param path - Full BIP32 path string
+ * @returns true if this is a change address path
+ */
+export function isChangePath(path: string): boolean {
+  const parsed = parsePathComponents(path);
+  return parsed?.chain === 1;
+}
+
+/**
+ * Get display-friendly index from path (for UI display only)
+ * @param path - Full BIP32 path string
+ * @returns The address index number, or 0 if invalid
+ */
+export function getIndexFromPath(path: string): number {
+  const parsed = parsePathComponents(path);
+  return parsed?.index ?? 0;
+}
+
+/**
+ * Convert a BIP32 path to a DOM-safe ID string
+ * Replaces characters that are invalid in DOM IDs:
+ * - ' (apostrophe) -> 'h' (hardened marker)
+ * - / (forward slash) -> '-' (dash)
+ *
+ * @param path - Full BIP32 path like "m/84'/1'/0'/0/5"
+ * @returns DOM-safe ID like "m-84h-1h-0h-0-5"
+ *
+ * Examples:
+ *   "m/84'/1'/0'/0/5" -> "m-84h-1h-0h-0-5"
+ *   "m/44'/0'/0'/1/3" -> "m-44h-0h-0h-1-3"
+ */
+export function pathToDOMId(path: string): string {
+  return path.replace(/'/g, "h").replace(/\//g, "-");
+}
+
+/**
+ * Convert a DOM-safe ID back to a BIP32 path string
+ * Reverses the transformation done by pathToDOMId:
+ * - 'h' -> ' (apostrophe for hardened)
+ * - '-' -> / (forward slash)
+ *
+ * @param encoded - DOM-safe ID like "m-84h-1h-0h-0-5"
+ * @returns BIP32 path like "m/84'/1'/0'/0/5"
+ *
+ * Examples:
+ *   "m-84h-1h-0h-0-5" -> "m/84'/1'/0'/0/5"
+ *   "m-44h-0h-0h-1-3" -> "m/44'/0'/0'/1/3"
+ */
+export function domIdToPath(encoded: string): string {
+  // Split by dash, then restore path format
+  const parts = encoded.split("-");
+  return parts
+    .map((part, idx) => {
+      if (idx === 0) return part; // 'm' stays as-is
+      // Restore hardened marker: ends with 'h' -> ends with "'"
+      return part.endsWith("h") ? `${part.slice(0, -1)}'` : part;
+    })
+    .join("/");
+}

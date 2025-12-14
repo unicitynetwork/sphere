@@ -95,7 +95,7 @@ export function SeedPhraseModal({ isOpen, onClose, seedPhrase }: SeedPhraseModal
                       <div className="grid grid-cols-3 gap-2 mb-4">
                         {seedPhrase.map((word, index) => (
                           <motion.div
-                            key={index}
+                            key={`seed-word-${index}`}
                             initial={{ opacity: 0, scale: 0.8 }}
                             animate={{ opacity: 1, scale: 1 }}
                             transition={{ delay: index * 0.03 }}

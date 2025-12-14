@@ -18,7 +18,7 @@ npm run build
 # Lint the codebase
 npm run lint
 
-# Run all tests
+# Run all tests (watch mode)
 npm run test
 
 # Run tests once (no watch mode)
@@ -29,17 +29,21 @@ npx vitest run tests/unit/components/wallet/L3/services/TokenValidationService.t
 
 # Preview production build
 npm run preview
+
+# Type check only (without building)
+npx tsc --noEmit
 ```
 
 ## Architecture
 
 ### Tech Stack
-- React 19 + TypeScript with Vite
-- TanStack Query for state management
+- React 19 + TypeScript with Vite 7
+- TanStack Query v5 for server state management
 - Tailwind CSS 4 for styling
 - Framer Motion for animations
-- React Router DOM for navigation
+- React Router DOM v7 for routing
 - Vitest + jsdom for testing
+- Helia for IPFS/IPNS browser integration
 
 ### Application Structure
 
@@ -54,8 +58,8 @@ All routes except intro use `DashboardLayout` which provides header, navigation,
 
 **Layer 1 (L1) - ALPHA Blockchain:**
 - Location: `src/components/wallet/L1/`
-- Custom HD wallet implementation with BIP32-style derivation
-- Uses Fulcrum WebSocket for blockchain data (electrum-style protocol)
+- Custom HD wallet implementation with BIP32-style derivation (see `SPHERE_DEVELOPER_GUIDE.md` for details)
+- Uses Fulcrum WebSocket for blockchain data (Electrum-style protocol)
 - Supports vesting classification (coins from blocks ≤280,000 are "vested")
 - SDK in `src/components/wallet/L1/sdk/` handles crypto, transactions, network calls
 
@@ -155,8 +159,14 @@ Copy `.env.example` to `.env` and configure:
 
 ```env
 VITE_AGENT_API_URL=http://localhost:3000  # Agentic chatbot backend
-VITE_USE_MOCK_AGENTS=true                  # Use mock agents (for local dev)
+VITE_USE_MOCK_AGENTS=true                  # Use mock agents (for local dev without backend)
 VITE_AGGREGATOR_URL=/rpc                   # Unicity aggregator (proxied in dev)
+VITE_ENABLE_IPFS=true                      # Enable IPFS storage for wallet backup
+
+# Optional: HTTPS for dev server (e.g., for WebCrypto APIs)
+SSL_CERT_PATH=/path/to/certs              # Path to SSL certificate directory
+HMR_HOST=your-dev-server.example.com      # Custom HMR host for remote dev
+BASE_PATH=/                                # Base path for deployment (default: /)
 ```
 
 ## Testing
@@ -165,8 +175,12 @@ Tests are located in `tests/` directory and run with Vitest:
 - Test files: `tests/**/*.test.ts`, `tests/**/*.test.tsx`
 - Environment: jsdom
 - Path alias: `@` maps to `/src`
+- Globals enabled: `describe`, `it`, `expect`, `vi` are available without imports
 
 ## Developer Notes
+
+### Crypto Libraries
+The project uses node polyfills (`vite-plugin-node-polyfills`) for browser compatibility with crypto libraries like `elliptic`, `bip39`, and `crypto-js`. The `/rpc` endpoint is proxied to the Unicity aggregator in development.
 
 ### BIP32 Implementation
 The L1 wallet uses a custom derivation that differs from standard BIP32 (see `SPHERE_DEVELOPER_GUIDE.md` for migration details). Standard path would be `m/44'/0'/0'/0/{index}`.
@@ -208,9 +222,16 @@ Key persistence patterns:
 - `unicity_chat_*` - Chat conversations and messages
 - `wallet-active-layer` - Currently selected layer (L1/L3)
 - `sphere-theme` - UI theme preference
-- `l3_selected_address_index` - Selected address index for L3
+- `l3_selected_address_path` - Selected address BIP32 path for L3 identity (e.g., "m/84'/1'/0'/0/0"); determines which derived key is used for IPFS/IPNS publishing and token ownership
 
 ### Custom Events
 The app uses custom events for cross-component communication:
 - `wallet-updated` - Triggers TanStack Query refetch for wallet data
 - Dispatch via `window.dispatchEvent(new Event('wallet-updated'))`
+
+### Key External Dependencies
+- `@unicitylabs/state-transition-sdk` (v1.6.0) - L3 token operations and state transitions
+- `@unicitylabs/nostr-js-sdk` - P2P messaging and token transfers
+- `helia` / `@helia/ipns` / `@helia/json` - Browser-based IPFS/IPNS for decentralized storage
+- `elliptic` - secp256k1 cryptography for L1 wallet
+- `bip39` - Seed phrase generation and validation

@@ -94,17 +94,22 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     })();
   }, []);
 
-  // Set initial selected address when wallet loads - sync with L3's stored index
+  // Set initial selected address when wallet loads - sync with L3's stored path
   useEffect(() => {
     if (wallet && wallet.addresses.length > 0) {
-      // Read stored index (same one L3 uses)
-      const storedIndex = parseInt(localStorage.getItem("l3_selected_address_index") || "0", 10);
-      const validIndex = Math.min(Math.max(0, storedIndex), wallet.addresses.length - 1);
-      const addressFromIndex = wallet.addresses[validIndex].address;
+      // Read stored path (same one L3 uses) - path is the ONLY reliable identifier
+      const storedPath = localStorage.getItem("l3_selected_address_path");
+
+      // Find address by path, fallback to first address if not found
+      const addressFromPath = storedPath
+        ? wallet.addresses.find(a => a.path === storedPath)?.address
+        : wallet.addresses[0]?.address;
+
+      const selectedAddr = addressFromPath || wallet.addresses[0]?.address;
 
       // Only update if different from current selection
-      if (selectedAddress !== addressFromIndex) {
-        setSelectedAddress(addressFromIndex);
+      if (selectedAddr && selectedAddress !== selectedAddr) {
+        setSelectedAddress(selectedAddr);
       }
     }
   }, [selectedAddress, wallet]);
@@ -185,8 +190,13 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           const keyManager = UnifiedKeyManager.getInstance("user-pin-1234");
           await keyManager.createFromMnemonic(result.mnemonic);
 
-          // Reset selected address index to 0 for clean import
-          localStorage.setItem("l3_selected_address_index", "0");
+          // Reset selected address path for clean import - use first address's path
+          const firstAddr = result.wallet.addresses[0];
+          if (firstAddr?.path) {
+            localStorage.setItem("l3_selected_address_path", firstAddr.path);
+          } else {
+            localStorage.removeItem("l3_selected_address_path");
+          }
 
           // Save wallet and use directly (no scanning needed for mnemonic wallets)
           await saveWalletToStorage("main", result.wallet);
@@ -340,8 +350,13 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
           const keyManager = UnifiedKeyManager.getInstance("user-pin-1234");
           await keyManager.createFromMnemonic(result.mnemonic);
 
-          // Reset selected address index to 0 for clean import
-          localStorage.setItem("l3_selected_address_index", "0");
+          // Reset selected address path for clean import - use first address's path
+          const firstAddr = result.wallet.addresses[0];
+          if (firstAddr?.path) {
+            localStorage.setItem("l3_selected_address_path", firstAddr.path);
+          } else {
+            localStorage.removeItem("l3_selected_address_path");
+          }
 
           // Save wallet and use directly (no scanning needed for mnemonic wallets)
           await saveWalletToStorage("main", result.wallet);
@@ -535,13 +550,18 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     setViewMode("main");
   };
 
-  // Select address - sync with L3's selected address index
+  // Select address - sync with L3's selected address path
   const onSelectAddress = (address: string) => {
-    // Find index of selected address
-    const index = wallet?.addresses.findIndex(a => a.address === address) ?? 0;
+    // Find the selected address to get its path - path is the ONLY reliable identifier
+    const selectedAddr = wallet?.addresses.find(a => a.address === address);
 
-    // Sync to L3's selected address index
-    localStorage.setItem("l3_selected_address_index", String(index));
+    // Sync to L3's selected address path
+    if (selectedAddr?.path) {
+      localStorage.setItem("l3_selected_address_path", selectedAddr.path);
+    } else {
+      // Fallback: remove path to trigger default behavior
+      localStorage.removeItem("l3_selected_address_path");
+    }
 
     // Reset L3 state so it picks up new identity
     WalletRepository.getInstance().resetInMemoryState();
