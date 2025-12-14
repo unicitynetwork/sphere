@@ -4,6 +4,7 @@
  */
 
 import type { NametagData } from "../../../../../repositories/WalletRepository";
+import type { OutboxEntry } from "./OutboxTypes";
 
 // ==========================================
 // Storage Format (for IPFS)
@@ -21,14 +22,15 @@ export interface TombstoneEntry {
 
 /**
  * Complete storage data structure for IPFS
- * Contains metadata, nametag, tombstones, and all tokens keyed by their IDs
+ * Contains metadata, nametag, tombstones, outbox, and all tokens keyed by their IDs
  */
 export interface TxfStorageData {
   _meta: TxfMeta;
   _nametag?: NametagData;
   _tombstones?: TombstoneEntry[];  // State-hash-aware tombstones (spent token states)
+  _outbox?: OutboxEntry[];         // Pending transfers (CRITICAL for recovery)
   // Dynamic keys for tokens: _<tokenId>
-  [key: string]: TxfToken | TxfMeta | NametagData | TombstoneEntry[] | undefined;
+  [key: string]: TxfToken | TxfMeta | NametagData | TombstoneEntry[] | OutboxEntry[] | undefined;
 }
 
 /**
@@ -216,6 +218,7 @@ export function isActiveTokenKey(key: string): boolean {
          key !== "_meta" &&
          key !== "_nametag" &&
          key !== "_tombstones" &&
+         key !== "_outbox" &&
          key !== "_integrity";
 }
 

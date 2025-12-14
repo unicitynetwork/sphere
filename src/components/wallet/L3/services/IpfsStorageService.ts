@@ -11,6 +11,7 @@ import * as ed from "@noble/ed25519";
 import type { CID } from "multiformats/cid";
 import type { PrivateKey, ConnectionGater, PeerId } from "@libp2p/interface";
 import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
+import { OutboxRepository } from "../../../../repositories/OutboxRepository";
 import { IdentityManager } from "./IdentityManager";
 import type { Token } from "../data/model";
 import type { TxfStorageData, TxfMeta, TxfToken, TombstoneEntry } from "./types/TxfTypes";
@@ -1924,7 +1925,14 @@ export class IpfsStorageService {
     const rawTombstones = (remoteTxf as Record<string, unknown>)._tombstones;
     console.log(`📦 Raw remote _tombstones field:`, rawTombstones);
 
-    const { tokens: remoteTokens, nametag, tombstones: remoteTombstones, archivedTokens: remoteArchived, forkedTokens: remoteForked } = parseTxfStorageData(remoteTxf);
+    const { tokens: remoteTokens, nametag, tombstones: remoteTombstones, archivedTokens: remoteArchived, forkedTokens: remoteForked, outboxEntries: remoteOutbox } = parseTxfStorageData(remoteTxf);
+
+    // Import outbox entries from remote (CRITICAL for transfer recovery)
+    if (remoteOutbox && remoteOutbox.length > 0) {
+      const outboxRepo = OutboxRepository.getInstance();
+      outboxRepo.importFromRemote(remoteOutbox);
+      console.log(`📦 Imported ${remoteOutbox.length} outbox entries from remote`);
+    }
 
     // Debug: Log parsed tombstones (now TombstoneEntry[])
     console.log(`📦 Parsed remote tombstones (${remoteTombstones.length}):`,
@@ -2511,8 +2519,8 @@ export class IpfsStorageService {
                 }
               }
 
-              // Merge archived and forked tokens from remote
-              const { archivedTokens: remoteArchived, forkedTokens: remoteForked } = parseTxfStorageData(remoteTxf);
+              // Merge archived, forked tokens, and outbox entries from remote
+              const { archivedTokens: remoteArchived, forkedTokens: remoteForked, outboxEntries: remoteOutbox } = parseTxfStorageData(remoteTxf);
               if (remoteArchived.size > 0) {
                 const archivedMergedCount = walletRepo.mergeArchivedTokens(remoteArchived);
                 if (archivedMergedCount > 0) {
@@ -2524,6 +2532,12 @@ export class IpfsStorageService {
                 if (forkedMergedCount > 0) {
                   console.log(`📦 Merged ${forkedMergedCount} forked token(s) from remote`);
                 }
+              }
+              // Import outbox entries from remote (CRITICAL for transfer recovery)
+              if (remoteOutbox && remoteOutbox.length > 0) {
+                const outboxRepo = OutboxRepository.getInstance();
+                outboxRepo.importFromRemote(remoteOutbox);
+                console.log(`📦 Imported ${remoteOutbox.length} outbox entries from remote during conflict resolution`);
               }
 
               // Also sync nametag from remote if local doesn't have one
@@ -2585,11 +2599,17 @@ export class IpfsStorageService {
         }
       }
 
-      // 4. Build TXF storage data with incremented version (include tombstones, archives, forks)
+      // 4. Build TXF storage data with incremented version (include tombstones, archives, forks, outbox)
       const newVersion = this.incrementVersionCounter();
       const tombstones = walletRepo.getTombstones();
       const archivedTokens = walletRepo.getArchivedTokens();
       const forkedTokens = walletRepo.getForkedTokens();
+
+      // Get outbox entries for IPFS sync (CRITICAL for transfer recovery)
+      const outboxRepo = OutboxRepository.getInstance();
+      outboxRepo.setCurrentAddress(wallet.address);
+      const outboxEntries = outboxRepo.getAllForSync();
+
       const meta: Omit<TxfMeta, "formatVersion"> = {
         version: newVersion,
         address: wallet.address,
@@ -2597,9 +2617,9 @@ export class IpfsStorageService {
         lastCid: this.getLastCid() || undefined,
       };
 
-      const txfStorageData = buildTxfStorageData(tokensToSync, meta, nametag || undefined, tombstones, archivedTokens, forkedTokens);
-      if (tombstones.length > 0 || archivedTokens.size > 0 || forkedTokens.size > 0) {
-        console.log(`📦 Including ${tombstones.length} tombstone(s), ${archivedTokens.size} archived, ${forkedTokens.size} forked in sync`);
+      const txfStorageData = buildTxfStorageData(tokensToSync, meta, nametag || undefined, tombstones, archivedTokens, forkedTokens, outboxEntries);
+      if (tombstones.length > 0 || archivedTokens.size > 0 || forkedTokens.size > 0 || outboxEntries.length > 0) {
+        console.log(`📦 Including ${tombstones.length} tombstone(s), ${archivedTokens.size} archived, ${forkedTokens.size} forked, ${outboxEntries.length} outbox in sync`);
       }
 
       // 4. Ensure backend is connected before storing

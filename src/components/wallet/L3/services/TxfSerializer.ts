@@ -22,6 +22,7 @@ import {
   archivedKeyFromTokenId,
   forkedKeyFromTokenIdAndState,
 } from "./types/TxfTypes";
+import type { OutboxEntry } from "./types/OutboxTypes";
 import {
   safeParseTxfToken,
   safeParseTxfMeta,
@@ -168,7 +169,8 @@ export function buildTxfStorageData(
   nametag?: NametagData,
   tombstones?: TombstoneEntry[],
   archivedTokens?: Map<string, TxfToken>,
-  forkedTokens?: Map<string, TxfToken>
+  forkedTokens?: Map<string, TxfToken>,
+  outboxEntries?: OutboxEntry[]
 ): TxfStorageData {
   const storageData: TxfStorageData = {
     _meta: {
@@ -184,6 +186,11 @@ export function buildTxfStorageData(
   // Add tombstones for spent token states (prevents zombie token resurrection)
   if (tombstones && tombstones.length > 0) {
     storageData._tombstones = tombstones;
+  }
+
+  // Add outbox entries (CRITICAL for transfer recovery)
+  if (outboxEntries && outboxEntries.length > 0) {
+    storageData._outbox = outboxEntries;
   }
 
   // Add each active token with _<tokenId> key
@@ -227,6 +234,7 @@ export function parseTxfStorageData(data: unknown): {
   tombstones: TombstoneEntry[];
   archivedTokens: Map<string, TxfToken>;
   forkedTokens: Map<string, TxfToken>;
+  outboxEntries: OutboxEntry[];
   validationErrors: string[];
 } {
   const result: {
@@ -236,6 +244,7 @@ export function parseTxfStorageData(data: unknown): {
     tombstones: TombstoneEntry[];
     archivedTokens: Map<string, TxfToken>;
     forkedTokens: Map<string, TxfToken>;
+    outboxEntries: OutboxEntry[];
     validationErrors: string[];
   } = {
     tokens: [],
@@ -244,6 +253,7 @@ export function parseTxfStorageData(data: unknown): {
     tombstones: [],
     archivedTokens: new Map(),
     forkedTokens: new Map(),
+    outboxEntries: [],
     validationErrors: [],
   };
 
@@ -288,6 +298,26 @@ export function parseTxfStorageData(data: unknown): {
       }
       // Legacy string format: discard (no state hash info)
       // Per migration strategy: start fresh with state-hash-aware tombstones
+    }
+  }
+
+  // Extract outbox entries (CRITICAL for transfer recovery)
+  if (storageData._outbox && Array.isArray(storageData._outbox)) {
+    for (const entry of storageData._outbox) {
+      // Basic validation for OutboxEntry structure
+      if (
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as OutboxEntry).id === "string" &&
+        typeof (entry as OutboxEntry).status === "string" &&
+        typeof (entry as OutboxEntry).sourceTokenId === "string" &&
+        typeof (entry as OutboxEntry).salt === "string" &&
+        typeof (entry as OutboxEntry).commitmentJson === "string"
+      ) {
+        result.outboxEntries.push(entry as OutboxEntry);
+      } else {
+        result.validationErrors.push("Invalid outbox entry structure");
+      }
     }
   }
 

@@ -19,6 +19,7 @@ import { TokenId } from "@unicitylabs/state-transition-sdk/lib/token/TokenId";
 import { IpfsStorageService } from "../services/IpfsStorageService";
 import { useServices } from "../../../../contexts/useServices";
 import type { NostrService } from "../services/NostrService";
+import { OutboxRecoveryService } from "../services/OutboxRecoveryService";
 
 export const KEYS = {
   IDENTITY: ["wallet", "identity"],
@@ -97,6 +98,45 @@ export const useWallet = () => {
       storageService.startAutoSync();
     }
   }, [identityQuery.data, nametagQuery.data, identityManager]);
+
+  // Recover any incomplete transfers from outbox on startup and enable periodic retry
+  // This runs when identity is loaded and services are available
+  useEffect(() => {
+    const identity = identityQuery.data;
+    if (!identity?.address || !nostrService) return;
+
+    const recoveryService = OutboxRecoveryService.getInstance();
+    recoveryService.setIdentityManager(identityManager);
+
+    // Run initial recovery
+    const pendingCount = recoveryService.getPendingCount(identity.address);
+    if (pendingCount > 0) {
+      console.log(`📤 useWallet: Found ${pendingCount} pending outbox entries, starting recovery...`);
+    }
+
+    recoveryService.recoverPendingTransfers(identity.address, nostrService)
+      .then((result) => {
+        if (result.recovered > 0 || result.failed > 0) {
+          console.log(`📤 useWallet: Initial recovery - ${result.recovered} recovered, ${result.failed} failed`);
+          // Refresh tokens after recovery
+          queryClient.invalidateQueries({ queryKey: KEYS.TOKENS });
+          queryClient.invalidateQueries({ queryKey: KEYS.AGGREGATED });
+        }
+
+        // Start periodic retry after initial recovery
+        recoveryService.startPeriodicRetry(identity.address, nostrService);
+      })
+      .catch((error) => {
+        console.error("📤 useWallet: Initial recovery failed:", error);
+        // Still start periodic retry even if initial recovery failed
+        recoveryService.startPeriodicRetry(identity.address, nostrService);
+      });
+
+    // Cleanup on unmount or identity change
+    return () => {
+      recoveryService.stopPeriodicRetry();
+    };
+  }, [identityQuery.data?.address, nostrService, identityManager, queryClient]);
 
   // Ensure registry is loaded before aggregating assets
   const registryQuery = useQuery({
@@ -414,13 +454,33 @@ export const useWallet = () => {
       // 4. EXECUTE SPLIT
       if (plan.requiresSplit) {
         console.log("✂️ Executing split...");
+
+        // Import outbox repository for tracking
+        const { OutboxRepository } = await import("../../../../repositories/OutboxRepository");
+        const outboxRepo = OutboxRepository.getInstance();
+
+        // Get wallet address for outbox context
+        const wallet = walletRepo.getWallet();
+        const walletAddress = wallet?.address || "";
+        if (walletAddress) {
+          outboxRepo.setCurrentAddress(walletAddress);
+        }
+
+        // Create outbox context for tracking
+        const outboxContext = walletAddress ? {
+          walletAddress,
+          recipientNametag,
+          recipientPubkey,
+        } : undefined;
+
         const executor = new TokenSplitExecutor();
 
         const splitResult = await executor.executeSplitPlan(
           plan,
           recipientAddress,
           signingService,
-          (burnedId) => walletRepo.removeToken(burnedId, undefined, true) // Skip history for split
+          (burnedId) => walletRepo.removeToken(burnedId, undefined, true), // Skip history for split
+          outboxContext
         );
 
         // Add transaction history for the actual sent amount
@@ -439,6 +499,7 @@ export const useWallet = () => {
         for (let i = 0; i < splitResult.tokensForRecipient.length; i++) {
           const token = splitResult.tokensForRecipient[i];
           const tx = splitResult.recipientTransferTxs[i];
+          const outboxEntryId = splitResult.outboxEntryIds[i];
 
           const sourceTokenString = JSON.stringify(token.toJSON());
           const transferTxString = JSON.stringify(tx.toJSON());
@@ -450,10 +511,37 @@ export const useWallet = () => {
 
           console.log("📨 Sending split token via Nostr...");
           await nostrService.sendTokenTransfer(recipientPubkey, payload, undefined, undefined, params.eventId);
+
+          // Update outbox: Nostr sent
+          if (outboxEntryId) {
+            outboxRepo.updateStatus(outboxEntryId, "NOSTR_SENT");
+            console.log(`📤 Outbox: Split transfer ${outboxEntryId.slice(0, 8)}... sent via Nostr`);
+          }
         }
 
         for (const keptToken of splitResult.tokensKeptBySender) {
           saveChangeTokenToWallet(keptToken, params.coinId);
+        }
+
+        // Mark all outbox entries as completed
+        for (const outboxEntryId of splitResult.outboxEntryIds) {
+          if (outboxEntryId) {
+            outboxRepo.updateStatus(outboxEntryId, "COMPLETED");
+            console.log(`📤 Outbox: Split transfer ${outboxEntryId.slice(0, 8)}... completed`);
+          }
+        }
+
+        // Clean up split group
+        if (splitResult.splitGroupId) {
+          outboxRepo.removeSplitGroup(splitResult.splitGroupId);
+        }
+
+        // Final IPFS sync after split completion
+        if (walletAddress) {
+          const ipfsService = IpfsStorageService.getInstance(identityManager);
+          await ipfsService.syncNow().catch(err => {
+            console.warn("⚠️ Final IPFS sync after split failed:", err);
+          });
         }
       }
 
@@ -476,6 +564,17 @@ export const useWallet = () => {
     nostr: NostrService,
     recipientNametag: string
   ) => {
+    const { OutboxRepository } = await import("../../../../repositories/OutboxRepository");
+    const { createOutboxEntry } = await import("../services/types/OutboxTypes");
+    const outboxRepo = OutboxRepository.getInstance();
+
+    // Get wallet address for outbox repository
+    const wallet = walletRepo.getWallet();
+    if (wallet?.address) {
+      outboxRepo.setCurrentAddress(wallet.address);
+    }
+
+    // 1. Generate salt and create commitment
     const salt = Buffer.alloc(32);
     window.crypto.getRandomValues(salt);
 
@@ -488,11 +587,80 @@ export const useWallet = () => {
       signingService
     );
 
+    // 2. Extract amount and coinId from source token
+    let amount = "0";
+    let coinId = "";
+    const coinsOpt = sourceToken.coins;
+    if (coinsOpt) {
+      const rawCoins = coinsOpt.coins;
+      const firstItem = rawCoins[0];
+      if (Array.isArray(firstItem) && firstItem.length === 2) {
+        coinId = firstItem[0]?.toString() || "";
+        const val = firstItem[1];
+        if (Array.isArray(val)) {
+          amount = val[1]?.toString() || "0";
+        } else if (val) {
+          amount = val.toString();
+        }
+      }
+    }
+
+    // 3. Create outbox entry BEFORE any network calls (CRITICAL)
+    const outboxEntry = createOutboxEntry(
+      "DIRECT_TRANSFER",
+      uiId,
+      recipientNametag,
+      recipientPubkey,
+      JSON.stringify(recipientAddress.toJSON ? recipientAddress.toJSON() : recipientAddress),
+      amount,
+      coinId,
+      Buffer.from(salt).toString("hex"),
+      JSON.stringify(sourceToken.toJSON()),
+      JSON.stringify(transferCommitment.toJSON())
+    );
+
+    // 4. Save to localStorage
+    outboxRepo.addEntry(outboxEntry);
+    console.log(`📤 Outbox: Created entry ${outboxEntry.id.slice(0, 8)}... for direct transfer`);
+
+    // 5. CRITICAL: Sync to IPFS and WAIT for success
+    try {
+      const ipfsService = IpfsStorageService.getInstance(identityManager);
+      const syncResult = await ipfsService.syncNow();
+
+      if (!syncResult.success) {
+        // Remove outbox entry since we didn't start the transfer
+        outboxRepo.removeEntry(outboxEntry.id);
+        throw new Error(`Failed to sync outbox to IPFS - aborting transfer: ${syncResult.error}`);
+      }
+
+      console.log(`📤 Outbox entry synced to IPFS: ${syncResult.cid?.slice(0, 12)}...`);
+    } catch (err) {
+      // Remove outbox entry if IPFS sync failed
+      outboxRepo.removeEntry(outboxEntry.id);
+      throw err;
+    }
+
+    // 6. Update status: ready to submit
+    outboxRepo.updateEntry(outboxEntry.id, { status: "READY_TO_SUBMIT" });
+
+    // 7. NOW safe to submit to aggregator (idempotent - REQUEST_ID_EXISTS is OK)
     const client = ServiceProvider.stateTransitionClient;
     const res = await client.submitTransferCommitment(transferCommitment);
-    if (res.status !== "SUCCESS")
-      throw new Error(`Direct transfer failed: ${res.status}`);
 
+    if (res.status !== "SUCCESS" && res.status !== "REQUEST_ID_EXISTS") {
+      outboxRepo.updateEntry(outboxEntry.id, {
+        status: "FAILED",
+        lastError: `Aggregator error: ${res.status}`,
+      });
+      throw new Error(`Direct transfer failed: ${res.status}`);
+    }
+
+    // 8. Update status: submitted
+    outboxRepo.updateEntry(outboxEntry.id, { status: "SUBMITTED" });
+    console.log(`📤 Transfer submitted to aggregator (status: ${res.status})`);
+
+    // 9. Wait for inclusion proof
     const proof = await waitInclusionProof(
       ServiceProvider.getRootTrustBase(),
       client,
@@ -501,6 +669,15 @@ export const useWallet = () => {
 
     const tx = transferCommitment.toTransaction(proof);
 
+    // 10. Update status: proof received
+    outboxRepo.updateEntry(outboxEntry.id, {
+      status: "PROOF_RECEIVED",
+      inclusionProofJson: JSON.stringify(proof.toJSON()),
+      transferTxJson: JSON.stringify(tx.toJSON()),
+    });
+    console.log(`📤 Inclusion proof received`);
+
+    // 11. Send via Nostr
     const sourceTokenString = JSON.stringify(sourceToken.toJSON());
     const transferTxString = JSON.stringify(tx.toJSON());
 
@@ -511,7 +688,25 @@ export const useWallet = () => {
 
     await nostr.sendTokenTransfer(recipientPubkey, payload);
 
+    // 12. Update status: Nostr sent
+    outboxRepo.updateEntry(outboxEntry.id, { status: "NOSTR_SENT" });
+    console.log(`📤 Token sent via Nostr to ${recipientNametag}`);
+
+    // 13. Archive and remove token from active wallet
     walletRepo.removeToken(uiId, recipientNametag);
+
+    // 14. Mark outbox entry as completed
+    outboxRepo.updateEntry(outboxEntry.id, { status: "COMPLETED" });
+    console.log(`📤 Direct transfer completed - outbox entry ${outboxEntry.id.slice(0, 8)}... marked complete`);
+
+    // 15. Final IPFS sync to update outbox status
+    try {
+      const ipfsService = IpfsStorageService.getInstance(identityManager);
+      await ipfsService.syncNow();
+    } catch (err) {
+      console.warn(`📤 Final IPFS sync after transfer failed:`, err);
+      // Non-critical - token is transferred, outbox will be cleaned up later
+    }
   };
 
   const saveChangeTokenToWallet = (sdkToken: SdkToken<any>, coinId: string) => {
