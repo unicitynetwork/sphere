@@ -919,6 +919,9 @@ export function CreateWalletFlow() {
           WalletRepository.saveNametagForAddress(l3Identity.address, {
             name: scannedAddr.l3Nametag,
             token: {}, // Minimal token data - full sync will happen later
+            timestamp: Date.now(),
+            format: "TXF",
+            version: "1.0",
           });
           console.log(`💾 Saved nametag @${scannedAddr.l3Nametag} for L3 address ${l3Identity.address.slice(0, 20)}...`);
         } catch (e) {
@@ -994,6 +997,9 @@ export function CreateWalletFlow() {
             WalletRepository.saveNametagForAddress(l3Identity.address, {
               name: addr.l3Nametag,
               token: {}, // Minimal token data - full sync will happen later
+              timestamp: Date.now(),
+              format: "TXF",
+              version: "1.0",
             });
             console.log(`💾 Saved nametag @${addr.l3Nametag} for L3 address ${l3Identity.address.slice(0, 20)}...`);
           } catch (e) {
