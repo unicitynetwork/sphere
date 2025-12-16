@@ -1111,8 +1111,7 @@ export function CreateWalletFlow() {
                 type="text"
                 value={nametagInput}
                 onChange={(e) => {
-                  // Allow only Latin letters, numbers, hyphen, underscore, plus, dot
-                  const value = e.target.value;
+                  const value = e.target.value.toLowerCase();
                   if (/^[a-z0-9_\-+.]*$/.test(value)) {
                     setNametagInput(value);
                   }
