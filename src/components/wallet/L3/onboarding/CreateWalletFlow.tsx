@@ -444,13 +444,8 @@ export function CreateWalletFlow() {
     setIsBusy(true);
     setError(null);
     try {
-      // Clear any existing wallet data to prevent conflicts with old identity
-      const existingKeyManager = getUnifiedKeyManager();
-      if (existingKeyManager?.isInitialized()) {
-        console.log("🔐 Clearing existing wallet before creating new one");
-        existingKeyManager.clear();
-        UnifiedKeyManager.resetInstance();
-      }
+      // Clear all wallet data to ensure clean slate
+      UnifiedKeyManager.clearAll();
 
       await createWallet();
       // Go directly to nametag step

@@ -322,10 +322,13 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     showMessage("success", "Wallet Loaded", `Loaded ${scannedAddresses.length} addresses with ${totalBalance.toFixed(8)} ALPHA total`);
   };
 
-  // Cancel scan modal
+  // Cancel scan modal - also clear wallet data since import was aborted
   const onCancelScan = () => {
     setShowScanModal(false);
     setPendingWallet(null);
+
+    // Clear any partially imported wallet data
+    UnifiedKeyManager.clearAll();
   };
 
   // Confirm load with password

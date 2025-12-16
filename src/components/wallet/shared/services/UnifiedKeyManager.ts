@@ -317,6 +317,9 @@ export class UnifiedKeyManager {
       console.log("🔐 Unified wallet imported with WIF HMAC mode (no chain code)");
     }
 
+    // Mark as initialized since we have valid data
+    this.hasInitialized = true;
+
     this.saveToStorage();
   }
 
@@ -352,6 +355,9 @@ export class UnifiedKeyManager {
     this.derivationMode = mode;
     this.basePath = basePath || DEFAULT_BASE_PATH;
     this.source = "file";
+
+    // Mark as initialized since we have valid data
+    this.hasInitialized = true;
 
     this.saveToStorage();
 
@@ -720,6 +726,46 @@ export class UnifiedKeyManager {
   static resetInstance(): void {
     UnifiedKeyManager.instance = null;
     console.log("🔐 UnifiedKeyManager instance reset");
+  }
+
+  /**
+   * Clear ALL wallet data from localStorage and reset singleton
+   * Use this before creating/importing a new wallet to ensure clean slate
+   * This is a static method that can be called without an instance
+   */
+  static clearAll(): void {
+    console.log("🔐 Clearing all wallet data...");
+
+    // Clear UnifiedKeyManager localStorage keys
+    localStorage.removeItem(STORAGE_KEY_ENCRYPTED_MNEMONIC);
+    localStorage.removeItem(STORAGE_KEY_ENCRYPTED_MASTER);
+    localStorage.removeItem(STORAGE_KEY_CHAIN_CODE);
+    localStorage.removeItem(STORAGE_KEY_WALLET_SOURCE);
+    localStorage.removeItem(STORAGE_KEY_DERIVATION_MODE);
+    localStorage.removeItem(STORAGE_KEY_BASE_PATH);
+
+    // Clear L1 wallet storage
+    localStorage.removeItem("wallet_main");
+
+    // Clear L3 selected address
+    localStorage.removeItem("l3_selected_address_path");
+    localStorage.removeItem("l3_selected_address_index"); // Legacy key
+
+    // Reset singleton instance
+    if (UnifiedKeyManager.instance) {
+      UnifiedKeyManager.instance.mnemonic = null;
+      UnifiedKeyManager.instance.masterKey = null;
+      UnifiedKeyManager.instance.chainCode = null;
+      UnifiedKeyManager.instance.derivationMode = "bip32";
+      UnifiedKeyManager.instance.basePath = DEFAULT_BASE_PATH;
+      UnifiedKeyManager.instance.source = "unknown";
+      UnifiedKeyManager.instance.hasInitialized = false;
+      UnifiedKeyManager.instance.isInitializing = false;
+      UnifiedKeyManager.instance.initializePromise = null;
+    }
+    UnifiedKeyManager.instance = null;
+
+    console.log("🔐 All wallet data cleared");
   }
 
   // ==========================================
