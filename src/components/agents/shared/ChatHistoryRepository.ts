@@ -1,5 +1,6 @@
 /**
  * ChatHistoryRepository - localStorage-based persistent storage for agent chat history
+ * with IPFS sync support for cross-device synchronization
  *
  * Storage structure:
  * - Key: `sphere_agent_chat_sessions` - Array of all chat sessions metadata
@@ -9,9 +10,15 @@
  * - Automatic cleanup when storage limit is approached
  * - Session management (create, continue, delete)
  * - Search through chat history
+ * - IPFS sync for cross-device synchronization (when enabled)
  */
 
 import type { ChatMessage } from '../../../hooks/useAgentChat';
+import {
+  ChatHistoryIpfsService,
+  type ChatSessionData as IpfsChatSessionData,
+  type SyncResult,
+} from './ChatHistoryIpfsService';
 
 // Maximum storage size (in bytes) before cleanup is triggered - ~4MB to leave room
 const MAX_STORAGE_SIZE = 4 * 1024 * 1024;
@@ -38,8 +45,14 @@ export interface ChatSessionData extends ChatSession {
 
 export class ChatHistoryRepository {
   private static instance: ChatHistoryRepository;
+  private ipfsService: ChatHistoryIpfsService;
+  private ipfsSyncEnabled = false;
+  private syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingSync = false;
 
-  private constructor() {}
+  private constructor() {
+    this.ipfsService = ChatHistoryIpfsService.getInstance();
+  }
 
   static getInstance(): ChatHistoryRepository {
     if (!ChatHistoryRepository.instance) {
@@ -379,6 +392,8 @@ export class ChatHistoryRepository {
 
   private notifyUpdate(): void {
     window.dispatchEvent(new CustomEvent('agent-chat-history-updated'));
+    // Schedule IPFS sync if enabled
+    this.scheduleIpfsSync();
   }
 
   // ==========================================
@@ -393,6 +408,207 @@ export class ChatHistoryRepository {
       ...session,
       messages: this.getMessages(sessionId),
     };
+  }
+
+  // ==========================================
+  // IPFS Sync Methods
+  // ==========================================
+
+  /**
+   * Initialize IPFS sync for a user
+   * @param seedPhrase - User's seed phrase for IPFS key derivation
+   * @param userId - User identifier (nametag)
+   */
+  async initializeIpfsSync(seedPhrase: string, userId: string): Promise<boolean> {
+    try {
+      const success = await this.ipfsService.initialize(seedPhrase, userId);
+      if (success) {
+        this.ipfsSyncEnabled = true;
+        console.log('[ChatHistory] IPFS sync initialized');
+      }
+      return success;
+    } catch (error) {
+      console.error('[ChatHistory] Failed to initialize IPFS sync:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Check if IPFS sync is enabled
+   */
+  isIpfsSyncEnabled(): boolean {
+    return this.ipfsSyncEnabled && this.ipfsService.isInitialized();
+  }
+
+  /**
+   * Get IPFS service status
+   */
+  getIpfsStatus() {
+    return this.ipfsService.getStatus();
+  }
+
+  /**
+   * Sync local history with IPFS
+   * Called automatically on changes when IPFS is enabled
+   */
+  async syncWithIpfs(): Promise<SyncResult | null> {
+    if (!this.isIpfsSyncEnabled()) {
+      return null;
+    }
+
+    try {
+      // Get all sessions with messages for current user
+      const userId = this.ipfsService.getCurrentUserId();
+      if (!userId) return null;
+
+      const sessions = this.getAllSessions()
+        .filter(s => s.userId === userId)
+        .map(s => this.getSessionWithMessages(s.id))
+        .filter((s): s is IpfsChatSessionData => s !== null);
+
+      // Sync with IPFS
+      const { sessions: mergedSessions, synced } = await this.ipfsService.sync(sessions);
+
+      if (synced && mergedSessions.length > 0) {
+        // Update local storage with merged data
+        this.importFromIpfs(mergedSessions);
+      }
+
+      return this.ipfsService.getStatus().lastSync;
+    } catch (error) {
+      console.error('[ChatHistory] IPFS sync failed:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Schedule a debounced IPFS sync
+   */
+  private scheduleIpfsSync(): void {
+    if (!this.isIpfsSyncEnabled()) return;
+
+    if (this.syncDebounceTimer) {
+      clearTimeout(this.syncDebounceTimer);
+    }
+
+    this.syncDebounceTimer = setTimeout(async () => {
+      if (this.pendingSync) return;
+      this.pendingSync = true;
+
+      try {
+        await this.syncWithIpfs();
+      } finally {
+        this.pendingSync = false;
+      }
+    }, 5000); // 5 second debounce
+  }
+
+  /**
+   * Force an immediate IPFS sync (for manual sync button)
+   */
+  async forceIpfsSync(): Promise<SyncResult | null> {
+    if (this.syncDebounceTimer) {
+      clearTimeout(this.syncDebounceTimer);
+      this.syncDebounceTimer = null;
+    }
+
+    return this.syncWithIpfs();
+  }
+
+  /**
+   * Restore history from IPFS (initial load)
+   */
+  async restoreFromIpfs(): Promise<boolean> {
+    if (!this.isIpfsSyncEnabled()) {
+      return false;
+    }
+
+    try {
+      const result = await this.ipfsService.restore();
+      if (result.success && result.sessions) {
+        this.importFromIpfs(result.sessions);
+        console.log(`[ChatHistory] Restored ${result.sessions.length} sessions from IPFS`);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('[ChatHistory] Failed to restore from IPFS:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Import sessions from IPFS into local storage
+   */
+  private importFromIpfs(sessions: IpfsChatSessionData[]): void {
+    if (!this.isLocalStorageAvailable()) return;
+
+    const existingSessions = this.getAllSessions();
+    const existingIds = new Set(existingSessions.map(s => s.id));
+
+    // Merge sessions
+    for (const session of sessions) {
+      if (existingIds.has(session.id)) {
+        // Update existing session if remote is newer
+        const existing = existingSessions.find(s => s.id === session.id);
+        if (existing && session.updatedAt > existing.updatedAt) {
+          // Update session metadata
+          const idx = existingSessions.findIndex(s => s.id === session.id);
+          if (idx >= 0) {
+            existingSessions[idx] = {
+              id: session.id,
+              agentId: session.agentId,
+              userId: session.userId,
+              title: session.title,
+              preview: session.preview,
+              createdAt: session.createdAt,
+              updatedAt: session.updatedAt,
+              messageCount: session.messageCount,
+            };
+          }
+          // Update messages
+          localStorage.setItem(
+            this.getMessagesKey(session.id),
+            JSON.stringify(session.messages)
+          );
+        }
+      } else {
+        // Add new session
+        existingSessions.push({
+          id: session.id,
+          agentId: session.agentId,
+          userId: session.userId,
+          title: session.title,
+          preview: session.preview,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          messageCount: session.messageCount,
+        });
+        // Add messages
+        localStorage.setItem(
+          this.getMessagesKey(session.id),
+          JSON.stringify(session.messages)
+        );
+      }
+    }
+
+    // Sort by updatedAt and save
+    existingSessions.sort((a, b) => b.updatedAt - a.updatedAt);
+    this.saveSessions(existingSessions);
+    this.notifyUpdate();
+  }
+
+  /**
+   * Disable IPFS sync (e.g., on logout)
+   */
+  disableIpfsSync(): void {
+    if (this.syncDebounceTimer) {
+      clearTimeout(this.syncDebounceTimer);
+      this.syncDebounceTimer = null;
+    }
+    this.ipfsSyncEnabled = false;
+    ChatHistoryIpfsService.resetInstance();
+    this.ipfsService = ChatHistoryIpfsService.getInstance();
   }
 }
 

@@ -94,3 +94,45 @@ export const IPFS_CONFIG = {
   enableAutoSync: true,
   syncIntervalMs: 5 * 60 * 1000, // 5 minutes
 };
+
+/**
+ * IPNS resolution configuration
+ */
+export const IPNS_RESOLUTION_CONFIG = {
+  /** Wait this long for initial responses before selecting best record */
+  initialTimeoutMs: 10000,
+  /** Maximum wait for all gateway responses */
+  maxWaitMs: 30000,
+  /** Per-gateway request timeout */
+  perGatewayTimeoutMs: 25000,
+  /** Gateway path resolution timeout (fast path) */
+  gatewayPathTimeoutMs: 5000,
+};
+
+/**
+ * Get the backend gateway URL for API calls
+ * Uses HTTPS on secure pages, HTTP otherwise
+ */
+export function getBackendGatewayUrl(): string | null {
+  const configured = CUSTOM_PEERS.find((p) => isPeerConfigured(p.peerId));
+  if (!configured) return null;
+
+  const isSecure =
+    typeof window !== "undefined" && window.location.protocol === "https:";
+
+  return isSecure
+    ? `https://${configured.host}`
+    : `http://${configured.host}:9080`;
+}
+
+/**
+ * Get all configured backend gateway URLs for multi-node operations
+ */
+export function getAllBackendGatewayUrls(): string[] {
+  const isSecure =
+    typeof window !== "undefined" && window.location.protocol === "https:";
+
+  return CUSTOM_PEERS.filter((p) => isPeerConfigured(p.peerId)).map((peer) =>
+    isSecure ? `https://${peer.host}` : `http://${peer.host}:9080`
+  );
+}

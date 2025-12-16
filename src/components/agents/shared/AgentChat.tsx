@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
-import { Plus, X, PanelLeftClose, Search, Trash2, Clock, MessageSquare, Activity, ChevronDown } from 'lucide-react';
+import { Plus, X, PanelLeftClose, Search, Trash2, Clock, MessageSquare, Activity, ChevronDown, Cloud, CloudOff, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../../config/activities';
 import { useAgentChat, type ChatMessage } from '../../../hooks/useAgentChat';
@@ -115,10 +115,33 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
   const currentNametag = useRef<string | null>(null);
   const lastSavedMessagesRef = useRef<string>('');
 
-  // Get nametag from wallet for user identification
-  const { nametag } = useWallet();
+  // Get nametag and seed phrase from wallet for user identification and IPFS sync
+  const { nametag, getSeedPhrase } = useWallet();
+  const [seedPhrase, setSeedPhrase] = useState<string | undefined>(undefined);
+
+  // Load seed phrase for IPFS sync
+  useEffect(() => {
+    if (!nametag) {
+      setSeedPhrase(undefined);
+      return;
+    }
+
+    const loadSeed = async () => {
+      try {
+        const seed = await getSeedPhrase();
+        if (seed) {
+          setSeedPhrase(seed.join(' '));
+        }
+      } catch (error) {
+        console.warn('[AgentChat] Failed to get seed phrase for IPFS sync:', error);
+      }
+    };
+
+    loadSeed();
+  }, [nametag, getSeedPhrase]);
 
   // Chat history hook - bound to nametag so each user has their own history
+  // Enable IPFS sync when seed phrase is available
   const {
     sessions,
     currentSession,
@@ -128,10 +151,16 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     resetCurrentSession,
     saveCurrentMessages,
     searchSessions,
+    ipfsSyncEnabled,
+    isIpfsSyncing,
+    lastIpfsSync,
+    forceIpfsSync,
   } = useChatHistory({
     agentId: agent.id,
     userId: nametag ?? undefined,
+    seedPhrase,
     enabled: !!nametag, // Only enable when user has a nametag
+    enableIpfsSync: !!seedPhrase, // Enable IPFS sync when seed phrase is available
   });
 
   // Filter sessions based on search
@@ -546,10 +575,43 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
                   </AnimatePresence>
                 </div>
               ) : (
-                <h3 className="text-neutral-900 dark:text-white font-medium flex items-center gap-2">
-                  <Clock className="w-4 h-4" />
-                  Chat History
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-neutral-900 dark:text-white font-medium flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    Chat History
+                  </h3>
+                  {/* IPFS sync indicator */}
+                  {ipfsSyncEnabled && (
+                    <motion.button
+                      onClick={forceIpfsSync}
+                      disabled={isIpfsSyncing}
+                      className={`p-1 rounded transition-colors ${
+                        isIpfsSyncing
+                          ? 'text-blue-500 animate-pulse'
+                          : lastIpfsSync?.success
+                            ? 'text-green-500 hover:text-green-600'
+                            : 'text-neutral-400 hover:text-neutral-600'
+                      }`}
+                      title={
+                        isIpfsSyncing
+                          ? 'Syncing...'
+                          : lastIpfsSync?.success
+                            ? `Synced: ${new Date(lastIpfsSync.timestamp).toLocaleTimeString()}`
+                            : 'Click to sync'
+                      }
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                    >
+                      {isIpfsSyncing ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : lastIpfsSync?.success ? (
+                        <Cloud className="w-4 h-4" />
+                      ) : (
+                        <CloudOff className="w-4 h-4" />
+                      )}
+                    </motion.button>
+                  )}
+                </div>
               )}
 
               <div className="flex items-center gap-1">
