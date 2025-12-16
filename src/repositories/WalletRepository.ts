@@ -703,6 +703,36 @@ export class WalletRepository {
   }
 
   /**
+   * Clear ALL wallet data from localStorage
+   * This removes all per-address wallet data (tokens, nametags)
+   * Used when deleting wallet completely
+   */
+  static clearAllWalletStorage(): void {
+    console.log("🗑️ Clearing all wallet storage from localStorage...");
+
+    // Find and remove all keys that start with STORAGE_KEY_PREFIX
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(STORAGE_KEY_PREFIX)) {
+        keysToRemove.push(key);
+      }
+    }
+
+    // Also remove legacy key and transaction history
+    keysToRemove.push(LEGACY_STORAGE_KEY);
+    keysToRemove.push(STORAGE_KEY_HISTORY);
+
+    // Remove all found keys
+    for (const key of keysToRemove) {
+      localStorage.removeItem(key);
+      console.log(`  Removed: ${key}`);
+    }
+
+    console.log(`🗑️ Cleared ${keysToRemove.length} wallet storage keys`);
+  }
+
+  /**
    * Get the current active address
    */
   getCurrentAddress(): string | null {

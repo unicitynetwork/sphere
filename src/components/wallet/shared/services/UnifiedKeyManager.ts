@@ -751,6 +751,26 @@ export class UnifiedKeyManager {
     localStorage.removeItem("l3_selected_address_path");
     localStorage.removeItem("l3_selected_address_index"); // Legacy key
 
+    // Clear ALL per-address wallet data (tokens, nametags)
+    // This is important - without this, nametags are found locally
+    // and IPNS check is skipped on re-import
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("unicity_wallet_")) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const key of keysToRemove) {
+      localStorage.removeItem(key);
+    }
+    if (keysToRemove.length > 0) {
+      console.log(`🔐 Cleared ${keysToRemove.length} per-address wallet entries`);
+    }
+
+    // Also clear transaction history
+    localStorage.removeItem("unicity_transaction_history");
+
     // Reset singleton instance
     if (UnifiedKeyManager.instance) {
       UnifiedKeyManager.instance.mnemonic = null;
