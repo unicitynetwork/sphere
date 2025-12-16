@@ -930,14 +930,15 @@ function decryptWithPassword(encrypted: string, password: string, salt: string):
 
 /**
  * Determine derivation mode from wallet
+ * IMPORTANT: chainCode is the definitive indicator for BIP32 mode.
+ * Without chainCode, BIP32 derivation is impossible regardless of flags.
  */
 function determineDerivationMode(wallet: Wallet): WalletJSONDerivationMode {
-  if (wallet.isBIP32 || wallet.isImportedAlphaWallet) {
-    return "bip32";
-  }
+  // ChainCode is REQUIRED for BIP32 derivation - check this first
   if (wallet.chainCode || wallet.masterChainCode) {
     return "bip32";
   }
+  // Without chainCode, can only use WIF HMAC mode (even if isBIP32 flag is set)
   return "wif_hmac";
 }
 

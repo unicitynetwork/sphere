@@ -375,23 +375,34 @@ export class UnifiedKeyManager {
   /**
    * Derive address from a full BIP32 path string
    * This is the ONLY method for address derivation - PATH is the single identifier
-   * @param path - Full path like "m/84'/1'/0'/0/5" or "m/44'/0'/0'/1/3"
+   * @param path - Full path like "m/84'/1'/0'/0/5" or "m/44'/0'/0'/1/3" or "m/44'/0'/0'" (HMAC style)
    */
   deriveAddressFromPath(path: string): DerivedAddress {
     if (!this.masterKey) {
       throw new Error("Wallet not initialized");
     }
 
-    // Parse path to extract chain and index
-    // Matches: m/84'/1'/0'/0/5 or m/44'/0'/0'/1/3
-    const match = path.match(/m\/(\d+)'\/(\d+)'\/(\d+)'\/(\d+)\/(\d+)/);
-    if (!match) {
-      throw new Error(`Invalid BIP32 path: ${path}`);
-    }
+    let index: number;
+    let isChange: boolean;
 
-    const chain = parseInt(match[4], 10);  // 0=external, 1=change
-    const index = parseInt(match[5], 10);
-    const isChange = chain === 1;
+    // Parse path to extract chain and index
+    // Try 5-level BIP32 first: m/84'/1'/0'/0/5 or m/44'/0'/0'/1/3
+    const bip32Match = path.match(/m\/(\d+)'\/(\d+)'\/(\d+)'\/(\d+)\/(\d+)/);
+    if (bip32Match) {
+      const chain = parseInt(bip32Match[4], 10);  // 0=external, 1=change
+      index = parseInt(bip32Match[5], 10);
+      isChange = chain === 1;
+    } else {
+      // Try 3-level HMAC path: m/44'/0'/0' (Standard wallet format)
+      const hmacMatch = path.match(/m\/(\d+)'\/(\d+)'\/(\d+)'/);
+      if (hmacMatch) {
+        // In HMAC paths, the last hardened component is the index
+        index = parseInt(hmacMatch[3], 10);
+        isChange = false;  // HMAC wallets don't have change addresses
+      } else {
+        throw new Error(`Invalid BIP32 path: ${path}`);
+      }
+    }
 
     if (this.derivationMode === "bip32" && this.chainCode) {
       // Standard BIP32 derivation using wallet's base path (e.g., m/84'/1'/0'/0/{index})
