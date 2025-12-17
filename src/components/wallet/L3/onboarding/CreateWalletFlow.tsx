@@ -51,7 +51,7 @@ const SESSION_KEY = "user-pin-1234";
 const identityManager = IdentityManager.getInstance(SESSION_KEY);
 
 export function CreateWalletFlow() {
-  const { identity, createWallet, restoreWallet, mintNametag, nametag, getUnifiedKeyManager, checkNametagAvailability } = useWallet();
+  const { identity, createWallet, mintNametag, nametag, getUnifiedKeyManager, checkNametagAvailability } = useWallet();
 
   const [step, setStep] = useState<'start' | 'restoreMethod' | 'restore' | 'importFile' | 'addressSelection' | 'nametag' | 'processing'>('start');
   const [nametagInput, setNametagInput] = useState('');
