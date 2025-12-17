@@ -51,7 +51,7 @@ const SESSION_KEY = "user-pin-1234";
 const identityManager = IdentityManager.getInstance(SESSION_KEY);
 
 export function CreateWalletFlow() {
-  const { identity, createWallet, mintNametag, nametag, getUnifiedKeyManager } = useWallet();
+  const { identity, createWallet, restoreWallet, mintNametag, nametag, getUnifiedKeyManager, checkNametagAvailability } = useWallet();
 
   const [step, setStep] = useState<'start' | 'restoreMethod' | 'restore' | 'importFile' | 'addressSelection' | 'nametag' | 'processing'>('start');
   const [nametagInput, setNametagInput] = useState('');
@@ -569,10 +569,18 @@ export function CreateWalletFlow() {
 
     setIsBusy(true);
     setError(null);
-    setStep('processing');
 
     try {
       const cleanTag = nametagInput.trim().replace('@', '');
+
+      const isNametagAvailable = await checkNametagAvailability(cleanTag);
+      if (!isNametagAvailable) {
+        setError(`${cleanTag} already exists.`);
+        setIsBusy(false);
+        return;
+      }
+
+      setStep('processing');
 
       // Step 1: Mint nametag on blockchain and save to localStorage
       setProcessingStatus('Minting Unicity ID on blockchain...');
@@ -1751,7 +1759,12 @@ export function CreateWalletFlow() {
               <input
                 type="text"
                 value={nametagInput}
-                onChange={(e) => setNametagInput(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value.toLowerCase();
+                  if (/^[a-z0-9_\-+.]*$/.test(value)) {
+                    setNametagInput(value);
+                  }
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && nametagInput && !isBusy) handleMintNametag();
                 }}

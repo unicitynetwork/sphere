@@ -794,6 +794,10 @@ export const useWallet = () => {
     return identityManager.getUnifiedKeyManager();
   };
 
+  const checkNametagAvailability = async (nametag: string): Promise<boolean> => {
+    return await nametagService.isNametagAvailable(nametag);
+  };
+
   return {
     identity: identityQuery.data,
     isLoadingIdentity: identityQuery.isLoading,
@@ -819,5 +823,6 @@ export const useWallet = () => {
     getSeedPhrase,
     getL1Address,
     getUnifiedKeyManager,
+    checkNametagAvailability,
   };
 };
