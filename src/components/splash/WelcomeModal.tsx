@@ -48,7 +48,7 @@ export function WelcomeModal({ show, onAccept }: WelcomeModalProps) {
             className="relative w-full max-w-lg bg-linear-to-b from-neutral-900 to-black border border-orange-500/20 rounded-3xl shadow-2xl shadow-orange-500/10 overflow-hidden"
           >
             {/* Glow effect */}
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-32 bg-orange-500/20 blur-3xl pointer-events-none" />
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-32 bg-orange-500/10 blur-3xl pointer-events-none" />
 
             {/* Content */}
             <div className="relative p-6 md:p-8">
@@ -97,7 +97,7 @@ export function WelcomeModal({ show, onAccept }: WelcomeModalProps) {
                     transition={{ delay: 0.4 + index * 0.1 }}
                     className="flex flex-col items-center text-center p-3 rounded-xl bg-neutral-800/30 border border-neutral-700/30"
                   >
-                    <feature.icon className="w-6 h-6 text-orange-400 mb-2" />
+                    <feature.icon className="w-6 h-6 text-orange-500 mb-2" />
                     <span className="text-white text-xs font-medium">{feature.title}</span>
                     <span className="text-neutral-500 text-[10px] mt-0.5">{feature.description}</span>
                   </motion.div>
