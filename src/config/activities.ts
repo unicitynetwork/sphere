@@ -54,7 +54,7 @@ export const agents: AgentConfig[] = [
     category: 'Assistant',
     color: 'from-orange-500 to-amber-500',
     type: 'simple-ai',
-    greetingMessage: "Hi! I'm Viktor, your personal assistant.\nShort intro on me. I care a great deal about privacy. I don't know you, I don't log you, I don't even know your IP address. You are invisible here and nothing will be recorded about our conversation.\nHow can I help?",
+    greetingMessage: "Hi! I'm Viktor, your personal assistant.\nI care a great deal about privacy. I don't know you, I don't log you, I don't even know your IP address. You are invisible here and nothing will be recorded about our conversation.\nHow can I help?",
     backendActivityId: 'ama',
     quickActions: [
       { label: 'Research', message: 'Research the latest news' },
