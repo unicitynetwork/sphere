@@ -155,11 +155,14 @@ function replaceMathPlaceholders(
 
 // Parse inline markdown and HTML (bold, italic, code, br, links, images, plain URLs)
 function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
-  // FIRST PASS: Extract inline math and replace with safe tokens that won't be matched by markdown regex
+  // FIRST PASS: Handle escape sequences (e.g., \* should become just *)
+  const unescapedText = text.replace(/\\([*_`[\]()#+-.|!\\])/g, '$1');
+
+  // SECOND PASS: Extract inline math and replace with safe tokens that won't be matched by markdown regex
   const mathBlocks: string[] = [];
   const mathPlaceholder = '\u0000MATH';  // Unique placeholder that markdown won't match
 
-  const processedText = text.replace(
+  const processedText = unescapedText.replace(
     /(?<!\\)((?:\\\\)*)\\\((.+?)\\\)/g,
     (match, backslashes, latex) => {
       if (backslashes && backslashes.length % 2 === 1) {
@@ -175,8 +178,8 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
   let key = 0;
 
-  // SECOND PASS: Process markdown - math placeholders won't be captured by markdown patterns
-  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(([^)]+)\)|!\[([^\]]*)\]\(([^)]+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"]))/gi;
+  // THIRD PASS: Process markdown - math placeholders won't be captured by markdown patterns
+  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(((?:[^\s()]|\([^\s)]*\))+)(?:\s+"([^"]+)")?\)|!\[([^\]]*)\]\(((?:[^()]|\([^)]*\))+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"]))/gi;
   let lastIndex = 0;
   let match;
 
@@ -242,17 +245,25 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
         </a>
       );
     } else if (match[13] && match[14]) {
-      // [text](url) markdown link
+      // [text](url) or [text](url "tooltip") markdown link
       const content = replaceMathPlaceholders(match[13], mathBlocks, `${keyPrefix}-link`, key);
+      const tooltip = match[15]; // Optional tooltip
       parts.push(
-        <a key={`${keyPrefix}-link-${key++}`} href={match[14]} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 underline">
+        <a
+          key={`${keyPrefix}-link-${key++}`}
+          href={match[14]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 underline"
+          title={tooltip || undefined}
+        >
           {content}
         </a>
       );
-    } else if (match[16]) {
+    } else if (match[17]) {
       // ![alt](url) markdown image (supports base64 data URLs)
-      const alt = match[15] || 'image';
-      const src = match[16];
+      const alt = match[16] || 'image';
+      const src = match[17];
       parts.push(
         <img
           key={`${keyPrefix}-img-${key++}`}
@@ -262,9 +273,9 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
           loading="lazy"
         />
       );
-    } else if (match[17]) {
+    } else if (match[18]) {
       // Plain URL (https://... or http://...)
-      const url = match[17];
+      const url = match[18];
       parts.push(
         <a
           key={`${keyPrefix}-url-${key++}`}
@@ -290,16 +301,81 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   return parts.length > 0 ? parts : [text];
 }
 
+// Helper function to split table row by | while respecting escaped | and links
+function splitTableRow(line: string): string[] {
+  const cells: string[] = [];
+  let currentCell = '';
+  let inQuotes = false;
+  let escaped = false;
+  let bracketDepth = 0;  // Track depth of [ ] for nested brackets
+  let inLinkParen = false;  // Track if we're inside (...) part of a link
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (escaped) {
+      currentCell += char;
+      escaped = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      escaped = true;
+      currentCell += char;
+      continue;
+    }
+
+    if (char === '[') {
+      bracketDepth++;
+      currentCell += char;
+      continue;
+    }
+
+    if (char === ']' && bracketDepth > 0) {
+      bracketDepth--;
+      currentCell += char;
+      if (bracketDepth === 0 && i + 1 < line.length && line[i + 1] === '(') {
+        inLinkParen = true;
+      }
+      continue;
+    }
+
+    if (char === '"' && (inLinkParen || inQuotes)) {
+      inQuotes = !inQuotes;
+      currentCell += char;
+      continue;
+    }
+
+    if (char === ')' && inLinkParen && !inQuotes) {
+      inLinkParen = false;
+      currentCell += char;
+      continue;
+    }
+
+    // Only split on | when not inside brackets, link parens, or quotes
+    if (char === '|' && !inQuotes && bracketDepth === 0 && !inLinkParen) {
+      cells.push(currentCell);
+      currentCell = '';
+      continue;
+    }
+
+    currentCell += char;
+  }
+
+  // Push the last cell
+  if (currentCell || line.endsWith('|')) {
+    cells.push(currentCell);
+  }
+
+  // Remove empty first/last from split (table format is |cell1|cell2|)
+  return cells.slice(1, -1).map(cell => cell.trim());
+}
+
 // Parse markdown table
 function parseTable(lines: string[], keyPrefix: string): React.ReactNode {
   const rows = lines
     .filter(line => !line.match(/^\|[\s-:|]+\|$/)) // Skip separator rows
-    .map(line =>
-      line
-        .split('|')
-        .slice(1, -1) // Remove empty first/last from split
-        .map(cell => cell.trim())
-    );
+    .map(line => splitTableRow(line));
 
   if (rows.length === 0) return null;
 
