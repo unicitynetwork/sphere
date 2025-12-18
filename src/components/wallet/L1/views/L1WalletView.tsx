@@ -10,6 +10,8 @@ import {
   broadcast,
   saveWalletToStorage,
   importWallet as importWalletFromFile,
+  importWalletFromJSON,
+  isJSONWalletFormat,
   type VestingMode,
   type TransactionPlan,
   type Wallet,
@@ -20,6 +22,7 @@ import { NoWalletView, HistoryView, MainWalletView } from ".";
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { WalletScanModal, ImportWalletModal, LoadPasswordModal } from "../components/modals";
+import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 
 type ViewMode = "main" | "history";
 
@@ -58,7 +61,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     createWallet,
     importWallet,
     deleteWallet,
-    exportWallet,
     analyzeTransaction,
     setVestingMode,
     invalidateWallet,
@@ -92,17 +94,22 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     })();
   }, []);
 
-  // Set initial selected address when wallet loads - sync with L3's stored index
+  // Set initial selected address when wallet loads - sync with L3's stored path
   useEffect(() => {
     if (wallet && wallet.addresses.length > 0) {
-      // Read stored index (same one L3 uses)
-      const storedIndex = parseInt(localStorage.getItem("l3_selected_address_index") || "0", 10);
-      const validIndex = Math.min(Math.max(0, storedIndex), wallet.addresses.length - 1);
-      const addressFromIndex = wallet.addresses[validIndex].address;
+      // Read stored path (same one L3 uses) - path is the ONLY reliable identifier
+      const storedPath = localStorage.getItem("l3_selected_address_path");
+
+      // Find address by path, fallback to first address if not found
+      const addressFromPath = storedPath
+        ? wallet.addresses.find(a => a.path === storedPath)?.address
+        : wallet.addresses[0]?.address;
+
+      const selectedAddr = addressFromPath || wallet.addresses[0]?.address;
 
       // Only update if different from current selection
-      if (selectedAddress !== addressFromIndex) {
-        setSelectedAddress(addressFromIndex);
+      if (selectedAddr && selectedAddress !== selectedAddr) {
+        setSelectedAddress(selectedAddr);
       }
     }
   }, [selectedAddress, wallet]);
@@ -155,6 +162,71 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
       const content = await file.text();
 
+      // Handle JSON wallet files
+      if (file.name.endsWith(".json") || isJSONWalletFormat(content)) {
+        // Check if encrypted
+        try {
+          const json = JSON.parse(content);
+          if (json.encrypted) {
+            // Encrypted JSON - show password modal
+            setPendingFile(file);
+            setInitialScanCount(scanCount || 10);
+            setShowLoadPasswordModal(true);
+            return;
+          }
+        } catch {
+          // Not valid JSON, continue with error
+          throw new Error("Invalid JSON wallet file");
+        }
+
+        // Unencrypted JSON - import directly
+        const result = await importWalletFromJSON(content);
+        if (!result.success || !result.wallet) {
+          throw new Error(result.error || "Import failed");
+        }
+
+        // If has mnemonic, restore via UnifiedKeyManager
+        if (result.mnemonic) {
+          const keyManager = UnifiedKeyManager.getInstance("user-pin-1234");
+          await keyManager.createFromMnemonic(result.mnemonic);
+
+          // Reset selected address path for clean import - use first address's path
+          const firstAddr = result.wallet.addresses[0];
+          if (firstAddr?.path) {
+            localStorage.setItem("l3_selected_address_path", firstAddr.path);
+          } else {
+            localStorage.removeItem("l3_selected_address_path");
+          }
+
+          // Save wallet and use directly (no scanning needed for mnemonic wallets)
+          await saveWalletToStorage("main", result.wallet);
+          await invalidateWallet();
+          if (result.wallet.addresses.length > 0) {
+            setSelectedAddress(result.wallet.addresses[0].address);
+          }
+          showMessage("success", "Wallet Loaded", "Wallet loaded successfully with recovery phrase!");
+          return;
+        }
+
+        // No mnemonic - check if BIP32 needs scanning
+        const isBIP32 = result.derivationMode === "bip32" || result.wallet.chainCode;
+        if (isBIP32) {
+          setPendingWallet(result.wallet);
+          setInitialScanCount(scanCount || 10);
+          setShowScanModal(true);
+        } else {
+          // Standard wallet - save and use directly
+          await saveWalletToStorage("main", result.wallet);
+          await invalidateWallet();
+          if (result.wallet.addresses.length > 0) {
+            setSelectedAddress(result.wallet.addresses[0].address);
+          }
+          showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
+        }
+        return;
+      }
+
+      // Handle TXT files
       if (content.includes("ENCRYPTED MASTER KEY")) {
         setPendingFile(file);
         setInitialScanCount(scanCount || 10);
@@ -250,10 +322,13 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     showMessage("success", "Wallet Loaded", `Loaded ${scannedAddresses.length} addresses with ${totalBalance.toFixed(8)} ALPHA total`);
   };
 
-  // Cancel scan modal
+  // Cancel scan modal - also clear wallet data since import was aborted
   const onCancelScan = () => {
     setShowScanModal(false);
     setPendingWallet(null);
+
+    // Clear any partially imported wallet data
+    UnifiedKeyManager.clearAll();
   };
 
   // Confirm load with password
@@ -261,7 +336,60 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     if (!pendingFile) return;
 
     try {
-      // First, import without saving to check if it's BIP32
+      const content = await pendingFile.text();
+
+      // Check if this is an encrypted JSON file
+      if (pendingFile.name.endsWith(".json") || isJSONWalletFormat(content)) {
+        const result = await importWalletFromJSON(content, password);
+        if (!result.success || !result.wallet) {
+          throw new Error(result.error || "Import failed");
+        }
+
+        setShowLoadPasswordModal(false);
+        setPendingFile(null);
+
+        // If has mnemonic, restore via UnifiedKeyManager
+        if (result.mnemonic) {
+          const keyManager = UnifiedKeyManager.getInstance("user-pin-1234");
+          await keyManager.createFromMnemonic(result.mnemonic);
+
+          // Reset selected address path for clean import - use first address's path
+          const firstAddr = result.wallet.addresses[0];
+          if (firstAddr?.path) {
+            localStorage.setItem("l3_selected_address_path", firstAddr.path);
+          } else {
+            localStorage.removeItem("l3_selected_address_path");
+          }
+
+          // Save wallet and use directly (no scanning needed for mnemonic wallets)
+          await saveWalletToStorage("main", result.wallet);
+          await invalidateWallet();
+          if (result.wallet.addresses.length > 0) {
+            setSelectedAddress(result.wallet.addresses[0].address);
+          }
+          showMessage("success", "Wallet Loaded", "Wallet loaded successfully with recovery phrase!");
+          return;
+        }
+
+        // No mnemonic - check if BIP32 needs scanning
+        const isBIP32 = result.derivationMode === "bip32" || result.wallet.chainCode;
+        if (isBIP32) {
+          setPendingWallet(result.wallet);
+          // initialScanCount already set when showing password modal
+          setShowScanModal(true);
+        } else {
+          // Standard wallet - save and use directly
+          await saveWalletToStorage("main", result.wallet);
+          await invalidateWallet();
+          if (result.wallet.addresses.length > 0) {
+            setSelectedAddress(result.wallet.addresses[0].address);
+          }
+          showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
+        }
+        return;
+      }
+
+      // Handle TXT files with password
       const result = await importWalletFromFile(pendingFile, password);
       if (!result.success || !result.wallet) {
         throw new Error(result.error || "Import failed");
@@ -316,18 +444,30 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     }
   };
 
-  // Save wallet
+  // Check if mnemonic is available for export
+  const hasMnemonic = (() => {
+    try {
+      const keyManager = UnifiedKeyManager.getInstance("user-pin-1234");
+      return keyManager.getMnemonic() !== null;
+    } catch {
+      return false;
+    }
+  })();
+
+  // Save wallet as JSON (only JSON format supported)
   const onSaveWallet = (filename: string, password?: string) => {
     if (!wallet) {
       showMessage("warning", "No Wallet", "No wallet to save");
       return;
     }
 
-    const result = exportWallet(wallet, filename, password);
-    if (result.success) {
-      showMessage("success", "Wallet Saved", "Wallet saved successfully!");
-    } else {
-      showMessage("error", "Save Error", "Error saving wallet: " + result.error);
+    try {
+      // Use UnifiedKeyManager for JSON export (includes mnemonic if available)
+      const keyManager = UnifiedKeyManager.getInstance("user-pin-1234");
+      keyManager.downloadJSON(filename, { password });
+      showMessage("success", "Wallet Saved", "Wallet saved as JSON successfully!");
+    } catch (err) {
+      showMessage("error", "Save Error", `Error saving wallet: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -413,13 +553,18 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     setViewMode("main");
   };
 
-  // Select address - sync with L3's selected address index
+  // Select address - sync with L3's selected address path
   const onSelectAddress = (address: string) => {
-    // Find index of selected address
-    const index = wallet?.addresses.findIndex(a => a.address === address) ?? 0;
+    // Find the selected address to get its path - path is the ONLY reliable identifier
+    const selectedAddr = wallet?.addresses.find(a => a.address === address);
 
-    // Sync to L3's selected address index
-    localStorage.setItem("l3_selected_address_index", String(index));
+    // Sync to L3's selected address path
+    if (selectedAddr?.path) {
+      localStorage.setItem("l3_selected_address_path", selectedAddr.path);
+    } else {
+      // Fallback: remove path to trigger default behavior
+      localStorage.removeItem("l3_selected_address_path");
+    }
 
     // Reset L3 state so it picks up new identity
     WalletRepository.getInstance().resetInMemoryState();
@@ -514,6 +659,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         selectedAddress={selectedAddress}
         selectedPrivateKey={selectedPrivateKey}
         addresses={addresses}
+        walletAddresses={wallet?.addresses}
         balance={balance}
         totalBalance={totalBalance}
         showBalances={showBalances}
@@ -521,6 +667,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         onSelectAddress={onSelectAddress}
         onShowHistory={onShowHistory}
         onSaveWallet={onSaveWallet}
+        hasMnemonic={hasMnemonic}
         onDeleteWallet={onDeleteWallet}
         onSendTransaction={onSendTransaction}
         txPlan={txPlan}

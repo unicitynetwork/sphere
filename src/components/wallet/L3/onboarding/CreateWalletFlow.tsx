@@ -1,12 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft, Plus, ChevronDown, Check, Upload, FileText, X } from 'lucide-react';
+import { Wallet, ArrowRight, Loader2, ShieldCheck, KeyRound, ArrowLeft, Plus, ChevronDown, Check, Upload, FileText, FileJson, X } from 'lucide-react';
 import { useWallet } from '../hooks/useWallet';
 import { WalletRepository } from '../../../../repositories/WalletRepository';
 import { IdentityManager } from '../services/IdentityManager';
+import { UnifiedKeyManager } from '../../shared/services/UnifiedKeyManager';
+import { fetchNametagFromIpns } from '../services/IpnsNametagFetcher';
+import { IpfsStorageService } from '../services/IpfsStorageService';
 import {
   importWallet as importWalletFromFile,
+  importWalletFromJSON,
+  isJSONWalletFormat,
   type Wallet as L1Wallet,
   type ScannedAddress,
   saveWalletToStorage,
@@ -25,6 +30,20 @@ interface DerivedAddressInfo {
   path: string;
   hasNametag: boolean;
   existingNametag?: string;
+  isChange?: boolean;           // True if this is a change address (chain=1)
+  fromL1Wallet?: boolean;       // True if loaded from L1 wallet (e.g., .dat import) - show immediately
+  // Full nametag data for localStorage persistence
+  nametagData?: {
+    name: string;
+    token: object;
+    timestamp?: number;
+    format?: string;
+  };
+  // IPNS fetching state
+  privateKey?: string;          // Needed to derive IPNS name
+  ipnsName?: string;
+  ipnsLoading?: boolean;        // True while fetching from IPFS
+  ipnsError?: string;           // Error message if fetch failed
 }
 
 // Session key (same as useWallet.ts)
@@ -32,7 +51,7 @@ const SESSION_KEY = "user-pin-1234";
 const identityManager = IdentityManager.getInstance(SESSION_KEY);
 
 export function CreateWalletFlow() {
-  const { identity, createWallet, restoreWallet, mintNametag, nametag, getUnifiedKeyManager, checkNametagAvailability } = useWallet();
+  const { identity, createWallet, mintNametag, nametag, getUnifiedKeyManager, checkNametagAvailability } = useWallet();
 
   const [step, setStep] = useState<'start' | 'restoreMethod' | 'restore' | 'importFile' | 'addressSelection' | 'nametag' | 'processing'>('start');
   const [nametagInput, setNametagInput] = useState('');
@@ -42,8 +61,13 @@ export function CreateWalletFlow() {
 
   // Address selection state
   const [derivedAddresses, setDerivedAddresses] = useState<DerivedAddressInfo[]>([]);
-  const [selectedAddressIndex, setSelectedAddressIndex] = useState<number>(0);
+  const [selectedAddressPath, setSelectedAddressPath] = useState<string | null>(null);
   const [showAddressDropdown, setShowAddressDropdown] = useState(false);
+
+  // Helper to get selected address by path
+  // Show addresses that are: checked (IPNS done) OR from L1 wallet (e.g., .dat import)
+  const visibleAddresses = derivedAddresses.filter(a => !a.ipnsLoading || a.fromL1Wallet);
+  const selectedAddress = visibleAddresses.find((a) => a.path === selectedAddressPath) || visibleAddresses[0];
 
   // Wallet import and scanning state (for .dat and BIP32 .txt files)
   const [showScanModal, setShowScanModal] = useState(false);
@@ -58,6 +82,12 @@ export function CreateWalletFlow() {
   const [needsScanning, setNeedsScanning] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
 
+  // State for IPNS nametag fetching on Complete Setup screen
+  const [ipnsFetchingNametag, setIpnsFetchingNametag] = useState(false);
+
+  // State for processing status message
+  const [processingStatus, setProcessingStatus] = useState('');
+
   // Connect to L1 WebSocket on mount (needed for wallet scanning)
   useEffect(() => {
     if (!isWebSocketConnected()) {
@@ -67,6 +97,162 @@ export function CreateWalletFlow() {
     }
   }, []);
 
+  // Effect: Fetch nametag from IPNS when identity exists but nametag doesn't
+  // This allows auto-proceeding if the nametag was published from another device
+  useEffect(() => {
+    // Only run on 'start' step when identity exists but no nametag
+    if (step !== 'start' || !identity || nametag || ipnsFetchingNametag) return;
+
+    const fetchNametag = async () => {
+      setIpnsFetchingNametag(true);
+      console.log('🔍 [Complete Setup] Checking IPNS for existing nametag...');
+
+      try {
+        const result = await fetchNametagFromIpns(identity.privateKey);
+
+        if (result.nametag && result.nametagData) {
+          console.log(`🔍 [Complete Setup] Found nametag: ${result.nametag}`);
+
+          // Save nametag to localStorage
+          WalletRepository.saveNametagForAddress(identity.address, {
+            name: result.nametagData.name,
+            token: result.nametagData.token,
+            timestamp: result.nametagData.timestamp || Date.now(),
+            format: result.nametagData.format || "TXF",
+            version: "1.0",
+          });
+
+          // Reload to proceed to wallet with the found nametag
+          console.log('✅ [Complete Setup] Nametag found, proceeding to wallet...');
+          window.location.reload();
+        } else {
+          console.log('🔍 [Complete Setup] No nametag found in IPNS');
+          setIpnsFetchingNametag(false);
+        }
+      } catch (error) {
+        console.warn('🔍 [Complete Setup] IPNS fetch error:', error);
+        setIpnsFetchingNametag(false);
+      }
+    };
+
+    fetchNametag();
+  }, [step, identity, nametag, ipnsFetchingNametag]);
+
+  // State for sequential IPNS checking
+  const [isCheckingIpns, setIsCheckingIpns] = useState(false);
+  const [firstFoundNametagPath, setFirstFoundNametagPath] = useState<string | null>(null);
+  // Auto-derive new addresses during IPNS check (for mnemonic imports)
+  // For .dat imports, this is set to false - we only check existing addresses
+  const [autoDeriveDuringIpnsCheck, setAutoDeriveDuringIpnsCheck] = useState(true);
+
+  // Effect: Fetch nametags from IPNS sequentially
+  // Check ALL addresses up to limit (10), don't stop on first nametag found
+  // Auto-select the FIRST address with nametag
+  useEffect(() => {
+    // Only run when in addressSelection step and we have addresses to check
+    if (step !== 'addressSelection' || derivedAddresses.length === 0 || isCheckingIpns) return;
+
+    // Find the next address that needs IPNS fetching
+    const nextToCheck = derivedAddresses.find(
+      (addr) => addr.ipnsLoading && addr.privateKey
+    );
+
+    if (!nextToCheck) {
+      // All current addresses checked, no more pending
+      console.log('🔍 All current addresses checked');
+      return;
+    }
+
+    // Sequential fetch - one at a time
+    const fetchAndMaybeDerive = async () => {
+      setIsCheckingIpns(true);
+      const addr = nextToCheck;
+      const chainLabel = addr.isChange ? 'change' : 'external';
+      console.log(`🔍 Checking IPNS for ${chainLabel} #${addr.index} (path: ${addr.path})...`);
+
+      try {
+        const result = await fetchNametagFromIpns(addr.privateKey!);
+        console.log(`🔍 IPNS result for ${chainLabel} (path: ${addr.path}): ${result.nametag || 'none'} (via ${result.source})`);
+
+        // Update state with fetched result
+        setDerivedAddresses((prev) =>
+          prev.map((a) =>
+            a.path === addr.path
+              ? {
+                  ...a,
+                  ipnsName: result.ipnsName,
+                  hasNametag: !!result.nametag,
+                  existingNametag: result.nametag || undefined,
+                  nametagData: result.nametagData,
+                  ipnsLoading: false,
+                  ipnsError: result.error,
+                  privateKey: undefined,
+                }
+              : a
+          )
+        );
+
+        // If this is the FIRST nametag found, auto-select this address
+        if (result.nametag && !firstFoundNametagPath) {
+          console.log(`✅ Found FIRST nametag "${result.nametag}" at ${chainLabel} #${addr.index}, auto-selecting`);
+          setFirstFoundNametagPath(addr.path);
+          setSelectedAddressPath(addr.path);
+        } else if (result.nametag) {
+          console.log(`✅ Found another nametag "${result.nametag}" at ${chainLabel} #${addr.index}`);
+        }
+      } catch (error: any) {
+        console.warn(`🔍 IPNS fetch error for ${chainLabel} (path: ${addr.path}):`, error.message);
+        setDerivedAddresses((prev) =>
+          prev.map((a) =>
+            a.path === addr.path
+              ? {
+                  ...a,
+                  ipnsLoading: false,
+                  ipnsError: error.message,
+                  privateKey: undefined,
+                }
+              : a
+          )
+        );
+      }
+
+      setIsCheckingIpns(false);
+
+      // Only auto-derive new addresses for mnemonic imports (not for .dat/scanned imports)
+      // For .dat imports, we only check IPNS for the addresses selected during blockchain scan
+      if (autoDeriveDuringIpnsCheck && derivedAddresses.length < 10) {
+        console.log(`🔍 Deriving next address (#${derivedAddresses.length})...`);
+        await deriveNextAddressInternal();
+      }
+    };
+
+    fetchAndMaybeDerive();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, derivedAddresses, isCheckingIpns, firstFoundNametagPath, autoDeriveDuringIpnsCheck]);
+
+  // Internal helper to derive next address (used by auto-derive)
+  const deriveNextAddressInternal = async () => {
+    const nextIndex = derivedAddresses.length;
+    const keyManager = getUnifiedKeyManager();
+    const basePath = keyManager.getBasePath();
+    const path = `${basePath}/0/${nextIndex}`;
+    const derived = keyManager.deriveAddressFromPath(path);
+    const l3Identity = await identityManager.deriveIdentityFromPath(path);
+    const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+    const hasLocalNametag = !!existingNametag;
+
+    setDerivedAddresses(prev => [...prev, {
+      index: nextIndex,
+      l1Address: derived.l1Address,
+      l3Address: l3Identity.address,
+      path: path,
+      hasNametag: hasLocalNametag,
+      existingNametag: existingNametag?.name,
+      privateKey: hasLocalNametag ? undefined : l3Identity.privateKey,
+      ipnsLoading: !hasLocalNametag,
+    }]);
+  };
+
   // Helper: truncate address for display
   const truncateAddress = (addr: string) =>
     addr ? addr.slice(0, 12) + "..." + addr.slice(-8) : '';
@@ -74,43 +260,61 @@ export function CreateWalletFlow() {
   // Helper: derive addresses and check for existing nametags
   const deriveAndCheckAddresses = async (count: number): Promise<DerivedAddressInfo[]> => {
     const keyManager = getUnifiedKeyManager();
+    const basePath = keyManager.getBasePath();
     const results: DerivedAddressInfo[] = [];
 
     for (let i = 0; i < count; i++) {
-      const derived = keyManager.deriveAddress(i);
-      const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(i);
+      // Build path and derive using path-based method - PATH is the single identifier
+      const path = `${basePath}/0/${i}`;
+      const derived = keyManager.deriveAddressFromPath(path);
+      // Use path-based derivation for unambiguous L3 identity
+      const l3Identity = await identityManager.deriveIdentityFromPath(path);
       const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+      const hasLocalNametag = !!existingNametag;
 
       results.push({
         index: i,
         l1Address: derived.l1Address,
         l3Address: l3Identity.address,
-        path: derived.path,
-        hasNametag: !!existingNametag,
+        path: path, // PATH is the primary key!
+        hasNametag: hasLocalNametag,
         existingNametag: existingNametag?.name,
+        // Store L3 private key for IPNS derivation (IPNS name is tied to L3 identity key)
+        privateKey: hasLocalNametag ? undefined : l3Identity.privateKey,
+        // Mark for IPNS loading if no local nametag found
+        ipnsLoading: !hasLocalNametag,
       });
     }
 
     return results;
   };
 
-  // Helper: derive one more address
+  // Helper: derive one more address and resume IPNS checking
   const handleDeriveNewAddress = async () => {
     setIsBusy(true);
     try {
       const nextIndex = derivedAddresses.length;
       const keyManager = getUnifiedKeyManager();
-      const derived = keyManager.deriveAddress(nextIndex);
-      const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(nextIndex);
+      const basePath = keyManager.getBasePath();
+      // Build path and derive using path-based method - PATH is the single identifier
+      const path = `${basePath}/0/${nextIndex}`;
+      const derived = keyManager.deriveAddressFromPath(path);
+      // Use path-based derivation for unambiguous L3 identity
+      const l3Identity = await identityManager.deriveIdentityFromPath(path);
       const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+      const hasLocalNametag = !!existingNametag;
 
       setDerivedAddresses([...derivedAddresses, {
         index: nextIndex,
         l1Address: derived.l1Address,
         l3Address: l3Identity.address,
-        path: derived.path,
-        hasNametag: !!existingNametag,
+        path: path, // PATH is the primary key!
+        hasNametag: hasLocalNametag,
         existingNametag: existingNametag?.name,
+        // Store private key for IPNS derivation (only if no local nametag)
+        privateKey: hasLocalNametag ? undefined : l3Identity.privateKey,
+        // Mark for IPNS loading if no local nametag found
+        ipnsLoading: !hasLocalNametag,
       }]);
     } catch (e: any) {
       setError("Failed to derive new address: " + e.message);
@@ -125,12 +329,74 @@ export function CreateWalletFlow() {
     setError(null);
 
     try {
-      const selected = derivedAddresses[selectedAddressIndex];
+      if (!selectedAddress) {
+        throw new Error("No address selected");
+      }
 
-      // Store selected index for future identity derivation
-      identityManager.setSelectedAddressIndex(selected.index);
+      // Store selected PATH for future identity derivation
+      // Path is the only unambiguous identifier
+      identityManager.setSelectedAddressPath(selectedAddress.path);
 
-      if (selected.hasNametag) {
+      // Save L1 wallet with ALL derived addresses that have nametags
+      // This ensures all addresses are preserved after reload
+      const keyManager = getUnifiedKeyManager();
+
+      // Log all addresses and their nametag status for debugging
+      console.log("📋 All derived addresses:", derivedAddresses.map(a => ({
+        index: a.index,
+        path: a.path,
+        hasNametag: a.hasNametag,
+        nametag: a.existingNametag,
+        hasNametagData: !!a.nametagData,
+      })));
+
+      const addressesToSave = derivedAddresses
+        .filter(addr => addr.hasNametag || addr.path === selectedAddress.path)
+        .map(addr => {
+          const derived = keyManager.deriveAddressFromPath(addr.path);
+          return {
+            index: addr.index,
+            address: derived.l1Address,
+            privateKey: derived.privateKey,
+            publicKey: derived.publicKey,
+            path: addr.path,
+            isChange: addr.isChange,
+            createdAt: new Date().toISOString(),
+          };
+        });
+
+      console.log(`💾 Addresses to save: ${addressesToSave.length} (with nametags or selected)`);
+
+      // Save wallet to L1 storage
+      const l1Wallet: L1Wallet = {
+        masterPrivateKey: keyManager.getMasterKeyHex() || '',
+        chainCode: keyManager.getChainCodeHex() || undefined,
+        addresses: addressesToSave,
+        isBIP32: keyManager.getDerivationMode() === 'bip32',
+      };
+      saveWalletToStorage("main", l1Wallet);
+      console.log(`💾 Saved L1 wallet with ${addressesToSave.length} addresses`);
+
+      // Reset IPFS service so it will be re-initialized with the new identity
+      // This is critical when user selects a different address than the one
+      // that was previously used to initialize the IPFS service
+      await IpfsStorageService.resetInstance();
+
+      // Save all nametags fetched from IPNS to localStorage
+      for (const addr of derivedAddresses) {
+        if (addr.hasNametag && addr.nametagData && addr.l3Address) {
+          console.log(`💾 Saving nametag for ${addr.l3Address.slice(0, 20)}...`);
+          WalletRepository.saveNametagForAddress(addr.l3Address, {
+            name: addr.nametagData.name,
+            token: addr.nametagData.token,
+            timestamp: addr.nametagData.timestamp || Date.now(),
+            format: addr.nametagData.format || "TXF",
+            version: "1.0",
+          });
+        }
+      }
+
+      if (selectedAddress.hasNametag) {
         // Address already has nametag - proceed to main app
         console.log("✅ Address has existing nametag, proceeding to main app");
         window.location.reload();
@@ -146,7 +412,9 @@ export function CreateWalletFlow() {
   };
 
   // Helper: go to address selection after wallet creation/restore/import
-  const goToAddressSelection = async () => {
+  // skipIpnsCheck: if true, disable auto-derive during IPNS check (for .dat imports)
+  // IPNS will still be checked for addresses without nametag, but no new addresses will be derived
+  const goToAddressSelection = async (skipIpnsCheck: boolean = false) => {
     setIsBusy(true);
     setError(null);
     try {
@@ -154,46 +422,88 @@ export function CreateWalletFlow() {
       const l1Wallet = loadWalletFromStorage("main");
 
       if (l1Wallet && l1Wallet.addresses && l1Wallet.addresses.length > 0) {
-        // Use addresses from L1 wallet storage
-        console.log(`📋 Loading ${l1Wallet.addresses.length} addresses from L1 wallet storage`);
+        // Use ALL addresses from L1 wallet storage (both external and change)
+        // External and change addresses have DIFFERENT L3 identities
+        const allAddresses = l1Wallet.addresses;
+        const changeCount = allAddresses.filter(addr => addr.isChange).length;
+        console.log(`📋 Loading ${allAddresses.length} addresses from L1 wallet storage (${allAddresses.length - changeCount} external, ${changeCount} change)`);
         const results: DerivedAddressInfo[] = [];
 
-        // For each L1 address, derive L3 identity using sequential index (not L1's index)
-        // This ensures we can find existing nametags that were created with deriveIdentityFromUnifiedWallet
-        for (let i = 0; i < l1Wallet.addresses.length; i++) {
-          const addr = l1Wallet.addresses[i];
+        // For each L1 address, derive L3 identity using the address's actual index AND isChange flag
+        // External and change addresses have DIFFERENT L3 identities (different chain in BIP32 path)
+        // Log UnifiedKeyManager state for debugging
+        const keyManager = getUnifiedKeyManager();
+        console.log(`🔍 [goToAddressSelection] UnifiedKeyManager state:`, {
+          basePath: keyManager.getBasePath(),
+          isInitialized: keyManager.isInitialized(),
+          masterKeyPrefix: keyManager.getMasterKeyHex()?.slice(0, 16) || 'unknown',
+        });
 
-          if (!addr.privateKey) {
-            console.warn(`Skipping address ${addr.address} - no private key`);
+        for (const addr of allAddresses) {
+          // Use PATH for L3 derivation - the only unambiguous identifier
+          // Skip addresses without a path (should not happen in BIP32 wallets)
+          if (!addr.path) {
+            console.warn(`⚠️ Address ${addr.address.slice(0, 20)}... has no path, skipping`);
             continue;
           }
 
-          // Use sequential index i for L3 derivation (0, 1, 2...)
-          // This matches how deriveIdentityFromUnifiedWallet works
-          const l3Identity = await identityManager.deriveIdentityFromUnifiedWallet(i);
+          // Use path-based derivation for unambiguous L3 identity
+          const l3Identity = await identityManager.deriveIdentityFromPath(addr.path);
           const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
 
-          console.log(`🔍 Address ${i}: L1=${addr.address.slice(0, 20)}... L3=${l3Identity.address.slice(0, 20)}... hasNametag=${!!existingNametag} nametag=${existingNametag?.name}`);
+          const isChange = addr.isChange ?? false;
+          const chainLabel = isChange ? "change" : "external";
+          console.log(`🔍 Address (path: ${addr.path}, ${chainLabel}): L1=${addr.address.slice(0, 20)}... L3=${l3Identity.address.slice(0, 20)}... key=${l3Identity.privateKey.slice(0, 8)}... hasNametag=${!!existingNametag} nametag=${existingNametag?.name}`);
+
+          // Enable IPNS fetching for addresses without local nametag
+          // Note: For .dat imports, we still check IPNS for addresses without nametag
+          // (in case IPNS didn't finish during scan), but we don't auto-derive new addresses
+          const enableIpnsFetching = !existingNametag;
 
           results.push({
-            index: i, // Use sequential index for L3
+            index: addr.index, // Keep for display purposes only
             l1Address: addr.address,
             l3Address: l3Identity.address,
-            path: addr.path || `m/44'/0'/0'/0/${addr.index}`,
+            path: addr.path, // PATH is the primary key!
             hasNametag: !!existingNametag,
             existingNametag: existingNametag?.name,
+            isChange,  // Track change status for UI display
+            fromL1Wallet: true, // Address from L1 wallet - show immediately even while IPNS loading
+            // Enable IPNS nametag fetching for addresses without local nametag
+            // IMPORTANT: Use l3Identity.privateKey (from UnifiedKeyManager) for IPNS derivation,
+            // NOT addr.privateKey (L1 wallet). The IPNS name is tied to the L3 identity key.
+            privateKey: enableIpnsFetching ? l3Identity.privateKey : undefined,
+            ipnsLoading: enableIpnsFetching,
           });
         }
 
+        // Sort addresses: external first (by index), then change (by index)
+        results.sort((a, b) => {
+          const aIsChange = a.isChange ? 1 : 0;
+          const bIsChange = b.isChange ? 1 : 0;
+          if (aIsChange !== bIsChange) return aIsChange - bIsChange;
+          return a.index - b.index;
+        });
+
         setDerivedAddresses(results);
-        setSelectedAddressIndex(0);
+        // Select first address by default (using path, not index)
+        setSelectedAddressPath(results[0]?.path || null);
       } else {
         // No L1 wallet addresses - derive from UnifiedKeyManager
         console.log("📋 No L1 wallet addresses found, deriving from UnifiedKeyManager");
-        const addresses = await deriveAndCheckAddresses(1);
+        const addresses = await deriveAndCheckAddresses(1); // Start with 1 address, auto-derive more if no nametag found
         setDerivedAddresses(addresses);
-        setSelectedAddressIndex(0);
+        // Select first address by default (using path, not index)
+        setSelectedAddressPath(addresses[0]?.path || null);
       }
+
+      // Reset IPNS checking state for new address selection
+      setIsCheckingIpns(false);
+      setFirstFoundNametagPath(null);
+
+      // For .dat imports, disable auto-derive (only check IPNS for existing addresses)
+      // For mnemonic imports, enable auto-derive to find all addresses with nametags
+      setAutoDeriveDuringIpnsCheck(!skipIpnsCheck);
 
       setStep('addressSelection');
     } catch (e: any) {
@@ -203,6 +513,37 @@ export function CreateWalletFlow() {
     }
   };
 
+  // Helper: Verify nametag is available via IPNS with retry (30s timeout)
+  const verifyNametagInIpnsWithRetry = async (
+    privateKey: string,
+    expectedNametag: string,
+    timeoutMs: number = 30000
+  ): Promise<boolean> => {
+    const startTime = Date.now();
+    const retryInterval = 3000; // 3 seconds between retries
+
+    while (Date.now() - startTime < timeoutMs) {
+      try {
+        console.log(`🔄 IPNS verification attempt for "${expectedNametag}"...`);
+        const result = await fetchNametagFromIpns(privateKey);
+        if (result.nametag === expectedNametag) {
+          return true; // Verified!
+        }
+        console.log(`🔄 IPNS returned "${result.nametag || 'null'}", expected "${expectedNametag}"`);
+      } catch (error) {
+        console.log('🔄 IPNS verification attempt failed, retrying...', error);
+      }
+
+      // Wait before next retry (unless we've exceeded timeout)
+      const remainingTime = timeoutMs - (Date.now() - startTime);
+      if (remainingTime > retryInterval) {
+        await new Promise(resolve => setTimeout(resolve, retryInterval));
+      }
+    }
+
+    return false; // Timeout reached
+  };
+
   const handleCreateKeys = async () => {
     // Prevent double-clicking
     if (isBusy) return;
@@ -210,7 +551,9 @@ export function CreateWalletFlow() {
     setIsBusy(true);
     setError(null);
     try {
-      // Always create new wallet (overwrites existing if any)
+      // Clear all wallet data to ensure clean slate
+      UnifiedKeyManager.clearAll();
+
       await createWallet();
       // Go directly to nametag step
       setStep('nametag');
@@ -231,17 +574,54 @@ export function CreateWalletFlow() {
       const cleanTag = nametagInput.trim().replace('@', '');
 
       const isNametagAvailable = await checkNametagAvailability(cleanTag);
-      if(!isNametagAvailable) {
+      if (!isNametagAvailable) {
         setError(`${cleanTag} already exists.`);
+        setIsBusy(false);
         return;
       }
 
       setStep('processing');
+
+      // Step 1: Mint nametag on blockchain and save to localStorage
+      setProcessingStatus('Minting Unicity ID on blockchain...');
+      console.log('🏷️ Step 1: Minting nametag on blockchain...');
       await mintNametag(cleanTag);
-      // Successfully minted nametag - reload to reinitialize with new nametag
+      console.log('✅ Nametag minted and saved to localStorage');
+
+      // Step 2: Sync to IPFS storage
+      setProcessingStatus('Syncing to IPFS storage...');
+      console.log('🏷️ Step 2: Syncing to IPFS...');
+      try {
+        const ipfsService = IpfsStorageService.getInstance(identityManager);
+        await ipfsService.syncNow();
+        console.log('✅ IPFS sync completed');
+      } catch (syncError) {
+        console.warn('⚠️ IPFS sync failed, continuing anyway:', syncError);
+      }
+
+      // Step 3: Verify nametag can be fetched from IPNS (30s timeout with retries)
+      setProcessingStatus('Verifying IPFS availability...');
+      console.log('🏷️ Step 3: Verifying nametag in IPNS (30s timeout)...');
+      const currentIdentity = await identityManager.getCurrentIdentity();
+      if (!currentIdentity) {
+        console.warn('⚠️ Could not get current identity for verification, proceeding anyway');
+      }
+      const verified = currentIdentity
+        ? await verifyNametagInIpnsWithRetry(currentIdentity.privateKey, cleanTag, 30000)
+        : false;
+
+      if (!verified) {
+        console.warn('⚠️ IPNS verification timed out after 30s, proceeding anyway');
+      } else {
+        console.log(`✅ Verified nametag "${cleanTag}" available via IPNS`);
+      }
+
+      // Step 4: Successfully completed - reload to reinitialize with new nametag
       // This ensures React Query refreshes and the app transitions to main wallet view
+      console.log('🏷️ Step 4: All steps completed, reloading...');
       window.location.reload();
     } catch (e: any) {
+      console.error('❌ Nametag minting failed:', e);
       setError(e.message || "Minting failed");
       setStep('nametag');
     } finally {
@@ -262,8 +642,17 @@ export function CreateWalletFlow() {
     setError(null);
 
     try {
+      // Clear all wallet data to ensure clean slate
+      UnifiedKeyManager.clearAll();
+
       const mnemonic = words.join(' ');
-      await restoreWallet(mnemonic);
+
+      // Set up UnifiedKeyManager but DON'T create identity yet
+      // Creating identity triggers query invalidation which can unmount CreateWalletFlow
+      // if the address already has a nametag stored. We need to show address selection first.
+      const keyManager = getUnifiedKeyManager();
+      await keyManager.createFromMnemonic(mnemonic);
+
       // Go to address selection instead of nametag
       await goToAddressSelection();
     } catch (e: any) {
@@ -278,6 +667,14 @@ export function CreateWalletFlow() {
     setError(null);
 
     try {
+      // Clear any existing wallet data to prevent conflicts with old identity
+      const existingKeyManager = getUnifiedKeyManager();
+      if (existingKeyManager?.isInitialized()) {
+        console.log("🔐 Clearing existing wallet before importing from file");
+        existingKeyManager.clear();
+        UnifiedKeyManager.resetInstance();
+      }
+
       // Clear any existing L1 wallet from storage before importing new one
       // This prevents showing old addresses when importing a different wallet
       localStorage.removeItem("wallet_main");
@@ -303,7 +700,87 @@ export function CreateWalletFlow() {
 
       const content = await file.text();
 
-      // Check if encrypted
+      // Handle JSON wallet files (new v1.0 format)
+      if (file.name.endsWith(".json") || isJSONWalletFormat(content)) {
+        try {
+          const json = JSON.parse(content);
+
+          // Check if encrypted JSON
+          if (json.encrypted) {
+            setPendingFile(file);
+            setInitialScanCount(scanCountParam || 10);
+            setShowLoadPasswordModal(true);
+            setIsBusy(false);
+            return;
+          }
+
+          // Import unencrypted JSON
+          const result = await importWalletFromJSON(content);
+          console.log("📦 JSON import result:", {
+            success: result.success,
+            hasMnemonic: !!result.mnemonic,
+            mnemonic: result.mnemonic?.slice(0, 20) + "...",
+            source: result.source,
+            derivationMode: result.derivationMode,
+          });
+          if (!result.success || !result.wallet) {
+            throw new Error(result.error || "Import failed");
+          }
+
+          // If has mnemonic, set up UnifiedKeyManager but DON'T create identity yet
+          // Creating identity triggers query invalidation which can unmount CreateWalletFlow
+          // if the address already has a nametag stored. We need to show address selection first.
+          if (result.mnemonic) {
+            console.log("📦 Setting up UnifiedKeyManager from mnemonic (without creating identity)...");
+            const keyManager = getUnifiedKeyManager();
+            await keyManager.createFromMnemonic(result.mnemonic);
+
+            // Clear selected address path - user will choose in address selection
+            localStorage.removeItem("l3_selected_address_path");
+            localStorage.removeItem("l3_selected_address_index"); // Clean up legacy
+
+            // Go to address selection - this will derive multiple addresses
+            // and let user choose which one to use (e.g., find addresses with nametags via IPNS)
+            await goToAddressSelection();
+            return;
+          }
+
+          // Check if BIP32 needs scanning
+          const isJsonBIP32 = result.derivationMode === "bip32" || result.wallet.chainCode;
+          if (isJsonBIP32) {
+            // Import master key into UnifiedKeyManager first
+            const keyManager = getUnifiedKeyManager();
+            const chainCode = result.wallet.chainCode || result.wallet.masterChainCode || null;
+            // Get basePath from descriptorPath (e.g., "84'/1'/0'" -> "m/84'/1'/0'")
+            const basePath = result.wallet.descriptorPath ? `m/${result.wallet.descriptorPath}` : undefined;
+            await keyManager.importWithMode(result.wallet.masterPrivateKey, chainCode, result.derivationMode || "bip32", basePath);
+
+            setPendingWallet(result.wallet);
+            setInitialScanCount(scanCountParam || 10);
+            setShowScanModal(true);
+            setIsBusy(false);
+            return;
+          }
+
+          // Standard JSON wallet - save and use directly
+          const keyManager = getUnifiedKeyManager();
+          await keyManager.importWithMode(result.wallet.masterPrivateKey, null, "wif_hmac");
+
+          saveWalletToStorage("main", result.wallet);
+
+          // Go to address selection
+          await goToAddressSelection();
+          return;
+        } catch (e) {
+          // If JSON parsing fails but it looked like JSON, throw error
+          if (file.name.endsWith(".json")) {
+            throw new Error(`Invalid JSON wallet file: ${e instanceof Error ? e.message : String(e)}`);
+          }
+          // Otherwise continue to try other formats
+        }
+      }
+
+      // Check if encrypted TXT file
       if (content.includes("ENCRYPTED MASTER KEY")) {
         setPendingFile(file);
         setInitialScanCount(scanCountParam || 10);
@@ -355,7 +832,9 @@ export function CreateWalletFlow() {
         }
 
         if (mnemonic) {
-          await restoreWallet(mnemonic);
+          // Set up UnifiedKeyManager but DON'T create identity yet
+          const keyManager = getUnifiedKeyManager();
+          await keyManager.createFromMnemonic(mnemonic);
           imported = true;
         }
       } catch {
@@ -369,7 +848,9 @@ export function CreateWalletFlow() {
         if (words.length === 12 || words.length === 24) {
           const isMnemonic = words.every(w => /^[a-z]+$/.test(w.toLowerCase()));
           if (isMnemonic) {
-            await restoreWallet(trimmed);
+            // Set up UnifiedKeyManager but DON'T create identity yet
+            const keyManager = getUnifiedKeyManager();
+            await keyManager.createFromMnemonic(trimmed);
             imported = true;
           }
         }
@@ -439,13 +920,32 @@ export function CreateWalletFlow() {
       // Save L1 wallet to storage
       saveWalletToStorage("main", walletWithAddress);
 
-      // Import the wallet into UnifiedKeyManager
+      // Save nametag found during scan to WalletRepository (for L3 address selection)
+      if (scannedAddr.l3Nametag && scannedAddr.path) {
+        try {
+          const l3Identity = await identityManager.deriveIdentityFromPath(scannedAddr.path);
+          WalletRepository.saveNametagForAddress(l3Identity.address, {
+            name: scannedAddr.l3Nametag,
+            token: {}, // Minimal token data - full sync will happen later
+            timestamp: Date.now(),
+            format: "TXF",
+            version: "1.0",
+          });
+          console.log(`💾 Saved nametag @${scannedAddr.l3Nametag} for L3 address ${l3Identity.address.slice(0, 20)}...`);
+        } catch (e) {
+          console.warn(`Failed to save nametag for address ${scannedAddr.path}:`, e);
+        }
+      }
+
+      // Import the wallet into UnifiedKeyManager with basePath preserved
       const keyManager = getUnifiedKeyManager();
+      const basePath = pendingWallet.descriptorPath ? `m/${pendingWallet.descriptorPath}` : undefined;
       if (pendingWallet.masterPrivateKey && pendingWallet.masterChainCode) {
         await keyManager.importWithMode(
           pendingWallet.masterPrivateKey,
           pendingWallet.masterChainCode,
-          "bip32"
+          "bip32",
+          basePath
         );
       } else if (pendingWallet.masterPrivateKey) {
         await keyManager.importWithMode(
@@ -459,8 +959,8 @@ export function CreateWalletFlow() {
       setPendingWallet(null);
 
       // Go to address selection to choose L3 identity
-      // User will see address #0 (the one they selected) in the dropdown
-      await goToAddressSelection();
+      // Skip IPNS check for .dat imports - nametags already found during blockchain scan
+      await goToAddressSelection(true);
     } catch (e: any) {
       setError(e.message || "Failed to import wallet");
       setIsBusy(false);
@@ -496,13 +996,35 @@ export function CreateWalletFlow() {
       // Save L1 wallet to storage with ALL addresses
       saveWalletToStorage("main", walletWithAddresses);
 
-      // Import the wallet into UnifiedKeyManager
+      // Save nametags found during scan to WalletRepository (for L3 address selection)
+      // This ensures goToAddressSelection() can find them via checkNametagForAddress()
+      for (const addr of scannedAddresses) {
+        if (addr.l3Nametag && addr.path) {
+          try {
+            const l3Identity = await identityManager.deriveIdentityFromPath(addr.path);
+            WalletRepository.saveNametagForAddress(l3Identity.address, {
+              name: addr.l3Nametag,
+              token: {}, // Minimal token data - full sync will happen later
+              timestamp: Date.now(),
+              format: "TXF",
+              version: "1.0",
+            });
+            console.log(`💾 Saved nametag @${addr.l3Nametag} for L3 address ${l3Identity.address.slice(0, 20)}...`);
+          } catch (e) {
+            console.warn(`Failed to save nametag for address ${addr.path}:`, e);
+          }
+        }
+      }
+
+      // Import the wallet into UnifiedKeyManager with basePath preserved
       const keyManager = getUnifiedKeyManager();
+      const basePath = pendingWallet.descriptorPath ? `m/${pendingWallet.descriptorPath}` : undefined;
       if (pendingWallet.masterPrivateKey && pendingWallet.masterChainCode) {
         await keyManager.importWithMode(
           pendingWallet.masterPrivateKey,
           pendingWallet.masterChainCode,
-          "bip32"
+          "bip32",
+          basePath
         );
       } else if (pendingWallet.masterPrivateKey) {
         await keyManager.importWithMode(
@@ -516,8 +1038,8 @@ export function CreateWalletFlow() {
       setPendingWallet(null);
 
       // Go to address selection to choose which L1 address to use for L3 identity
-      // This will show all the scanned addresses in the dropdown
-      await goToAddressSelection();
+      // Skip IPNS check for .dat imports - nametags already found during blockchain scan
+      await goToAddressSelection(true);
     } catch (e: any) {
       setError(e.message || "Failed to import wallet");
       setIsBusy(false);
@@ -539,7 +1061,58 @@ export function CreateWalletFlow() {
       setError(null);
       setShowLoadPasswordModal(false);
 
-      // Import with password
+      const content = await pendingFile.text();
+
+      // Check if this is an encrypted JSON file
+      if (pendingFile.name.endsWith(".json") || isJSONWalletFormat(content)) {
+        const result = await importWalletFromJSON(content, password);
+        if (!result.success || !result.wallet) {
+          throw new Error(result.error || "Import failed");
+        }
+
+        setPendingFile(null);
+
+        // If has mnemonic, set up UnifiedKeyManager but DON'T create identity yet
+        // Creating identity triggers query invalidation which can unmount CreateWalletFlow
+        // if the address already has a nametag stored. We need to show address selection first.
+        if (result.mnemonic) {
+          console.log("📦 Setting up UnifiedKeyManager from encrypted JSON mnemonic (without creating identity)...");
+          const keyManager = getUnifiedKeyManager();
+          await keyManager.createFromMnemonic(result.mnemonic);
+
+          // Clear selected address path - user will choose in address selection
+          localStorage.removeItem("l3_selected_address_path");
+          localStorage.removeItem("l3_selected_address_index"); // Clean up legacy
+
+          // Go to address selection after restoring from mnemonic
+          await goToAddressSelection();
+          return;
+        }
+
+        // Check if BIP32 needs scanning
+        const isBIP32 = result.derivationMode === "bip32" || result.wallet.chainCode;
+        if (isBIP32) {
+          const keyManager = getUnifiedKeyManager();
+          const chainCode = result.wallet.chainCode || result.wallet.masterChainCode || null;
+          // Get basePath from descriptorPath (e.g., "84'/1'/0'" -> "m/84'/1'/0'")
+          const basePath = result.wallet.descriptorPath ? `m/${result.wallet.descriptorPath}` : undefined;
+          await keyManager.importWithMode(result.wallet.masterPrivateKey, chainCode, result.derivationMode || "bip32", basePath);
+
+          setPendingWallet(result.wallet);
+          setShowScanModal(true);
+          setIsBusy(false);
+          return;
+        }
+
+        // Standard JSON wallet
+        const keyManager = getUnifiedKeyManager();
+        await keyManager.importWithMode(result.wallet.masterPrivateKey, null, "wif_hmac");
+        saveWalletToStorage("main", result.wallet);
+        await goToAddressSelection();
+        return;
+      }
+
+      // Handle TXT files with password
       const result = await importWalletFromFile(pendingFile, password);
       if (!result.success || !result.wallet) {
         throw new Error(result.error || "Import failed");
@@ -561,11 +1134,13 @@ export function CreateWalletFlow() {
         });
 
         const keyManager = getUnifiedKeyManager();
+        const basePath = result.wallet.descriptorPath ? `m/${result.wallet.descriptorPath}` : undefined;
         if (result.wallet.masterPrivateKey && result.wallet.masterChainCode) {
           await keyManager.importWithMode(
             result.wallet.masterPrivateKey,
             result.wallet.masterChainCode,
-            "bip32"
+            "bip32",
+            basePath
           );
         } else if (result.wallet.masterPrivateKey) {
           await keyManager.importWithMode(
@@ -599,8 +1174,25 @@ export function CreateWalletFlow() {
         return;
       }
 
-      // For .txt files, check if BIP32 or standard
       const content = await file.text();
+
+      // JSON wallet files - check format and derivation mode
+      if (file.name.endsWith(".json") || isJSONWalletFormat(content)) {
+        try {
+          const json = JSON.parse(content);
+          // JSON files with mnemonic don't need scanning - restore directly from seed
+          // JSON files with BIP32 but no mnemonic need scanning
+          const hasMnemonic = !!json.mnemonic || !!json.encrypted?.mnemonic;
+          const isBIP32 = json.derivationMode === "bip32" || json.chainCode;
+          setNeedsScanning(!hasMnemonic && isBIP32);
+          setScanCount(10);
+        } catch {
+          setNeedsScanning(true);
+        }
+        return;
+      }
+
+      // For .txt files, check if BIP32 or standard
       const isBIP32 = content.includes("MASTER CHAIN CODE") ||
                       content.includes("WALLET TYPE: BIP32") ||
                       content.includes("WALLET TYPE: Alpha descriptor");
@@ -635,7 +1227,7 @@ export function CreateWalletFlow() {
     setIsDragging(false);
 
     const file = e.dataTransfer.files[0];
-    if (file && (file.name.endsWith(".txt") || file.name.endsWith(".dat"))) {
+    if (file && (file.name.endsWith(".txt") || file.name.endsWith(".dat") || file.name.endsWith(".json"))) {
       await handleFileSelect(file);
     }
   };
@@ -693,20 +1285,34 @@ export function CreateWalletFlow() {
 
             {/* Show "Continue Setup" if identity exists but no nametag */}
             {identity && !nametag && (
-              <motion.button
-                onClick={() => setStep('nametag')}
-                disabled={isBusy}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                transition={{ duration: 0.1 }}
-                className="relative w-full py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-linear-to-r from-emerald-500 to-emerald-600 text-white text-sm md:text-base font-bold shadow-xl shadow-emerald-500/30 flex items-center justify-center gap-2 md:gap-3 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden group mb-3"
-              >
-                <div className="absolute inset-0 bg-linear-to-r from-emerald-400 to-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                <span className="relative z-10 flex items-center gap-2 md:gap-3">
-                  <ShieldCheck className="w-4 h-4 md:w-5 md:h-5" />
-                  Continue Setup
-                </span>
-              </motion.button>
+              <>
+                <motion.button
+                  onClick={() => setStep('nametag')}
+                  disabled={isBusy}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  transition={{ duration: 0.1 }}
+                  className="relative w-full py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-linear-to-r from-emerald-500 to-emerald-600 text-white text-sm md:text-base font-bold shadow-xl shadow-emerald-500/30 flex items-center justify-center gap-2 md:gap-3 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden group mb-3"
+                >
+                  <div className="absolute inset-0 bg-linear-to-r from-emerald-400 to-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <span className="relative z-10 flex items-center gap-2 md:gap-3">
+                    <ShieldCheck className="w-4 h-4 md:w-5 md:h-5" />
+                    Continue Setup
+                  </span>
+                </motion.button>
+
+                {/* Show loading indicator while checking IPNS */}
+                {ipnsFetchingNametag && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="flex items-center justify-center gap-2 text-neutral-500 dark:text-neutral-400 text-xs mb-2"
+                  >
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Checking for existing Unicity ID...</span>
+                  </motion.div>
+                )}
+              </>
             )}
 
             {/* Divider when showing continue option */}
@@ -794,7 +1400,7 @@ export function CreateWalletFlow() {
             {/* 12-word grid */}
             <div className="grid grid-cols-3 gap-2 md:gap-3 mb-6">
               {Array.from({ length: 12 }).map((_, index) => (
-                <div key={index} className="relative">
+                <div key={`seed-input-${index}`} className="relative">
                   <span className="absolute left-2 md:left-3 top-1/2 -translate-y-1/2 text-[10px] md:text-xs text-neutral-400 dark:text-neutral-600 font-medium z-10">
                     {index + 1}.
                   </span>
@@ -805,6 +1411,19 @@ export function CreateWalletFlow() {
                       const newWords = [...seedWords];
                       newWords[index] = e.target.value;
                       setSeedWords(newWords);
+                    }}
+                    onPaste={(e) => {
+                      const pastedText = e.clipboardData.getData('text').trim();
+                      const words = pastedText.split(/\s+/).filter(w => w.length > 0);
+                      // If pasted text contains multiple words, fill all fields
+                      if (words.length > 1) {
+                        e.preventDefault();
+                        const newWords = Array(12).fill('');
+                        words.slice(0, 12).forEach((word, i) => {
+                          newWords[i] = word.toLowerCase();
+                        });
+                        setSeedWords(newWords);
+                      }
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && index < 11) {
@@ -900,33 +1519,48 @@ export function CreateWalletFlow() {
 
             {/* Address Dropdown */}
             <div className="relative mb-4">
-              <button
-                onClick={() => setShowAddressDropdown(!showAddressDropdown)}
-                className="w-full bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 rounded-xl py-3 md:py-3.5 px-4 text-left flex items-center justify-between hover:border-purple-500/50 transition-all"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-neutral-400 dark:text-neutral-500">
-                      #{derivedAddresses[selectedAddressIndex]?.index ?? 0}
-                    </span>
-                    <span className="text-sm md:text-base font-mono text-neutral-900 dark:text-white truncate">
-                      {truncateAddress(derivedAddresses[selectedAddressIndex]?.l1Address || '')}
-                    </span>
-                    {derivedAddresses[selectedAddressIndex]?.hasNametag && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
-                        <Check className="w-3 h-3" />
-                        {derivedAddresses[selectedAddressIndex]?.existingNametag}
-                      </span>
-                    )}
-                  </div>
+              {/* Show loading state while checking addresses */}
+              {visibleAddresses.length === 0 ? (
+                <div className="w-full bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 rounded-xl py-3 md:py-3.5 px-4 flex items-center gap-3">
+                  <Loader2 className="w-5 h-5 animate-spin text-purple-500" />
+                  <span className="text-sm text-neutral-500 dark:text-neutral-400">Checking for nametags...</span>
                 </div>
-                <motion.div
-                  animate={{ rotate: showAddressDropdown ? 180 : 0 }}
-                  transition={{ duration: 0.2 }}
+              ) : (
+                <button
+                  onClick={() => setShowAddressDropdown(!showAddressDropdown)}
+                  className="w-full bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 rounded-xl py-3 md:py-3.5 px-4 text-left flex items-center justify-between hover:border-purple-500/50 transition-all"
                 >
-                  <ChevronDown className="w-5 h-5 text-neutral-400 dark:text-neutral-500" />
-                </motion.div>
-              </button>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-neutral-400 dark:text-neutral-500">
+                        #{selectedAddress?.index ?? 0}
+                      </span>
+                      <span className="text-sm md:text-base font-mono text-neutral-900 dark:text-white truncate">
+                        {truncateAddress(selectedAddress?.l1Address || '')}
+                      </span>
+                      {selectedAddress?.isChange && (
+                        <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[9px] font-bold rounded shrink-0">
+                          Change
+                        </span>
+                      )}
+                      {selectedAddress?.ipnsLoading ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-neutral-400" />
+                      ) : selectedAddress?.hasNametag ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
+                          <Check className="w-3 h-3" />
+                          {selectedAddress?.existingNametag}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <motion.div
+                    animate={{ rotate: showAddressDropdown ? 180 : 0 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <ChevronDown className="w-5 h-5 text-neutral-400 dark:text-neutral-500" />
+                  </motion.div>
+                </button>
+              )}
 
               {/* Dropdown Menu */}
               <AnimatePresence>
@@ -939,15 +1573,16 @@ export function CreateWalletFlow() {
                     className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl overflow-hidden z-50"
                   >
                     <div className="max-h-64 overflow-y-auto">
-                      {derivedAddresses.map((addr, idx) => (
+                      {/* Only show addresses that have been checked or from L1 wallet */}
+                      {visibleAddresses.map((addr) => (
                         <button
                           key={addr.l1Address}
                           onClick={() => {
-                            setSelectedAddressIndex(idx);
+                            setSelectedAddressPath(addr.path);
                             setShowAddressDropdown(false);
                           }}
                           className={`w-full px-4 py-3 flex items-center gap-3 hover:bg-neutral-100 dark:hover:bg-neutral-700/50 transition-colors ${
-                            idx === selectedAddressIndex ? 'bg-purple-50 dark:bg-purple-900/20' : ''
+                            addr.path === selectedAddressPath ? 'bg-purple-50 dark:bg-purple-900/20' : ''
                           }`}
                         >
                           <span className="text-xs text-neutral-400 dark:text-neutral-500 w-6">
@@ -956,29 +1591,43 @@ export function CreateWalletFlow() {
                           <span className="flex-1 text-sm font-mono text-neutral-900 dark:text-white truncate text-left">
                             {truncateAddress(addr.l1Address)}
                           </span>
-                          {addr.hasNametag && (
+                          {addr.isChange && (
+                            <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[9px] font-bold rounded shrink-0">
+                              Change
+                            </span>
+                          )}
+                          {addr.ipnsLoading ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-neutral-400" />
+                          ) : addr.hasNametag ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
                               <Check className="w-3 h-3" />
                               {addr.existingNametag}
                             </span>
-                          )}
-                          {idx === selectedAddressIndex && (
+                          ) : null}
+                          {addr.path === selectedAddressPath && (
                             <div className="w-2 h-2 rounded-full bg-purple-500" />
                           )}
                         </button>
                       ))}
                     </div>
 
-                    {/* Derive New Address Button */}
-                    <button
-                      onClick={handleDeriveNewAddress}
-                      disabled={isBusy}
-                      className="w-full px-4 py-3 flex items-center gap-3 border-t border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-700/50 transition-colors text-purple-600 dark:text-purple-400 disabled:opacity-50"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span className="text-sm font-medium">Derive New Address</span>
-                      {isBusy && <Loader2 className="w-4 h-4 animate-spin ml-auto" />}
-                    </button>
+                    {/* Loading indicator while IPNS is checking, or Derive New Address button */}
+                    {isCheckingIpns || derivedAddresses.some(a => a.ipnsLoading) ? (
+                      <div className="w-full px-4 py-3 flex items-center gap-3 border-t border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span className="text-sm">Checking for nametags...</span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={handleDeriveNewAddress}
+                        disabled={isBusy}
+                        className="w-full px-4 py-3 flex items-center gap-3 border-t border-neutral-200 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-700/50 transition-colors text-purple-600 dark:text-purple-400 disabled:opacity-50"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span className="text-sm font-medium">Derive New Address</span>
+                        {isBusy && <Loader2 className="w-4 h-4 animate-spin ml-auto" />}
+                      </button>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -988,7 +1637,7 @@ export function CreateWalletFlow() {
             <div className="mb-6 p-3 bg-neutral-100 dark:bg-neutral-800/50 rounded-lg border border-neutral-200 dark:border-neutral-700/50">
               <div className="text-xs text-neutral-500 dark:text-neutral-400 mb-1">L3 Unicity Address</div>
               <div className="text-xs font-mono text-neutral-700 dark:text-neutral-300 break-all">
-                {derivedAddresses[selectedAddressIndex]?.l3Address || '...'}
+                {selectedAddress?.l3Address || '...'}
               </div>
             </div>
 
@@ -1019,7 +1668,7 @@ export function CreateWalletFlow() {
                       <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" />
                       Loading...
                     </>
-                  ) : derivedAddresses[selectedAddressIndex]?.hasNametag ? (
+                  ) : selectedAddress?.hasNametag ? (
                     <>
                       Continue
                       <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />
@@ -1035,7 +1684,7 @@ export function CreateWalletFlow() {
             </div>
 
             {/* Info about nametag */}
-            {derivedAddresses[selectedAddressIndex]?.hasNametag && (
+            {selectedAddress?.hasNametag && (
               <motion.p
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -1111,8 +1760,7 @@ export function CreateWalletFlow() {
                 type="text"
                 value={nametagInput}
                 onChange={(e) => {
-                  // Allow only Latin letters, numbers, hyphen, underscore, plus, dot
-                  const value = e.target.value;
+                  const value = e.target.value.toLowerCase();
                   if (/^[a-z0-9_\-+.]*$/.test(value)) {
                     setNametagInput(value);
                   }
@@ -1211,40 +1859,53 @@ export function CreateWalletFlow() {
               Setting up Profile...
             </motion.h3>
 
-            {/* Progress Steps */}
+            {/* Dynamic Progress Status */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.3 }}
               className="space-y-2 md:space-y-2.5 text-xs md:text-sm"
             >
-              {[
-                { text: "Minting Nametag on Blockchain", delay: 0.4 },
-                { text: "Registering on Nostr Relay", delay: 0.6 },
-                { text: "Finalizing Wallet", delay: 0.8 }
-              ].map((step, index) => (
+              {/* Current status indicator */}
+              <motion.div
+                key={processingStatus}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="flex items-center gap-2 md:gap-3 text-neutral-700 dark:text-neutral-300 bg-orange-50 dark:bg-orange-900/20 px-3 md:px-4 py-2.5 md:py-3 rounded-lg backdrop-blur-sm border border-orange-200 dark:border-orange-700/30"
+              >
                 <motion.div
-                  key={index}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: step.delay }}
-                  className="flex items-center gap-2 md:gap-3 text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800/30 px-3 md:px-4 py-2 md:py-2.5 rounded-lg backdrop-blur-sm border border-neutral-200 dark:border-neutral-700/30"
-                >
-                  <motion.div
-                    animate={{
-                      scale: [1, 1.2, 1],
-                      opacity: [0.5, 1, 0.5]
-                    }}
-                    transition={{
-                      duration: 1.5,
-                      repeat: Infinity,
-                      delay: step.delay
-                    }}
-                    className="w-1.5 h-1.5 md:w-2 md:h-2 rounded-full bg-orange-500 dark:bg-orange-400 shrink-0"
-                  />
-                  <span className="text-left">{step.text}</span>
-                </motion.div>
-              ))}
+                  animate={{
+                    scale: [1, 1.2, 1],
+                    opacity: [0.5, 1, 0.5]
+                  }}
+                  transition={{
+                    duration: 1.5,
+                    repeat: Infinity
+                  }}
+                  className="w-2 h-2 md:w-2.5 md:h-2.5 rounded-full bg-orange-500 dark:bg-orange-400 shrink-0"
+                />
+                <span className="text-left font-medium">
+                  {processingStatus || 'Initializing...'}
+                </span>
+              </motion.div>
+
+              {/* Step indicators */}
+              <div className="flex items-center justify-center gap-2 mt-4">
+                <div className={`w-2 h-2 rounded-full transition-colors ${
+                  processingStatus.includes('Minting') ? 'bg-orange-500' :
+                  processingStatus.includes('Syncing') || processingStatus.includes('Verifying') ? 'bg-emerald-500' :
+                  'bg-neutral-300 dark:bg-neutral-600'
+                }`} />
+                <div className={`w-2 h-2 rounded-full transition-colors ${
+                  processingStatus.includes('Syncing') ? 'bg-orange-500' :
+                  processingStatus.includes('Verifying') ? 'bg-emerald-500' :
+                  'bg-neutral-300 dark:bg-neutral-600'
+                }`} />
+                <div className={`w-2 h-2 rounded-full transition-colors ${
+                  processingStatus.includes('Verifying') ? 'bg-orange-500' :
+                  'bg-neutral-300 dark:bg-neutral-600'
+                }`} />
+              </div>
             </motion.div>
 
             <motion.p
@@ -1253,7 +1914,9 @@ export function CreateWalletFlow() {
               transition={{ delay: 1 }}
               className="mt-4 md:mt-5 text-[10px] md:text-xs text-neutral-400 dark:text-neutral-500"
             >
-              This may take a few moments...
+              {processingStatus.includes('Verifying')
+                ? 'Verifying IPFS storage (up to 30 seconds)...'
+                : 'This may take a few moments...'}
             </motion.p>
           </motion.div>
         )}
@@ -1325,7 +1988,7 @@ export function CreateWalletFlow() {
                       Import from File
                     </div>
                     <div className="text-sm text-neutral-500 dark:text-neutral-400">
-                      Import wallet from .dat or .txt file
+                      Import wallet from .json, .dat or .txt file
                     </div>
                   </div>
                   <ArrowRight className="w-5 h-5 text-neutral-400 group-hover:text-orange-500 transition-colors" />
@@ -1402,13 +2065,13 @@ export function CreateWalletFlow() {
                     Select wallet file
                   </p>
                   <p className="text-xs md:text-sm text-neutral-400 dark:text-neutral-500 mb-3">
-                    .txt or .dat
+                    .json, .txt or .dat
                   </p>
                   <label className="inline-block cursor-pointer">
                     <input
                       type="file"
                       className="hidden"
-                      accept=".txt,.dat"
+                      accept=".json,.txt,.dat"
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) handleFileSelect(file);
@@ -1429,7 +2092,11 @@ export function CreateWalletFlow() {
                 {/* Selected File Display */}
                 <div className="p-4 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 rounded-xl mb-4">
                   <div className="flex items-center gap-3">
-                    <FileText className="w-6 h-6 text-orange-500 shrink-0" />
+                    {selectedFile.name.endsWith(".json") ? (
+                      <FileJson className="w-6 h-6 text-orange-500 shrink-0" />
+                    ) : (
+                      <FileText className="w-6 h-6 text-orange-500 shrink-0" />
+                    )}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm md:text-base text-neutral-900 dark:text-white font-medium truncate">
                         {selectedFile.name}

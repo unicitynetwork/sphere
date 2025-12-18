@@ -1,7 +1,5 @@
 import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
-import { TokenId } from "@unicitylabs/state-transition-sdk/lib/token/TokenId";
 import { TokenType } from "@unicitylabs/state-transition-sdk/lib/token/TokenType";
-import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
 import * as bip39 from "bip39";
 import CryptoJS from "crypto-js";
 import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
@@ -10,14 +8,23 @@ import { UnmaskedPredicateReference } from "@unicitylabs/state-transition-sdk/li
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 
 const STORAGE_KEY_ENC_SEED = "encrypted_seed";
-const STORAGE_KEY_SELECTED_INDEX = "l3_selected_address_index";
+const STORAGE_KEY_SELECTED_PATH = "l3_selected_address_path";
+// Legacy key - will be migrated to path-based
+const STORAGE_KEY_SELECTED_INDEX_LEGACY = "l3_selected_address_index";
 const UNICITY_TOKEN_TYPE_HEX =
   "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9ef0efbe397867509";
 const DEFAULT_SESSION_KEY = "user-pin-1234";
 
+/**
+ * User identity for L3 Unicity wallet.
+ *
+ * NOTE: The wallet address is derived using UnmaskedPredicateReference (no nonce/salt).
+ * This creates a stable, reusable DirectAddress from publicKey + tokenType.
+ * The SDK's UnmaskedPredicate (which uses salt) is only used for token ownership
+ * predicates during transfers, where the salt comes from the transaction itself.
+ */
 export interface UserIdentity {
   privateKey: string;
-  nonce: string;
   publicKey: string;
   address: string;
   mnemonic?: string;
@@ -28,7 +35,6 @@ export interface UserIdentity {
 export class IdentityManager {
   private static instance: IdentityManager;
   private sessionKey: string;
-  private unifiedKeyManager: UnifiedKeyManager | null = null;
 
   private constructor(sessionKey: string) {
     this.sessionKey = sessionKey;
@@ -43,35 +49,38 @@ export class IdentityManager {
 
   /**
    * Get the UnifiedKeyManager instance
+   * NOTE: Always fetch fresh from singleton to avoid stale references after resetInstance()
    */
   getUnifiedKeyManager(): UnifiedKeyManager {
-    if (!this.unifiedKeyManager) {
-      this.unifiedKeyManager = UnifiedKeyManager.getInstance(this.sessionKey);
-    }
-    return this.unifiedKeyManager;
+    // Always get fresh instance from singleton - don't cache!
+    // UnifiedKeyManager.resetInstance() can make cached references stale
+    return UnifiedKeyManager.getInstance(this.sessionKey);
   }
 
   /**
-   * Get the selected address index for identity derivation
-   * Defaults to 0 if not set
+   * Get the selected address PATH for identity derivation
+   * Returns null if not set (caller should use default first address)
    */
-  getSelectedAddressIndex(): number {
-    const saved = localStorage.getItem(STORAGE_KEY_SELECTED_INDEX);
-    return saved ? parseInt(saved, 10) : 0;
+  getSelectedAddressPath(): string | null {
+    return localStorage.getItem(STORAGE_KEY_SELECTED_PATH);
   }
 
   /**
-   * Set the selected address index for identity derivation
+   * Set the selected address PATH for identity derivation
+   * @param path - Full BIP32 path like "m/84'/1'/0'/0/0"
    */
-  setSelectedAddressIndex(index: number): void {
-    localStorage.setItem(STORAGE_KEY_SELECTED_INDEX, index.toString());
+  setSelectedAddressPath(path: string): void {
+    localStorage.setItem(STORAGE_KEY_SELECTED_PATH, path);
+    // Clean up legacy index key
+    localStorage.removeItem(STORAGE_KEY_SELECTED_INDEX_LEGACY);
   }
 
   /**
-   * Clear the selected address index (for wallet reset)
+   * Clear the selected address path (for wallet reset)
    */
-  clearSelectedAddressIndex(): void {
-    localStorage.removeItem(STORAGE_KEY_SELECTED_INDEX);
+  clearSelectedAddressPath(): void {
+    localStorage.removeItem(STORAGE_KEY_SELECTED_PATH);
+    localStorage.removeItem(STORAGE_KEY_SELECTED_INDEX_LEGACY);
   }
 
   /**
@@ -81,79 +90,67 @@ export class IdentityManager {
   async generateNewIdentity(): Promise<UserIdentity> {
     const keyManager = this.getUnifiedKeyManager();
     const mnemonic = await keyManager.generateNew(12);
-    return this.deriveIdentityFromUnifiedWallet(0, mnemonic);
+    // Use path-based derivation - PATH is the single identifier
+    const basePath = keyManager.getBasePath();
+    const defaultPath = `${basePath}/0/0`;
+    const identity = await this.deriveIdentityFromPath(defaultPath);
+    // Save mnemonic for legacy compatibility
+    if (mnemonic) {
+      this.saveSeed(mnemonic);
+    }
+    return { ...identity, mnemonic };
   }
 
   /**
-   * Derive identity from the UnifiedKeyManager at a specific index
-   * Uses standard BIP32 derivation: m/44'/0'/0'/0/{index}
+   * Derive L3 identity from a BIP32 path
+   * This is the PREFERRED method - use path as the single identifier
+   * @param path - Full BIP32 path like "m/84'/1'/0'/0/0"
    */
-  async deriveIdentityFromUnifiedWallet(
-    index: number = 0,
-    mnemonic?: string
-  ): Promise<UserIdentity> {
+  async deriveIdentityFromPath(path: string): Promise<UserIdentity> {
     const keyManager = this.getUnifiedKeyManager();
 
     if (!keyManager.isInitialized()) {
       throw new Error("Unified wallet not initialized");
     }
 
-    const derived = keyManager.deriveAddress(index);
-    const nonce = keyManager.deriveL3Nonce(derived.privateKey, index);
-
+    const derived = keyManager.deriveAddressFromPath(path);
     const secret = Buffer.from(derived.privateKey, "hex");
-    const nonceBuffer = Buffer.from(nonce, "hex");
 
-    const l3Address = await this.deriveL3Address(secret, nonceBuffer);
+    const l3Address = await this.deriveL3Address(secret);
 
     const signingService = await SigningService.createFromSecret(secret);
     const publicKey = Buffer.from(signingService.publicKey).toString("hex");
 
-    const identity: UserIdentity = {
+    // Parse path to get index for addressIndex field
+    const match = path.match(/\/(\d+)$/);
+    const index = match ? parseInt(match[1], 10) : 0;
+
+    return {
       privateKey: derived.privateKey,
-      nonce: nonce,
       publicKey: publicKey,
       address: l3Address,
-      mnemonic: mnemonic || keyManager.getMnemonic() || undefined,
+      mnemonic: keyManager.getMnemonic() || undefined,
       l1Address: derived.l1Address,
       addressIndex: index,
     };
-
-    // Save mnemonic for legacy compatibility
-    if (identity.mnemonic) {
-      this.saveSeed(identity.mnemonic);
-    }
-
-    return identity;
   }
 
   /**
-   * Derive identity from a raw private key and index
+   * Derive identity from a raw private key
    * Useful for external integrations
    */
-  async deriveIdentityFromPrivateKey(
-    privateKey: string,
-    index: number = 0
-  ): Promise<UserIdentity> {
-    const nonce = CryptoJS.HmacSHA256(
-      CryptoJS.enc.Utf8.parse(`unicity-nonce-${index}`),
-      CryptoJS.enc.Hex.parse(privateKey)
-    ).toString();
-
+  async deriveIdentityFromPrivateKey(privateKey: string): Promise<UserIdentity> {
     const secret = Buffer.from(privateKey, "hex");
-    const nonceBuffer = Buffer.from(nonce, "hex");
 
-    const l3Address = await this.deriveL3Address(secret, nonceBuffer);
+    const l3Address = await this.deriveL3Address(secret);
 
     const signingService = await SigningService.createFromSecret(secret);
     const publicKey = Buffer.from(signingService.publicKey).toString("hex");
 
     return {
       privateKey,
-      nonce,
       publicKey,
       address: l3Address,
-      addressIndex: index,
     };
   }
 
@@ -168,33 +165,42 @@ export class IdentityManager {
       throw new Error("Invalid recovery phrase. Please check your words and try again.");
     }
 
-    // Use UnifiedKeyManager for BIP32 derivation - no legacy fallback
+    // Use UnifiedKeyManager for BIP32 derivation - PATH is the single identifier
     const keyManager = this.getUnifiedKeyManager();
     await keyManager.createFromMnemonic(mnemonic);
-    return this.deriveIdentityFromUnifiedWallet(0, mnemonic);
+
+    // Use path-based derivation for the default first external address
+    const basePath = keyManager.getBasePath();
+    const defaultPath = `${basePath}/0/0`;
+    const identity = await this.deriveIdentityFromPath(defaultPath);
+
+    // Save mnemonic for legacy compatibility
+    this.saveSeed(mnemonic);
+
+    return { ...identity, mnemonic };
   }
 
   /**
-   * Derive L3 Unicity address from secret and nonce
+   * Derive L3 Unicity address from secret
+   * Uses UnmaskedPredicateReference (no nonce) for a stable, reusable address
    */
-  private async deriveL3Address(secret: Buffer, nonce: Buffer): Promise<string> {
+  private async deriveL3Address(secret: Buffer): Promise<string> {
     try {
       const signingService = await SigningService.createFromSecret(secret);
 
       const tokenTypeBytes = Buffer.from(UNICITY_TOKEN_TYPE_HEX, "hex");
       const tokenType = new TokenType(tokenTypeBytes);
 
-      const tokenId = new TokenId(Buffer.alloc(32));
-
-      const predicate = await UnmaskedPredicate.create(
-        tokenId,
+      // Use UnmaskedPredicateReference for stable wallet address (no nonce)
+      // This matches getWalletAddress() and is the correct approach per SDK
+      const predicateRef = UnmaskedPredicateReference.create(
         tokenType,
-        signingService,
-        HashAlgorithm.SHA256,
-        nonce
+        signingService.algorithm,
+        signingService.publicKey,
+        HashAlgorithm.SHA256
       );
 
-      return (await (await predicate.getReference()).toAddress()).toString();
+      return (await (await predicateRef).toAddress()).toString();
     } catch (error) {
       console.error("Error deriving address", error);
       throw error;
@@ -216,8 +222,16 @@ export class IdentityManager {
     const initialized = await keyManager.initialize();
 
     if (initialized) {
-      const index = this.getSelectedAddressIndex(); // Use stored index instead of hardcoded 0
-      return this.deriveIdentityFromUnifiedWallet(index);
+      // Use path-based derivation (not index-based) - PATH is the ONLY reliable identifier
+      const selectedPath = this.getSelectedAddressPath();
+      if (selectedPath) {
+        return this.deriveIdentityFromPath(selectedPath);
+      }
+
+      // Fallback to first external address if no path stored
+      const basePath = keyManager.getBasePath();
+      const defaultPath = `${basePath}/0/0`;
+      return this.deriveIdentityFromPath(defaultPath);
     }
 
     // No wallet initialized - user must create or import a wallet
@@ -244,6 +258,8 @@ export class IdentityManager {
         Buffer.from(UNICITY_TOKEN_TYPE_HEX, "hex")
       );
 
+      // UnmaskedPredicateReference creates a stable, reusable DirectAddress
+      // This does NOT use nonce - the address is derived only from publicKey + tokenType
       const predicateRef = UnmaskedPredicateReference.create(
         tokenType,
         signingService.algorithm,

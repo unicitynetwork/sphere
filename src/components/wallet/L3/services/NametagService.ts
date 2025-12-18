@@ -43,8 +43,8 @@ export class NametagService {
   async isNametagAvailable(nametag: string): Promise<boolean> {
     const nametagTokenId = await TokenId.fromNameTag(nametag);
     const isAlreadyMinted = await ServiceProvider.stateTransitionClient.isMinted(
-        ServiceProvider.getRootTrustBase(),
-        nametagTokenId
+      ServiceProvider.getRootTrustBase(),
+      nametagTokenId
     );
     return !isAlreadyMinted;
   }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   ArrowDownLeft,
   Send,
@@ -11,9 +11,10 @@ import {
   Check,
   Plus,
   ArrowRightLeft,
+  Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { TransactionPlan, VestingMode, VestingBalances } from "../sdk";
+import type { TransactionPlan, VestingMode, VestingBalances, WalletAddress } from "../sdk";
 import {
   QRModal,
   SaveWalletModal,
@@ -23,6 +24,7 @@ import {
   SendModal,
 } from "../components/modals";
 import { VestingSelector } from "../components/VestingSelector";
+import { useAddressNametags } from "../hooks/useAddressNametags";
 
 // Animated balance display component
 function AnimatedBalance({ value, show }: { value: number; show: boolean }) {
@@ -74,6 +76,8 @@ interface MainWalletViewProps {
   selectedAddress: string;
   selectedPrivateKey: string;
   addresses: string[];
+  /** Full wallet addresses with index info for nametag fetching */
+  walletAddresses?: WalletAddress[];
   balance: number;
   totalBalance: number;
   showBalances: boolean;
@@ -81,6 +85,8 @@ interface MainWalletViewProps {
   onSelectAddress: (address: string) => void;
   onShowHistory: () => void;
   onSaveWallet: (filename: string, password?: string) => void;
+  /** Whether mnemonic is available for export */
+  hasMnemonic?: boolean;
   onDeleteWallet: () => void;
   onSendTransaction: (destination: string, amount: string) => Promise<void>;
   txPlan: TransactionPlan | null;
@@ -95,6 +101,7 @@ export function MainWalletView({
   selectedAddress,
   selectedPrivateKey,
   addresses,
+  walletAddresses,
   balance,
   totalBalance,
   showBalances,
@@ -102,6 +109,7 @@ export function MainWalletView({
   onSelectAddress,
   onShowHistory,
   onSaveWallet,
+  hasMnemonic,
   onDeleteWallet,
   onSendTransaction,
   txPlan,
@@ -121,6 +129,28 @@ export function MainWalletView({
   const [showBridgeModal, setShowBridgeModal] = useState(false);
   const [pendingDestination, setPendingDestination] = useState("");
   const [pendingAmount, setPendingAmount] = useState("");
+
+  // Fetch nametags for all wallet addresses
+  const { nametagState } = useAddressNametags(walletAddresses);
+
+  // Sort addresses: external first (by index), then change (by index)
+  const sortedAddresses = useMemo(() => {
+    if (!walletAddresses || walletAddresses.length === 0) {
+      return addresses; // Fallback to original order if no wallet address info
+    }
+    // Create a map for quick lookup of wallet address info
+    const addrMap = new Map(walletAddresses.map(wa => [wa.address, wa]));
+    return [...addresses].sort((a, b) => {
+      const aInfo = addrMap.get(a);
+      const bInfo = addrMap.get(b);
+      // If no info, treat as external and sort by original order
+      const aIsChange = aInfo?.isChange ? 1 : 0;
+      const bIsChange = bInfo?.isChange ? 1 : 0;
+      if (aIsChange !== bIsChange) return aIsChange - bIsChange;
+      // Within same type, sort by index
+      return (aInfo?.index ?? 0) - (bInfo?.index ?? 0);
+    });
+  }, [addresses, walletAddresses]);
 
   const handleSendFromModal = async (destination: string, amount: string) => {
     setPendingDestination(destination);
@@ -170,8 +200,57 @@ export function MainWalletView({
               onClick={() => setShowDropdown((prev) => !prev)}
               className="flex-1 bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 flex items-center justify-between hover:bg-neutral-200/50 dark:hover:bg-neutral-700/50 transition-colors"
             >
-              <span className="font-mono text-xs sm:text-sm">
-                {selectedAddress.slice(0, 12) + "..." + selectedAddress.slice(-8)}
+              <span className="text-xs sm:text-sm flex items-center gap-1.5">
+                {(() => {
+                  const nametagInfo = nametagState[selectedAddress];
+                  const selectedWalletInfo = walletAddresses?.find(wa => wa.address === selectedAddress);
+                  const isSelectedChange = selectedWalletInfo?.isChange;
+
+                  // Helper to render Change badge
+                  const ChangeBadge = isSelectedChange ? (
+                    <span className="px-1 py-0.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[9px] font-bold rounded shrink-0">
+                      Change
+                    </span>
+                  ) : null;
+
+                  if (!nametagInfo || nametagInfo.ipnsLoading) {
+                    return (
+                      <>
+                        <Loader2 className="w-3 h-3 animate-spin text-neutral-400" />
+                        <span className="font-mono">{selectedAddress.slice(0, 8)}...{selectedAddress.slice(-6)}</span>
+                        {ChangeBadge}
+                      </>
+                    );
+                  }
+                  if (nametagInfo.nametag) {
+                    return (
+                      <>
+                        <span className="font-medium text-blue-600 dark:text-blue-400">@{nametagInfo.nametag}</span>
+                        <span className="text-neutral-400 dark:text-neutral-500 font-mono text-[10px]">
+                          {selectedAddress.slice(0, 6)}...{selectedAddress.slice(-4)}
+                        </span>
+                        {ChangeBadge}
+                      </>
+                    );
+                  }
+                  if (nametagInfo.hasL3Inventory) {
+                    return (
+                      <>
+                        <span className="font-mono">{selectedAddress.slice(0, 12)}...{selectedAddress.slice(-8)}</span>
+                        <span className="px-1 py-0.5 bg-purple-500/20 text-purple-600 dark:text-purple-400 text-[9px] font-bold rounded">
+                          L3
+                        </span>
+                        {ChangeBadge}
+                      </>
+                    );
+                  }
+                  return (
+                    <>
+                      <span className="font-mono">{selectedAddress.slice(0, 12)}...{selectedAddress.slice(-8)}</span>
+                      {ChangeBadge}
+                    </>
+                  );
+                })()}
               </span>
               <ChevronDown className={`w-3 h-3 sm:w-4 sm:h-4 text-neutral-500 dark:text-neutral-400 transition-transform ${showDropdown ? "rotate-180" : ""}`} />
             </button>
@@ -230,32 +309,63 @@ export function MainWalletView({
                   transition={{ duration: 0.2 }}
                   className="absolute z-20 mt-2 w-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl max-h-52 overflow-y-auto custom-scrollbar"
                 >
-                  {addresses.map((a) => (
-                    <div
-                      key={a}
-                      className={`flex items-center gap-2 px-3 py-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer ${
-                        a === selectedAddress ? "bg-neutral-100 dark:bg-neutral-800/50" : ""
-                      }`}
-                      onClick={() => {
-                        onSelectAddress(a);
-                        setShowDropdown(false);
-                      }}
-                    >
-                      <span className="flex-1 text-left text-xs text-neutral-700 dark:text-neutral-200 font-mono truncate">
-                        {a}
-                      </span>
-                      <a
-                        href={`https://www.unicity.network/address/${a}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-1 text-blue-500 dark:text-blue-400 hover:text-blue-400 dark:hover:text-blue-300 transition-colors"
-                        title="View in explorer"
-                        onClick={(e) => e.stopPropagation()}
+                  {sortedAddresses.map((a) => {
+                    const nametagInfo = nametagState[a];
+                    const walletAddrInfo = walletAddresses?.find(wa => wa.address === a);
+                    const isChangeAddr = walletAddrInfo?.isChange;
+                    return (
+                      <div
+                        key={a}
+                        className={`flex items-center gap-2 px-3 py-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer ${
+                          a === selectedAddress ? "bg-neutral-100 dark:bg-neutral-800/50" : ""
+                        }`}
+                        onClick={() => {
+                          onSelectAddress(a);
+                          setShowDropdown(false);
+                        }}
                       >
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                  ))}
+                        <span className="flex-1 text-left text-xs dark:text-neutral-200">
+                          {!nametagInfo || nametagInfo.ipnsLoading ? (
+                            <span className="flex items-center gap-1.5 text-neutral-400 dark:text-neutral-500">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <span className="font-mono">{a.slice(0, 8)}...{a.slice(-6)}</span>
+                            </span>
+                          ) : nametagInfo.nametag ? (
+                            <span className="flex items-center gap-1.5">
+                              <span className="font-medium text-blue-600 dark:text-blue-400">@{nametagInfo.nametag}</span>
+                              <span className="text-neutral-400 dark:text-neutral-500 font-mono text-[10px]">
+                                {a.slice(0, 6)}...{a.slice(-4)}
+                              </span>
+                            </span>
+                          ) : nametagInfo.hasL3Inventory ? (
+                            <span className="flex items-center gap-1.5">
+                              <span className="font-mono truncate text-neutral-700 dark:text-neutral-200">{a}</span>
+                              <span className="px-1 py-0.5 bg-purple-500/20 text-purple-600 dark:text-purple-400 text-[9px] font-bold rounded shrink-0">
+                                L3
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="font-mono truncate text-neutral-700 dark:text-neutral-200">{a}</span>
+                          )}
+                        </span>
+                        {isChangeAddr && (
+                          <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[9px] font-bold rounded shrink-0">
+                            Change
+                          </span>
+                        )}
+                        <a
+                          href={`https://www.unicity.network/address/${a}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-1 text-blue-500 dark:text-blue-400 hover:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                          title="View in explorer"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    );
+                  })}
                 </motion.div>
               </>
             )}
@@ -407,6 +517,7 @@ export function MainWalletView({
         show={showSaveModal}
         onConfirm={handleSave}
         onCancel={() => setShowSaveModal(false)}
+        hasMnemonic={hasMnemonic}
       />
 
       <DeleteConfirmationModal
