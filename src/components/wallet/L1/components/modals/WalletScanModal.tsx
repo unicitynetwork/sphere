@@ -18,6 +18,7 @@ export function WalletScanModal({ show, wallet, initialScanCount = 100, onSelect
   const [foundAddresses, setFoundAddresses] = useState<ScannedAddress[]>([]);
   const [selectedAddresses, setSelectedAddresses] = useState<Set<string>>(new Set());
   const [scanCount, setScanCount] = useState(initialScanCount);
+  const [l1Complete, setL1Complete] = useState(false);  // Latches true once L1 scan finishes
   const stopScanRef = useRef(false);
 
   // Reset state when modal opens
@@ -27,6 +28,7 @@ export function WalletScanModal({ show, wallet, initialScanCount = 100, onSelect
       setFoundAddresses([]);
       setSelectedAddresses(new Set());
       setProgress({ current: 0, total: initialScanCount, found: 0, totalBalance: 0, foundAddresses: [] });
+      setL1Complete(false);
       stopScanRef.current = false;
       // Auto-start scanning with initial count
       startScan(initialScanCount);
@@ -53,6 +55,10 @@ export function WalletScanModal({ show, wallet, initialScanCount = 100, onSelect
         scanLimit,
         (p) => {
           setProgress(p);
+          // Latch l1Complete once L1 scan finishes (prevents IPNS callbacks from resetting it)
+          if (p.l1ScanComplete) {
+            setL1Complete(true);
+          }
           // Update found addresses in real-time from progress callback
           if (p.foundAddresses && p.foundAddresses.length > 0) {
             setFoundAddresses(p.foundAddresses);
@@ -75,6 +81,7 @@ export function WalletScanModal({ show, wallet, initialScanCount = 100, onSelect
 
   const stopScan = () => {
     stopScanRef.current = true;
+    setIsScanning(false);  // Immediate UI feedback
   };
 
   const handleCancel = () => {
@@ -137,7 +144,11 @@ export function WalletScanModal({ show, wallet, initialScanCount = 100, onSelect
           <div>
             <h3 className="text-neutral-900 dark:text-white text-base font-bold">Scanning Wallet</h3>
             <p className="text-neutral-500 dark:text-neutral-400 text-xs">
-              {isScanning ? "Searching for addresses with balances..." : "Click addresses to select/deselect"}
+              {isScanning && !l1Complete
+                ? "Searching for addresses with balances..."
+                : isScanning
+                  ? "Resolving Unicity IDs..."
+                  : "Click addresses to select/deselect"}
             </p>
           </div>
         </div>
@@ -210,6 +221,11 @@ export function WalletScanModal({ show, wallet, initialScanCount = 100, onSelect
                                 CHANGE
                               </span>
                             )}
+                            {addr.l3Nametag && (
+                              <span className="px-1 py-0.5 bg-purple-500/20 text-purple-600 dark:text-purple-400 text-[9px] font-bold rounded">
+                                {addr.l3Nametag}
+                              </span>
+                            )}
                           </div>
                           <div className="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono truncate">
                             {addr.address}
@@ -263,7 +279,7 @@ export function WalletScanModal({ show, wallet, initialScanCount = 100, onSelect
           >
             Cancel
           </button>
-          {isScanning ? (
+          {isScanning && !l1Complete ? (
             <button
               onClick={stopScan}
               className="flex-1 py-1.5 bg-red-600 rounded-lg text-white text-sm hover:bg-red-500 transition-colors"
