@@ -1,5 +1,7 @@
 name: Deploy to Server
 
+run-name: Deploy ${{ github.sha }}
+
 on:
   workflow_dispatch:
 
