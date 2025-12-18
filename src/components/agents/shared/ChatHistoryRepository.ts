@@ -193,6 +193,8 @@ export class ChatHistoryRepository {
     }
 
     this.notifyUpdate();
+    // Store to IPFS (overwrite, no merge) to persist deletion
+    this.scheduleIpfsStore();
   }
 
   deleteAllSessionsForAgent(agentId: string, userId?: string): void {
@@ -213,6 +215,8 @@ export class ChatHistoryRepository {
 
     this.saveSessions(otherSessions);
     this.notifyUpdate();
+    // Store to IPFS (overwrite, no merge) to persist deletion
+    this.scheduleIpfsStore();
   }
 
   clearAllHistory(): void {
@@ -228,6 +232,8 @@ export class ChatHistoryRepository {
     // Clear sessions
     localStorage.removeItem(SESSIONS_KEY);
     this.notifyUpdate();
+    // Store to IPFS (overwrite, no merge) to persist deletion
+    this.scheduleIpfsStore();
   }
 
   // ==========================================
@@ -456,6 +462,23 @@ export class ChatHistoryRepository {
       return null;
     }
 
+    // Wait for any pending store operation to complete
+    // This prevents sync from restoring deleted items before store finishes
+    if (this.pendingSync) {
+      console.log('[ChatHistory] Sync waiting for pending operation...');
+      // Wait up to 30 seconds for pending operation
+      for (let i = 0; i < 60; i++) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        if (!this.pendingSync) break;
+      }
+      if (this.pendingSync) {
+        console.warn('[ChatHistory] Sync timeout waiting for pending operation');
+        return null;
+      }
+    }
+
+    this.pendingSync = true;
+
     try {
       // Get all sessions with messages for current user
       const userId = this.ipfsService.getCurrentUserId();
@@ -470,13 +493,46 @@ export class ChatHistoryRepository {
       const { sessions: mergedSessions, synced } = await this.ipfsService.sync(sessions);
 
       if (synced && mergedSessions.length > 0) {
-        // Update local storage with merged data
-        this.importFromIpfs(mergedSessions);
+        // Only update existing sessions, don't add new ones from remote
+        // This prevents deleted sessions from being restored
+        // New sessions from other devices will be added on next full restore
+        this.updateExistingFromIpfs(mergedSessions);
       }
 
       return this.ipfsService.getStatus().lastSync;
     } catch (error) {
       console.error('[ChatHistory] IPFS sync failed:', error);
+      return null;
+    } finally {
+      this.pendingSync = false;
+    }
+  }
+
+  /**
+   * Store local history to IPFS (overwrite, no merge)
+   * Used after deletions to ensure deleted items don't come back
+   */
+  async storeToIpfs(): Promise<SyncResult | null> {
+    if (!this.isIpfsSyncEnabled()) {
+      return null;
+    }
+
+    try {
+      // Get all sessions with messages for current user
+      const userId = this.ipfsService.getCurrentUserId();
+      if (!userId) return null;
+
+      const sessions = this.getAllSessions()
+        .filter(s => s.userId === userId)
+        .map(s => this.getSessionWithMessages(s.id))
+        .filter((s): s is IpfsChatSessionData => s !== null);
+
+      // Store directly to IPFS (no merge with remote)
+      const result = await this.ipfsService.store(sessions);
+
+      return result;
+    } catch (error) {
+      console.error('[ChatHistory] IPFS store failed:', error);
       return null;
     }
   }
@@ -501,6 +557,49 @@ export class ChatHistoryRepository {
         this.pendingSync = false;
       }
     }, 5000); // 5 second debounce
+  }
+
+  /**
+   * Schedule IPFS store for deletions
+   * Uses immediate store (no debounce) to prevent race conditions with sync
+   * that could restore deleted items before store completes
+   */
+  private scheduleIpfsStore(): void {
+    if (!this.isIpfsSyncEnabled()) return;
+
+    // Cancel any pending sync to prevent it from restoring deleted items
+    if (this.syncDebounceTimer) {
+      clearTimeout(this.syncDebounceTimer);
+      this.syncDebounceTimer = null;
+    }
+
+    // Store immediately (no debounce) to persist deletion before any sync can restore it
+    // Use a microtask to ensure localStorage is fully updated first
+    queueMicrotask(async () => {
+      // Wait for any pending sync to complete before storing
+      // This ensures we don't try to store while sync is importing data
+      if (this.pendingSync) {
+        console.log('[ChatHistory] Store waiting for pending sync to complete...');
+        for (let i = 0; i < 120; i++) { // Wait up to 60 seconds
+          await new Promise(resolve => setTimeout(resolve, 500));
+          if (!this.pendingSync) break;
+        }
+        if (this.pendingSync) {
+          console.warn('[ChatHistory] Store timeout waiting for sync');
+          return;
+        }
+      }
+
+      this.pendingSync = true;
+
+      try {
+        console.log('[ChatHistory] Storing deletion to IPFS immediately...');
+        await this.storeToIpfs();
+        console.log('[ChatHistory] Deletion stored to IPFS');
+      } finally {
+        this.pendingSync = false;
+      }
+    });
   }
 
   /**
@@ -538,7 +637,52 @@ export class ChatHistoryRepository {
   }
 
   /**
-   * Import sessions from IPFS into local storage
+   * Update only existing sessions from IPFS (don't add new ones)
+   * Used during sync to prevent deleted sessions from being restored
+   */
+  private updateExistingFromIpfs(sessions: IpfsChatSessionData[]): void {
+    if (!this.isLocalStorageAvailable()) return;
+
+    const existingSessions = this.getAllSessions();
+    const existingIds = new Set(existingSessions.map(s => s.id));
+    let updated = false;
+
+    for (const session of sessions) {
+      if (existingIds.has(session.id)) {
+        // Update existing session if remote is newer
+        const existing = existingSessions.find(s => s.id === session.id);
+        if (existing && session.updatedAt > existing.updatedAt) {
+          const idx = existingSessions.findIndex(s => s.id === session.id);
+          if (idx >= 0) {
+            existingSessions[idx] = {
+              id: session.id,
+              agentId: session.agentId,
+              userId: session.userId,
+              title: session.title,
+              preview: session.preview,
+              createdAt: session.createdAt,
+              updatedAt: session.updatedAt,
+              messageCount: session.messageCount,
+            };
+            localStorage.setItem(
+              this.getMessagesKey(session.id),
+              JSON.stringify(session.messages)
+            );
+            updated = true;
+          }
+        }
+      }
+      // Don't add new sessions - they might have been intentionally deleted
+    }
+
+    if (updated) {
+      this.saveSessions(existingSessions);
+    }
+  }
+
+  /**
+   * Import sessions from IPFS into local storage (full import, adds new sessions)
+   * Used for initial restore from IPFS
    */
   private importFromIpfs(sessions: IpfsChatSessionData[]): void {
     if (!this.isLocalStorageAvailable()) return;

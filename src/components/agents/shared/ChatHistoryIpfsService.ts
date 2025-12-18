@@ -304,17 +304,13 @@ export class ChatHistoryIpfsService {
       // Resolve IPNS to get latest CID
       const resolution = await this.resolveIpns();
       if (!resolution) {
-        // Try local CID as fallback
-        const localCid = this.getStoredCid();
-        if (localCid) {
-          console.log(`[ChatHistoryIpfs] IPNS resolution failed, trying local CID: ${localCid.slice(0, 16)}...`);
-          return this.restoreFromCid(localCid);
-        }
-        console.log("[ChatHistoryIpfs] No IPNS record found and no local CID");
+        // Don't use local CID as fallback - local storage is the source of truth
+        // If IPNS fails, sync will upload local data to IPFS
+        console.log("[ChatHistoryIpfs] IPNS resolution failed - local data will be used as source of truth");
         return {
           success: false,
           timestamp: Date.now(),
-          error: "No IPNS record found and no local CID",
+          error: "IPNS resolution failed",
         };
       }
 
