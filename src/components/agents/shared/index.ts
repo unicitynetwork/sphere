@@ -7,4 +7,5 @@ export { QuickActions } from './QuickActions';
 export { AgentChat, type AgentMessage, type SidebarItem, type SidebarConfig } from './AgentChat';
 export { ChatHistoryRepository, chatHistoryRepository, type ChatSession, type ChatSessionData } from './ChatHistoryRepository';
 export { useChatHistory } from './useChatHistory';
+export { useChatHistorySync, useChatHistorySyncStatus, chatHistorySyncKeys, type SyncState } from './useChatHistorySync';
 export { ChatHistoryIpfsService, getChatHistoryIpfsService, type ChatSyncResult, type ChatSyncStatus, type SyncStep } from './ChatHistoryIpfsService';

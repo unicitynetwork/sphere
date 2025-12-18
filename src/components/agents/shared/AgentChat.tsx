@@ -7,7 +7,7 @@ import { useWallet } from '../../wallet/L3/hooks/useWallet';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatHeader, ChatBubble, ChatInput, QuickActions } from './index';
 import { useChatHistory } from './useChatHistory';
-import type { SyncStep } from './ChatHistoryIpfsService';
+import type { SyncState } from './useChatHistorySync';
 
 // Generic sidebar item (for custom agent-specific items like bets, purchases, orders)
 export interface SidebarItem {
@@ -129,7 +129,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     resetCurrentSession,
     saveCurrentMessages,
     searchSessions,
-    syncStatus,
+    syncState,
   } = useChatHistory({
     agentId: agent.id,
     userId: nametag ?? undefined,
@@ -455,41 +455,90 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     return new Date(timestamp).toLocaleDateString();
   };
 
-  // Get sync step display info
-  const getSyncStepInfo = (step: SyncStep): { label: string; icon: ReactNode; color: string } => {
-    switch (step) {
+  // Get sync display info based on detailed step from IPFS service
+  const getSyncDisplayInfo = (state: SyncState): { label: string; icon: ReactNode; color: string } => {
+    // Use detailed step for more granular status
+    switch (state.currentStep) {
       case 'initializing':
-        return { label: 'Initializing...', icon: <Loader2 className="w-3 h-3 animate-spin" />, color: 'text-blue-500' };
+        return {
+          label: 'Initializing...',
+          icon: <Loader2 className="w-3 h-3 animate-spin" />,
+          color: 'text-blue-500'
+        };
       case 'resolving-ipns':
-        return { label: 'Looking up...', icon: <Cloud className="w-3 h-3" />, color: 'text-blue-500' };
+        return {
+          label: 'Looking up...',
+          icon: <Cloud className="w-3 h-3" />,
+          color: 'text-blue-500'
+        };
       case 'fetching-content':
-        return { label: 'Downloading...', icon: <Cloud className="w-3 h-3" />, color: 'text-blue-500' };
+        return {
+          label: 'Downloading...',
+          icon: <Cloud className="w-3 h-3 animate-pulse" />,
+          color: 'text-blue-500'
+        };
       case 'importing-data':
-        return { label: 'Importing...', icon: <Loader2 className="w-3 h-3 animate-spin" />, color: 'text-blue-500' };
+        return {
+          label: 'Importing...',
+          icon: <Loader2 className="w-3 h-3 animate-spin" />,
+          color: 'text-blue-500'
+        };
       case 'building-data':
-        return { label: 'Preparing...', icon: <Loader2 className="w-3 h-3 animate-spin" />, color: 'text-amber-500' };
+        return {
+          label: 'Preparing...',
+          icon: <Loader2 className="w-3 h-3 animate-spin" />,
+          color: 'text-amber-500'
+        };
       case 'uploading':
-        return { label: 'Uploading...', icon: <Cloud className="w-3 h-3" />, color: 'text-amber-500' };
+        return {
+          label: 'Uploading...',
+          icon: <Cloud className="w-3 h-3 animate-pulse" />,
+          color: 'text-amber-500'
+        };
       case 'publishing-ipns':
-        return { label: 'Publishing...', icon: <Cloud className="w-3 h-3" />, color: 'text-amber-500' };
+        return {
+          label: 'Publishing...',
+          icon: <Cloud className="w-3 h-3 animate-pulse" />,
+          color: 'text-amber-500'
+        };
       case 'complete':
-        return { label: 'Synced', icon: <Check className="w-3 h-3" />, color: 'text-green-500' };
+        return {
+          label: 'Synced',
+          icon: <Check className="w-3 h-3" />,
+          color: 'text-green-500'
+        };
       case 'error':
-        return { label: 'Sync error', icon: <AlertCircle className="w-3 h-3" />, color: 'text-red-500' };
+        return {
+          label: 'Sync error',
+          icon: <AlertCircle className="w-3 h-3" />,
+          color: 'text-red-500'
+        };
       case 'idle':
       default:
-        return { label: 'Synced', icon: <Check className="w-3 h-3" />, color: 'text-neutral-400' };
+        // Check TanStack Query states for additional context
+        if (state.isError) {
+          return {
+            label: 'Sync error',
+            icon: <AlertCircle className="w-3 h-3" />,
+            color: 'text-red-500'
+          };
+        }
+        return {
+          label: 'Synced',
+          icon: <Check className="w-3 h-3" />,
+          color: 'text-neutral-400'
+        };
     }
   };
 
   // Render sync status indicator (always visible)
   const renderSyncIndicator = () => {
-    const { label, icon, color } = getSyncStepInfo(syncStatus.step);
+    const { label, icon, color } = getSyncDisplayInfo(syncState);
 
     return (
       <div className={`flex items-center gap-1.5 text-xs ${color} px-2 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800/50`}>
         {icon}
-        <span>{syncStatus.progress || label}</span>
+        <span>{syncState.stepProgress || label}</span>
       </div>
     );
   };
@@ -642,14 +691,12 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
             )}
           </div>
 
-          {/* Sync status indicator */}
-          <AnimatePresence>
-            {syncStatus.step !== 'idle' && (!sidebarConfig || sidebarTab === 'history') && (
-              <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800/50">
-                {renderSyncIndicator()}
-              </div>
-            )}
-          </AnimatePresence>
+          {/* Sync status indicator - show when syncing or always in history tab */}
+          {(!sidebarConfig || sidebarTab === 'history') && (
+            <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800/50">
+              {renderSyncIndicator()}
+            </div>
+          )}
 
           {/* Content based on tab */}
           {(!sidebarConfig || sidebarTab === 'history') ? (

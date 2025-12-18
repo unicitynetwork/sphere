@@ -7,24 +7,18 @@
  * - Search through history
  * - Event-based updates
  * - Per-user history (bound to nametag)
- * - IPFS sync for cross-device access
+ * - IPFS sync for cross-device access (via TanStack Query)
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { chatHistoryRepository, type ChatSession } from './ChatHistoryRepository';
-import { getChatHistoryIpfsService, type SyncStep } from './ChatHistoryIpfsService';
+import { useChatHistorySync, type SyncState } from './useChatHistorySync';
 import type { ChatMessage } from '../../../hooks/useAgentChat';
 
 interface UseChatHistoryOptions {
   agentId: string;
   userId?: string; // nametag - each user has their own history
   enabled?: boolean;
-}
-
-interface SyncStatus {
-  step: SyncStep;
-  progress?: string;
-  isSyncing: boolean;
 }
 
 interface UseChatHistoryReturn {
@@ -46,8 +40,8 @@ interface UseChatHistoryReturn {
   // State
   isLoading: boolean;
 
-  // IPFS sync status
-  syncStatus: SyncStatus;
+  // IPFS sync status (TanStack Query based)
+  syncState: SyncState;
 }
 
 export function useChatHistory({
@@ -58,13 +52,15 @@ export function useChatHistory({
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSession, setCurrentSession] = useState<ChatSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>({
-    step: 'idle',
-    isSyncing: false,
-  });
 
   const currentSessionRef = useRef<ChatSession | null>(null);
   const userIdRef = useRef<string | undefined>(userId);
+
+  // TanStack Query based IPFS sync
+  const { syncState } = useChatHistorySync({
+    userId,
+    enabled: enabled && !!userId,
+  });
 
   // Keep refs in sync
   useEffect(() => {
@@ -74,31 +70,6 @@ export function useChatHistory({
   useEffect(() => {
     userIdRef.current = userId;
   }, [userId]);
-
-  // Initialize IPFS sync service when userId is available
-  useEffect(() => {
-    if (!enabled || !userId) return;
-
-    // Start IPFS auto-sync for chat history
-    try {
-      const ipfsService = getChatHistoryIpfsService();
-      ipfsService.startAutoSync();
-
-      // Subscribe to status changes
-      const unsubscribe = ipfsService.onStatusChange(() => {
-        const status = ipfsService.getStatus();
-        setSyncStatus({
-          step: status.currentStep,
-          progress: status.stepProgress,
-          isSyncing: status.isSyncing,
-        });
-      });
-
-      return unsubscribe;
-    } catch (e) {
-      console.warn('[useChatHistory] Failed to start IPFS sync:', e);
-    }
-  }, [enabled, userId]);
 
   // Load sessions on mount and when userId changes
   useEffect(() => {
@@ -117,14 +88,16 @@ export function useChatHistory({
     setCurrentSession(null);
     loadSessions();
 
-    // Listen for updates from other tabs/components
+    // Listen for updates from other tabs/components and IPFS sync
     const handleUpdate = () => {
       loadSessions();
     };
 
     window.addEventListener('agent-chat-history-updated', handleUpdate);
+    window.addEventListener('agent-chat-history-synced', handleUpdate);
     return () => {
       window.removeEventListener('agent-chat-history-updated', handleUpdate);
+      window.removeEventListener('agent-chat-history-synced', handleUpdate);
     };
   }, [agentId, userId, enabled]);
 
@@ -195,7 +168,7 @@ export function useChatHistory({
       });
     }
 
-    // Save all messages
+    // Save all messages (this triggers IPFS sync via event)
     chatHistoryRepository.saveMessages(session.id, validMessages);
 
     // Update local session state
@@ -222,6 +195,6 @@ export function useChatHistory({
     saveCurrentMessages,
     searchSessions,
     isLoading,
-    syncStatus,
+    syncState,
   };
 }
