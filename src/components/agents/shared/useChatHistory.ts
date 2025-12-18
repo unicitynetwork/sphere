@@ -100,17 +100,18 @@ export function useChatHistory({
           const status = chatHistoryRepository.getIpfsStatus();
           setIpfsIpnsName(status.ipnsName);
 
-          // Restore from IPFS on initialization
+          // Sync with IPFS on initialization (this will restore remote data
+          // or upload local data if no remote exists)
           setIsIpfsSyncing(true);
-          const restored = await chatHistoryRepository.restoreFromIpfs();
+          const syncResult = await chatHistoryRepository.syncWithIpfs();
 
-          if (restored) {
-            // Reload sessions after restore
-            const agentSessions = chatHistoryRepository.getSessionsForAgent(agentId, userId);
-            setSessions(agentSessions);
+          // Reload sessions after sync
+          const agentSessions = chatHistoryRepository.getSessionsForAgent(agentId, userId);
+          setSessions(agentSessions);
+
+          if (syncResult) {
+            setLastIpfsSync(syncResult);
           }
-
-          setLastIpfsSync(status.lastSync);
           setIsIpfsSyncing(false);
           console.log('[useChatHistory] IPFS sync initialized successfully');
         }

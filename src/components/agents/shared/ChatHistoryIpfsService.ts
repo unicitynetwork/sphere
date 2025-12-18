@@ -19,7 +19,7 @@ import { sha256 } from "@noble/hashes/sha256";
 import * as ed from "@noble/ed25519";
 import { sha512 } from "@noble/hashes/sha512";
 import type { PrivateKey } from "@libp2p/interface";
-import { getAllBackendGatewayUrls, IPNS_RESOLUTION_CONFIG } from "../../../config/ipfs.config";
+import { getAllBackendGatewayUrls } from "../../../config/ipfs.config";
 import type { ChatMessage } from "../../../hooks/useAgentChat";
 
 // Configure @noble/ed25519 to use sync sha512
@@ -298,6 +298,8 @@ export class ChatHistoryIpfsService {
       };
     }
 
+    console.log("[ChatHistoryIpfs] Attempting to restore from IPFS...");
+
     try {
       // Resolve IPNS to get latest CID
       const resolution = await this.resolveIpns();
@@ -305,9 +307,10 @@ export class ChatHistoryIpfsService {
         // Try local CID as fallback
         const localCid = this.getStoredCid();
         if (localCid) {
-          console.log("[ChatHistoryIpfs] IPNS resolution failed, trying local CID");
+          console.log(`[ChatHistoryIpfs] IPNS resolution failed, trying local CID: ${localCid.slice(0, 16)}...`);
           return this.restoreFromCid(localCid);
         }
+        console.log("[ChatHistoryIpfs] No IPNS record found and no local CID");
         return {
           success: false,
           timestamp: Date.now(),
@@ -315,8 +318,10 @@ export class ChatHistoryIpfsService {
         };
       }
 
+      console.log(`[ChatHistoryIpfs] IPNS resolved to CID: ${resolution.cid.slice(0, 16)}...`);
       return this.restoreFromCid(resolution.cid);
     } catch (error) {
+      console.error("[ChatHistoryIpfs] Restore error:", error);
       return {
         success: false,
         timestamp: Date.now(),
@@ -369,23 +374,33 @@ export class ChatHistoryIpfsService {
    */
   async sync(localSessions: ChatSessionData[]): Promise<{ sessions: ChatSessionData[]; synced: boolean }> {
     if (!this.isInitialized()) {
+      console.log("[ChatHistoryIpfs] Sync skipped - not initialized");
       return { sessions: localSessions, synced: false };
     }
+
+    console.log(`[ChatHistoryIpfs] Starting sync with ${localSessions.length} local sessions`);
 
     try {
       // Get remote data
       const restoreResult = await this.restore();
 
       if (!restoreResult.success || !restoreResult.sessions) {
+        console.log(`[ChatHistoryIpfs] No remote data found (error: ${restoreResult.error || 'none'})`);
         // No remote data, upload local
         if (localSessions.length > 0) {
+          console.log(`[ChatHistoryIpfs] Uploading ${localSessions.length} local sessions to IPFS`);
           await this.store(localSessions);
+        } else {
+          console.log("[ChatHistoryIpfs] No local sessions to upload");
         }
         return { sessions: localSessions, synced: true };
       }
 
+      console.log(`[ChatHistoryIpfs] Found ${restoreResult.sessions.length} remote sessions`);
+
       // Merge sessions
       const merged = this.mergeSessions(localSessions, restoreResult.sessions);
+      console.log(`[ChatHistoryIpfs] Merged to ${merged.length} sessions`);
 
       // Store merged result
       if (merged.length > 0) {
@@ -561,15 +576,25 @@ export class ChatHistoryIpfsService {
     if (!this.cachedIpnsName) return null;
 
     const gatewayUrls = getAllBackendGatewayUrls();
-    if (gatewayUrls.length === 0) return null;
+    if (gatewayUrls.length === 0) {
+      console.warn("[ChatHistoryIpfs] No gateways configured for IPNS resolution");
+      return null;
+    }
 
-    // Try fast gateway path first
-    for (const gatewayUrl of gatewayUrls) {
+    console.log(`[ChatHistoryIpfs] Resolving IPNS ${this.cachedIpnsName.slice(0, 16)}... via ${gatewayUrls.length} gateways`);
+
+    // Use shorter timeout for chat history - it's less critical than wallet
+    const CHAT_GATEWAY_TIMEOUT = 5000; // 5 seconds for gateway path
+    const CHAT_ROUTING_TIMEOUT = 10000; // 10 seconds for routing API (faster than wallet's 25s)
+
+    // Try fast gateway path first (all in parallel for speed)
+    const gatewayPromises = gatewayUrls.map(async (gatewayUrl) => {
       try {
+        const hostname = new URL(gatewayUrl).hostname;
         const response = await fetch(
           `${gatewayUrl}/ipns/${this.cachedIpnsName}?format=dag-json`,
           {
-            signal: AbortSignal.timeout(IPNS_RESOLUTION_CONFIG.gatewayPathTimeoutMs),
+            signal: AbortSignal.timeout(CHAT_GATEWAY_TIMEOUT),
             headers: { Accept: "application/vnd.ipld.dag-json, application/json" },
           }
         );
@@ -578,23 +603,34 @@ export class ChatHistoryIpfsService {
           const ipfsPath = response.headers.get("X-Ipfs-Path");
           const cidMatch = ipfsPath?.match(/^\/ipfs\/(.+)$/);
           if (cidMatch) {
-            console.log(`[ChatHistoryIpfs] IPNS resolved via gateway path: ${cidMatch[1].slice(0, 16)}...`);
+            console.log(`[ChatHistoryIpfs] IPNS resolved via gateway path (${hostname}): ${cidMatch[1].slice(0, 16)}...`);
             return { cid: cidMatch[1], sequence: 0n };
           }
         }
+        return null;
       } catch {
-        // Try next gateway
+        return null;
       }
+    });
+
+    // Race all gateway path requests
+    const gatewayResults = await Promise.all(gatewayPromises);
+    const gatewayResult = gatewayResults.find(r => r !== null);
+    if (gatewayResult) {
+      return gatewayResult;
     }
 
-    // Fallback to routing API for sequence info
-    for (const gatewayUrl of gatewayUrls) {
+    console.log("[ChatHistoryIpfs] Gateway path failed, trying routing API...");
+
+    // Fallback to routing API (also in parallel)
+    const routingPromises = gatewayUrls.map(async (gatewayUrl) => {
       try {
+        const hostname = new URL(gatewayUrl).hostname;
         const response = await fetch(
           `${gatewayUrl}/api/v0/routing/get?arg=/ipns/${this.cachedIpnsName}`,
           {
             method: "POST",
-            signal: AbortSignal.timeout(IPNS_RESOLUTION_CONFIG.perGatewayTimeoutMs),
+            signal: AbortSignal.timeout(CHAT_ROUTING_TIMEOUT),
           }
         );
 
@@ -605,16 +641,28 @@ export class ChatHistoryIpfsService {
             const record = unmarshalIPNSRecord(recordData);
             const cidMatch = record.value.match(/^\/ipfs\/(.+)$/);
             if (cidMatch) {
-              console.log(`[ChatHistoryIpfs] IPNS resolved via routing: ${cidMatch[1].slice(0, 16)}..., seq=${record.sequence}`);
+              console.log(`[ChatHistoryIpfs] IPNS resolved via routing API (${hostname}): ${cidMatch[1].slice(0, 16)}..., seq=${record.sequence}`);
               return { cid: cidMatch[1], sequence: record.sequence };
             }
           }
+        } else if (response.status === 500) {
+          // 500 error typically means IPNS record doesn't exist yet - this is normal for first sync
+          console.debug(`[ChatHistoryIpfs] Routing API ${hostname}: IPNS record not found (500)`);
         }
+        return null;
       } catch {
-        // Try next gateway
+        return null;
       }
+    });
+
+    // Race all routing API requests
+    const routingResults = await Promise.all(routingPromises);
+    const routingResult = routingResults.find(r => r !== null);
+    if (routingResult) {
+      return routingResult;
     }
 
+    console.log("[ChatHistoryIpfs] IPNS resolution failed on all gateways (record may not exist yet)");
     return null;
   }
 

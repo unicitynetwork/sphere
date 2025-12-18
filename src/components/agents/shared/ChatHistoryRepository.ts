@@ -330,7 +330,7 @@ export class ChatHistoryRepository {
       return agentId ? this.getSessionsForAgent(agentId, userId) : this.getAllSessions();
     }
 
-    let sessions = agentId ? this.getSessionsForAgent(agentId, userId) : this.getAllSessions();
+    const sessions = agentId ? this.getSessionsForAgent(agentId, userId) : this.getAllSessions();
 
     return sessions.filter(session => {
       // Check title and preview
