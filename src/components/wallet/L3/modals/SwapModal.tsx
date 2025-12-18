@@ -81,13 +81,10 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
       });
 
       // Step 2: Request swapped tokens from faucet
-      // Convert toAmount to human-readable number (not smallest unit)
-      const toAmountHumanReadable = Math.floor(exchangeInfo.toAmount);
-
       await FaucetService.requestTokens(
         nametag,
-        toAsset.name!.toLowerCase(), // Use symbol (bitcoin, ethereum, etc) not coinId
-        toAmountHumanReadable
+        toAsset.name!.toLowerCase(), // Use full coin name (bitcoin, ethereum, etc)
+        exchangeInfo.toAmount
       );
 
       setStep('success');
@@ -102,7 +99,14 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
     const temp = fromAsset;
     setFromAsset(toAsset);
     setToAsset(temp);
-    setFromAmount('');
+
+    // Transfer the "to" amount to "from" field (max 6 decimal places)
+    if (exchangeInfo && exchangeInfo.toAmount > 0) {
+      const roundedAmount = parseFloat(exchangeInfo.toAmount.toFixed(6));
+      setFromAmount(roundedAmount.toString());
+    } else {
+      setFromAmount('');
+    }
   };
 
   // Validate amount
@@ -158,9 +162,9 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
                 exit={{ opacity: 0 }}
               >
                 {/* FROM Section */}
-                <div className="bg-neutral-50 dark:bg-neutral-900/50 rounded-2xl p-3 sm:p-4 mb-2">
-                  <div className="flex justify-between items-center mb-3">
-                    <span className="text-xs text-neutral-500 dark:text-neutral-400">From</span>
+                <div className="mb-2">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">From</span>
                     {fromAsset && (
                       <span className="text-xs text-neutral-500 dark:text-neutral-400 truncate ml-2">
                         Balance: <span className="text-neutral-900 dark:text-white">{fromAsset.getFormattedAmount()}</span>
@@ -168,9 +172,10 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto">
+                  <div className="bg-neutral-50 dark:bg-neutral-900/50 rounded-2xl p-3 sm:p-4">
+                    <div className="flex items-center gap-2 sm:gap-3">
                     {/* Token Selector */}
-                    <div className="relative">
+                    <div className="relative shrink-0">
                       <button
                         onClick={() => setShowFromDropdown(!showFromDropdown)}
                         className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition-colors whitespace-nowrap"
@@ -183,37 +188,30 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
                         ) : (
                           <span className="text-neutral-500 text-sm sm:text-base">Select</span>
                         )}
-                        <ArrowDownUp className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-neutral-400 shrink-0" />
+                        <ArrowDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-neutral-400 shrink-0" />
                       </button>
 
                       {/* From Dropdown */}
                       {showFromDropdown && (
-                        <>
-                          {/* Backdrop to close dropdown */}
-                          <div
-                            className="fixed inset-0 z-40"
-                            onClick={() => setShowFromDropdown(false)}
-                          />
-                          <div className="absolute top-full left-0 mt-2 w-48 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl shadow-xl z-50 max-h-60 overflow-y-auto">
-                            {assets.map(asset => (
-                              <button
-                                key={asset.coinId}
-                                onClick={() => {
-                                  setFromAsset(asset);
-                                  setShowFromDropdown(false);
-                                  setFromAmount('');
-                                }}
-                                className="w-full flex items-center gap-3 p-3 hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition-colors text-left"
-                              >
-                                <img src={asset.iconUrl || ''} className="w-6 h-6 rounded-full" alt="" />
-                                <div className="flex-1 min-w-0">
-                                  <div className="text-neutral-900 dark:text-white font-medium text-sm truncate">{asset.symbol}</div>
-                                  <div className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{asset.getFormattedAmount()}</div>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        </>
+                        <div className="absolute top-full left-0 mt-2 w-48 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl shadow-xl z-60 max-h-48 overflow-y-auto">
+                          {assets.map(asset => (
+                            <button
+                              key={asset.coinId}
+                              onClick={() => {
+                                setFromAsset(asset);
+                                setShowFromDropdown(false);
+                                setFromAmount('');
+                              }}
+                              className="w-full flex items-center gap-3 p-3 hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition-colors text-left"
+                            >
+                              <img src={asset.iconUrl || ''} className="w-6 h-6 rounded-full" alt="" />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-neutral-900 dark:text-white font-medium text-sm truncate">{asset.symbol}</div>
+                                <div className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{asset.getFormattedAmount()}</div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
                       )}
                     </div>
 
@@ -228,27 +226,28 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
                     />
                   </div>
 
-                  {fromAsset && fromAmount && (
-                    <div className="mt-2 text-right text-xs text-neutral-500 dark:text-neutral-400">
-                      ≈ ${(parseFloat(fromAmount) * fromAsset.priceUsd).toFixed(2)}
-                    </div>
-                  )}
+                    {fromAsset && fromAmount && (
+                      <div className="mt-2 text-right text-xs text-neutral-500 dark:text-neutral-400">
+                        ≈ ${(parseFloat(fromAmount) * fromAsset.priceUsd).toFixed(2)}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Flip Button */}
-                <div className="flex justify-center -my-3 relative z-10">
+                <div className="flex justify-center items-center mt-4 mb-1 relative z-10">
                   <button
                     onClick={handleFlipAssets}
                     className="p-2 bg-white dark:bg-neutral-900 border-2 border-neutral-200 dark:border-neutral-700 rounded-full hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
                   >
-                    <ArrowDown className="w-5 h-5 text-neutral-600 dark:text-neutral-400" />
+                    <ArrowDownUp className="w-5 h-5 text-neutral-600 dark:text-neutral-400" />
                   </button>
                 </div>
 
                 {/* TO Section */}
-                <div className="bg-neutral-50 dark:bg-neutral-900/50 rounded-2xl p-3 sm:p-4 mt-2 mb-4">
-                  <div className="flex justify-between items-center mb-3">
-                    <span className="text-xs text-neutral-500 dark:text-neutral-400">To</span>
+                <div className="mb-4">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">To</span>
                     {toAsset && (
                       <span className="text-xs text-neutral-500 dark:text-neutral-400 truncate ml-2">
                         Balance: <span className="text-neutral-900 dark:text-white">{toAsset.getFormattedAmount()}</span>
@@ -256,9 +255,10 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto">
+                  <div className="bg-neutral-50 dark:bg-neutral-900/50 rounded-2xl p-3 sm:p-4">
+                    <div className="flex items-center gap-2 sm:gap-3">
                     {/* Token Selector */}
-                    <div className="relative">
+                    <div className="relative shrink-0">
                       <button
                         onClick={() => setShowToDropdown(!showToDropdown)}
                         className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition-colors whitespace-nowrap"
@@ -271,36 +271,29 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
                         ) : (
                           <span className="text-neutral-500 text-sm sm:text-base">Select</span>
                         )}
-                        <ArrowDownUp className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-neutral-400 shrink-0" />
+                        <ArrowDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-neutral-400 shrink-0" />
                       </button>
 
                       {/* To Dropdown */}
                       {showToDropdown && (
-                        <>
-                          {/* Backdrop to close dropdown */}
-                          <div
-                            className="fixed inset-0 z-40"
-                            onClick={() => setShowToDropdown(false)}
-                          />
-                          <div className="absolute top-full left-0 mt-2 w-48 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl shadow-xl z-50 max-h-60 overflow-y-auto">
-                            {assets.map(asset => (
-                              <button
-                                key={asset.coinId}
-                                onClick={() => {
-                                  setToAsset(asset);
-                                  setShowToDropdown(false);
-                                }}
-                                className="w-full flex items-center gap-3 p-3 hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition-colors text-left"
-                              >
-                                <img src={asset.iconUrl || ''} className="w-6 h-6 rounded-full" alt="" />
-                                <div className="flex-1 min-w-0">
-                                  <div className="text-neutral-900 dark:text-white font-medium text-sm truncate">{asset.symbol}</div>
-                                  <div className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{asset.getFormattedAmount()}</div>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        </>
+                        <div className="absolute bottom-full left-0 mb-2 w-48 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl shadow-xl z-60 max-h-48 overflow-y-auto">
+                          {assets.map(asset => (
+                            <button
+                              key={asset.coinId}
+                              onClick={() => {
+                                setToAsset(asset);
+                                setShowToDropdown(false);
+                              }}
+                              className="w-full flex items-center gap-3 p-3 hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition-colors text-left"
+                            >
+                              <img src={asset.iconUrl || ''} className="w-6 h-6 rounded-full" alt="" />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-neutral-900 dark:text-white font-medium text-sm truncate">{asset.symbol}</div>
+                                <div className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{asset.getFormattedAmount()}</div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
                       )}
                     </div>
 
@@ -310,11 +303,12 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
                     </div>
                   </div>
 
-                  {exchangeInfo && (
-                    <div className="mt-2 text-right text-xs text-neutral-500 dark:text-neutral-400">
-                      ≈ ${exchangeInfo.toValueUSD.toFixed(2)}
-                    </div>
-                  )}
+                    {exchangeInfo && (
+                      <div className="mt-2 text-right text-xs text-neutral-500 dark:text-neutral-400">
+                        ≈ ${exchangeInfo.toValueUSD.toFixed(2)}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Exchange Rate Info */}
