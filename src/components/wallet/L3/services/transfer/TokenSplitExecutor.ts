@@ -16,6 +16,9 @@ import { TokenCoinData } from "@unicitylabs/state-transition-sdk/lib/token/fungi
 import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment";
 import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
 import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenState";
+import { OutboxRepository } from "../../../../../repositories/OutboxRepository";
+import type { OutboxSplitGroup } from "../types/OutboxTypes";
+import { createOutboxEntry } from "../types/OutboxTypes";
 
 // === Helper Types ===
 
@@ -31,6 +34,10 @@ interface SplitTokenResult {
   tokenForRecipient: SdkToken<any>;
   tokenForSender: SdkToken<any>;
   recipientTransferTx: TransferTransaction;
+  /** Outbox entry ID for tracking Nostr delivery (if outbox enabled) */
+  outboxEntryId?: string;
+  /** Split group ID for recovery (if outbox enabled) */
+  splitGroupId?: string;
 }
 
 // === Helper: SHA-256 ===
@@ -53,12 +60,22 @@ export class TokenSplitExecutor {
     plan: SplitPlan,
     recipientAddress: IAddress,
     signingService: SigningService,
-    onTokenBurned: (uiId: string) => void
+    onTokenBurned: (uiId: string) => void,
+    /** Optional outbox context for tracking. If provided, creates outbox entries for recovery. */
+    outboxContext?: {
+      walletAddress: string;
+      recipientNametag: string;
+      recipientPubkey: string;
+    }
   ): Promise<{
     tokensForRecipient: SdkToken<any>[];
     tokensKeptBySender: SdkToken<any>[];
     burnedTokens: any[];
     recipientTransferTxs: TransferTransaction[];
+    /** Outbox entry IDs for tracking Nostr delivery (one per recipient token) */
+    outboxEntryIds: string[];
+    /** Split group ID for recovery */
+    splitGroupId?: string;
   }> {
     console.log(`⚙️ Executing split plan using TokenSplitBuilder...`);
 
@@ -67,6 +84,8 @@ export class TokenSplitExecutor {
       tokensKeptBySender: [] as SdkToken<any>[],
       burnedTokens: [] as any[],
       recipientTransferTxs: [] as TransferTransaction[],
+      outboxEntryIds: [] as string[],
+      splitGroupId: undefined as string | undefined,
     };
 
     if (
@@ -86,13 +105,22 @@ export class TokenSplitExecutor {
         recipientAddress,
         signingService,
         onTokenBurned,
-        plan.tokenToSplit.uiToken.id
+        plan.tokenToSplit.uiToken.id,
+        outboxContext
       );
 
       result.tokensForRecipient.push(splitResult.tokenForRecipient);
       result.tokensKeptBySender.push(splitResult.tokenForSender);
       result.burnedTokens.push(plan.tokenToSplit.uiToken);
       result.recipientTransferTxs.push(splitResult.recipientTransferTx);
+
+      // Track outbox entries for Nostr delivery
+      if (splitResult.outboxEntryId) {
+        result.outboxEntryIds.push(splitResult.outboxEntryId);
+      }
+      if (splitResult.splitGroupId) {
+        result.splitGroupId = splitResult.splitGroupId;
+      }
     }
 
     return result;
@@ -106,7 +134,12 @@ export class TokenSplitExecutor {
     recipientAddress: IAddress,
     signingService: SigningService,
     onTokenBurned: (uiId: string) => void,
-    uiTokenId: string
+    uiTokenId: string,
+    outboxContext?: {
+      walletAddress: string;
+      recipientNametag: string;
+      recipientPubkey: string;
+    }
   ): Promise<SplitTokenResult> {
     const tokenIdHex = Buffer.from(tokenToSplit.id.bytes).toString("hex");
     console.log(`🔪 Splitting token ${tokenIdHex.slice(0, 8)}...`);
@@ -114,6 +147,28 @@ export class TokenSplitExecutor {
     const builder = new TokenSplitBuilder();
 
     const seedString = `${tokenIdHex}_${splitAmount.toString()}_${remainderAmount.toString()}`;
+
+    // Initialize outbox tracking if context provided
+    let outboxRepo: OutboxRepository | null = null;
+    let splitGroupId: string | undefined;
+    let transferEntryId: string | undefined;
+
+    if (outboxContext) {
+      outboxRepo = OutboxRepository.getInstance();
+      outboxRepo.setCurrentAddress(outboxContext.walletAddress);
+
+      // Create a split group to track this operation
+      splitGroupId = crypto.randomUUID();
+      const splitGroup: OutboxSplitGroup = {
+        groupId: splitGroupId,
+        createdAt: Date.now(),
+        originalTokenId: uiTokenId,
+        seedString: seedString,
+        entryIds: [],
+      };
+      outboxRepo.createSplitGroup(splitGroup);
+      console.log(`📤 Outbox: Created split group ${splitGroupId.slice(0, 8)}...`);
+    }
 
     const recipientTokenId = new TokenId(await sha256(seedString));
     const senderTokenId = new TokenId(await sha256(seedString + "_sender"));
@@ -257,13 +312,49 @@ export class TokenSplitExecutor {
       signingService
     );
 
+    // Create outbox entry for transfer tracking BEFORE submitting
+    // This is critical for Nostr delivery recovery
+    if (outboxRepo && outboxContext && splitGroupId) {
+      const coinIdHex = Buffer.from(coinId.bytes).toString("hex");
+      const transferEntry = createOutboxEntry(
+        "SPLIT_TRANSFER",
+        uiTokenId,
+        outboxContext.recipientNametag,
+        outboxContext.recipientPubkey,
+        JSON.stringify((recipientAddress as any).toJSON ? (recipientAddress as any).toJSON() : recipientAddress),
+        splitAmount.toString(),
+        coinIdHex,
+        Buffer.from(transferSalt).toString("hex"),
+        JSON.stringify(recipientTokenBeforeTransfer.toJSON()),
+        JSON.stringify(transferCommitment.toJSON()),
+        splitGroupId,
+        3 // Index 3 = transfer phase (after burn=0, mint-sender=1, mint-recipient=2)
+      );
+
+      // Set status to READY_TO_SUBMIT since IPFS sync should happen at caller level
+      transferEntry.status = "READY_TO_SUBMIT";
+      outboxRepo.addEntry(transferEntry);
+      outboxRepo.addEntryToSplitGroup(splitGroupId, transferEntry.id);
+      transferEntryId = transferEntry.id;
+      console.log(`📤 Outbox: Added split transfer entry ${transferEntry.id.slice(0, 8)}...`);
+    }
+
     const transferRes = await this.client.submitTransferCommitment(transferCommitment);
 
     if (
       transferRes.status !== "SUCCESS" &&
       transferRes.status !== "REQUEST_ID_EXISTS"
     ) {
+      // Mark outbox entry as failed
+      if (outboxRepo && transferEntryId) {
+        outboxRepo.updateStatus(transferEntryId, "FAILED", `Transfer failed: ${transferRes.status}`);
+      }
       throw new Error(`Transfer failed: ${transferRes.status}`);
+    }
+
+    // Update outbox: submitted
+    if (outboxRepo && transferEntryId) {
+      outboxRepo.updateStatus(transferEntryId, "SUBMITTED");
     }
 
     const transferProof = await waitInclusionProof(
@@ -273,12 +364,24 @@ export class TokenSplitExecutor {
     );
 
     const transferTx = transferCommitment.toTransaction(transferProof);
+
+    // Update outbox: proof received (ready for Nostr delivery)
+    if (outboxRepo && transferEntryId) {
+      outboxRepo.updateEntry(transferEntryId, {
+        status: "PROOF_RECEIVED",
+        inclusionProofJson: JSON.stringify(transferProof.toJSON()),
+        transferTxJson: JSON.stringify(transferTx.toJSON()),
+      });
+    }
+
     console.log("✅ Split transfer complete!");
 
     return {
       tokenForRecipient: recipientTokenBeforeTransfer,
       tokenForSender: senderToken,
       recipientTransferTx: transferTx,
+      outboxEntryId: transferEntryId,
+      splitGroupId: splitGroupId,
     };
   }
 

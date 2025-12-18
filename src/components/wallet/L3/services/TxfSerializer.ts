@@ -11,10 +11,18 @@ import {
   type TxfToken,
   type TxfGenesis,
   type TxfTransaction,
+  type TombstoneEntry,
   isTokenKey,
+  isArchivedKey,
+  isForkedKey,
   tokenIdFromKey,
+  tokenIdFromArchivedKey,
+  parseForkedKey,
   keyFromTokenId,
+  archivedKeyFromTokenId,
+  forkedKeyFromTokenIdAndState,
 } from "./types/TxfTypes";
+import type { OutboxEntry } from "./types/OutboxTypes";
 import {
   safeParseTxfToken,
   safeParseTxfMeta,
@@ -41,7 +49,12 @@ export function tokenToTxf(token: Token): TxfToken | null {
 
     // Validate it has the expected TXF structure
     if (!txfData.genesis || !txfData.state) {
-      console.warn(`Token ${token.id} jsonData is not in TXF format`);
+      console.warn(`Token ${token.id} jsonData is not in TXF format`, {
+        hasGenesis: !!txfData.genesis,
+        hasState: !!txfData.state,
+        topLevelKeys: Object.keys(txfData),
+        genesisKeys: txfData.genesis ? Object.keys(txfData.genesis) : [],
+      });
       return null;
     }
 
@@ -153,7 +166,11 @@ export function txfToToken(tokenId: string, txf: TxfToken): Token {
 export function buildTxfStorageData(
   tokens: Token[],
   meta: Omit<TxfMeta, "formatVersion">,
-  nametag?: NametagData
+  nametag?: NametagData,
+  tombstones?: TombstoneEntry[],
+  archivedTokens?: Map<string, TxfToken>,
+  forkedTokens?: Map<string, TxfToken>,
+  outboxEntries?: OutboxEntry[]
 ): TxfStorageData {
   const storageData: TxfStorageData = {
     _meta: {
@@ -166,13 +183,41 @@ export function buildTxfStorageData(
     storageData._nametag = nametag;
   }
 
-  // Add each token with _<tokenId> key
+  // Add tombstones for spent token states (prevents zombie token resurrection)
+  if (tombstones && tombstones.length > 0) {
+    storageData._tombstones = tombstones;
+  }
+
+  // Add outbox entries (CRITICAL for transfer recovery)
+  if (outboxEntries && outboxEntries.length > 0) {
+    storageData._outbox = outboxEntries;
+  }
+
+  // Add each active token with _<tokenId> key
   for (const token of tokens) {
     const txf = tokenToTxf(token);
     if (txf) {
       // Use the token's actual ID from genesis data
       const actualTokenId = txf.genesis.data.tokenId;
       storageData[keyFromTokenId(actualTokenId)] = txf;
+    }
+  }
+
+  // Add archived tokens with _archived_<tokenId> key
+  if (archivedTokens && archivedTokens.size > 0) {
+    for (const [tokenId, txf] of archivedTokens) {
+      storageData[archivedKeyFromTokenId(tokenId)] = txf;
+    }
+  }
+
+  // Add forked tokens with _forked_<tokenId>_<stateHash> key
+  if (forkedTokens && forkedTokens.size > 0) {
+    for (const [key, txf] of forkedTokens) {
+      // Key is already in format tokenId_stateHash
+      const [tokenId, stateHash] = key.split("_");
+      if (tokenId && stateHash) {
+        storageData[forkedKeyFromTokenIdAndState(tokenId, stateHash)] = txf;
+      }
     }
   }
 
@@ -186,17 +231,29 @@ export function parseTxfStorageData(data: unknown): {
   tokens: Token[];
   meta: TxfMeta | null;
   nametag: NametagData | null;
+  tombstones: TombstoneEntry[];
+  archivedTokens: Map<string, TxfToken>;
+  forkedTokens: Map<string, TxfToken>;
+  outboxEntries: OutboxEntry[];
   validationErrors: string[];
 } {
   const result: {
     tokens: Token[];
     meta: TxfMeta | null;
     nametag: NametagData | null;
+    tombstones: TombstoneEntry[];
+    archivedTokens: Map<string, TxfToken>;
+    forkedTokens: Map<string, TxfToken>;
+    outboxEntries: OutboxEntry[];
     validationErrors: string[];
   } = {
     tokens: [],
     meta: null,
     nametag: null,
+    tombstones: [],
+    archivedTokens: new Map(),
+    forkedTokens: new Map(),
+    outboxEntries: [],
     validationErrors: [],
   };
 
@@ -226,8 +283,47 @@ export function parseTxfStorageData(data: unknown): {
     result.nametag = storageData._nametag as NametagData;
   }
 
-  // Extract and validate tokens using Zod
+  // Extract tombstones (state-hash-aware entries)
+  if (storageData._tombstones && Array.isArray(storageData._tombstones)) {
+    for (const entry of storageData._tombstones) {
+      // Parse TombstoneEntry objects (new format)
+      if (
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as TombstoneEntry).tokenId === "string" &&
+        typeof (entry as TombstoneEntry).stateHash === "string" &&
+        typeof (entry as TombstoneEntry).timestamp === "number"
+      ) {
+        result.tombstones.push(entry as TombstoneEntry);
+      }
+      // Legacy string format: discard (no state hash info)
+      // Per migration strategy: start fresh with state-hash-aware tombstones
+    }
+  }
+
+  // Extract outbox entries (CRITICAL for transfer recovery)
+  if (storageData._outbox && Array.isArray(storageData._outbox)) {
+    for (const entry of storageData._outbox) {
+      // Basic validation for OutboxEntry structure
+      if (
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as OutboxEntry).id === "string" &&
+        typeof (entry as OutboxEntry).status === "string" &&
+        typeof (entry as OutboxEntry).sourceTokenId === "string" &&
+        typeof (entry as OutboxEntry).salt === "string" &&
+        typeof (entry as OutboxEntry).commitmentJson === "string"
+      ) {
+        result.outboxEntries.push(entry as OutboxEntry);
+      } else {
+        result.validationErrors.push("Invalid outbox entry structure");
+      }
+    }
+  }
+
+  // Extract and validate all keys
   for (const key of Object.keys(storageData)) {
+    // Active tokens: _<tokenId>
     if (isTokenKey(key)) {
       const tokenId = tokenIdFromKey(key);
       const validation = validateTokenEntry(key, storageData[key]);
@@ -251,6 +347,34 @@ export function parseTxfStorageData(data: unknown): {
           }
         } catch {
           // Skip invalid token
+        }
+      }
+    }
+    // Archived tokens: _archived_<tokenId>
+    else if (isArchivedKey(key)) {
+      const tokenId = tokenIdFromArchivedKey(key);
+      try {
+        const txfToken = storageData[key] as TxfToken;
+        if (txfToken?.genesis?.data?.tokenId) {
+          result.archivedTokens.set(tokenId, txfToken);
+        }
+      } catch {
+        result.validationErrors.push(`Archived token ${tokenId}: invalid structure`);
+      }
+    }
+    // Forked tokens: _forked_<tokenId>_<stateHash>
+    else if (isForkedKey(key)) {
+      const parsed = parseForkedKey(key);
+      if (parsed) {
+        try {
+          const txfToken = storageData[key] as TxfToken;
+          if (txfToken?.genesis?.data?.tokenId) {
+            // Store with key format tokenId_stateHash (matching WalletRepository format)
+            const mapKey = `${parsed.tokenId}_${parsed.stateHash}`;
+            result.forkedTokens.set(mapKey, txfToken);
+          }
+        } catch {
+          result.validationErrors.push(`Forked token ${parsed.tokenId}: invalid structure`);
         }
       }
     }
@@ -354,6 +478,34 @@ export function getTokenId(token: Token): string {
     }
   }
   return token.id;
+}
+
+/**
+ * Get the current state hash from a TXF token
+ * - If no transactions: use genesis state hash
+ * - If has transactions: use newStateHash from last transaction
+ */
+export function getCurrentStateHash(txf: TxfToken): string {
+  if (txf.transactions.length === 0) {
+    // No transfers yet - use genesis state hash
+    return txf.genesis.inclusionProof.authenticator.stateHash;
+  }
+  // Use newStateHash from the most recent transaction
+  return txf.transactions[txf.transactions.length - 1].newStateHash;
+}
+
+/**
+ * Get current state hash from a Token object (parses jsonData)
+ */
+export function getCurrentStateHashFromToken(token: Token): string | null {
+  if (!token.jsonData) return null;
+
+  try {
+    const txf = JSON.parse(token.jsonData) as TxfToken;
+    return getCurrentStateHash(txf);
+  } catch {
+    return null;
+  }
 }
 
 /**

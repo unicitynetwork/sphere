@@ -156,7 +156,6 @@ function replaceMathPlaceholders(
 // Parse inline markdown and HTML (bold, italic, code, br, links, images, plain URLs)
 function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   // FIRST PASS: Handle escape sequences (e.g., \* should become just *)
-  // Process common escaped markdown characters
   const unescapedText = text.replace(/\\([*_`[\]()#+-.|!\\])/g, '$1');
 
   // SECOND PASS: Extract inline math and replace with safe tokens that won't be matched by markdown regex
@@ -180,7 +179,7 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   let key = 0;
 
   // THIRD PASS: Process markdown - math placeholders won't be captured by markdown patterns
-  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(([^\s)]+)(?:\s+"([^"]+)")?\)|!\[([^\]]*)\]\(([^)]+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"]))/gi;
+  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(((?:[^\s()]|\([^\s)]*\))+)(?:\s+"([^"]+)")?\)|!\[([^\]]*)\]\(((?:[^()]|\([^)]*\))+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"]))/gi;
   let lastIndex = 0;
   let match;
 
@@ -302,12 +301,14 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   return parts.length > 0 ? parts : [text];
 }
 
-// Helper function to split table row by | while respecting quoted strings (for tooltips)
+// Helper function to split table row by | while respecting escaped | and links
 function splitTableRow(line: string): string[] {
   const cells: string[] = [];
   let currentCell = '';
   let inQuotes = false;
   let escaped = false;
+  let bracketDepth = 0;  // Track depth of [ ] for nested brackets
+  let inLinkParen = false;  // Track if we're inside (...) part of a link
 
   for (let i = 0; i < line.length; i++) {
     const char = line[i];
@@ -324,13 +325,35 @@ function splitTableRow(line: string): string[] {
       continue;
     }
 
-    if (char === '"') {
+    if (char === '[') {
+      bracketDepth++;
+      currentCell += char;
+      continue;
+    }
+
+    if (char === ']' && bracketDepth > 0) {
+      bracketDepth--;
+      currentCell += char;
+      if (bracketDepth === 0 && i + 1 < line.length && line[i + 1] === '(') {
+        inLinkParen = true;
+      }
+      continue;
+    }
+
+    if (char === '"' && (inLinkParen || inQuotes)) {
       inQuotes = !inQuotes;
       currentCell += char;
       continue;
     }
 
-    if (char === '|' && !inQuotes) {
+    if (char === ')' && inLinkParen && !inQuotes) {
+      inLinkParen = false;
+      currentCell += char;
+      continue;
+    }
+
+    // Only split on | when not inside brackets, link parens, or quotes
+    if (char === '|' && !inQuotes && bracketDepth === 0 && !inLinkParen) {
       cells.push(currentCell);
       currentCell = '';
       continue;

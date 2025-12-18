@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Shield, AlertCircle } from "lucide-react";
+import { Shield, AlertCircle, FileJson } from "lucide-react";
 
 interface SaveWalletModalProps {
   show: boolean;
   onConfirm: (filename: string, password?: string) => void;
   onCancel: () => void;
+  /** Whether mnemonic is available (shows indicator) */
+  hasMnemonic?: boolean;
 }
 
-export function SaveWalletModal({ show, onConfirm, onCancel }: SaveWalletModalProps) {
+export function SaveWalletModal({ show, onConfirm, onCancel, hasMnemonic }: SaveWalletModalProps) {
   const [filename, setFilename] = useState("alpha_wallet_backup");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
@@ -75,9 +77,24 @@ export function SaveWalletModal({ show, onConfirm, onCancel }: SaveWalletModalPr
           </motion.div>
           <h3 className="text-neutral-900 dark:text-white text-xl font-bold mb-2">Backup Wallet</h3>
           <p className="text-xs text-neutral-500 dark:text-neutral-400">
-            Export your wallet keys to a file. Keep this safe!
+            Export your wallet keys to a JSON file. Keep this safe!
           </p>
         </motion.div>
+
+        {/* Format indicator */}
+        <div className="flex items-center justify-center gap-2 mb-4 p-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+          <FileJson className="w-4 h-4 text-blue-500" />
+          <span className="text-sm text-blue-500 font-medium">JSON Format</span>
+          {hasMnemonic && (
+            <span className="text-[10px] bg-green-500/20 text-green-500 px-1.5 py-0.5 rounded">
+              +mnemonic
+            </span>
+          )}
+        </div>
+
+        <p className="text-[10px] text-neutral-400 mb-4 text-center">
+          Includes verification address{hasMnemonic ? " and recovery phrase" : ""}
+        </p>
 
         <label className="text-xs text-neutral-500 mb-1 block">
           Filename
