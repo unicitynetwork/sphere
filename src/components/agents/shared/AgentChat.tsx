@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
-import { Plus, X, PanelLeftClose, Search, Trash2, Clock, MessageSquare, Activity, ChevronDown, Cloud, CloudOff, RefreshCw } from 'lucide-react';
+import { Plus, X, PanelLeftClose, Search, Trash2, Clock, MessageSquare, Activity, ChevronDown, Cloud, Check, Loader2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../../config/activities';
 import { useAgentChat, type ChatMessage } from '../../../hooks/useAgentChat';
@@ -7,6 +7,7 @@ import { useWallet } from '../../wallet/L3/hooks/useWallet';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatHeader, ChatBubble, ChatInput, QuickActions } from './index';
 import { useChatHistory } from './useChatHistory';
+import type { SyncStep } from './ChatHistoryIpfsService';
 
 // Generic sidebar item (for custom agent-specific items like bets, purchases, orders)
 export interface SidebarItem {
@@ -115,33 +116,10 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
   const currentNametag = useRef<string | null>(null);
   const lastSavedMessagesRef = useRef<string>('');
 
-  // Get nametag and seed phrase from wallet for user identification and IPFS sync
-  const { nametag, getSeedPhrase } = useWallet();
-  const [seedPhrase, setSeedPhrase] = useState<string | undefined>(undefined);
-
-  // Load seed phrase for IPFS sync
-  useEffect(() => {
-    if (!nametag) {
-      setSeedPhrase(undefined);
-      return;
-    }
-
-    const loadSeed = async () => {
-      try {
-        const seed = await getSeedPhrase();
-        if (seed) {
-          setSeedPhrase(seed.join(' '));
-        }
-      } catch (error) {
-        console.warn('[AgentChat] Failed to get seed phrase for IPFS sync:', error);
-      }
-    };
-
-    loadSeed();
-  }, [nametag, getSeedPhrase]);
+  // Get nametag from wallet for user identification
+  const { nametag } = useWallet();
 
   // Chat history hook - bound to nametag so each user has their own history
-  // Enable IPFS sync when seed phrase is available
   const {
     sessions,
     currentSession,
@@ -151,16 +129,11 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     resetCurrentSession,
     saveCurrentMessages,
     searchSessions,
-    ipfsSyncEnabled,
-    isIpfsSyncing,
-    lastIpfsSync,
-    forceIpfsSync,
+    syncStatus,
   } = useChatHistory({
     agentId: agent.id,
     userId: nametag ?? undefined,
-    seedPhrase,
     enabled: !!nametag, // Only enable when user has a nametag
-    enableIpfsSync: !!seedPhrase, // Enable IPFS sync when seed phrase is available
   });
 
   // Filter sessions based on search
@@ -482,6 +455,45 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     return new Date(timestamp).toLocaleDateString();
   };
 
+  // Get sync step display info
+  const getSyncStepInfo = (step: SyncStep): { label: string; icon: ReactNode; color: string } => {
+    switch (step) {
+      case 'initializing':
+        return { label: 'Initializing...', icon: <Loader2 className="w-3 h-3 animate-spin" />, color: 'text-blue-500' };
+      case 'resolving-ipns':
+        return { label: 'Looking up...', icon: <Cloud className="w-3 h-3" />, color: 'text-blue-500' };
+      case 'fetching-content':
+        return { label: 'Downloading...', icon: <Cloud className="w-3 h-3" />, color: 'text-blue-500' };
+      case 'importing-data':
+        return { label: 'Importing...', icon: <Loader2 className="w-3 h-3 animate-spin" />, color: 'text-blue-500' };
+      case 'building-data':
+        return { label: 'Preparing...', icon: <Loader2 className="w-3 h-3 animate-spin" />, color: 'text-amber-500' };
+      case 'uploading':
+        return { label: 'Uploading...', icon: <Cloud className="w-3 h-3" />, color: 'text-amber-500' };
+      case 'publishing-ipns':
+        return { label: 'Publishing...', icon: <Cloud className="w-3 h-3" />, color: 'text-amber-500' };
+      case 'complete':
+        return { label: 'Synced', icon: <Check className="w-3 h-3" />, color: 'text-green-500' };
+      case 'error':
+        return { label: 'Sync error', icon: <AlertCircle className="w-3 h-3" />, color: 'text-red-500' };
+      case 'idle':
+      default:
+        return { label: 'Synced', icon: <Check className="w-3 h-3" />, color: 'text-neutral-400' };
+    }
+  };
+
+  // Render sync status indicator (always visible)
+  const renderSyncIndicator = () => {
+    const { label, icon, color } = getSyncStepInfo(syncStatus.step);
+
+    return (
+      <div className={`flex items-center gap-1.5 text-xs ${color} px-2 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800/50`}>
+        {icon}
+        <span>{syncStatus.progress || label}</span>
+      </div>
+    );
+  };
+
   // Render left sidebar with tabs (history and activity)
   const renderHistorySidebar = () => {
 
@@ -575,43 +587,10 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
                   </AnimatePresence>
                 </div>
               ) : (
-                <div className="flex items-center gap-2">
-                  <h3 className="text-neutral-900 dark:text-white font-medium flex items-center gap-2">
-                    <Clock className="w-4 h-4" />
-                    Chat History
-                  </h3>
-                  {/* IPFS sync indicator */}
-                  {ipfsSyncEnabled && (
-                    <motion.button
-                      onClick={forceIpfsSync}
-                      disabled={isIpfsSyncing}
-                      className={`p-1 rounded transition-colors ${
-                        isIpfsSyncing
-                          ? 'text-blue-500 animate-pulse'
-                          : lastIpfsSync?.success
-                            ? 'text-green-500 hover:text-green-600'
-                            : 'text-neutral-400 hover:text-neutral-600'
-                      }`}
-                      title={
-                        isIpfsSyncing
-                          ? 'Syncing...'
-                          : lastIpfsSync?.success
-                            ? `Synced: ${new Date(lastIpfsSync.timestamp).toLocaleTimeString()}`
-                            : 'Click to sync'
-                      }
-                      whileHover={{ scale: 1.1 }}
-                      whileTap={{ scale: 0.9 }}
-                    >
-                      {isIpfsSyncing ? (
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                      ) : lastIpfsSync?.success ? (
-                        <Cloud className="w-4 h-4" />
-                      ) : (
-                        <CloudOff className="w-4 h-4" />
-                      )}
-                    </motion.button>
-                  )}
-                </div>
+                <h3 className="text-neutral-900 dark:text-white font-medium flex items-center gap-2">
+                  <Clock className="w-4 h-4" />
+                  Chat History
+                </h3>
               )}
 
               <div className="flex items-center gap-1">
@@ -662,6 +641,15 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
               </div>
             )}
           </div>
+
+          {/* Sync status indicator */}
+          <AnimatePresence>
+            {syncStatus.step !== 'idle' && (!sidebarConfig || sidebarTab === 'history') && (
+              <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800/50">
+                {renderSyncIndicator()}
+              </div>
+            )}
+          </AnimatePresence>
 
           {/* Content based on tab */}
           {(!sidebarConfig || sidebarTab === 'history') ? (
