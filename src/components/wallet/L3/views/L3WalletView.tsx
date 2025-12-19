@@ -1,4 +1,4 @@
-import { Plus, ArrowUpRight, Sparkles, Loader2, Coins, Layers, Bell, CheckCircle, XCircle, Key, Download, Upload, Clock } from 'lucide-react';
+import { Plus, ArrowUpRight, ArrowDownUp, Sparkles, Loader2, Coins, Layers, Bell, CheckCircle, XCircle, Key, Download, Upload, Clock } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
@@ -6,6 +6,7 @@ import { useWallet } from '../hooks/useWallet';
 import { CreateWalletFlow } from '../onboarding/CreateWalletFlow';
 import { TokenRow } from '../../shared/components';
 import { SendModal } from '../modals/SendModal';
+import { SwapModal } from '../modals/SwapModal';
 import { useIncomingPaymentRequests } from '../hooks/useIncomingPaymentRequests';
 import { PaymentRequestsModal } from '../modals/PaymentRequestModal';
 import { FaucetService } from '../services/FaucetService';
@@ -20,6 +21,7 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
   const { exportTxf, importTxf, isExportingTxf, isImportingTxf, isSyncing, isEnabled: isIpfsEnabled } = useIpfsStorage();
   const [activeTab, setActiveTab] = useState<Tab>('assets');
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+  const [isSwapModalOpen, setIsSwapModalOpen] = useState(false);
   const [isRequestsOpen, setIsRequestsOpen] = useState(false);
   const [isSeedPhraseOpen, setIsSeedPhraseOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -209,23 +211,23 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
         </div>
 
         {/* L2 Actions - Speed focused */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <motion.button
             whileHover={{ scale: isFaucetLoading ? 1 : 1.02, y: isFaucetLoading ? 0 : -2 }}
             whileTap={{ scale: isFaucetLoading ? 1 : 0.98 }}
             onClick={handleTopUp}
             disabled={isFaucetLoading || !nametag}
-            className="relative px-4 py-3 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 text-white text-sm shadow-xl shadow-orange-500/20 flex items-center justify-center gap-2 overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
+            className="relative px-3 py-3 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 text-white text-sm shadow-xl shadow-orange-500/20 flex items-center justify-center gap-2 overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isFaucetLoading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Requesting...</span>
+                <span className="hidden sm:inline">Requesting...</span>
               </>
             ) : faucetSuccess ? (
               <>
                 <CheckCircle className="w-4 h-4" />
-                <span>Success!</span>
+                <span className="hidden sm:inline">Success!</span>
               </>
             ) : (
               <>
@@ -238,8 +240,18 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
           <motion.button
             whileHover={{ scale: 1.02, y: -2 }}
             whileTap={{ scale: 0.98 }}
+            onClick={() => setIsSwapModalOpen(true)}
+            className="relative px-3 py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2"
+          >
+            <ArrowDownUp className="w-4 h-4" />
+            <span>Swap</span>
+          </motion.button>
+
+          <motion.button
+            whileHover={{ scale: 1.02, y: -2 }}
+            whileTap={{ scale: 0.98 }}
             onClick={() => setIsSendModalOpen(true)}
-            className="relative px-4 py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2"
+            className="relative px-3 py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2"
           >
             <ArrowUpRight className="w-4 h-4" />
             <span>Send</span>
@@ -432,6 +444,8 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
         </div>
       </div>
       <SendModal isOpen={isSendModalOpen} onClose={() => setIsSendModalOpen(false)} />
+
+      <SwapModal isOpen={isSwapModalOpen} onClose={() => setIsSwapModalOpen(false)} />
 
       <PaymentRequestsModal isOpen={isRequestsOpen} onClose={() => setIsRequestsOpen(false)} />
 
