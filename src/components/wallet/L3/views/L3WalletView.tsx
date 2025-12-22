@@ -1,4 +1,4 @@
-import { Plus, ArrowUpRight, Sparkles, Loader2, Coins, Layers, Bell, CheckCircle, XCircle, Key, Download, Upload, Clock } from 'lucide-react';
+import { Plus, ArrowUpRight, ArrowDownUp, Sparkles, Loader2, Coins, Layers, Bell, CheckCircle, XCircle, Key, Download, Upload, Clock } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
@@ -6,6 +6,7 @@ import { useWallet } from '../hooks/useWallet';
 import { CreateWalletFlow } from '../onboarding/CreateWalletFlow';
 import { TokenRow } from '../../shared/components';
 import { SendModal } from '../modals/SendModal';
+import { SwapModal } from '../modals/SwapModal';
 import { useIncomingPaymentRequests } from '../hooks/useIncomingPaymentRequests';
 import { PaymentRequestsModal } from '../modals/PaymentRequestModal';
 import { FaucetService } from '../services/FaucetService';
@@ -17,9 +18,10 @@ type Tab = 'assets' | 'tokens';
 
 export function L3WalletView({ showBalances }: { showBalances: boolean }) {
   const { identity, assets, tokens, isLoadingAssets, isLoadingIdentity, nametag, getSeedPhrase } = useWallet();
-  const { exportTxf, importTxf, isExportingTxf, isImportingTxf } = useIpfsStorage();
+  const { exportTxf, importTxf, isExportingTxf, isImportingTxf, isSyncing, isEnabled: isIpfsEnabled } = useIpfsStorage();
   const [activeTab, setActiveTab] = useState<Tab>('assets');
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+  const [isSwapModalOpen, setIsSwapModalOpen] = useState(false);
   const [isRequestsOpen, setIsRequestsOpen] = useState(false);
   const [isSeedPhraseOpen, setIsSeedPhraseOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -29,6 +31,8 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
   const [faucetError, setFaucetError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [initialSyncComplete, setInitialSyncComplete] = useState(false);
+  const hasSyncStarted = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { pendingCount } = useIncomingPaymentRequests();
@@ -43,9 +47,28 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
     prevPendingCount.current = pendingCount;
   }, [pendingCount]);
 
+  // Track when initial IPFS sync completes (latches true after first sync has ended)
+  useEffect(() => {
+    // Track when sync starts
+    if (isSyncing && isIpfsEnabled) {
+      hasSyncStarted.current = true;
+      console.log(`🔄 L3WalletView: sync started, hasSyncStarted=true`);
+    }
+    // Only mark complete after sync has started AND then stopped
+    if (!isSyncing && isIpfsEnabled && !initialSyncComplete && hasSyncStarted.current) {
+      console.log(`🔄 L3WalletView: sync completed, marking initialSyncComplete=true`);
+      setInitialSyncComplete(true);
+    }
+  }, [isSyncing, isIpfsEnabled, initialSyncComplete]);
+
+
   const totalValue = useMemo(() => {
     return assets.reduce((sum, asset) => sum + asset.getTotalFiatValue('USD'), 0);
   }, [assets]);
+
+  // Debug: Log spinner visibility conditions
+  const shouldShowSpinner = isSyncing && isIpfsEnabled && !initialSyncComplete;
+  console.log(`🔄 L3WalletView render: isSyncing=${isSyncing}, isIpfsEnabled=${isIpfsEnabled}, initialSyncComplete=${initialSyncComplete}, shouldShowSpinner=${shouldShowSpinner}`);
 
   const handleTopUp = async () => {
     if (!nametag) {
@@ -80,6 +103,8 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
     if (phrase) {
       setSeedPhrase(phrase);
       setIsSeedPhraseOpen(true);
+    } else {
+      alert("Recovery phrase not available.\n\nThis wallet was imported from a file that doesn't contain a mnemonic phrase. Only the master key was imported.");
     }
   };
 
@@ -174,30 +199,35 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
             </div>
         </div>
 
-        <h2 className="text-3xl text-neutral-900 dark:text-white font-bold tracking-tight mb-4">
-          {showBalances
-            ? `$${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-            : '••••••'}
-        </h2>
+        <div className="flex items-center gap-2 mb-4">
+          <h2 className="text-3xl text-neutral-900 dark:text-white font-bold tracking-tight">
+            {showBalances
+              ? `$${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : '••••••'}
+          </h2>
+          {isSyncing && isIpfsEnabled && (
+            <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+          )}
+        </div>
 
         {/* L2 Actions - Speed focused */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <motion.button
             whileHover={{ scale: isFaucetLoading ? 1 : 1.02, y: isFaucetLoading ? 0 : -2 }}
             whileTap={{ scale: isFaucetLoading ? 1 : 0.98 }}
             onClick={handleTopUp}
             disabled={isFaucetLoading || !nametag}
-            className="relative px-4 py-3 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 text-white text-sm shadow-xl shadow-orange-500/20 flex items-center justify-center gap-2 overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
+            className="relative px-3 py-3 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 text-white text-sm shadow-xl shadow-orange-500/20 flex items-center justify-center gap-2 overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isFaucetLoading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Requesting...</span>
+                <span className="hidden sm:inline">Requesting...</span>
               </>
             ) : faucetSuccess ? (
               <>
                 <CheckCircle className="w-4 h-4" />
-                <span>Success!</span>
+                <span className="hidden sm:inline">Success!</span>
               </>
             ) : (
               <>
@@ -210,8 +240,18 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
           <motion.button
             whileHover={{ scale: 1.02, y: -2 }}
             whileTap={{ scale: 0.98 }}
+            onClick={() => setIsSwapModalOpen(true)}
+            className="relative px-3 py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2"
+          >
+            <ArrowDownUp className="w-4 h-4" />
+            <span>Swap</span>
+          </motion.button>
+
+          <motion.button
+            whileHover={{ scale: 1.02, y: -2 }}
+            whileTap={{ scale: 0.98 }}
             onClick={() => setIsSendModalOpen(true)}
-            className="relative px-4 py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2"
+            className="relative px-3 py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2"
           >
             <ArrowUpRight className="w-4 h-4" />
             <span>Send</span>
@@ -332,66 +372,80 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
           )}
         </AnimatePresence>
 
-        {isLoadingAssets ? (
-          <div className="py-10 text-center">
-            <Loader2 className="w-6 h-6 text-orange-500 animate-spin mx-auto" />
-          </div>
-        ) : (
-          <AnimatePresence mode="wait">
-            {activeTab === 'assets' && (
-              /* ASSETS VIEW */
-              <motion.div
-                key="assets"
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
-                transition={{ duration: 0.2 }}
-                className="space-y-2"
-              >
-                {assets.length === 0 ? (
-                  <EmptyState />
-                ) : (
-                  assets.map((asset, index) => (
-                    <AssetRow
-                      key={asset.coinId}
-                      asset={asset}
-                      showBalances={showBalances}
-                      delay={index * 0.05}
-                    />
-                  ))
-                )}
-              </motion.div>
-            )}
-
-            {activeTab === 'tokens' && (
-              <motion.div
-                key="tokens"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.2 }}
-                className="space-y-2"
-              >
-                {tokens.filter(t => t.type !== 'Nametag').length === 0 ? (
-                  <EmptyState text="No individual tokens found." />
-                ) : (
-                  tokens
-                    .filter(t => t.type !== 'Nametag')
-                    .sort((a, b) => b.timestamp - a.timestamp)
-                    .map((token, index) => (
-                      <TokenRow
-                        key={token.id}
-                        token={token}
+        <div className="relative min-h-[200px]">
+          {isLoadingAssets ? (
+            <div className="py-10 text-center">
+              <Loader2 className="w-6 h-6 text-orange-500 animate-spin mx-auto" />
+            </div>
+          ) : (
+            <AnimatePresence mode="wait">
+              {activeTab === 'assets' && (
+                /* ASSETS VIEW */
+                <motion.div
+                  key="assets"
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 20 }}
+                  transition={{ duration: 0.2 }}
+                  className="space-y-2"
+                >
+                  {assets.length === 0 ? (
+                    <EmptyState />
+                  ) : (
+                    assets.map((asset, index) => (
+                      <AssetRow
+                        key={asset.coinId}
+                        asset={asset}
+                        showBalances={showBalances}
                         delay={index * 0.05}
                       />
                     ))
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        )}
+                  )}
+                </motion.div>
+              )}
+
+              {activeTab === 'tokens' && (
+                <motion.div
+                  key="tokens"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ duration: 0.2 }}
+                  className="space-y-2"
+                >
+                  {tokens.filter(t => t.type !== 'Nametag').length === 0 ? (
+                    <EmptyState text="No individual tokens found." />
+                  ) : (
+                    tokens
+                      .filter(t => t.type !== 'Nametag')
+                      .sort((a, b) => b.timestamp - a.timestamp)
+                      .map((token, index) => (
+                        <TokenRow
+                          key={token.id}
+                          token={token}
+                          delay={index * 0.05}
+                        />
+                      ))
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          )}
+
+          {/* Overlay spinner for initial IPFS sync */}
+          {isSyncing && isIpfsEnabled && !initialSyncComplete && (
+            <div className="absolute inset-0 bg-white/80 dark:bg-black/80 flex items-center justify-center rounded-lg z-10">
+              <div className="flex flex-col items-center gap-2">
+                <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+                <span className="text-sm text-neutral-600 dark:text-neutral-400">Syncing from fog...</span>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
       <SendModal isOpen={isSendModalOpen} onClose={() => setIsSendModalOpen(false)} />
+
+      <SwapModal isOpen={isSwapModalOpen} onClose={() => setIsSwapModalOpen(false)} />
 
       <PaymentRequestsModal isOpen={isRequestsOpen} onClose={() => setIsRequestsOpen(false)} />
 

@@ -29,16 +29,26 @@ export function useIpfsStorage() {
   const queryClient = useQueryClient();
   const [lastEvent, setLastEvent] = useState<StorageEvent | null>(null);
   const [isServiceReady, setIsServiceReady] = useState(false);
+  const [isSyncingRealtime, setIsSyncingRealtime] = useState(false);
 
-  const isEnabled = import.meta.env.VITE_ENABLE_IPFS === 'true';
+  // IPFS is always enabled since useWallet starts the service unconditionally
+  // The env var VITE_ENABLE_IPFS is checked elsewhere but useWallet starts IPFS regardless
+  const isEnabled = true;
 
-  // Get storage service instance (only if enabled)
-  const storageService = isEnabled ? IpfsStorageService.getInstance(identityManager) : null;
+  // Get storage service instance - useWallet will have started this
+  const storageService = IpfsStorageService.getInstance(identityManager);
 
   // Listen for storage events
   useEffect(() => {
+    console.log(`🔄 useIpfsStorage: setting up event listener`);
     const handleEvent = (e: CustomEvent<StorageEvent>) => {
       setLastEvent(e.detail);
+
+      // Handle real-time sync state changes for immediate UI updates
+      if (e.detail.type === "sync:state-changed" && e.detail.data?.isSyncing !== undefined) {
+        console.log(`🔄 useIpfsStorage: received sync:state-changed, isSyncing=${e.detail.data.isSyncing}`);
+        setIsSyncingRealtime(e.detail.data.isSyncing);
+      }
 
       // Invalidate status query on storage completion
       if (
@@ -66,6 +76,11 @@ export function useIpfsStorage() {
     if (!storageService) return;
     storageService.startAutoSync();
     setIsServiceReady(true);
+
+    // Initialize sync state from service (in case sync already started before hook mounted)
+    const currentSyncState = storageService.isCurrentlySyncing();
+    console.log(`🔄 useIpfsStorage: initializing sync state to ${currentSyncState}`);
+    setIsSyncingRealtime(currentSyncState);
 
     return () => {
       // Note: Don't shutdown on unmount as service is singleton
@@ -224,7 +239,7 @@ export function useIpfsStorage() {
 
     // Sync operations
     sync: syncMutation.mutateAsync,
-    isSyncing: syncMutation.isPending || (storageService?.isCurrentlySyncing() ?? false),
+    isSyncing: syncMutation.isPending || isSyncingRealtime || (storageService?.isCurrentlySyncing() ?? false),
     syncError: syncMutation.error,
 
     // Restore operations

@@ -1,7 +1,7 @@
 import { ExternalLink } from 'lucide-react';
 import type { AgentConfig } from '../../config/activities';
 import { mockGames, type GameInfo } from '../../data/agentsMockData';
-import { AgentChat, type SidebarItem, type AgentMessage } from './shared';
+import { AgentChat, type AgentMessage } from './shared';
 import { isMock } from '../../hooks/useAgentChat';
 
 interface GamesChatProps {
@@ -12,9 +12,6 @@ interface GamesChatProps {
 interface GamesCardData {
   games: GameInfo[];
 }
-
-// Placeholder type for sidebar item (not used but required by generic)
-type NoSidebarItem = SidebarItem;
 
 export function GamesChat({ agent }: GamesChatProps) {
   const isMockMode = isMock();
@@ -52,7 +49,7 @@ export function GamesChat({ agent }: GamesChatProps) {
   };
 
   return (
-    <AgentChat<GamesCardData, NoSidebarItem>
+    <AgentChat<GamesCardData>
       agent={agent}
       processMessage={processMessage}
       renderMessageCard={(cardData) => (

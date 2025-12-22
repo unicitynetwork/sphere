@@ -12,8 +12,8 @@ import { loadWalletFromStorage } from "./storage";
 // Same session key as L3 (from useWallet.ts)
 const SESSION_KEY = "user-pin-1234";
 
-// L3 selected address index storage key
-const SELECTED_INDEX_KEY = "l3_selected_address_index";
+// L3 selected address path storage key - PATH is the ONLY reliable identifier
+const SELECTED_PATH_KEY = "l3_selected_address_path";
 
 /**
  * Load wallet from UnifiedKeyManager and convert to L1 Wallet interface
@@ -47,26 +47,29 @@ export async function loadWalletFromUnifiedKeyManager(): Promise<Wallet | null> 
     return null;
   }
 
-  // Get selected address index (same as L3 uses)
-  const selectedIndex = parseInt(
-    localStorage.getItem(SELECTED_INDEX_KEY) || "0",
-    10
-  );
+  // Get selected address path (same as L3 uses) - PATH is the ONLY reliable identifier
+  const selectedPath = localStorage.getItem(SELECTED_PATH_KEY);
 
-  // Derive addresses up to selected index
-  const addresses: WalletAddress[] = [];
-  for (let i = 0; i <= selectedIndex; i++) {
-    const derived = keyManager.deriveAddress(i);
-    addresses.push({
-      address: derived.l1Address,
-      publicKey: derived.publicKey,
-      privateKey: derived.privateKey,
-      path: derived.path,
-      index: i,
-    });
-  }
+  // Get base path for default address derivation
+  const basePath = keyManager.getBasePath();
+  const defaultPath = `${basePath}/0/0`;  // First external address
+
+  // Derive the selected address (or default if none selected)
+  const targetPath = selectedPath || defaultPath;
+  const derived = keyManager.deriveAddressFromPath(targetPath);
+
+  // Build addresses array with just the selected address
+  // Additional addresses will be added from storage or scanning
+  const addresses: WalletAddress[] = [{
+    address: derived.l1Address,
+    publicKey: derived.publicKey,
+    privateKey: derived.privateKey,
+    path: derived.path,
+    index: derived.index,
+  }];
 
   // Build L1 Wallet from UnifiedKeyManager data
+  // Use derived address directly instead of addresses[0] for clarity
   const wallet: Wallet = {
     masterPrivateKey: masterKey,
     chainCode: chainCode || undefined,
@@ -74,7 +77,7 @@ export async function loadWalletFromUnifiedKeyManager(): Promise<Wallet | null> 
     createdAt: Date.now(),
     isImportedAlphaWallet: walletInfo.source === "file",
     isBIP32: walletInfo.derivationMode === "bip32",
-    childPrivateKey: addresses[0]?.privateKey || null,
+    childPrivateKey: derived.privateKey || null,
   };
 
   return wallet;

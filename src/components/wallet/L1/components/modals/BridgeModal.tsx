@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowRight,
@@ -142,19 +142,7 @@ export function BridgeModal({
   const [balanceInfo, setBalanceInfo] = useState<BalanceInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Check balance when modal opens
-  useEffect(() => {
-    if (show && address) {
-      checkBalance();
-    } else {
-      // Reset state when modal closes
-      setStatus("idle");
-      setBalanceInfo(null);
-      setError(null);
-      setUnicityId("");
-    }
-  }, [show, address]);
-
-  const checkBalance = async () => {
+  const checkBalance = useCallback(async () => {
     setStatus("checking");
     setError(null);
 
@@ -187,7 +175,19 @@ export function BridgeModal({
           (err instanceof Error ? err.message : String(err))
       );
     }
-  };
+  }, [address]);
+
+  useEffect(() => {
+    if (show && address) {
+      checkBalance();
+    } else {
+      // Reset state when modal closes
+      setStatus("idle");
+      setBalanceInfo(null);
+      setError(null);
+      setUnicityId("");
+    }
+  }, [show, address, checkBalance]);
 
   const handleBridge = async () => {
     if (!unicityId.trim()) {

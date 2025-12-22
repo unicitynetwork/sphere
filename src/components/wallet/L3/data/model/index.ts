@@ -265,9 +265,14 @@ export class TransactionEvent {
 // 6. User Identity & Wallet
 // ==========================================
 
+/**
+ * User identity for L3 Unicity wallet.
+ *
+ * NOTE: The wallet address is derived using UnmaskedPredicateReference (no nonce/salt).
+ * This creates a stable, reusable DirectAddress from publicKey + tokenType.
+ */
 export interface UserIdentity {
     privateKey: string;
-    nonce: string;
     publicKey: string;
     address: string;
     nametag?: string; // Optional field for local storage convenience

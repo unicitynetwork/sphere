@@ -200,6 +200,10 @@ export function useL1Wallet(selectedAddress?: string) {
   // Mutation: Create new wallet via UnifiedKeyManager
   const createWalletMutation = useMutation({
     mutationFn: async () => {
+      // Clear all wallet data first (ensures clean slate)
+      UnifiedKeyManager.clearAll();
+
+      // Generate new wallet
       const keyManager = getUnifiedKeyManager();
       await keyManager.generateNew(12);
       // Load the wallet from UnifiedKeyManager
@@ -227,6 +231,9 @@ export function useL1Wallet(selectedAddress?: string) {
       file: File;
       password?: string;
     }) => {
+      // Clear all wallet data first (ensures clean slate)
+      UnifiedKeyManager.clearAll();
+
       const keyManager = getUnifiedKeyManager();
 
       // Read file content
@@ -272,15 +279,10 @@ export function useL1Wallet(selectedAddress?: string) {
   // Mutation: Delete wallet via UnifiedKeyManager
   const deleteWalletMutation = useMutation({
     mutationFn: async () => {
-      // 1. Clear UnifiedKeyManager localStorage and reset singleton
-      const keyManager = getUnifiedKeyManager();
-      keyManager.clear();
-      UnifiedKeyManager.resetInstance();
+      // Clear all wallet data
+      UnifiedKeyManager.clearAll();
 
-      // 2. Clear IdentityManager selected index
-      localStorage.removeItem("l3_selected_address_index");
-
-      // 3. Reset WalletRepository in-memory state (keeps localStorage intact for tokens/nametags)
+      // Reset WalletRepository in-memory state (keeps localStorage intact for tokens/nametags)
       WalletRepository.getInstance().resetInMemoryState();
     },
     onSuccess: () => {

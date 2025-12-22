@@ -105,7 +105,6 @@ export const TxfTokenSchema = z.object({
 
 export const TxfMetaSchema = z.object({
   version: z.number().int().nonnegative(),
-  timestamp: z.number(),
   address: z.string(),
   ipnsName: z.string(),
   formatVersion: z.literal("2.0"),
