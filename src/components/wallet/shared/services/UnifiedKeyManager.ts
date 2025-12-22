@@ -771,6 +771,53 @@ export class UnifiedKeyManager {
     // Also clear transaction history
     localStorage.removeItem("unicity_transaction_history");
 
+    // Clear chat history (localStorage only, NO IPFS sync)
+    // We don't want to propagate chat deletion to other devices when user deletes wallet
+    // We clear directly here instead of calling repository methods to avoid circular dependencies
+    console.log("🔐 Clearing chat history (localStorage only, no IPFS sync)...");
+
+    // Clear chat sessions and messages
+    const chatSessionsKey = "sphere_agent_chat_sessions";
+    const chatSessionsRaw = localStorage.getItem(chatSessionsKey);
+    if (chatSessionsRaw) {
+      try {
+        const sessions = JSON.parse(chatSessionsRaw);
+        // Remove all message stores
+        if (Array.isArray(sessions)) {
+          sessions.forEach((session: { id: string }) => {
+            localStorage.removeItem(`sphere_agent_chat_messages:${session.id}`);
+          });
+          console.log(`🔐 Cleared ${sessions.length} chat sessions and messages`);
+        }
+      } catch (err) {
+        console.warn("🔐 Failed to parse chat sessions:", err);
+      }
+    }
+    localStorage.removeItem(chatSessionsKey);
+
+    // Clear chat tombstones
+    localStorage.removeItem("sphere_agent_chat_tombstones");
+
+    // Clear chat IPFS state (version counters, CIDs, sequence numbers)
+    // We scan all keys to find IPFS-related chat storage keys
+    const chatIpfsKeys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (
+        key.startsWith("ipfs_chat_version_") ||
+        key.startsWith("ipfs_chat_cid_") ||
+        key.startsWith("ipfs_chat_seq_")
+      )) {
+        chatIpfsKeys.push(key);
+      }
+    }
+    for (const key of chatIpfsKeys) {
+      localStorage.removeItem(key);
+    }
+    if (chatIpfsKeys.length > 0) {
+      console.log(`🔐 Cleared ${chatIpfsKeys.length} chat IPFS state keys`);
+    }
+
     // Reset singleton instance
     if (UnifiedKeyManager.instance) {
       UnifiedKeyManager.instance.mnemonic = null;

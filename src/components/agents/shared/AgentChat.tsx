@@ -1,22 +1,39 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
-import { Plus, Eye, X, Wallet, CheckCircle, PanelLeftClose } from 'lucide-react';
+import { Plus, X, PanelLeftClose, Search, Trash2, Clock, MessageSquare, Activity, ChevronDown, Cloud, Check, Loader2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../../config/activities';
-import { useAgentChat } from '../../../hooks/useAgentChat';
+import { useAgentChat, type ChatMessage } from '../../../hooks/useAgentChat';
 import { useWallet } from '../../wallet/L3/hooks/useWallet';
 import { v4 as uuidv4 } from 'uuid';
-import { ChatContainer, ChatHeader, ChatBubble, ChatInput, QuickActions } from './index';
+import { ChatHeader, ChatBubble, ChatInput, QuickActions } from './index';
+import { useChatHistory } from './useChatHistory';
+import type { SyncState } from './useChatHistorySync';
 
-// Generic sidebar item
+// Generic sidebar item (for custom agent-specific items like bets, purchases, orders)
 export interface SidebarItem {
   id: string;
   title: string;
+  subtitle?: string;
   image?: string;
+  icon?: ReactNode;
   timestamp: number;
-  status: string;
-  amount?: number;
+  status?: string;
+  amount?: string;
   [key: string]: unknown;
 }
+
+// Configuration for the custom sidebar content (optional - each agent defines their own)
+export interface SidebarConfig<TItem extends SidebarItem> {
+  title: string;
+  emptyText: string;
+  emptyIcon?: ReactNode;
+  items: TItem[];
+  renderItem: (item: TItem, onClick: () => void) => ReactNode;
+  onItemClick?: (item: TItem) => void;
+}
+
+// Sidebar tab type
+type SidebarTab = 'history' | 'activity';
 
 // Extended message with optional card data
 export interface AgentMessage<TCardData = unknown> {
@@ -29,44 +46,14 @@ export interface AgentMessage<TCardData = unknown> {
   showActionButton?: boolean;
 }
 
-// Configuration for the sidebar (optional)
-interface SidebarConfig<TItem extends SidebarItem> {
-  title: string;
-  emptyText: string;
-  emptyIcon: ReactNode;
-  items: TItem[];
-  setItems: React.Dispatch<React.SetStateAction<TItem[]>>;
-  renderItem: (item: TItem) => ReactNode;
-  storageKey: string;
-}
-
 // Configuration for action button in messages
 interface ActionConfig<TCardData> {
   label: string | ((data: TCardData) => string);
   onAction: (data: TCardData) => void;
 }
 
-// Configuration for transaction modal
-interface TransactionConfig<TCardData> {
-  confirmTitle: string;
-  processingText: string;
-  successText: string;
-  renderConfirmContent?: (data: TCardData, onConfirm: () => void) => ReactNode;
-  onConfirm: (data: TCardData) => Promise<SidebarItem>;
-}
-
-// Configuration for details modal
-interface DetailsConfig<TItem extends SidebarItem> {
-  title: string;
-  renderContent: (item: TItem) => ReactNode;
-  renderActions?: (item: TItem, onClose: () => void) => ReactNode;
-}
-
-interface AgentChatProps<TCardData, TItem extends SidebarItem> {
+interface AgentChatProps<TCardData, TItem extends SidebarItem = SidebarItem> {
   agent: AgentConfig;
-
-  // Sidebar (optional - if not provided, renders without sidebar)
-  sidebarConfig?: SidebarConfig<TItem>;
 
   // Mock response handler (for sidebar-based agents that don't use real backend)
   getMockResponse?: (
@@ -83,12 +70,6 @@ interface AgentChatProps<TCardData, TItem extends SidebarItem> {
   // Action button
   actionConfig?: ActionConfig<TCardData>;
 
-  // Transaction modal (optional)
-  transactionConfig?: TransactionConfig<TCardData>;
-
-  // Details modal (optional)
-  detailsConfig?: DetailsConfig<TItem>;
-
   // Additional message actions
   renderMessageActions?: (message: AgentMessage<TCardData>) => ReactNode;
 
@@ -97,44 +78,69 @@ interface AgentChatProps<TCardData, TItem extends SidebarItem> {
 
   // Background gradient colors
   bgGradient?: { from: string; to: string };
+
+  // Custom sidebar configuration (bets, purchases, orders, etc.)
+  // Each agent can provide their own items and rendering
+  sidebarConfig?: SidebarConfig<TItem>;
 }
 
-export function AgentChat<TCardData, TItem extends SidebarItem>({
+export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
   agent,
-  sidebarConfig,
   getMockResponse,
   processMessage,
   renderMessageCard,
   actionConfig,
-  transactionConfig,
-  detailsConfig,
   renderMessageActions,
   additionalContent,
   bgGradient = { from: 'bg-indigo-500/5', to: 'bg-cyan-500/5' },
+  sidebarConfig,
 }: AgentChatProps<TCardData, TItem>) {
   const [input, setInput] = useState('');
   const [extendedMessages, setExtendedMessages] = useState<AgentMessage<TCardData>[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isMockTyping, setIsMockTyping] = useState(false);
 
-  // Transaction modal state
-  const [showTransactionModal, setShowTransactionModal] = useState(false);
-  const [pendingCardData, setPendingCardData] = useState<TCardData | null>(null);
-  const [transactionStep, setTransactionStep] = useState<'confirm' | 'processing' | 'success'>('confirm');
-
-  // Details modal state
-  const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<TItem | null>(null);
+  // Sidebar state (left sidebar for chat history and activity)
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('history');
+  const [showTabSelector, setShowTabSelector] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const hasGreeted = useRef(false);
   const currentAgentId = useRef(agent.id);
+  const currentNametag = useRef<string | null>(null);
+  const lastSavedMessagesRef = useRef<string>('');
 
   // Get nametag from wallet for user identification
   const { nametag } = useWallet();
+
+  // Chat history hook - bound to nametag so each user has their own history
+  const {
+    sessions,
+    currentSession,
+    loadSession,
+    deleteSession,
+    clearAllHistory,
+    resetCurrentSession,
+    saveCurrentMessages,
+    searchSessions,
+    syncState,
+    justDeleted,
+  } = useChatHistory({
+    agentId: agent.id,
+    userId: nametag ?? undefined,
+    enabled: !!nametag, // Only enable when user has a nametag
+  });
+
+  // Filter sessions based on search
+  const filteredSessions = searchQuery.trim()
+    ? searchSessions(searchQuery)
+    : sessions;
 
   // Use the agent chat hook for streaming support
   const {
@@ -184,11 +190,26 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
       setExtendedMessages([]);
       setInput('');
       hasGreeted.current = false;
+      lastSavedMessagesRef.current = '';
       if (!useMockMode) {
         setMessages([]);
       }
     }
   }, [agent.id, setMessages, useMockMode]);
+
+  // Reset state when nametag changes (user switches account)
+  useEffect(() => {
+    if (currentNametag.current !== nametag) {
+      currentNametag.current = nametag ?? null;
+      setExtendedMessages([]);
+      setInput('');
+      hasGreeted.current = false;
+      lastSavedMessagesRef.current = '';
+      if (!useMockMode) {
+        setMessages([]);
+      }
+    }
+  }, [nametag, setMessages, useMockMode]);
 
   // Sync messages from useAgentChat hook (for non-mock mode)
   useEffect(() => {
@@ -212,12 +233,34 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
     });
   }, [messages, useMockMode, processMessage]);
 
-  // Save sidebar items to localStorage
+  // Auto-save chat history when messages change (debounced)
   useEffect(() => {
-    if (sidebarConfig) {
-      localStorage.setItem(sidebarConfig.storageKey, JSON.stringify(sidebarConfig.items));
-    }
-  }, [sidebarConfig?.items, sidebarConfig?.storageKey, sidebarConfig]);
+    if (isTyping) return;
+
+    // Filter out greeting messages for saving
+    const messagesToSave = extendedMessages.filter(m => m.id !== 'greeting' && m.content.trim());
+    if (messagesToSave.length === 0) return;
+
+    // Create a simple hash of messages to detect changes
+    const messagesHash = JSON.stringify(messagesToSave.map(m => ({ id: m.id, content: m.content })));
+    if (messagesHash === lastSavedMessagesRef.current) return;
+
+    // Debounce the save
+    const timeoutId = setTimeout(() => {
+      // Convert AgentMessage to ChatMessage format for storage
+      const chatMessages: ChatMessage[] = messagesToSave.map(m => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        timestamp: m.timestamp,
+        thinking: m.thinking,
+      }));
+      saveCurrentMessages(chatMessages);
+      lastSavedMessagesRef.current = messagesHash;
+    }, 1000);
+
+    return () => clearTimeout(timeoutId);
+  }, [extendedMessages, isTyping, saveCurrentMessages]);
 
   // Greeting message
   useEffect(() => {
@@ -333,27 +376,9 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
   };
 
   const handleAction = (cardData: TCardData) => {
-    if (transactionConfig) {
-      setPendingCardData(cardData);
-      setTransactionStep('confirm');
-      setShowTransactionModal(true);
-    } else if (actionConfig) {
+    if (actionConfig) {
       actionConfig.onAction(cardData);
     }
-  };
-
-  const handleConfirmTransaction = async () => {
-    if (!pendingCardData || !transactionConfig || !sidebarConfig) return;
-
-    setTransactionStep('processing');
-    const newItem = await transactionConfig.onConfirm(pendingCardData);
-    sidebarConfig.setItems(prev => [newItem as TItem, ...prev]);
-    setTransactionStep('success');
-  };
-
-  const handleCloseSuccessModal = () => {
-    setShowTransactionModal(false);
-    setPendingCardData(null);
   };
 
   const handleNewChat = () => {
@@ -362,13 +387,51 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
       setMessages([]);
     }
     hasGreeted.current = false;
+    lastSavedMessagesRef.current = '';
+    // Reset current session so a new one is created when first message is saved
+    resetCurrentSession();
   };
 
-  const handleItemClick = (item: TItem) => {
-    if (detailsConfig) {
-      setSelectedItem(item);
-      setShowDetailsModal(true);
+  // Load a previous chat session
+  const handleLoadSession = useCallback((sessionId: string) => {
+    const sessionMessages = loadSession(sessionId);
+    if (sessionMessages.length > 0) {
+      // Convert ChatMessage to AgentMessage format
+      const agentMessages: AgentMessage<TCardData>[] = sessionMessages.map(m => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        timestamp: m.timestamp,
+        thinking: m.thinking,
+      }));
+      setExtendedMessages(agentMessages);
+
+      if (!useMockMode) {
+        setMessages(sessionMessages);
+      }
+
+      hasGreeted.current = true;
+      lastSavedMessagesRef.current = JSON.stringify(sessionMessages.map(m => ({ id: m.id, content: m.content })));
+
+      // Close sidebar on mobile
+      setSidebarOpen(false);
     }
+  }, [loadSession, setMessages, useMockMode]);
+
+  const handleDeleteSession = (sessionId: string) => {
+    deleteSession(sessionId);
+    setShowDeleteConfirm(null);
+
+    // If we deleted the current session, start a new chat
+    if (currentSession?.id === sessionId) {
+      handleNewChat();
+    }
+  };
+
+  const handleClearAllHistory = () => {
+    clearAllHistory();
+    setShowClearAllConfirm(false);
+    handleNewChat();
   };
 
   const getActionLabel = (cardData: TCardData): string => {
@@ -378,9 +441,121 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
       : actionConfig.label;
   };
 
-  // Render sidebar if config provided
-  const renderSidebar = () => {
-    if (!sidebarConfig) return null;
+  // Format relative time for session display
+  const formatRelativeTime = (timestamp: number): string => {
+    const now = Date.now();
+    const diff = now - timestamp;
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return new Date(timestamp).toLocaleDateString();
+  };
+
+  // Get sync display info based on detailed step from IPFS service
+  const getSyncDisplayInfo = (state: SyncState): { label: string; icon: ReactNode; color: string } => {
+    // Use detailed step for more granular status
+    switch (state.currentStep) {
+      case 'initializing':
+        return {
+          label: 'Initializing...',
+          icon: <Loader2 className="w-3 h-3 animate-spin" />,
+          color: 'text-blue-500'
+        };
+      case 'resolving-ipns':
+        return {
+          label: 'Looking up...',
+          icon: <Cloud className="w-3 h-3" />,
+          color: 'text-blue-500'
+        };
+      case 'fetching-content':
+        return {
+          label: 'Downloading...',
+          icon: <Cloud className="w-3 h-3 animate-pulse" />,
+          color: 'text-blue-500'
+        };
+      case 'importing-data':
+        return {
+          label: 'Importing...',
+          icon: <Loader2 className="w-3 h-3 animate-spin" />,
+          color: 'text-blue-500'
+        };
+      case 'building-data':
+        return {
+          label: 'Preparing...',
+          icon: <Loader2 className="w-3 h-3 animate-spin" />,
+          color: 'text-amber-500'
+        };
+      case 'uploading':
+        return {
+          label: 'Uploading...',
+          icon: <Cloud className="w-3 h-3 animate-pulse" />,
+          color: 'text-amber-500'
+        };
+      case 'publishing-ipns':
+        return {
+          label: 'Publishing...',
+          icon: <Cloud className="w-3 h-3 animate-pulse" />,
+          color: 'text-amber-500'
+        };
+      case 'complete':
+        return {
+          label: 'Synced',
+          icon: <Check className="w-3 h-3" />,
+          color: 'text-green-500'
+        };
+      case 'error':
+        return {
+          label: 'Sync error',
+          icon: <AlertCircle className="w-3 h-3" />,
+          color: 'text-red-500'
+        };
+      case 'idle':
+      default:
+        // Check TanStack Query states for additional context
+        if (state.isError) {
+          return {
+            label: 'Sync error',
+            icon: <AlertCircle className="w-3 h-3" />,
+            color: 'text-red-500'
+          };
+        }
+        return {
+          label: 'Synced',
+          icon: <Check className="w-3 h-3" />,
+          color: 'text-neutral-400'
+        };
+    }
+  };
+
+  // Render sync status indicator (always visible)
+  const renderSyncIndicator = () => {
+    // Show success message after deletion
+    if (justDeleted) {
+      return (
+        <div className="flex items-center gap-1.5 text-xs text-green-500 px-2 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800/50">
+          <Check className="w-3 h-3" />
+          <span>Successfully deleted</span>
+        </div>
+      );
+    }
+
+    const { label, icon, color } = getSyncDisplayInfo(syncState);
+
+    return (
+      <div className={`flex items-center gap-1.5 text-xs ${color} px-2 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800/50`}>
+        {icon}
+        <span>{syncState.stepProgress || label}</span>
+      </div>
+    );
+  };
+
+  // Render left sidebar with tabs (history and activity)
+  const renderHistorySidebar = () => {
 
     return (
       <>
@@ -399,25 +574,97 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
 
         {/* Sidebar */}
         <div className={`
-          w-56 border-r border-neutral-200 dark:border-neutral-800/50 flex flex-col z-50 overflow-hidden
+          w-64 border-r border-neutral-200 dark:border-neutral-800/50 flex flex-col z-50 overflow-hidden
           absolute lg:relative inset-y-0 left-0
           transform transition-all duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-          ${sidebarCollapsed ? 'lg:w-0 lg:border-0 lg:min-w-0' : 'lg:w-56'}
+          ${sidebarCollapsed ? 'lg:w-0 lg:border-0 lg:min-w-0' : 'lg:w-64'}
           bg-white/95 dark:bg-neutral-900/95 lg:bg-transparent dark:lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none rounded-l-3xl lg:rounded-none
         `}>
+          {/* Header with tabs */}
           <div className="p-4 border-b border-neutral-200 dark:border-neutral-800/50">
-            <div className="flex items-center justify-between">
-              <h3 className="text-neutral-900 dark:text-white font-medium">{sidebarConfig.title}</h3>
-              <div className="flex items-center gap-2">
-                <motion.button
-                  onClick={handleNewChat}
-                  className={`p-2 rounded-lg bg-linear-to-br ${agent.color} text-white`}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <Plus className="w-4 h-4" />
-                </motion.button>
+            <div className="flex items-center justify-between mb-3">
+              {/* Title with dropdown selector if sidebarConfig is provided */}
+              {sidebarConfig ? (
+                <div className="relative">
+                  <button
+                    onClick={() => setShowTabSelector(!showTabSelector)}
+                    className="text-neutral-900 dark:text-white font-medium flex items-center gap-2 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+                  >
+                    {sidebarTab === 'history' ? (
+                      <>
+                        <Clock className="w-4 h-4" />
+                        Chat History
+                      </>
+                    ) : (
+                      <>
+                        <Activity className="w-4 h-4" />
+                        {sidebarConfig.title}
+                      </>
+                    )}
+                    <ChevronDown className={`w-4 h-4 transition-transform ${showTabSelector ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {/* Dropdown menu */}
+                  <AnimatePresence>
+                    {showTabSelector && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -5 }}
+                        className="absolute top-full left-0 mt-1 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg overflow-hidden z-10 min-w-[160px]"
+                      >
+                        <button
+                          onClick={() => {
+                            setSidebarTab('history');
+                            setShowTabSelector(false);
+                          }}
+                          className={`w-full px-3 py-2 text-sm text-left flex items-center gap-2 transition-colors ${
+                            sidebarTab === 'history'
+                              ? 'bg-neutral-100 dark:bg-neutral-700 text-neutral-900 dark:text-white'
+                              : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-700/50'
+                          }`}
+                        >
+                          <Clock className="w-4 h-4" />
+                          Chat History
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSidebarTab('activity');
+                            setShowTabSelector(false);
+                          }}
+                          className={`w-full px-3 py-2 text-sm text-left flex items-center gap-2 transition-colors ${
+                            sidebarTab === 'activity'
+                              ? 'bg-neutral-100 dark:bg-neutral-700 text-neutral-900 dark:text-white'
+                              : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-700/50'
+                          }`}
+                        >
+                          <Activity className="w-4 h-4" />
+                          {sidebarConfig.title}
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              ) : (
+                <h3 className="text-neutral-900 dark:text-white font-medium flex items-center gap-2">
+                  <Clock className="w-4 h-4" />
+                  Chat History
+                </h3>
+              )}
+
+              <div className="flex items-center gap-1">
+                {sidebarTab === 'history' && (
+                  <motion.button
+                    onClick={handleNewChat}
+                    className={`p-2 rounded-lg bg-linear-to-br ${agent.color} text-white`}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    title="New chat"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </motion.button>
+                )}
                 {/* Collapse button for desktop */}
                 <motion.button
                   onClick={() => setSidebarCollapsed(true)}
@@ -439,32 +686,203 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
                 </motion.button>
               </div>
             </div>
-          </div>
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-2">
-            {sidebarConfig.items.length === 0 ? (
-              <div className="text-center text-neutral-500 py-8">
-                {sidebarConfig.emptyIcon}
-                <p className="text-sm mt-2">{sidebarConfig.emptyText}</p>
+            {/* Search - only for history tab (or when no sidebarConfig) */}
+            {(!sidebarConfig || sidebarTab === 'history') && (
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search history..."
+                  className="w-full pl-9 pr-3 py-2 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700/50 rounded-lg text-sm text-neutral-900 dark:text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-300 dark:focus:ring-neutral-600"
+                />
               </div>
-            ) : (
-              sidebarConfig.items.map((item) => (
-                <motion.div
-                  key={item.id}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  onClick={() => handleItemClick(item)}
-                  className="p-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700/30 cursor-pointer hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors group"
-                >
-                  <div className="flex items-center gap-3">
-                    {sidebarConfig.renderItem(item)}
-                    <Eye className="w-4 h-4 text-neutral-400 dark:text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                </motion.div>
-              ))
             )}
           </div>
+
+          {/* Sync status indicator - show when syncing or always in history tab */}
+          {(!sidebarConfig || sidebarTab === 'history') && (
+            <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800/50">
+              {renderSyncIndicator()}
+            </div>
+          )}
+
+          {/* Content based on tab */}
+          {(!sidebarConfig || sidebarTab === 'history') ? (
+            <>
+              {/* Sessions list */}
+              <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                {filteredSessions.length === 0 ? (
+                  <div className="text-center text-neutral-500 py-8">
+                    <MessageSquare className="w-8 h-8 mx-auto opacity-50 mb-2" />
+                    <p className="text-sm">
+                      {searchQuery ? 'No matching conversations' : 'No chat history yet'}
+                    </p>
+                  </div>
+                ) : (
+                  filteredSessions.map((session) => (
+                    <motion.div
+                      key={session.id}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className={`
+                        p-3 rounded-xl cursor-pointer transition-colors group relative
+                        ${currentSession?.id === session.id
+                          ? 'bg-neutral-200 dark:bg-neutral-700/50 border border-neutral-300 dark:border-neutral-600'
+                          : 'bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700/30 hover:bg-neutral-200 dark:hover:bg-neutral-700/50'
+                        }
+                      `}
+                      onClick={() => handleLoadSession(session.id)}
+                    >
+                      <div className="pr-8">
+                        <p className="text-neutral-900 dark:text-white text-sm font-medium truncate">
+                          {session.title}
+                        </p>
+                        <p className="text-neutral-500 text-xs truncate mt-1">
+                          {session.preview || 'No preview'}
+                        </p>
+                        <div className="flex items-center gap-2 mt-2 text-xs text-neutral-400">
+                          <Clock className="w-3 h-3" />
+                          <span>{formatRelativeTime(session.updatedAt)}</span>
+                          <span>·</span>
+                          <span>{session.messageCount} messages</span>
+                        </div>
+                      </div>
+
+                      {/* Delete button */}
+                      <motion.button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowDeleteConfirm(session.id);
+                        }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-red-500 hover:bg-red-500/10 transition-all"
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.9 }}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </motion.button>
+                    </motion.div>
+                  ))
+                )}
+              </div>
+
+              {/* Footer - clear all history */}
+              {sessions.length > 0 && (
+                <div className="p-3 border-t border-neutral-200 dark:border-neutral-800/50">
+                  <button
+                    onClick={() => setShowClearAllConfirm(true)}
+                    className="w-full py-2 px-3 rounded-lg text-sm text-red-500 hover:bg-red-500/10 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Clear all history
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            /* Custom sidebar content (Activity tab) - rendered by sidebarConfig */
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {sidebarConfig.items.length === 0 ? (
+                <div className="text-center text-neutral-500 py-8">
+                  {sidebarConfig.emptyIcon || <Activity className="w-8 h-8 mx-auto opacity-50 mb-2" />}
+                  <p className="text-sm">{sidebarConfig.emptyText}</p>
+                </div>
+              ) : (
+                sidebarConfig.items.map((item) => (
+                  <div key={item.id}>
+                    {sidebarConfig.renderItem(item, () => sidebarConfig.onItemClick?.(item))}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
+
+        {/* Delete confirmation modal */}
+        <AnimatePresence>
+          {showDeleteConfirm && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
+              onClick={() => setShowDeleteConfirm(null)}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl p-6 max-w-sm w-full shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 className="text-lg font-bold text-neutral-900 dark:text-white mb-2">
+                  Delete conversation?
+                </h3>
+                <p className="text-neutral-500 dark:text-neutral-400 text-sm mb-6">
+                  This action cannot be undone.
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowDeleteConfirm(null)}
+                    className="flex-1 py-2 px-4 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white font-medium border border-neutral-200 dark:border-neutral-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleDeleteSession(showDeleteConfirm)}
+                    className="flex-1 py-2 px-4 rounded-lg bg-red-500 text-white font-medium"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Clear all confirmation modal */}
+        <AnimatePresence>
+          {showClearAllConfirm && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
+              onClick={() => setShowClearAllConfirm(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl p-6 max-w-sm w-full shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 className="text-lg font-bold text-neutral-900 dark:text-white mb-2">
+                  Clear all history?
+                </h3>
+                <p className="text-neutral-500 dark:text-neutral-400 text-sm mb-6">
+                  This will delete all {sessions.length} conversations. This action cannot be undone.
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowClearAllConfirm(false)}
+                    className="flex-1 py-2 px-4 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white font-medium border border-neutral-200 dark:border-neutral-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleClearAllHistory}
+                    className="flex-1 py-2 px-4 rounded-lg bg-red-500 text-white font-medium"
+                  >
+                    Clear all
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </>
     );
   };
@@ -476,12 +894,27 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
         agent={agent}
         onToggleSidebar={() => setSidebarOpen(true)}
         onExpandSidebar={() => setSidebarCollapsed(false)}
-        showMenuButton={!!sidebarConfig}
+        showMenuButton={true}
         sidebarCollapsed={sidebarCollapsed}
       />
 
       {/* Messages area */}
       <div ref={messagesContainerRef} className="overflow-y-auto p-4 space-y-4 min-h-0">
+        {/* Success notification after deletion */}
+        <AnimatePresence>
+          {justDeleted && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="flex items-center justify-center gap-2 px-4 py-3 bg-green-500/10 border border-green-500/20 rounded-xl text-green-600 dark:text-green-400 text-sm font-medium"
+            >
+              <Check className="w-4 h-4" />
+              Successfully deleted
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <AnimatePresence initial={false}>
           {extendedMessages.map((message) => {
             // Determine if this message is currently streaming
@@ -554,144 +987,13 @@ export function AgentChat<TCardData, TItem extends SidebarItem>({
 
   return (
     <>
-      {sidebarConfig ? (
-        // With sidebar layout - use grid for proper height inheritance
-        <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden grid grid-cols-[auto_1fr] relative lg:shadow-xl dark:lg:shadow-2xl h-full min-h-0 theme-transition">
-          <div className={`absolute -top-20 -right-20 w-96 h-96 ${bgGradient.from} rounded-full blur-3xl`} />
-          <div className={`absolute -bottom-20 -left-20 w-96 h-96 ${bgGradient.to} rounded-full blur-3xl`} />
-          {renderSidebar()}
-          {renderChat()}
-        </div>
-      ) : (
-        // Without sidebar layout
-        <ChatContainer bgGradient={bgGradient}>
-          {renderChat()}
-        </ChatContainer>
-      )}
-
-      {/* Transaction Modal */}
-      <AnimatePresence>
-        {showTransactionModal && pendingCardData && transactionConfig && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-            onClick={() => transactionStep === 'confirm' && setShowTransactionModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl p-6 max-w-md w-full"
-              onClick={e => e.stopPropagation()}
-            >
-              {transactionStep === 'confirm' && (
-                <>
-                  <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-xl font-bold text-neutral-900 dark:text-white">{transactionConfig.confirmTitle}</h3>
-                    <button onClick={() => setShowTransactionModal(false)} className="text-neutral-400 hover:text-neutral-900 dark:hover:text-white">
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  {transactionConfig.renderConfirmContent
-                    ? transactionConfig.renderConfirmContent(pendingCardData, handleConfirmTransaction)
-                    : (
-                      <motion.button
-                        onClick={handleConfirmTransaction}
-                        className={`w-full py-4 rounded-xl bg-linear-to-r ${agent.color} text-white font-bold flex items-center justify-center gap-2`}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                      >
-                        <Wallet className="w-5 h-5" />
-                        Confirm & Pay
-                      </motion.button>
-                    )
-                  }
-                </>
-              )}
-
-              {transactionStep === 'processing' && (
-                <div className="py-12 text-center">
-                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-orange-500/20 flex items-center justify-center">
-                    <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}>
-                      <Wallet className="w-8 h-8 text-orange-500" />
-                    </motion.div>
-                  </div>
-                  <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">Processing...</h3>
-                  <p className="text-neutral-500 dark:text-neutral-400">{transactionConfig.processingText}</p>
-                </div>
-              )}
-
-              {transactionStep === 'success' && (
-                <div className="py-8 text-center">
-                  <motion.div
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-500 flex items-center justify-center"
-                  >
-                    <CheckCircle className="w-8 h-8 text-white" />
-                  </motion.div>
-                  <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">Success!</h3>
-                  <p className="text-neutral-500 dark:text-neutral-400 mb-6">{transactionConfig.successText}</p>
-
-                  <motion.button
-                    onClick={handleCloseSuccessModal}
-                    className="w-full py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white font-medium border border-neutral-200 dark:border-neutral-700"
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    Continue
-                  </motion.button>
-                </div>
-              )}
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Details Modal */}
-      <AnimatePresence>
-        {showDetailsModal && selectedItem && detailsConfig && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-            onClick={() => setShowDetailsModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl p-6 max-w-md w-full"
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-neutral-900 dark:text-white">{detailsConfig.title}</h3>
-                <button onClick={() => setShowDetailsModal(false)} className="text-neutral-400 hover:text-neutral-900 dark:hover:text-white">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {detailsConfig.renderContent(selectedItem)}
-
-              <div className="space-y-3 mt-4">
-                {detailsConfig.renderActions && detailsConfig.renderActions(selectedItem, () => setShowDetailsModal(false))}
-                <motion.button
-                  onClick={() => setShowDetailsModal(false)}
-                  className="w-full py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white font-medium border border-neutral-200 dark:border-neutral-700"
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  Close
-                </motion.button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Layout with left sidebar for chat history */}
+      <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden grid grid-cols-[auto_1fr] relative lg:shadow-xl dark:lg:shadow-2xl h-full min-h-0 theme-transition">
+        <div className={`absolute -top-20 -right-20 w-96 h-96 ${bgGradient.from} rounded-full blur-3xl`} />
+        <div className={`absolute -bottom-20 -left-20 w-96 h-96 ${bgGradient.to} rounded-full blur-3xl`} />
+        {renderHistorySidebar()}
+        {renderChat()}
+      </div>
 
       {/* Additional custom content */}
       {additionalContent}
