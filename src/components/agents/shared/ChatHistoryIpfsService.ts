@@ -1245,6 +1245,36 @@ export class ChatHistoryIpfsService {
     this.scheduleSync();
   }
 
+  /**
+   * Clear all local IPFS state (version counters, CIDs, sequence numbers)
+   * WITHOUT triggering any IPFS sync.
+   *
+   * Use this when deleting wallet - we want to clear local tracking data
+   * but NOT propagate deletion to IPFS network.
+   */
+  clearLocalStateOnly(): void {
+    console.log("💬 Clearing chat IPFS local state (no sync)");
+
+    // Clear version counter
+    if (this.cachedIpnsName) {
+      localStorage.removeItem(`${VERSION_STORAGE_PREFIX}${this.cachedIpnsName}`);
+      localStorage.removeItem(`${CID_STORAGE_PREFIX}${this.cachedIpnsName}`);
+      localStorage.removeItem(`${IPNS_SEQ_STORAGE_PREFIX}${this.cachedIpnsName}`);
+    }
+
+    // Clear tombstones
+    localStorage.removeItem("sphere_agent_chat_tombstones");
+
+    // Reset in-memory state
+    this.ipnsSequenceNumber = 0n;
+    this.lastKnownRemoteSequence = 0n;
+    this.lastSync = null;
+    this.hasPendingChanges = false;
+
+    // Note: We do NOT shutdown Helia or trigger any sync
+    console.log("💬 Chat IPFS local state cleared (no network operations)");
+  }
+
   // ==========================================
   // Status
   // ==========================================

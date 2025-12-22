@@ -39,6 +39,7 @@ interface UseChatHistoryReturn {
 
   // State
   isLoading: boolean;
+  justDeleted: boolean;
 
   // IPFS sync status (TanStack Query based)
   syncState: SyncState;
@@ -52,6 +53,7 @@ export function useChatHistory({
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSession, setCurrentSession] = useState<ChatSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [justDeleted, setJustDeleted] = useState(false);
 
   const currentSessionRef = useRef<ChatSession | null>(null);
   const userIdRef = useRef<string | undefined>(userId);
@@ -129,6 +131,10 @@ export function useChatHistory({
     if (currentSessionRef.current?.id === sessionId) {
       setCurrentSession(null);
     }
+
+    // Show success message
+    setJustDeleted(true);
+    setTimeout(() => setJustDeleted(false), 2000);
   }, []);
 
   // Clear all history for this agent and user
@@ -136,6 +142,10 @@ export function useChatHistory({
     chatHistoryRepository.deleteAllSessionsForAgent(agentId, userIdRef.current);
     setSessions([]);
     setCurrentSession(null);
+
+    // Show success message
+    setJustDeleted(true);
+    setTimeout(() => setJustDeleted(false), 2000);
   }, [agentId]);
 
   // Reset current session (for starting new chat)
@@ -195,6 +205,7 @@ export function useChatHistory({
     saveCurrentMessages,
     searchSessions,
     isLoading,
+    justDeleted,
     syncState,
   };
 }

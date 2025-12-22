@@ -130,6 +130,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     saveCurrentMessages,
     searchSessions,
     syncState,
+    justDeleted,
   } = useChatHistory({
     agentId: agent.id,
     userId: nametag ?? undefined,
@@ -533,6 +534,16 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
 
   // Render sync status indicator (always visible)
   const renderSyncIndicator = () => {
+    // Show success message after deletion
+    if (justDeleted) {
+      return (
+        <div className="flex items-center gap-1.5 text-xs text-green-500 px-2 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800/50">
+          <Check className="w-3 h-3" />
+          <span>Successfully deleted</span>
+        </div>
+      );
+    }
+
     const { label, icon, color } = getSyncDisplayInfo(syncState);
 
     return (
@@ -889,6 +900,21 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
 
       {/* Messages area */}
       <div ref={messagesContainerRef} className="overflow-y-auto p-4 space-y-4 min-h-0">
+        {/* Success notification after deletion */}
+        <AnimatePresence>
+          {justDeleted && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="flex items-center justify-center gap-2 px-4 py-3 bg-green-500/10 border border-green-500/20 rounded-xl text-green-600 dark:text-green-400 text-sm font-medium"
+            >
+              <Check className="w-4 h-4" />
+              Successfully deleted
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <AnimatePresence initial={false}>
           {extendedMessages.map((message) => {
             // Determine if this message is currently streaming

@@ -255,6 +255,37 @@ export class ChatHistoryRepository {
     this.notifyUpdate();
   }
 
+  /**
+   * Clear all chat history from localStorage WITHOUT syncing to IPFS
+   * Use this when deleting wallet - we only want to clear local data,
+   * not propagate deletion to other devices via IPFS
+   */
+  clearAllLocalHistoryOnly(): void {
+    if (!this.isLocalStorageAvailable()) return;
+
+    console.log('[ChatHistory] Clearing all local history (localStorage only, no IPFS sync)');
+
+    const sessions = this.getAllSessions();
+
+    // Delete all message stores
+    sessions.forEach(s => {
+      localStorage.removeItem(this.getMessagesKey(s.id));
+    });
+
+    // Clear sessions
+    localStorage.removeItem(SESSIONS_KEY);
+
+    // Also clear tombstones (since wallet is being deleted)
+    localStorage.removeItem('sphere_agent_chat_tombstones');
+
+    // Note: We do NOT call getChatHistoryIpfsService().recordBulkDeletion()
+    // because this is a local-only operation (wallet deletion)
+
+    console.log(`[ChatHistory] Cleared ${sessions.length} sessions from localStorage (no IPFS sync)`);
+
+    this.notifyUpdate();
+  }
+
   // ==========================================
   // Message Management
   // ==========================================
