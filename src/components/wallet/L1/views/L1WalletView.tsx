@@ -150,6 +150,15 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       // Then show scan modal to find addresses with balances
       if (file.name.endsWith(".dat")) {
         const result = await importWalletFromFile(file);
+
+        // Check if the .dat file is encrypted and needs a password
+        if (!result.success && result.isEncryptedDat) {
+          setPendingFile(file);
+          setInitialScanCount(scanCount || 100);
+          setShowLoadPasswordModal(true);
+          return;
+        }
+
         if (!result.success || !result.wallet) {
           throw new Error(result.error || "Import failed");
         }
