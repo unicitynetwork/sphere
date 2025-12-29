@@ -40,6 +40,7 @@ export interface UseOnboardingFlowReturn {
   isBusy: boolean;
   error: string | null;
   setError: (error: string | null) => void;
+  setIsBusy: (busy: boolean) => void;
 
   // Mnemonic restore state
   seedWords: string[];
@@ -652,6 +653,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     isBusy,
     error,
     setError,
+    setIsBusy,
 
     // Mnemonic restore state
     seedWords,
