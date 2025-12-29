@@ -8,20 +8,13 @@ import {
   createTransactionPlan,
   createAndSignTransaction,
   broadcast,
-  saveWalletToStorage,
-  importWallet as importWalletFromFile,
-  importWalletFromJSON,
-  isJSONWalletFormat,
   type VestingMode,
   type TransactionPlan,
-  type Wallet,
-  type ScannedAddress,
 } from "../sdk";
 import { useL1Wallet } from "../hooks";
 import { HistoryView, MainWalletView } from ".";
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
-import { WalletScanModal, ImportWalletModal, LoadPasswordModal } from "../components/modals";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 
 type ViewMode = "main" | "history";
@@ -29,8 +22,6 @@ type ViewMode = "main" | "history";
 export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const [selectedAddress, setSelectedAddress] = useState<string>("");
   const [viewMode, setViewMode] = useState<ViewMode>("main");
-  const [showLoadPasswordModal, setShowLoadPasswordModal] = useState(false);
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [isConnecting, setIsConnecting] = useState(() => !isWebSocketConnected());
   const [txPlan, setTxPlan] = useState<TransactionPlan | null>(null);
   const [isSending, setIsSending] = useState(false);
@@ -41,10 +32,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     message: string;
     txids?: string[];
   }>({ show: false, type: "info", title: "", message: "" });
-  const [showScanModal, setShowScanModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [pendingWallet, setPendingWallet] = useState<Wallet | null>(null);
-  const [initialScanCount, setInitialScanCount] = useState(10);
 
   // Use TanStack Query based hook
   const {
@@ -58,7 +45,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     currentBlockHeight,
     vestingBalances,
     isLoadingVesting,
-    importWallet,
     deleteWallet,
     analyzeTransaction,
     setVestingMode,
@@ -122,281 +108,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const handleVestingModeChange = useCallback((mode: VestingMode) => {
     setVestingMode(mode);
   }, [setVestingMode]);
-
-  // Handle import from modal
-  const onImportFromModal = async (file: File, scanCount?: number) => {
-    setShowImportModal(false);
-
-    try {
-      // For .dat files, use direct SDK import (not hook) to avoid auto-save
-      // Then show scan modal to find addresses with balances
-      if (file.name.endsWith(".dat")) {
-        const result = await importWalletFromFile(file);
-        if (!result.success || !result.wallet) {
-          throw new Error(result.error || "Import failed");
-        }
-        // Show scan modal - don't save wallet yet
-        setPendingWallet(result.wallet);
-        setInitialScanCount(scanCount || 100);
-        setShowScanModal(true);
-        return;
-      }
-
-      const content = await file.text();
-
-      // Handle JSON wallet files
-      if (file.name.endsWith(".json") || isJSONWalletFormat(content)) {
-        // Check if encrypted
-        try {
-          const json = JSON.parse(content);
-          if (json.encrypted) {
-            // Encrypted JSON - show password modal
-            setPendingFile(file);
-            setInitialScanCount(scanCount || 10);
-            setShowLoadPasswordModal(true);
-            return;
-          }
-        } catch {
-          // Not valid JSON, continue with error
-          throw new Error("Invalid JSON wallet file");
-        }
-
-        // Unencrypted JSON - import directly
-        const result = await importWalletFromJSON(content);
-        if (!result.success || !result.wallet) {
-          throw new Error(result.error || "Import failed");
-        }
-
-        // If has mnemonic, restore via UnifiedKeyManager
-        if (result.mnemonic) {
-          const keyManager = UnifiedKeyManager.getInstance("user-pin-1234");
-          await keyManager.createFromMnemonic(result.mnemonic);
-
-          // Reset selected address path for clean import - use first address's path
-          const firstAddr = result.wallet.addresses[0];
-          if (firstAddr?.path) {
-            localStorage.setItem("l3_selected_address_path", firstAddr.path);
-          } else {
-            localStorage.removeItem("l3_selected_address_path");
-          }
-
-          // Save wallet and use directly (no scanning needed for mnemonic wallets)
-          await saveWalletToStorage("main", result.wallet);
-          await invalidateWallet();
-          if (result.wallet.addresses.length > 0) {
-            setSelectedAddress(result.wallet.addresses[0].address);
-          }
-          showMessage("success", "Wallet Loaded", "Wallet loaded successfully with recovery phrase!");
-          return;
-        }
-
-        // No mnemonic - check if BIP32 needs scanning
-        const isBIP32 = result.derivationMode === "bip32" || result.wallet.chainCode;
-        if (isBIP32) {
-          setPendingWallet(result.wallet);
-          setInitialScanCount(scanCount || 10);
-          setShowScanModal(true);
-        } else {
-          // Standard wallet - save and use directly
-          await saveWalletToStorage("main", result.wallet);
-          await invalidateWallet();
-          if (result.wallet.addresses.length > 0) {
-            setSelectedAddress(result.wallet.addresses[0].address);
-          }
-          showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
-        }
-        return;
-      }
-
-      // Handle TXT files
-      if (content.includes("ENCRYPTED MASTER KEY")) {
-        setPendingFile(file);
-        setInitialScanCount(scanCount || 10);
-        setShowLoadPasswordModal(true);
-      } else {
-        // Check if this is a BIP32 wallet that needs scanning
-        const isBIP32 = content.includes("MASTER CHAIN CODE") ||
-                        content.includes("WALLET TYPE: BIP32") ||
-                        content.includes("WALLET TYPE: Alpha descriptor");
-
-        if (isBIP32) {
-          // For BIP32 .txt files, import and show scan modal like .dat files
-          const result = await importWalletFromFile(file);
-          if (!result.success || !result.wallet) {
-            throw new Error(result.error || "Import failed");
-          }
-          // Show scan modal - don't save wallet yet
-          setPendingWallet(result.wallet);
-          setInitialScanCount(scanCount || 10);
-          setShowScanModal(true);
-        } else {
-          // Standard wallet - import directly
-          const newWallet = await importWallet({ file });
-          if (newWallet.addresses.length > 0) {
-            setSelectedAddress(newWallet.addresses[0].address);
-          }
-          showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
-        }
-      }
-    } catch (err: unknown) {
-      showMessage(
-        "error",
-        "Load Error",
-        "Error loading wallet: " + (err instanceof Error ? err.message : String(err))
-      );
-      console.error(err);
-    }
-  };
-
-  // Handle scanned address selection
-  const onSelectScannedAddress = (scannedAddr: ScannedAddress) => {
-    if (!pendingWallet) return;
-
-    // Add the scanned address to wallet
-    const walletWithAddress: Wallet = {
-      ...pendingWallet,
-      addresses: [{
-        index: scannedAddr.index,
-        address: scannedAddr.address,
-        privateKey: scannedAddr.privateKey,
-        publicKey: scannedAddr.publicKey,
-        path: scannedAddr.path,
-        createdAt: new Date().toISOString(),
-      }],
-    };
-
-    // Save to storage
-    saveWalletToStorage("main", walletWithAddress);
-    invalidateWallet();
-    setSelectedAddress(scannedAddr.address);
-    setShowScanModal(false);
-    setPendingWallet(null);
-    showMessage("success", "Wallet Loaded", `Loaded address with ${scannedAddr.balance.toFixed(8)} ALPHA`);
-  };
-
-  // Handle loading all scanned addresses
-  const onSelectAllScannedAddresses = (scannedAddresses: ScannedAddress[]) => {
-    if (!pendingWallet || scannedAddresses.length === 0) return;
-
-    // Add all scanned addresses to wallet (preserving isChange flag)
-    const walletWithAddresses: Wallet = {
-      ...pendingWallet,
-      addresses: scannedAddresses.map((addr) => ({
-        index: addr.index,
-        address: addr.address,
-        privateKey: addr.privateKey,
-        publicKey: addr.publicKey,
-        path: addr.path,
-        createdAt: new Date().toISOString(),
-        isChange: addr.isChange,
-      })),
-    };
-
-    // Calculate total balance
-    const totalBalance = scannedAddresses.reduce((sum, addr) => sum + addr.balance, 0);
-
-    // Save to storage
-    saveWalletToStorage("main", walletWithAddresses);
-    invalidateWallet();
-    setSelectedAddress(scannedAddresses[0].address);
-    setShowScanModal(false);
-    setPendingWallet(null);
-    showMessage("success", "Wallet Loaded", `Loaded ${scannedAddresses.length} addresses with ${totalBalance.toFixed(8)} ALPHA total`);
-  };
-
-  // Cancel scan modal - also clear wallet data since import was aborted
-  const onCancelScan = () => {
-    setShowScanModal(false);
-    setPendingWallet(null);
-
-    // Clear any partially imported wallet data
-    UnifiedKeyManager.clearAll();
-  };
-
-  // Confirm load with password
-  const onConfirmLoadWithPassword = async (password: string) => {
-    if (!pendingFile) return;
-
-    try {
-      const content = await pendingFile.text();
-
-      // Check if this is an encrypted JSON file
-      if (pendingFile.name.endsWith(".json") || isJSONWalletFormat(content)) {
-        const result = await importWalletFromJSON(content, password);
-        if (!result.success || !result.wallet) {
-          throw new Error(result.error || "Import failed");
-        }
-
-        setShowLoadPasswordModal(false);
-        setPendingFile(null);
-
-        // If has mnemonic, restore via UnifiedKeyManager
-        if (result.mnemonic) {
-          const keyManager = UnifiedKeyManager.getInstance("user-pin-1234");
-          await keyManager.createFromMnemonic(result.mnemonic);
-
-          // Reset selected address path for clean import - use first address's path
-          const firstAddr = result.wallet.addresses[0];
-          if (firstAddr?.path) {
-            localStorage.setItem("l3_selected_address_path", firstAddr.path);
-          } else {
-            localStorage.removeItem("l3_selected_address_path");
-          }
-
-          // Save wallet and use directly (no scanning needed for mnemonic wallets)
-          await saveWalletToStorage("main", result.wallet);
-          await invalidateWallet();
-          if (result.wallet.addresses.length > 0) {
-            setSelectedAddress(result.wallet.addresses[0].address);
-          }
-          showMessage("success", "Wallet Loaded", "Wallet loaded successfully with recovery phrase!");
-          return;
-        }
-
-        // No mnemonic - check if BIP32 needs scanning
-        const isBIP32 = result.derivationMode === "bip32" || result.wallet.chainCode;
-        if (isBIP32) {
-          setPendingWallet(result.wallet);
-          // initialScanCount already set when showing password modal
-          setShowScanModal(true);
-        } else {
-          // Standard wallet - save and use directly
-          await saveWalletToStorage("main", result.wallet);
-          await invalidateWallet();
-          if (result.wallet.addresses.length > 0) {
-            setSelectedAddress(result.wallet.addresses[0].address);
-          }
-          showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
-        }
-        return;
-      }
-
-      // Handle TXT files with password
-      const result = await importWalletFromFile(pendingFile, password);
-      if (!result.success || !result.wallet) {
-        throw new Error(result.error || "Import failed");
-      }
-
-      setShowLoadPasswordModal(false);
-      setPendingFile(null);
-
-      // Check if BIP32 wallet - show scan modal
-      if (result.wallet.masterChainCode || result.wallet.isImportedAlphaWallet) {
-        setPendingWallet(result.wallet);
-        // initialScanCount already set when showing password modal
-        setShowScanModal(true);
-      } else {
-        // Standard wallet - save directly
-        const newWallet = await importWallet({ file: pendingFile, password });
-        if (newWallet.addresses.length > 0) {
-          setSelectedAddress(newWallet.addresses[0].address);
-        }
-        showMessage("success", "Wallet Loaded", "Wallet loaded successfully!");
-      }
-    } catch (err) {
-      showMessage("error", "Load Error", "Error loading wallet: " + (err instanceof Error ? err.message : String(err)));
-    }
-  };
 
   // Delete wallet
   const onDeleteWallet = async () => {
@@ -632,27 +343,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         message={messageModal.message}
         txids={messageModal.txids}
         onClose={closeMessage}
-      />
-      <ImportWalletModal
-        show={showImportModal}
-        onImport={onImportFromModal}
-        onCancel={() => setShowImportModal(false)}
-      />
-      <LoadPasswordModal
-        show={showLoadPasswordModal}
-        onConfirm={onConfirmLoadWithPassword}
-        onCancel={() => {
-          setShowLoadPasswordModal(false);
-          setPendingFile(null);
-        }}
-      />
-      <WalletScanModal
-        show={showScanModal}
-        wallet={pendingWallet}
-        initialScanCount={initialScanCount}
-        onSelectAddress={onSelectScannedAddress}
-        onSelectAll={onSelectAllScannedAddresses}
-        onCancel={onCancelScan}
       />
     </div>
   );

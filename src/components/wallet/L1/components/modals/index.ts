@@ -5,5 +5,4 @@ export { DeleteConfirmationModal } from "./DeleteConfirmationModal";
 export { TransactionConfirmationModal } from "./TransactionConfirmationModal";
 export { BridgeModal } from "./BridgeModal";
 export { WalletScanModal } from "./WalletScanModal";
-export { ImportWalletModal } from "./ImportWalletModal";
 export { SendModal } from "./SendModal";
