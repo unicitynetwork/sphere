@@ -18,7 +18,7 @@ import {
   type ScannedAddress,
 } from "../sdk";
 import { useL1Wallet } from "../hooks";
-import { NoWalletView, HistoryView, MainWalletView } from ".";
+import { HistoryView, MainWalletView } from ".";
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { WalletScanModal, ImportWalletModal, LoadPasswordModal } from "../components/modals";
@@ -58,7 +58,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     currentBlockHeight,
     vestingBalances,
     isLoadingVesting,
-    createWallet,
     importWallet,
     deleteWallet,
     analyzeTransaction,
@@ -123,23 +122,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const handleVestingModeChange = useCallback((mode: VestingMode) => {
     setVestingMode(mode);
   }, [setVestingMode]);
-
-  // Create new wallet
-  const onCreateWallet = async () => {
-    try {
-      const newWallet = await createWallet();
-      if (newWallet.addresses.length > 0) {
-        setSelectedAddress(newWallet.addresses[0].address);
-      }
-    } catch (err) {
-      showMessage("error", "Error", "Failed to create wallet: " + (err instanceof Error ? err.message : String(err)));
-    }
-  };
-
-  // Show import modal
-  const onShowImportModal = () => {
-    setShowImportModal(true);
-  };
 
   // Handle import from modal
   const onImportFromModal = async (file: File, scanCount?: number) => {
@@ -582,43 +564,9 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     );
   }
 
-  // No wallet view
+  // No wallet - return null, WalletGate handles the onboarding flow
   if (!wallet) {
-    return (
-      <div className="h-full overflow-y-auto">
-        <NoWalletView
-          onCreateWallet={onCreateWallet}
-          onImportWallet={onShowImportModal}
-          showLoadPasswordModal={showLoadPasswordModal}
-          onConfirmLoadWithPassword={onConfirmLoadWithPassword}
-          onCancelLoadPassword={() => {
-            setShowLoadPasswordModal(false);
-            setPendingFile(null);
-          }}
-        />
-        <MessageModal
-          show={messageModal.show}
-          type={messageModal.type}
-          title={messageModal.title}
-          message={messageModal.message}
-          txids={messageModal.txids}
-          onClose={closeMessage}
-        />
-        <ImportWalletModal
-          show={showImportModal}
-          onImport={onImportFromModal}
-          onCancel={() => setShowImportModal(false)}
-        />
-        <WalletScanModal
-          show={showScanModal}
-          wallet={pendingWallet}
-          initialScanCount={initialScanCount}
-          onSelectAddress={onSelectScannedAddress}
-          onSelectAll={onSelectAllScannedAddresses}
-          onCancel={onCancelScan}
-        />
-      </div>
-    );
+    return null;
   }
 
   // History view

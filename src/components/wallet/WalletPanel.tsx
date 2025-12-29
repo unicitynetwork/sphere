@@ -21,7 +21,12 @@ export function WalletPanel() {
     localStorage.setItem('wallet-active-layer', layer);
   };
   const [copied, setCopied] = useState(false);
-  const { nametag } = useWallet();
+  const { identity, nametag, isLoadingIdentity } = useWallet();
+
+  // Don't render wallet panel if not authenticated - WalletGate handles onboarding
+  if (isLoadingIdentity || !identity || !nametag) {
+    return null;
+  }
 
   const handleCopyNametag = async () => {
     if (!nametag) return;
