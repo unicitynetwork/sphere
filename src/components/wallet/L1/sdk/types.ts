@@ -68,6 +68,8 @@ export interface RestoreWalletResult {
   wallet: Wallet;
   message?: string;
   error?: string;
+  /** Indicates that the wallet.dat file is encrypted and requires a password */
+  isEncryptedDat?: boolean;
 }
 
 export interface ExportOptions {

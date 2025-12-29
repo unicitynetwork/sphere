@@ -682,6 +682,17 @@ export function CreateWalletFlow() {
       // For .dat files, use direct SDK import and show scan modal
       if (file.name.endsWith(".dat")) {
         const result = await importWalletFromFile(file);
+
+        // Check if the .dat file is encrypted and needs a password
+        if (!result.success && result.isEncryptedDat) {
+          console.log("📦 .dat file is encrypted, showing password modal");
+          setPendingFile(file);
+          setInitialScanCount(scanCountParam || 100);
+          setShowLoadPasswordModal(true);
+          setIsBusy(false);
+          return;
+        }
+
         if (!result.success || !result.wallet) {
           throw new Error(result.error || "Import failed");
         }
