@@ -27,7 +27,7 @@ export function RestoreScreen({
     onSeedWordsChange(newWords);
   };
 
-  const handlePaste = (e: React.ClipboardEvent, _index: number) => {
+  const handlePaste = (e: React.ClipboardEvent) => {
     const pastedText = e.clipboardData.getData("text").trim();
     const words = pastedText.split(/\s+/).filter((w) => w.length > 0);
     // If pasted text contains multiple words, fill all fields
@@ -91,7 +91,7 @@ export function RestoreScreen({
               type="text"
               value={seedWords[index]}
               onChange={(e) => handleWordChange(index, e.target.value)}
-              onPaste={(e) => handlePaste(e, index)}
+              onPaste={handlePaste}
               onKeyDown={(e) => handleKeyDown(e, index)}
               placeholder="word"
               className="w-full bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700/50 rounded-lg py-2 md:py-2.5 pl-7 md:pl-9 pr-2 md:pr-3 text-xs md:text-sm text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-blue-500 focus:bg-white dark:focus:bg-neutral-800 transition-all"
