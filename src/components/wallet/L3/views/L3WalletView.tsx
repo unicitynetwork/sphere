@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useWallet } from '../hooks/useWallet';
-import { CreateWalletFlow } from '../../shared/onboarding/CreateWalletFlow';
+import { CreateWalletFlow } from '../../onboarding/CreateWalletFlow';
 import { TokenRow } from '../../shared/components';
 import { SendModal } from '../modals/SendModal';
 import { SwapModal } from '../modals/SwapModal';

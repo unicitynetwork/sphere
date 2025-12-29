@@ -2,19 +2,19 @@
  * useOnboardingFlow - Manages onboarding flow state and navigation
  */
 import { useState, useCallback, useEffect } from "react";
-import { useWallet } from "../../../L3/hooks/useWallet";
-import { UnifiedKeyManager } from "../../services/UnifiedKeyManager";
-import { WalletRepository } from "../../../../../repositories/WalletRepository";
-import { IdentityManager } from "../../../L3/services/IdentityManager";
-import { fetchNametagFromIpns } from "../../../L3/services/IpnsNametagFetcher";
-import { IpfsStorageService } from "../../../L3/services/IpfsStorageService";
+import { useWallet } from "../../L3/hooks/useWallet";
+import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
+import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { IdentityManager } from "../../L3/services/IdentityManager";
+import { fetchNametagFromIpns } from "../../L3/services/IpnsNametagFetcher";
+import { IpfsStorageService } from "../../L3/services/IpfsStorageService";
 import {
   saveWalletToStorage,
   loadWalletFromStorage,
   connect as connectL1,
   isWebSocketConnected,
   type Wallet as L1Wallet,
-} from "../../../L1/sdk";
+} from "../../L1/sdk";
 import type { DerivedAddressInfo } from "../components/AddressSelectionScreen";
 
 export type OnboardingStep =

@@ -11,7 +11,7 @@ import {
   Check,
   Plus,
 } from "lucide-react";
-import { truncateAddress } from "../../../shared/utils/walletFileParser";
+import { truncateAddress } from "../../shared/utils/walletFileParser";
 
 export interface DerivedAddressInfo {
   index: number;

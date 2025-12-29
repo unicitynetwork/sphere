@@ -4,12 +4,12 @@
  */
 import { useState, useEffect, useCallback } from "react";
 import { AnimatePresence } from "framer-motion";
-import { useWallet } from "../../L3/hooks/useWallet";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
-import { IdentityManager } from "../../L3/services/IdentityManager";
-import { UnifiedKeyManager } from "../services/UnifiedKeyManager";
-import { fetchNametagFromIpns } from "../../L3/services/IpnsNametagFetcher";
-import { IpfsStorageService } from "../../L3/services/IpfsStorageService";
+import { useWallet } from "../L3/hooks/useWallet";
+import { WalletRepository } from "../../../repositories/WalletRepository";
+import { IdentityManager } from "../L3/services/IdentityManager";
+import { UnifiedKeyManager } from "../shared/services/UnifiedKeyManager";
+import { fetchNametagFromIpns } from "../L3/services/IpnsNametagFetcher";
+import { IpfsStorageService } from "../L3/services/IpfsStorageService";
 import {
   importWallet as importWalletFromFile,
   importWalletFromJSON,
@@ -20,10 +20,10 @@ import {
   loadWalletFromStorage,
   connect as connectL1,
   isWebSocketConnected,
-} from "../../L1/sdk";
-import { WalletScanModal } from "../../L1/components/modals/WalletScanModal";
-import { LoadPasswordModal } from "../../L1/components/modals/LoadPasswordModal";
-import { needsBlockchainScanning } from "../utils/walletFileParser";
+} from "../L1/sdk";
+import { WalletScanModal } from "../L1/components/modals/WalletScanModal";
+import { LoadPasswordModal } from "../L1/components/modals/LoadPasswordModal";
+import { needsBlockchainScanning } from "../shared/utils/walletFileParser";
 
 // Import screen components
 import {
