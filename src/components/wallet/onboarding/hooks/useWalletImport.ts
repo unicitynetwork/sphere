@@ -13,7 +13,13 @@ import {
   type Wallet as L1Wallet,
   type ScannedAddress,
 } from "../../L1/sdk";
-import { needsBlockchainScanning } from "../../shared/utils/walletFileParser";
+import {
+  needsBlockchainScanning,
+  isEncryptedWallet,
+  isBIP32Wallet,
+  extractMnemonic,
+  isValidMnemonicFormat,
+} from "../../shared/utils/walletFileParser";
 
 // Session key (same as useWallet.ts)
 const SESSION_KEY = "user-pin-1234";
@@ -245,7 +251,7 @@ export function useWalletImport({
         }
 
         // Check if encrypted TXT file
-        if (content.includes("ENCRYPTED MASTER KEY")) {
+        if (isEncryptedWallet(content)) {
           setPendingFile(file);
           setInitialScanCount(scanCountParam || 10);
           setShowLoadPasswordModal(true);
@@ -254,12 +260,7 @@ export function useWalletImport({
         }
 
         // Check if BIP32 wallet
-        const isBIP32 =
-          content.includes("MASTER CHAIN CODE") ||
-          content.includes("WALLET TYPE: BIP32") ||
-          content.includes("WALLET TYPE: Alpha descriptor");
-
-        if (isBIP32 && content.includes("MASTER PRIVATE KEY")) {
+        if (isBIP32Wallet(content) && content.includes("MASTER PRIVATE KEY")) {
           const result = await importWalletFromFile(file);
           if (!result.success || !result.wallet) {
             throw new Error(result.error || "Import failed");
@@ -276,12 +277,7 @@ export function useWalletImport({
 
         try {
           const json = JSON.parse(content);
-          let mnemonic: string | null = null;
-
-          if (json.mnemonic) mnemonic = json.mnemonic;
-          else if (json.seed) mnemonic = json.seed;
-          else if (json.recoveryPhrase) mnemonic = json.recoveryPhrase;
-          else if (json.words && Array.isArray(json.words)) mnemonic = json.words.join(" ");
+          const mnemonic = extractMnemonic(json as Record<string, unknown>);
 
           if (mnemonic) {
             const keyManager = getUnifiedKeyManager();
@@ -294,14 +290,10 @@ export function useWalletImport({
 
         if (!imported) {
           const trimmed = content.trim();
-          const words = trimmed.split(/\s+/);
-          if (words.length === 12 || words.length === 24) {
-            const isMnemonic = words.every((w) => /^[a-z]+$/.test(w.toLowerCase()));
-            if (isMnemonic) {
-              const keyManager = getUnifiedKeyManager();
-              await keyManager.createFromMnemonic(trimmed);
-              imported = true;
-            }
+          if (isValidMnemonicFormat(trimmed)) {
+            const keyManager = getUnifiedKeyManager();
+            await keyManager.createFromMnemonic(trimmed);
+            imported = true;
           }
         }
 
