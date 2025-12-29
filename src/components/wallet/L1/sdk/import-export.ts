@@ -3,7 +3,6 @@
  */
 import CryptoJS from "crypto-js";
 import { hexToWIF } from "./crypto";
-import { createBech32 } from "./bech32";
 import { deriveKeyAtPath } from "./address";
 import type {
   Wallet,
@@ -17,6 +16,7 @@ import type {
   WalletJSONExportOptions,
   WalletJSONImportResult,
 } from "./types";
+import { publicKeyToAddress, ec } from "../../shared/utils/cryptoUtils";
 
 // Re-export types
 export type {
@@ -29,21 +29,6 @@ export type {
   WalletJSONExportOptions,
   WalletJSONImportResult,
 };
-
-// Elliptic for key derivation
-import elliptic from "elliptic";
-const ec = new elliptic.ec("secp256k1");
-
-/**
- * Helper: hex string to Uint8Array
- */
-function hexToBytes(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
-  }
-  return bytes;
-}
 
 /**
  * Helper: bytes to hex string
@@ -867,13 +852,7 @@ export async function importWallet(
           const testChildKey = testHmac.substring(0, 64);
           const testKeyPair = ec.keyFromPrivate(testChildKey);
           const testPublicKey = testKeyPair.getPublic(true, "hex");
-          const testSha256 = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(testPublicKey));
-          const testRipemd = CryptoJS.RIPEMD160(testSha256);
-          const testAddress = createBech32(
-            "alpha",
-            witnessVersion,
-            hexToBytes(testRipemd.toString())
-          );
+          const testAddress = publicKeyToAddress(testPublicKey, "alpha", witnessVersion);
 
           if (testAddress === addr.address) {
             console.log(`✓ Found correct derivation for address ${addrIdx + 1} at index ${i}!`);
@@ -921,13 +900,7 @@ export async function importWallet(
             const publicKey = keyPair.getPublic(true, "hex");
 
             // Verify the derived address matches
-            const sha256 = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKey));
-            const ripemd = CryptoJS.RIPEMD160(sha256);
-            const derivedAddress = createBech32(
-              "alpha",
-              witnessVersion,
-              hexToBytes(ripemd.toString())
-            );
+            const derivedAddress = publicKeyToAddress(publicKey, "alpha", witnessVersion);
 
             if (derivedAddress === addr.address) {
               console.log(`✓ BIP32: Recovered key for address ${addrIdx + 1} at path ${addr.path}`);
@@ -973,13 +946,7 @@ export async function importWallet(
                 const derived = deriveKeyAtPath(masterKey, masterChainCode, testPath);
                 const keyPair = ec.keyFromPrivate(derived.privateKey);
                 const publicKey = keyPair.getPublic(true, "hex");
-                const sha256 = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKey));
-                const ripemd = CryptoJS.RIPEMD160(sha256);
-                const testAddress = createBech32(
-                  "alpha",
-                  witnessVersion,
-                  hexToBytes(ripemd.toString())
-                );
+                const testAddress = publicKeyToAddress(publicKey, "alpha", witnessVersion);
 
                 if (testAddress === addr.address) {
                   console.log(`✓ BIP32: Found address ${addrIdx + 1} at ${testPath}`);
@@ -1302,9 +1269,7 @@ function generateAddressForExport(
     const derived = deriveKeyAtPath(masterKey, chainCode, fullPath);
     const keyPair = ec.keyFromPrivate(derived.privateKey);
     const publicKey = keyPair.getPublic(true, "hex");
-    const sha256 = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKey));
-    const ripemd = CryptoJS.RIPEMD160(sha256);
-    const address = createBech32("alpha", witnessVersion, hexToBytes(ripemd.toString()));
+    const address = publicKeyToAddress(publicKey, "alpha", witnessVersion);
 
     return {
       address,
@@ -1320,9 +1285,7 @@ function generateAddressForExport(
     const childKey = hmac.substring(0, 64);
     const keyPair = ec.keyFromPrivate(childKey);
     const publicKey = keyPair.getPublic(true, "hex");
-    const sha256 = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKey));
-    const ripemd = CryptoJS.RIPEMD160(sha256);
-    const address = createBech32("alpha", witnessVersion, hexToBytes(ripemd.toString()));
+    const address = publicKeyToAddress(publicKey, "alpha", witnessVersion);
 
     return {
       address,
