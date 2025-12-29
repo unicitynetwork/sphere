@@ -95,6 +95,281 @@ function isValidPrivateKey(hex: string): boolean {
 }
 
 /**
+ * Yield to the event loop to prevent UI freeze
+ */
+function yieldToMain(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+/**
+ * Convert Uint8Array to CryptoJS WordArray via hex encoding
+ * This is the most reliable cross-platform method
+ */
+function uint8ArrayToWordArray(u8arr: Uint8Array): CryptoJS.lib.WordArray {
+  // Convert to hex string first, then parse - this is unambiguous
+  const hex = bytesToHex(u8arr);
+  return CryptoJS.enc.Hex.parse(hex);
+}
+
+/**
+ * Decrypt master key from CMasterKey structure
+ * Uses iterative SHA-512 (Bitcoin Core's method from crypter.cpp)
+ * Async to prevent UI freeze during heavy computation
+ */
+async function decryptMasterKey(
+  encryptedKey: Uint8Array,
+  salt: Uint8Array,
+  iterations: number,
+  password: string
+): Promise<string> {
+  // Derive key and IV using iterative SHA-512 (Bitcoin Core's BytesToKeySHA512AES method)
+  // First hash: SHA512(password + salt)
+  const passwordHex = bytesToHex(new TextEncoder().encode(password));
+  const saltHex = bytesToHex(salt);
+  const inputHex = passwordHex + saltHex;
+
+  // Parse hex to WordArray for SHA512
+  let hash = CryptoJS.SHA512(CryptoJS.enc.Hex.parse(inputHex));
+
+  // Process remaining iterations in batches to avoid blocking UI
+  const BATCH_SIZE = 1000;
+  for (let i = 0; i < iterations - 1; i++) {
+    hash = CryptoJS.SHA512(hash);
+    // Yield every BATCH_SIZE iterations to keep UI responsive
+    if (i % BATCH_SIZE === 0) {
+      await yieldToMain();
+    }
+  }
+
+  // Key is first 32 bytes (8 words), IV is next 16 bytes (4 words)
+  const derivedKey = CryptoJS.lib.WordArray.create(hash.words.slice(0, 8));
+  const derivedIv = CryptoJS.lib.WordArray.create(hash.words.slice(8, 12));
+
+  // Decrypt master key using AES-256-CBC
+  const encryptedWords = uint8ArrayToWordArray(encryptedKey);
+
+  const decrypted = CryptoJS.AES.decrypt(
+    { ciphertext: encryptedWords } as CryptoJS.lib.CipherParams,
+    derivedKey,
+    { iv: derivedIv, padding: CryptoJS.pad.Pkcs7, mode: CryptoJS.mode.CBC }
+  );
+
+  const result = CryptoJS.enc.Hex.stringify(decrypted);
+
+  if (!result || result.length !== 64) {
+    throw new Error('Master key decryption failed - incorrect password');
+  }
+
+  return result;
+}
+
+interface CMasterKeyData {
+  encryptedKey: Uint8Array;
+  salt: Uint8Array;
+  derivationMethod: number;
+  iterations: number;
+  position: number;
+}
+
+/**
+ * Find ALL CMasterKey structures in wallet.dat
+ * Returns array of all found structures (wallet may have multiple)
+ *
+ * CMasterKey format:
+ * - vchCryptedKey: compact_size (1 byte = 0x30) + encrypted_key (48 bytes)
+ * - vchSalt: compact_size (1 byte = 0x08) + salt (8 bytes)
+ * - nDerivationMethod: uint32 (4 bytes)
+ * - nDeriveIterations: uint32 (4 bytes)
+ */
+function findAllCMasterKeys(data: Uint8Array): CMasterKeyData[] {
+  const results: CMasterKeyData[] = [];
+
+  // Search for CMasterKey structure pattern:
+  // 0x30 (encrypted key length = 48) followed by 48 bytes,
+  // then 0x08 (salt length = 8) followed by 8 bytes,
+  // then derivation method (4 bytes) and iterations (4 bytes)
+
+  for (let pos = 0; pos < data.length - 70; pos++) {
+    if (data[pos] === 0x30) { // 48 = encrypted key length
+      const saltLenPos = pos + 1 + 48;
+      if (saltLenPos < data.length && data[saltLenPos] === 0x08) { // 8 = salt length
+        const iterPos = saltLenPos + 1 + 8 + 4; // after salt + derivation method
+        if (iterPos + 4 <= data.length) {
+          const iterations = data[iterPos] | (data[iterPos + 1] << 8) |
+                            (data[iterPos + 2] << 16) | (data[iterPos + 3] << 24);
+          // Bitcoin Core typically uses 25000-500000 iterations
+          if (iterations >= 1000 && iterations <= 10000000) {
+            const encryptedKey = data.slice(pos + 1, pos + 1 + 48);
+            const salt = data.slice(saltLenPos + 1, saltLenPos + 1 + 8);
+            const derivationMethod = data[saltLenPos + 1 + 8] | (data[saltLenPos + 1 + 8 + 1] << 8) |
+                                    (data[saltLenPos + 1 + 8 + 2] << 16) | (data[saltLenPos + 1 + 8 + 3] << 24);
+
+            console.log(`Found CMasterKey at position ${pos}, iterations: ${iterations}`);
+            results.push({ encryptedKey, salt, derivationMethod, iterations, position: pos });
+          }
+        }
+      }
+    }
+  }
+
+  console.log(`Total CMasterKey structures found: ${results.length}`);
+  return results;
+}
+
+/**
+ * Decrypt encrypted wallet.dat file and extract keys
+ * Port of webwallet's decryptAndImportWallet() function
+ * Async to prevent UI freeze during heavy computation
+ */
+async function decryptEncryptedWalletDat(data: Uint8Array, password: string): Promise<{
+  masterKey: string;
+  chainCode: string;
+  descriptorPath: string;
+} | null> {
+  try {
+    // Step 1: Find ALL CMasterKey structures (wallet may have multiple)
+    const cmasterKeys = findAllCMasterKeys(data);
+
+    if (cmasterKeys.length === 0) {
+      throw new Error('Could not find CMasterKey structure in wallet');
+    }
+
+    // Try to decrypt each CMasterKey until one succeeds
+    let masterKeyHex: string | null = null;
+    for (const cmk of cmasterKeys) {
+      try {
+        console.log(`Trying CMasterKey at position ${cmk.position}...`);
+        masterKeyHex = await decryptMasterKey(
+          cmk.encryptedKey,
+          cmk.salt,
+          cmk.iterations,
+          password
+        );
+        if (masterKeyHex && masterKeyHex.length === 64) {
+          console.log(`✓ Successfully decrypted with CMasterKey at position ${cmk.position}`);
+          break;
+        }
+      } catch (e) {
+        console.log(`✗ Failed with CMasterKey at position ${cmk.position}: ${e instanceof Error ? e.message : e}`);
+        // Continue to next CMasterKey
+      }
+    }
+
+    if (!masterKeyHex || masterKeyHex.length !== 64) {
+      throw new Error('Master key decryption failed - incorrect password');
+    }
+
+    // Step 2: Find wpkh descriptor with /0/* (receive addresses)
+    const descriptorPattern = new TextEncoder().encode('walletdescriptor');
+    let descriptorIndex = 0;
+    let descriptorId: Uint8Array | null = null;
+    let xpubString: string | null = null;
+
+    while ((descriptorIndex = findPattern(data, descriptorPattern, descriptorIndex)) !== -1) {
+      // Skip descriptor ID (32 bytes) - it's between the prefix and the value
+      let scanPos = descriptorIndex + descriptorPattern.length + 32;
+
+      // Read the descriptor value (starts with compact size)
+      const descLen = data[scanPos];
+      scanPos++;
+
+      const descBytes = data.slice(scanPos, scanPos + Math.min(descLen, 200));
+      let descStr = '';
+      for (let i = 0; i < descBytes.length && descBytes[i] >= 32 && descBytes[i] <= 126; i++) {
+        descStr += String.fromCharCode(descBytes[i]);
+      }
+
+      // Look for native SegWit receive descriptor: wpkh(...84h/1h/0h/0/*)
+      if (descStr.startsWith('wpkh(xpub') && descStr.includes('/0/*)')) {
+        // Extract xpub
+        const xpubMatch = descStr.match(/xpub[1-9A-HJ-NP-Za-km-z]{100,}/);
+        if (xpubMatch) {
+          xpubString = xpubMatch[0];
+
+          // Extract descriptor ID (32 bytes after "walletdescriptor" prefix)
+          const descIdStart = descriptorIndex + descriptorPattern.length;
+          descriptorId = data.slice(descIdStart, descIdStart + 32);
+          break;
+        }
+      }
+
+      descriptorIndex++;
+    }
+
+    if (!descriptorId || !xpubString) {
+      throw new Error('Could not find native SegWit receive descriptor');
+    }
+
+    // Step 3: Extract chain code from xpub
+    const xpubDecoded = base58Decode(xpubString);
+    const chainCode = bytesToHex(xpubDecoded.slice(13, 45));
+
+    // Step 4: Find and decrypt the BIP32 master private key
+    const ckeyPattern = new TextEncoder().encode('walletdescriptorckey');
+    let ckeyIndex = findPattern(data, ckeyPattern, 0);
+    let bip32MasterKey: string | null = null;
+
+    while (ckeyIndex !== -1 && !bip32MasterKey) {
+      // Check if this record matches our descriptor ID
+      const recordDescId = data.slice(ckeyIndex + ckeyPattern.length, ckeyIndex + ckeyPattern.length + 32);
+
+      if (Array.from(recordDescId).every((b, i) => b === descriptorId![i])) {
+        // Found the matching record - extract and decrypt the private key
+        let keyPos = ckeyIndex + ckeyPattern.length + 32;
+        const pubkeyLen = data[keyPos];
+        keyPos++;
+        const pubkey = data.slice(keyPos, keyPos + pubkeyLen);
+
+        // Find the value field (encrypted key) - search forward
+        for (let searchPos = keyPos + pubkeyLen; searchPos < Math.min(keyPos + pubkeyLen + 100, data.length - 50); searchPos++) {
+          // Look for a compact size followed by encrypted data (typically 48 bytes)
+          const valueLen = data[searchPos];
+          if (valueLen >= 32 && valueLen <= 64) {
+            const encryptedPrivKey = data.slice(searchPos + 1, searchPos + 1 + valueLen);
+
+            // Decrypt using master key with IV derived from pubkey hash (double SHA256)
+            const pubkeyWords = uint8ArrayToWordArray(pubkey);
+            const pubkeyHashWords = CryptoJS.SHA256(CryptoJS.SHA256(pubkeyWords));
+            const ivWords = CryptoJS.lib.WordArray.create(pubkeyHashWords.words.slice(0, 4));
+            const masterKeyWords = CryptoJS.enc.Hex.parse(masterKeyHex);
+            const encryptedWords = uint8ArrayToWordArray(encryptedPrivKey);
+
+            const decrypted = CryptoJS.AES.decrypt(
+              { ciphertext: encryptedWords } as CryptoJS.lib.CipherParams,
+              masterKeyWords,
+              { iv: ivWords, padding: CryptoJS.pad.Pkcs7, mode: CryptoJS.mode.CBC }
+            );
+
+            bip32MasterKey = CryptoJS.enc.Hex.stringify(decrypted);
+
+            if (bip32MasterKey.length === 64) {
+              console.log(`✓ BIP32 master key decrypted: ${bip32MasterKey.substring(0, 16)}...`);
+              break;
+            }
+          }
+        }
+        break;
+      }
+
+      ckeyIndex = findPattern(data, ckeyPattern, ckeyIndex + 1);
+    }
+
+    if (!bip32MasterKey || bip32MasterKey.length !== 64) {
+      throw new Error('Could not decrypt BIP32 master private key');
+    }
+
+    return {
+      masterKey: bip32MasterKey,
+      chainCode: chainCode,
+      descriptorPath: "84'/1'/0'" // BIP84 for Alpha network
+    };
+  } catch (error) {
+    console.error('Error decrypting encrypted wallet.dat:', error);
+    return null;
+  }
+}
+
+/**
  * Base58 decode function for decoding extended keys
  */
 function base58Decode(str: string): Uint8Array {
@@ -137,9 +412,10 @@ function base58Decode(str: string): Uint8Array {
 
 /**
  * Restore wallet from wallet.dat (SQLite BIP32 format)
- * Exact port of index.html restoreFromWalletDat() logic
+ * Supports both encrypted and unencrypted wallet.dat files
+ * Exact port of index.html restoreFromWalletDat() logic with encryption support
  */
-async function restoreFromWalletDat(file: File): Promise<RestoreWalletResult> {
+async function restoreFromWalletDat(file: File, password?: string): Promise<RestoreWalletResult> {
   try {
     const data = await readBinaryFile(file);
 
@@ -333,10 +609,44 @@ async function restoreFromWalletDat(file: File): Promise<RestoreWalletResult> {
     } else {
       // Check if this is an encrypted wallet
       if (hasMkey) {
+        // Wallet is encrypted - try to decrypt if password is provided
+        if (!password) {
+          return {
+            success: false,
+            wallet: {} as Wallet,
+            error: 'This wallet.dat file is encrypted. Please provide a password to decrypt it.',
+            isEncryptedDat: true
+          };
+        }
+
+        // Try to decrypt the encrypted wallet (async to prevent UI freeze)
+        const decryptedData = await decryptEncryptedWalletDat(data, password);
+        if (!decryptedData) {
+          return {
+            success: false,
+            wallet: {} as Wallet,
+            error: 'Failed to decrypt wallet.dat. The password may be incorrect.',
+            isEncryptedDat: true
+          };
+        }
+
+        // Successfully decrypted - create wallet with decrypted data
+        const wallet: Wallet = {
+          masterPrivateKey: decryptedData.masterKey,
+          addresses: [],
+          isEncrypted: false,
+          encryptedMasterKey: '',
+          childPrivateKey: null,
+          isImportedAlphaWallet: true,
+          masterChainCode: decryptedData.chainCode,
+          chainCode: decryptedData.chainCode,
+          descriptorPath: decryptedData.descriptorPath,
+        };
+
         return {
-          success: false,
-          wallet: {} as Wallet,
-          error: 'This wallet.dat file is encrypted. Encrypted wallet.dat files are not currently supported. Please decrypt the wallet in Bitcoin Core first, or export as text file.'
+          success: true,
+          wallet,
+          message: 'Encrypted wallet.dat decrypted and imported successfully!'
         };
       } else {
         return {
@@ -387,7 +697,7 @@ export async function importWallet(
   try {
     // Check for wallet.dat - use binary parser
     if (file.name.endsWith(".dat")) {
-      return restoreFromWalletDat(file);
+      return restoreFromWalletDat(file, password);
     }
 
     const fileContent = await file.text();
