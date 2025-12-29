@@ -751,6 +751,9 @@ export class UnifiedKeyManager {
     localStorage.removeItem("l3_selected_address_path");
     localStorage.removeItem("l3_selected_address_index"); // Legacy key
 
+    // Clear UI preferences
+    localStorage.removeItem("wallet-active-layer");
+
     // Clear ALL per-address wallet data (tokens, nametags)
     // This is important - without this, nametags are found locally
     // and IPNS check is skipped on re-import

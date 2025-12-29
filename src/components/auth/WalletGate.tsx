@@ -2,7 +2,7 @@ import { type ReactNode, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
 import { useWallet } from "../wallet/L3/hooks/useWallet";
-import { CreateWalletFlow } from "../wallet/L3/onboarding/CreateWalletFlow";
+import { CreateWalletFlow } from "../wallet/onboarding/CreateWalletFlow";
 import { NostrPinPublisher } from "../wallet/L3/services/NostrPinPublisher";
 import { NOSTR_PIN_CONFIG } from "../../config/nostrPin.config";
 

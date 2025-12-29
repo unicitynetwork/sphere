@@ -25,6 +25,7 @@ import { subscribeBlocks } from "../sdk/network";
 import { loadWalletFromUnifiedKeyManager, getUnifiedKeyManager } from "../sdk/unifiedWalletBridge";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { KEYS as L3_KEYS } from "../../L3/hooks/useWallet";
 
 // Query keys for L1 wallet
 export const L1_KEYS = {
@@ -279,21 +280,20 @@ export function useL1Wallet(selectedAddress?: string) {
   // Mutation: Delete wallet via UnifiedKeyManager
   const deleteWalletMutation = useMutation({
     mutationFn: async () => {
-      // Clear all wallet data
+      // Clear all wallet data from localStorage and reset singletons
       UnifiedKeyManager.clearAll();
 
-      // Reset WalletRepository in-memory state (keeps localStorage intact for tokens/nametags)
+      // Reset WalletRepository in-memory state
       WalletRepository.getInstance().resetInMemoryState();
     },
     onSuccess: () => {
-      // Clear ALL L1 queries
+      // Set identity to null immediately - this triggers WalletGate to show onboarding
+      queryClient.setQueryData(L3_KEYS.IDENTITY, null);
+      queryClient.setQueryData(L3_KEYS.NAMETAG, null);
+
+      // Clear all other queries
+      queryClient.removeQueries({ queryKey: ["wallet"] });
       queryClient.removeQueries({ queryKey: ["l1"] });
-
-      // Clear ALL L3 queries
-      queryClient.removeQueries({ queryKey: ["l3"] });
-
-      // Force page reload for clean state
-      window.location.reload();
     },
   });
 

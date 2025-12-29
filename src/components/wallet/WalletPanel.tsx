@@ -21,20 +21,10 @@ export function WalletPanel() {
     localStorage.setItem('wallet-active-layer', layer);
   };
   const [copied, setCopied] = useState(false);
-  const { nametag } = useWallet();
-
-  const handleCopyNametag = async () => {
-    if (!nametag) return;
-    try {
-      await navigator.clipboard.writeText(`${nametag}`);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy nametag:', err);
-    }
-  };
+  const { identity, nametag, isLoadingIdentity } = useWallet();
 
   // Auto-switch to L3 when payment request is received
+  // Note: This hook must be called before any early returns
   useEffect(() => {
     const handlePaymentRequest = () => {
       console.log("💰 Payment request received, switching to L3...");
@@ -47,6 +37,22 @@ export function WalletPanel() {
       window.removeEventListener('payment-requests-updated', handlePaymentRequest);
     };
   }, []);
+
+  // Don't render wallet panel if not authenticated - WalletGate handles onboarding
+  if (isLoadingIdentity || !identity || !nametag) {
+    return null;
+  }
+
+  const handleCopyNametag = async () => {
+    if (!nametag) return;
+    try {
+      await navigator.clipboard.writeText(`${nametag}`);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy nametag:', err);
+    }
+  };
 
   return (
     <div className="bg-white/60 dark:bg-neutral-900/90 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden h-full relative lg:shadow-xl dark:lg:shadow-2xl flex flex-col transition-all duration-500 theme-transition">

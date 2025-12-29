@@ -11,17 +11,13 @@
 
 import { deriveKeyAtPath } from "./address";
 import { getBalance } from "./network";
-import { createBech32 } from "./bech32";
 import type { Wallet } from "./types";
-import CryptoJS from "crypto-js";
-import elliptic from "elliptic";
 // L3 inventory checking imports
 import { IdentityManager } from "../../L3/services/IdentityManager";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { fetchNametagFromIpns } from "../../L3/services/IpnsNametagFetcher";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
-
-const ec = new elliptic.ec("secp256k1");
+import { publicKeyToAddress, ec } from "../../shared/utils/cryptoUtils";
 
 /**
  * Generate address at specific BIP32 path (supports both external and change chains)
@@ -35,16 +31,7 @@ function generateAddressAtPath(
 
   const keyPair = ec.keyFromPrivate(derived.privateKey);
   const publicKey = keyPair.getPublic(true, "hex");
-
-  // HASH160 (SHA256 -> RIPEMD160)
-  const sha = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKey)).toString();
-  const hash160 = CryptoJS.RIPEMD160(CryptoJS.enc.Hex.parse(sha)).toString();
-
-  const programBytes = Uint8Array.from(
-    hash160.match(/../g)!.map((x) => parseInt(x, 16))
-  );
-
-  const address = createBech32("alpha", 0, programBytes);
+  const address = publicKeyToAddress(publicKey);
 
   return {
     address,
