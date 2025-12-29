@@ -136,6 +136,7 @@ export const useWallet = () => {
     return () => {
       recoveryService.stopPeriodicRetry();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identityQuery.data?.address, nostrService, identityManager, queryClient]);
 
   // Ensure registry is loaded before aggregating assets

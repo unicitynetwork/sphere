@@ -384,6 +384,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       setError(message);
       setIsBusy(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedWords, getUnifiedKeyManager]);
 
   // Action: Mint nametag

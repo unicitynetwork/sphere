@@ -136,6 +136,7 @@ export function useWalletImport({
   const handleConfirmImport = useCallback(() => {
     if (!selectedFile) return;
     handleImportFromFile(selectedFile, scanCount);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFile, scanCount]);
 
   // Main import handler
