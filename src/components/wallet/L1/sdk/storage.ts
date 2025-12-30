@@ -8,7 +8,12 @@ export function saveWalletToStorage(key: string, wallet: Wallet) {
 export function loadWalletFromStorage(key: string): Wallet | null {
   const raw = localStorage.getItem(STORAGE_KEY_GENERATORS.l1WalletByKey(key));
   if (!raw) return null;
-  return JSON.parse(raw);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    console.error(`[Storage] Failed to parse wallet data for key: ${key}`);
+    return null;
+  }
 }
 
 export function deleteWalletFromStorage(key: string) {
@@ -16,10 +21,19 @@ export function deleteWalletFromStorage(key: string) {
 }
 
 export function getAllStoredWallets(): StoredWallet[] {
-  return Object.keys(localStorage)
-    .filter((k) => k.startsWith(STORAGE_KEY_PREFIXES.L1_WALLET))
-    .map((k) => ({
-      key: k.replace(STORAGE_KEY_PREFIXES.L1_WALLET, ""),
-      data: JSON.parse(localStorage.getItem(k)!)
-    }));
+  const wallets: StoredWallet[] = [];
+  for (const k of Object.keys(localStorage)) {
+    if (!k.startsWith(STORAGE_KEY_PREFIXES.L1_WALLET)) continue;
+    const raw = localStorage.getItem(k);
+    if (!raw) continue;
+    try {
+      wallets.push({
+        key: k.replace(STORAGE_KEY_PREFIXES.L1_WALLET, ""),
+        data: JSON.parse(raw)
+      });
+    } catch {
+      console.error(`[Storage] Failed to parse wallet: ${k}`);
+    }
+  }
+  return wallets;
 }

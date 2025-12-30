@@ -47,7 +47,7 @@ export class RegistryService {
 
         const cachedData = localStorage.getItem(STORAGE_KEYS.UNICITY_IDS_CACHE);
         const timestampStr = localStorage.getItem(STORAGE_KEYS.UNICITY_IDS_TIMESTAMP);
-        const timestamp = timestampStr ? parseInt(timestampStr) : 0;
+        const timestamp = timestampStr ? parseInt(timestampStr, 10) : 0;
         const isStale = (Date.now() - timestamp) > CACHE_VALIDITY_MS;
 
         if (cachedData && !isStale) {

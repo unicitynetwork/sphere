@@ -242,8 +242,8 @@ export class TokenBackupService {
     const lastSync = localStorage.getItem(STORAGE_KEYS.LAST_IPFS_SYNC_SUCCESS);
 
     const now = Date.now();
-    const lastBackupTime = lastBackup ? parseInt(lastBackup) : null;
-    const lastSyncTime = lastSync ? parseInt(lastSync) : null;
+    const lastBackupTime = lastBackup ? parseInt(lastBackup, 10) : null;
+    const lastSyncTime = lastSync ? parseInt(lastSync, 10) : null;
 
     const daysSinceBackup = lastBackupTime
       ? (now - lastBackupTime) / (1000 * 60 * 60 * 24)
