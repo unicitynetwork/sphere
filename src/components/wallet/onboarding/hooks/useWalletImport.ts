@@ -20,6 +20,7 @@ import {
   extractMnemonic,
   isValidMnemonicFormat,
 } from "../../shared/utils/walletFileParser";
+import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 // Session key (same as useWallet.ts)
 const SESSION_KEY = "user-pin-1234";
@@ -160,7 +161,7 @@ export function useWalletImport({
           UnifiedKeyManager.resetInstance();
         }
 
-        localStorage.removeItem("wallet_main");
+        localStorage.removeItem(STORAGE_KEYS.WALLET_MAIN);
 
         // For .dat files, use direct SDK import and show scan modal
         if (file.name.endsWith(".dat")) {
@@ -210,8 +211,8 @@ export function useWalletImport({
             if (result.mnemonic) {
               const keyManager = getUnifiedKeyManager();
               await keyManager.createFromMnemonic(result.mnemonic);
-              localStorage.removeItem("l3_selected_address_path");
-              localStorage.removeItem("l3_selected_address_index");
+              localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
+              localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_INDEX_LEGACY);
               await goToAddressSelection();
               return;
             }
@@ -491,8 +492,8 @@ export function useWalletImport({
           if (result.mnemonic) {
             const keyManager = getUnifiedKeyManager();
             await keyManager.createFromMnemonic(result.mnemonic);
-            localStorage.removeItem("l3_selected_address_path");
-            localStorage.removeItem("l3_selected_address_index");
+            localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
+            localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_INDEX_LEGACY);
             await goToAddressSelection();
             return;
           }

@@ -5,6 +5,7 @@ import {
 } from "./address";
 import type { Wallet } from "./types";
 import CryptoJS from "crypto-js";
+import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 /**
  * Create a new wallet matching the original index.html implementation
@@ -30,7 +31,7 @@ export function createWallet(): Wallet {
 }
 
 export function deleteWallet() {
-  localStorage.removeItem("wallet_main");
+  localStorage.removeItem(STORAGE_KEYS.WALLET_MAIN);
 }
 
 export function loadWallet(): Wallet | null {

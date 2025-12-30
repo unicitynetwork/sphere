@@ -27,6 +27,7 @@ import { IdentityManager } from "../../wallet/L3/services/IdentityManager";
 import { getBootstrapPeers, getAllBackendGatewayUrls, IPNS_RESOLUTION_CONFIG, IPFS_CONFIG } from "../../../config/ipfs.config";
 import type { ChatSession } from "./ChatHistoryRepository";
 import type { ChatMessage } from "../../../hooks/useAgentChat";
+import { STORAGE_KEYS, STORAGE_KEY_GENERATORS } from "../../../config/storageKeys";
 
 // ==========================================
 // Types
@@ -87,9 +88,6 @@ export interface ChatSyncStatus {
 // Different HKDF info string creates a separate key for chat storage
 const HKDF_INFO_CHAT = "ipfs-chat-history-ed25519-v1";
 const SYNC_DEBOUNCE_MS = 3000;
-const VERSION_STORAGE_PREFIX = "ipfs_chat_version_";
-const CID_STORAGE_PREFIX = "ipfs_chat_cid_";
-const IPNS_SEQ_STORAGE_PREFIX = "ipfs_chat_seq_";
 
 // ==========================================
 // ChatHistoryIpfsService
@@ -328,13 +326,13 @@ export class ChatHistoryIpfsService {
 
   private getVersionCounter(): number {
     if (!this.cachedIpnsName) return 0;
-    const key = `${VERSION_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = STORAGE_KEY_GENERATORS.ipfsChatVersion(this.cachedIpnsName);
     return parseInt(localStorage.getItem(key) || "0", 10);
   }
 
   private incrementVersionCounter(): number {
     if (!this.cachedIpnsName) return 1;
-    const key = `${VERSION_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = STORAGE_KEY_GENERATORS.ipfsChatVersion(this.cachedIpnsName);
     const next = this.getVersionCounter() + 1;
     localStorage.setItem(key, String(next));
     return next;
@@ -342,32 +340,32 @@ export class ChatHistoryIpfsService {
 
   private setVersionCounter(version: number): void {
     if (!this.cachedIpnsName) return;
-    const key = `${VERSION_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = STORAGE_KEY_GENERATORS.ipfsChatVersion(this.cachedIpnsName);
     localStorage.setItem(key, String(version));
   }
 
   private getLastCid(): string | null {
     if (!this.cachedIpnsName) return null;
-    const key = `${CID_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = STORAGE_KEY_GENERATORS.ipfsChatCid(this.cachedIpnsName);
     return localStorage.getItem(key);
   }
 
   private setLastCid(cid: string): void {
     if (!this.cachedIpnsName) return;
-    const key = `${CID_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = STORAGE_KEY_GENERATORS.ipfsChatCid(this.cachedIpnsName);
     localStorage.setItem(key, cid);
   }
 
   private getIpnsSequenceNumber(): bigint {
     if (!this.cachedIpnsName) return 0n;
-    const key = `${IPNS_SEQ_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = STORAGE_KEY_GENERATORS.ipfsChatSeq(this.cachedIpnsName);
     const stored = localStorage.getItem(key);
     return stored ? BigInt(stored) : 0n;
   }
 
   private setIpnsSequenceNumber(seq: bigint): void {
     if (!this.cachedIpnsName) return;
-    const key = `${IPNS_SEQ_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = STORAGE_KEY_GENERATORS.ipfsChatSeq(this.cachedIpnsName);
     localStorage.setItem(key, seq.toString());
   }
 
@@ -1054,12 +1052,8 @@ export class ChatHistoryIpfsService {
   // ==========================================
 
   private buildStorageData(): ChatHistoryStorageData {
-    const SESSIONS_KEY = "sphere_agent_chat_sessions";
-    const MESSAGES_KEY_PREFIX = "sphere_agent_chat_messages";
-    const TOMBSTONES_KEY = "sphere_agent_chat_tombstones";
-
     // Load sessions
-    const sessionsRaw = localStorage.getItem(SESSIONS_KEY);
+    const sessionsRaw = localStorage.getItem(STORAGE_KEYS.AGENT_CHAT_SESSIONS);
     const sessions: ChatSession[] = sessionsRaw ? JSON.parse(sessionsRaw) : [];
 
     console.log(`💬 buildStorageData: found ${sessions.length} sessions in localStorage`);
@@ -1073,7 +1067,7 @@ export class ChatHistoryIpfsService {
       console.log(`💬   - Session ${session.id.slice(0, 8)}... agentId=${session.agentId}, title="${session.title.slice(0, 20)}..."`);
 
       // Load messages for this session
-      const messagesRaw = localStorage.getItem(`${MESSAGES_KEY_PREFIX}:${session.id}`);
+      const messagesRaw = localStorage.getItem(STORAGE_KEY_GENERATORS.agentChatMessages(session.id));
       if (messagesRaw) {
         const messages = JSON.parse(messagesRaw);
         messagesMap[session.id] = messages;
@@ -1082,7 +1076,7 @@ export class ChatHistoryIpfsService {
     }
 
     // Load tombstones
-    const tombstonesRaw = localStorage.getItem(TOMBSTONES_KEY);
+    const tombstonesRaw = localStorage.getItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES);
     const tombstones: Record<string, ChatTombstone> = tombstonesRaw
       ? JSON.parse(tombstonesRaw)
       : {};
@@ -1103,21 +1097,17 @@ export class ChatHistoryIpfsService {
   }
 
   private async importRemoteData(data: ChatHistoryStorageData): Promise<number> {
-    const SESSIONS_KEY = "sphere_agent_chat_sessions";
-    const MESSAGES_KEY_PREFIX = "sphere_agent_chat_messages";
-    const TOMBSTONES_KEY = "sphere_agent_chat_tombstones";
-
     console.log(`💬 importRemoteData: remote has ${Object.keys(data.sessions).length} sessions, ${Object.keys(data.tombstones).length} tombstones`);
 
     // Load current local sessions
-    const localSessionsRaw = localStorage.getItem(SESSIONS_KEY);
+    const localSessionsRaw = localStorage.getItem(STORAGE_KEYS.AGENT_CHAT_SESSIONS);
     const localSessions: ChatSession[] = localSessionsRaw ? JSON.parse(localSessionsRaw) : [];
     const localSessionsMap = new Map(localSessions.map(s => [s.id, s]));
 
     console.log(`💬 importRemoteData: local has ${localSessions.length} sessions`);
 
     // Load local tombstones
-    const localTombstonesRaw = localStorage.getItem(TOMBSTONES_KEY);
+    const localTombstonesRaw = localStorage.getItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES);
     const localTombstones: Record<string, ChatTombstone> = localTombstonesRaw
       ? JSON.parse(localTombstonesRaw)
       : {};
@@ -1151,7 +1141,7 @@ export class ChatHistoryIpfsService {
         const remoteMessages = data.messages[sessionId];
         if (remoteMessages) {
           localStorage.setItem(
-            `${MESSAGES_KEY_PREFIX}:${sessionId}`,
+            STORAGE_KEY_GENERATORS.agentChatMessages(sessionId),
             JSON.stringify(remoteMessages)
           );
           console.log(`💬     Messages: ${remoteMessages.length}`);
@@ -1171,7 +1161,7 @@ export class ChatHistoryIpfsService {
         // Only apply tombstone if it's newer than local session
         if (tombstone.deletedAt > localSession.updatedAt) {
           localSessionsMap.delete(sessionId);
-          localStorage.removeItem(`${MESSAGES_KEY_PREFIX}:${sessionId}`);
+          localStorage.removeItem(STORAGE_KEY_GENERATORS.agentChatMessages(sessionId));
           localTombstones[sessionId] = tombstone;
         }
       } else {
@@ -1182,10 +1172,10 @@ export class ChatHistoryIpfsService {
 
     // Save merged sessions
     const mergedSessions = Array.from(localSessionsMap.values());
-    localStorage.setItem(SESSIONS_KEY, JSON.stringify(mergedSessions));
+    localStorage.setItem(STORAGE_KEYS.AGENT_CHAT_SESSIONS, JSON.stringify(mergedSessions));
 
     // Save merged tombstones
-    localStorage.setItem(TOMBSTONES_KEY, JSON.stringify(localTombstones));
+    localStorage.setItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES, JSON.stringify(localTombstones));
 
     console.log(`💬 Imported ${importedCount} chat session(s) from remote`);
 
@@ -1200,9 +1190,7 @@ export class ChatHistoryIpfsService {
    * Record a session deletion as a tombstone for IPFS sync
    */
   recordSessionDeletion(sessionId: string): void {
-    const TOMBSTONES_KEY = "sphere_agent_chat_tombstones";
-
-    const tombstonesRaw = localStorage.getItem(TOMBSTONES_KEY);
+    const tombstonesRaw = localStorage.getItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES);
     const tombstones: Record<string, ChatTombstone> = tombstonesRaw
       ? JSON.parse(tombstonesRaw)
       : {};
@@ -1213,7 +1201,7 @@ export class ChatHistoryIpfsService {
       reason: "user-deleted",
     };
 
-    localStorage.setItem(TOMBSTONES_KEY, JSON.stringify(tombstones));
+    localStorage.setItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES, JSON.stringify(tombstones));
 
     // Trigger sync
     this.scheduleSync();
@@ -1223,9 +1211,7 @@ export class ChatHistoryIpfsService {
    * Record deletion of all sessions for an agent/user
    */
   recordBulkDeletion(sessionIds: string[]): void {
-    const TOMBSTONES_KEY = "sphere_agent_chat_tombstones";
-
-    const tombstonesRaw = localStorage.getItem(TOMBSTONES_KEY);
+    const tombstonesRaw = localStorage.getItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES);
     const tombstones: Record<string, ChatTombstone> = tombstonesRaw
       ? JSON.parse(tombstonesRaw)
       : {};
@@ -1239,7 +1225,7 @@ export class ChatHistoryIpfsService {
       };
     }
 
-    localStorage.setItem(TOMBSTONES_KEY, JSON.stringify(tombstones));
+    localStorage.setItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES, JSON.stringify(tombstones));
 
     // Trigger sync
     this.scheduleSync();
@@ -1257,13 +1243,13 @@ export class ChatHistoryIpfsService {
 
     // Clear version counter
     if (this.cachedIpnsName) {
-      localStorage.removeItem(`${VERSION_STORAGE_PREFIX}${this.cachedIpnsName}`);
-      localStorage.removeItem(`${CID_STORAGE_PREFIX}${this.cachedIpnsName}`);
-      localStorage.removeItem(`${IPNS_SEQ_STORAGE_PREFIX}${this.cachedIpnsName}`);
+      localStorage.removeItem(STORAGE_KEY_GENERATORS.ipfsChatVersion(this.cachedIpnsName));
+      localStorage.removeItem(STORAGE_KEY_GENERATORS.ipfsChatCid(this.cachedIpnsName));
+      localStorage.removeItem(STORAGE_KEY_GENERATORS.ipfsChatSeq(this.cachedIpnsName));
     }
 
     // Clear tombstones
-    localStorage.removeItem("sphere_agent_chat_tombstones");
+    localStorage.removeItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES);
 
     // Reset in-memory state
     this.ipnsSequenceNumber = 0n;

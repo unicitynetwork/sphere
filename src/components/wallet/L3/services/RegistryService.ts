@@ -1,5 +1,6 @@
 import axios from 'axios';
 import bundledRegistry from '../../../../assets/unicity-ids.testnet.json';
+import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 
 export interface IconEntry {
@@ -20,8 +21,6 @@ export interface TokenDefinition {
 
 
 const REGISTRY_URL = "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet.json";
-const STORAGE_KEY_CACHE = "unicity_ids_cache";
-const STORAGE_KEY_TIMESTAMP = "unicity_ids_timestamp";
 const CACHE_VALIDITY_MS = 24 * 60 * 60 * 1000; // 24 Hours
 
 export class RegistryService {
@@ -46,8 +45,8 @@ export class RegistryService {
     private async init() {
         if (this.isInitialized) return;
 
-        const cachedData = localStorage.getItem(STORAGE_KEY_CACHE);
-        const timestampStr = localStorage.getItem(STORAGE_KEY_TIMESTAMP);
+        const cachedData = localStorage.getItem(STORAGE_KEYS.UNICITY_IDS_CACHE);
+        const timestampStr = localStorage.getItem(STORAGE_KEYS.UNICITY_IDS_TIMESTAMP);
         const timestamp = timestampStr ? parseInt(timestampStr) : 0;
         const isStale = (Date.now() - timestamp) > CACHE_VALIDITY_MS;
 
@@ -103,8 +102,8 @@ export class RegistryService {
                 this.updateMap(response.data);
                 
                 // Update Storage
-                localStorage.setItem(STORAGE_KEY_CACHE, JSON.stringify(response.data));
-                localStorage.setItem(STORAGE_KEY_TIMESTAMP, Date.now().toString());
+                localStorage.setItem(STORAGE_KEYS.UNICITY_IDS_CACHE, JSON.stringify(response.data));
+                localStorage.setItem(STORAGE_KEYS.UNICITY_IDS_TIMESTAMP, Date.now().toString());
             }
         } catch (e) {
             console.error("Registry: Failed to fetch from GitHub", e);

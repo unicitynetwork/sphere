@@ -8,12 +8,10 @@
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import type { Wallet, WalletAddress } from "./types";
 import { loadWalletFromStorage } from "./storage";
+import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 // Same session key as L3 (from useWallet.ts)
 const SESSION_KEY = "user-pin-1234";
-
-// L3 selected address path storage key - PATH is the ONLY reliable identifier
-const SELECTED_PATH_KEY = "l3_selected_address_path";
 
 /**
  * Load wallet from UnifiedKeyManager and convert to L1 Wallet interface
@@ -48,7 +46,7 @@ export async function loadWalletFromUnifiedKeyManager(): Promise<Wallet | null> 
   }
 
   // Get selected address path (same as L3 uses) - PATH is the ONLY reliable identifier
-  const selectedPath = localStorage.getItem(SELECTED_PATH_KEY);
+  const selectedPath = localStorage.getItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
 
   // Get base path for default address derivation
   const basePath = keyManager.getBasePath();

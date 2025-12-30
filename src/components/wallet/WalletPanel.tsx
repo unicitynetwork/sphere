@@ -4,11 +4,12 @@ import { motion } from 'framer-motion';
 import { L1WalletView } from './L1/views/L1WalletView';
 import { L3WalletView } from './L3/views/L3WalletView';
 import { useWallet } from './L3/hooks/useWallet';
+import { STORAGE_KEYS } from '../../config/storageKeys';
 
 type LayerType = 'L1' | 'L3';
 
 const getInitialLayer = (): LayerType => {
-  const saved = localStorage.getItem('wallet-active-layer');
+  const saved = localStorage.getItem(STORAGE_KEYS.WALLET_ACTIVE_LAYER);
   return saved === 'L1' ? 'L1' : 'L3';
 };
 
@@ -18,7 +19,7 @@ export function WalletPanel() {
 
   const handleLayerChange = (layer: LayerType) => {
     setActiveLayer(layer);
-    localStorage.setItem('wallet-active-layer', layer);
+    localStorage.setItem(STORAGE_KEYS.WALLET_ACTIVE_LAYER, layer);
   };
   const [copied, setCopied] = useState(false);
   const { identity, nametag, isLoadingIdentity } = useWallet();

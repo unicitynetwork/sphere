@@ -1,10 +1,7 @@
 import { Token, Wallet, TokenStatus } from "../components/wallet/L3/data/model";
 import type { TombstoneEntry, TxfToken, TxfTransaction } from "../components/wallet/L3/services/types/TxfTypes";
 import { v4 as uuidv4 } from "uuid";
-
-const LEGACY_STORAGE_KEY = "unicity_wallet_data";
-const STORAGE_KEY_PREFIX = "unicity_wallet_";
-const STORAGE_KEY_HISTORY = "unicity_transaction_history";
+import { STORAGE_KEYS, STORAGE_KEY_GENERATORS, STORAGE_KEY_PREFIXES } from "../config/storageKeys";
 
 /**
  * Interface for nametag data (one per identity)
@@ -80,7 +77,7 @@ export class WalletRepository {
   static checkNametagForAddress(address: string): NametagData | null {
     if (!address) return null;
 
-    const storageKey = `${STORAGE_KEY_PREFIX}${address}`;
+    const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
     try {
       const json = localStorage.getItem(storageKey);
       if (json) {
@@ -100,7 +97,7 @@ export class WalletRepository {
   static checkTokensForAddress(address: string): boolean {
     if (!address) return false;
 
-    const storageKey = `${STORAGE_KEY_PREFIX}${address}`;
+    const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
     try {
       const json = localStorage.getItem(storageKey);
       if (json) {
@@ -121,7 +118,7 @@ export class WalletRepository {
   static saveNametagForAddress(address: string, nametag: NametagData): void {
     if (!address || !nametag) return;
 
-    const storageKey = `${STORAGE_KEY_PREFIX}${address}`;
+    const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
     try {
       // Load existing wallet data or create minimal structure
       let walletData: StoredWallet;
@@ -178,7 +175,7 @@ export class WalletRepository {
    * Generate storage key for a specific address
    */
   private getStorageKey(address: string): string {
-    return `${STORAGE_KEY_PREFIX}${address}`;
+    return STORAGE_KEY_GENERATORS.walletByAddress(address);
   }
 
   /**
@@ -191,7 +188,7 @@ export class WalletRepository {
     }
 
     try {
-      const legacyJson = localStorage.getItem(LEGACY_STORAGE_KEY);
+      const legacyJson = localStorage.getItem(STORAGE_KEYS.WALLET_DATA_LEGACY);
       if (!legacyJson) {
         this._migrationComplete = true;
         return;
@@ -217,13 +214,13 @@ export class WalletRepository {
       // Check if already migrated
       if (localStorage.getItem(newKey)) {
         console.log("Wallet already migrated, removing legacy key");
-        localStorage.removeItem(LEGACY_STORAGE_KEY);
+        localStorage.removeItem(STORAGE_KEYS.WALLET_DATA_LEGACY);
         this._migrationComplete = true;
         return;
       }
 
       localStorage.setItem(newKey, legacyJson);
-      localStorage.removeItem(LEGACY_STORAGE_KEY);
+      localStorage.removeItem(STORAGE_KEYS.WALLET_DATA_LEGACY);
       console.log(`Successfully migrated wallet for ${parsed.address}`);
       this._migrationComplete = true;
     } catch (error) {
@@ -356,7 +353,7 @@ export class WalletRepository {
   // Transaction History Methods
   private loadTransactionHistory() {
     try {
-      const json = localStorage.getItem(STORAGE_KEY_HISTORY);
+      const json = localStorage.getItem(STORAGE_KEYS.TRANSACTION_HISTORY);
       if (json) {
         this._transactionHistory = JSON.parse(json);
       }
@@ -368,7 +365,7 @@ export class WalletRepository {
 
   private saveTransactionHistory() {
     try {
-      localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(this._transactionHistory));
+      localStorage.setItem(STORAGE_KEYS.TRANSACTION_HISTORY, JSON.stringify(this._transactionHistory));
     } catch (error) {
       console.error("Failed to save transaction history", error);
     }
@@ -678,7 +675,7 @@ export class WalletRepository {
       localStorage.removeItem(storageKey);
     }
     // Also remove legacy key if it exists
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    localStorage.removeItem(STORAGE_KEYS.WALLET_DATA_LEGACY);
     this._wallet = null;
     this._currentAddress = null;
     this._nametag = null;
@@ -710,18 +707,18 @@ export class WalletRepository {
   static clearAllWalletStorage(): void {
     console.log("🗑️ Clearing all wallet storage from localStorage...");
 
-    // Find and remove all keys that start with STORAGE_KEY_PREFIX
+    // Find and remove all keys that start with wallet address prefix
     const keysToRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key && key.startsWith(STORAGE_KEY_PREFIX)) {
+      if (key && key.startsWith(STORAGE_KEY_PREFIXES.WALLET_ADDRESS)) {
         keysToRemove.push(key);
       }
     }
 
     // Also remove legacy key and transaction history
-    keysToRemove.push(LEGACY_STORAGE_KEY);
-    keysToRemove.push(STORAGE_KEY_HISTORY);
+    keysToRemove.push(STORAGE_KEYS.WALLET_DATA_LEGACY);
+    keysToRemove.push(STORAGE_KEYS.TRANSACTION_HISTORY);
 
     // Remove all found keys
     for (const key of keysToRemove) {

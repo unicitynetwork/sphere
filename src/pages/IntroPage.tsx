@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SplashScreen } from '../components/splash/SplashScreen';
 import { WelcomeModal } from '../components/splash/WelcomeModal';
-
-const WELCOME_ACCEPTED_KEY = 'sphere_welcome_accepted';
+import { STORAGE_KEYS } from '../config/storageKeys';
 
 export function IntroPage() {
   const navigate = useNavigate();
@@ -11,7 +10,7 @@ export function IntroPage() {
   const [hasAcceptedWelcome, setHasAcceptedWelcome] = useState<boolean | null>(null);
 
   useEffect(() => {
-    const accepted = localStorage.getItem(WELCOME_ACCEPTED_KEY) === 'true';
+    const accepted = localStorage.getItem(STORAGE_KEYS.WELCOME_ACCEPTED) === 'true';
     setHasAcceptedWelcome(accepted);
   }, []);
 
@@ -24,7 +23,7 @@ export function IntroPage() {
   };
 
   const handleWelcomeAccept = () => {
-    localStorage.setItem(WELCOME_ACCEPTED_KEY, 'true');
+    localStorage.setItem(STORAGE_KEYS.WELCOME_ACCEPTED, 'true');
     setShowWelcomeModal(false);
     navigate('/home');
   };

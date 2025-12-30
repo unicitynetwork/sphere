@@ -16,6 +16,7 @@ import { HistoryView, MainWalletView } from ".";
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
+import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 type ViewMode = "main" | "history";
 
@@ -83,7 +84,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   useEffect(() => {
     if (wallet && wallet.addresses.length > 0) {
       // Read stored path (same one L3 uses) - path is the ONLY reliable identifier
-      const storedPath = localStorage.getItem("l3_selected_address_path");
+      const storedPath = localStorage.getItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
 
       // Find address by path, fallback to first address if not found
       const addressFromPath = storedPath
@@ -253,10 +254,10 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
     // Sync to L3's selected address path
     if (selectedAddr?.path) {
-      localStorage.setItem("l3_selected_address_path", selectedAddr.path);
+      localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, selectedAddr.path);
     } else {
       // Fallback: remove path to trigger default behavior
-      localStorage.removeItem("l3_selected_address_path");
+      localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
     }
 
     // Reset L3 state so it picks up new identity
