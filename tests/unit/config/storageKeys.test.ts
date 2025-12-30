@@ -112,6 +112,51 @@ describe("STORAGE_KEY_GENERATORS", () => {
       expect(key).toBe("sphere_ipfs_last_cid_k51qzi5uqu5d...");
     });
   });
+
+  describe("ipfsPendingIpns", () => {
+    it("should generate correct key format", () => {
+      const ipnsName = "k51test";
+      const key = STORAGE_KEY_GENERATORS.ipfsPendingIpns(ipnsName);
+
+      expect(key).toBe("sphere_ipfs_pending_ipns_k51test");
+    });
+  });
+
+  describe("ipfsLastSeq", () => {
+    it("should generate correct key format", () => {
+      const ipnsName = "k51test";
+      const key = STORAGE_KEY_GENERATORS.ipfsLastSeq(ipnsName);
+
+      expect(key).toBe("sphere_ipfs_last_seq_k51test");
+    });
+  });
+
+  describe("ipfsChatVersion", () => {
+    it("should generate correct key format", () => {
+      const ipnsName = "k51chat";
+      const key = STORAGE_KEY_GENERATORS.ipfsChatVersion(ipnsName);
+
+      expect(key).toBe("sphere_ipfs_chat_version_k51chat");
+    });
+  });
+
+  describe("ipfsChatCid", () => {
+    it("should generate correct key format", () => {
+      const ipnsName = "k51chat";
+      const key = STORAGE_KEY_GENERATORS.ipfsChatCid(ipnsName);
+
+      expect(key).toBe("sphere_ipfs_chat_cid_k51chat");
+    });
+  });
+
+  describe("ipfsChatSeq", () => {
+    it("should generate correct key format", () => {
+      const ipnsName = "k51chat";
+      const key = STORAGE_KEY_GENERATORS.ipfsChatSeq(ipnsName);
+
+      expect(key).toBe("sphere_ipfs_chat_seq_k51chat");
+    });
+  });
 });
 
 // ==========================================
@@ -258,5 +303,34 @@ describe("Key consistency", () => {
     expect(
       STORAGE_KEY_GENERATORS.ipfsLastCid(ipnsName).startsWith(STORAGE_KEY_PREFIXES.IPFS_LAST_CID)
     ).toBe(true);
+
+    expect(
+      STORAGE_KEY_GENERATORS.ipfsPendingIpns(ipnsName).startsWith(STORAGE_KEY_PREFIXES.IPFS_PENDING_IPNS)
+    ).toBe(true);
+
+    expect(
+      STORAGE_KEY_GENERATORS.ipfsLastSeq(ipnsName).startsWith(STORAGE_KEY_PREFIXES.IPFS_LAST_SEQ)
+    ).toBe(true);
+  });
+
+  it("should have matching IPFS chat prefixes and generators", () => {
+    const ipnsName = "k51chat";
+
+    expect(
+      STORAGE_KEY_GENERATORS.ipfsChatVersion(ipnsName).startsWith(STORAGE_KEY_PREFIXES.IPFS_CHAT_VERSION)
+    ).toBe(true);
+
+    expect(
+      STORAGE_KEY_GENERATORS.ipfsChatCid(ipnsName).startsWith(STORAGE_KEY_PREFIXES.IPFS_CHAT_CID)
+    ).toBe(true);
+
+    expect(
+      STORAGE_KEY_GENERATORS.ipfsChatSeq(ipnsName).startsWith(STORAGE_KEY_PREFIXES.IPFS_CHAT_SEQ)
+    ).toBe(true);
+  });
+
+  it("should have matching AGENT_MEMORY prefix and generator", () => {
+    const generatedKey = STORAGE_KEY_GENERATORS.agentMemory("user1", "activity1");
+    expect(generatedKey.startsWith(STORAGE_KEY_PREFIXES.AGENT_MEMORY)).toBe(true);
   });
 });
