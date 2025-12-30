@@ -29,7 +29,7 @@ import {
   type WalletJSON,
   type WalletJSONExportOptions,
 } from "../../L1/sdk/import-export";
-import { STORAGE_KEYS, STORAGE_KEY_GENERATORS, STORAGE_KEY_PREFIXES } from "../../../../config/storageKeys";
+import { STORAGE_KEYS, clearAllSphereData } from "../../../../config/storageKeys";
 
 const ec = new elliptic.ec("secp256k1");
 
@@ -729,91 +729,10 @@ export class UnifiedKeyManager {
   static clearAll(): void {
     console.log("🔐 Clearing all wallet data...");
 
-    // Clear UnifiedKeyManager localStorage keys
-    localStorage.removeItem(STORAGE_KEYS.UNIFIED_WALLET_MNEMONIC);
-    localStorage.removeItem(STORAGE_KEYS.UNIFIED_WALLET_MASTER);
-    localStorage.removeItem(STORAGE_KEYS.UNIFIED_WALLET_CHAINCODE);
-    localStorage.removeItem(STORAGE_KEYS.UNIFIED_WALLET_SOURCE);
-    localStorage.removeItem(STORAGE_KEYS.UNIFIED_WALLET_DERIVATION_MODE);
-    localStorage.removeItem(STORAGE_KEYS.UNIFIED_WALLET_BASE_PATH);
+    // Clear ALL sphere_* keys from localStorage in one go
+    clearAllSphereData();
 
-    // Clear L1 wallet storage
-    localStorage.removeItem(STORAGE_KEYS.WALLET_MAIN);
-
-    // Clear L3 selected address
-    localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
-    localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_INDEX); // Legacy key
-
-    // Clear UI preferences
-    localStorage.removeItem(STORAGE_KEYS.WALLET_ACTIVE_LAYER);
-
-    // Clear ALL per-address wallet data (tokens, nametags)
-    // This is important - without this, nametags are found locally
-    // and IPNS check is skipped on re-import
-    const keysToRemove: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith(STORAGE_KEY_PREFIXES.WALLET_ADDRESS)) {
-        keysToRemove.push(key);
-      }
-    }
-    for (const key of keysToRemove) {
-      localStorage.removeItem(key);
-    }
-    if (keysToRemove.length > 0) {
-      console.log(`🔐 Cleared ${keysToRemove.length} per-address wallet entries`);
-    }
-
-    // Also clear transaction history
-    localStorage.removeItem(STORAGE_KEYS.TRANSACTION_HISTORY);
-
-    // Clear chat history (localStorage only, NO IPFS sync)
-    // We don't want to propagate chat deletion to other devices when user deletes wallet
-    // We clear directly here instead of calling repository methods to avoid circular dependencies
-    console.log("🔐 Clearing chat history (localStorage only, no IPFS sync)...");
-
-    // Clear chat sessions and messages
-    const chatSessionsRaw = localStorage.getItem(STORAGE_KEYS.AGENT_CHAT_SESSIONS);
-    if (chatSessionsRaw) {
-      try {
-        const sessions = JSON.parse(chatSessionsRaw);
-        // Remove all message stores
-        if (Array.isArray(sessions)) {
-          sessions.forEach((session: { id: string }) => {
-            localStorage.removeItem(STORAGE_KEY_GENERATORS.agentChatMessages(session.id));
-          });
-          console.log(`🔐 Cleared ${sessions.length} chat sessions and messages`);
-        }
-      } catch (err) {
-        console.warn("🔐 Failed to parse chat sessions:", err);
-      }
-    }
-    localStorage.removeItem(STORAGE_KEYS.AGENT_CHAT_SESSIONS);
-
-    // Clear chat tombstones
-    localStorage.removeItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES);
-
-    // Clear chat IPFS state (version counters, CIDs, sequence numbers)
-    // We scan all keys to find IPFS-related chat storage keys
-    const chatIpfsKeys: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && (
-        key.startsWith(STORAGE_KEY_PREFIXES.IPFS_CHAT_VERSION) ||
-        key.startsWith(STORAGE_KEY_PREFIXES.IPFS_CHAT_CID) ||
-        key.startsWith(STORAGE_KEY_PREFIXES.IPFS_CHAT_SEQ)
-      )) {
-        chatIpfsKeys.push(key);
-      }
-    }
-    for (const key of chatIpfsKeys) {
-      localStorage.removeItem(key);
-    }
-    if (chatIpfsKeys.length > 0) {
-      console.log(`🔐 Cleared ${chatIpfsKeys.length} chat IPFS state keys`);
-    }
-
-    // Reset singleton instance
+    // Reset singleton instance (in-memory state)
     if (UnifiedKeyManager.instance) {
       UnifiedKeyManager.instance.mnemonic = null;
       UnifiedKeyManager.instance.masterKey = null;
