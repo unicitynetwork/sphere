@@ -25,9 +25,7 @@ import {
   isPendingStatus,
   validateOutboxEntry,
 } from "../components/wallet/L3/services/types/OutboxTypes";
-
-const OUTBOX_STORAGE_KEY = "unicity_outbox";
-const SPLIT_GROUPS_STORAGE_KEY = "unicity_outbox_split_groups";
+import { STORAGE_KEYS } from "../config/storageKeys";
 
 export class OutboxRepository {
   private static instance: OutboxRepository;
@@ -374,16 +372,16 @@ export class OutboxRepository {
   private getStorageKey(): string {
     // If we have a current address, namespace the storage
     if (this._currentAddress) {
-      return `${OUTBOX_STORAGE_KEY}_${this._currentAddress}`;
+      return `${STORAGE_KEYS.OUTBOX}_${this._currentAddress}`;
     }
-    return OUTBOX_STORAGE_KEY;
+    return STORAGE_KEYS.OUTBOX;
   }
 
   private getSplitGroupsStorageKey(): string {
     if (this._currentAddress) {
-      return `${SPLIT_GROUPS_STORAGE_KEY}_${this._currentAddress}`;
+      return `${STORAGE_KEYS.OUTBOX_SPLIT_GROUPS}_${this._currentAddress}`;
     }
-    return SPLIT_GROUPS_STORAGE_KEY;
+    return STORAGE_KEYS.OUTBOX_SPLIT_GROUPS;
   }
 
   private loadFromStorage(): void {

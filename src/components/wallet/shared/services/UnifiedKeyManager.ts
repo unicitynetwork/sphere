@@ -29,16 +29,9 @@ import {
   type WalletJSON,
   type WalletJSONExportOptions,
 } from "../../L1/sdk/import-export";
+import { STORAGE_KEYS, clearAllSphereData } from "../../../../config/storageKeys";
 
 const ec = new elliptic.ec("secp256k1");
-
-// Storage keys
-const STORAGE_KEY_ENCRYPTED_MNEMONIC = "unified_wallet_mnemonic";
-const STORAGE_KEY_ENCRYPTED_MASTER = "unified_wallet_master";
-const STORAGE_KEY_CHAIN_CODE = "unified_wallet_chaincode";
-const STORAGE_KEY_WALLET_SOURCE = "unified_wallet_source";
-const STORAGE_KEY_DERIVATION_MODE = "unified_wallet_derivation_mode";
-const STORAGE_KEY_BASE_PATH = "unified_wallet_base_path";
 
 // Default base path for BIP32 derivation
 const DEFAULT_BASE_PATH = "m/44'/0'/0'";
@@ -141,12 +134,12 @@ export class UnifiedKeyManager {
   private async doInitialize(): Promise<boolean> {
     try {
       // Try to load from storage
-      const encryptedMnemonic = localStorage.getItem(STORAGE_KEY_ENCRYPTED_MNEMONIC);
-      const encryptedMaster = localStorage.getItem(STORAGE_KEY_ENCRYPTED_MASTER);
-      const chainCode = localStorage.getItem(STORAGE_KEY_CHAIN_CODE);
-      const source = localStorage.getItem(STORAGE_KEY_WALLET_SOURCE) as WalletSource;
-      const derivationMode = localStorage.getItem(STORAGE_KEY_DERIVATION_MODE) as DerivationMode;
-      const storedBasePath = localStorage.getItem(STORAGE_KEY_BASE_PATH);
+      const encryptedMnemonic = localStorage.getItem(STORAGE_KEYS.UNIFIED_WALLET_MNEMONIC);
+      const encryptedMaster = localStorage.getItem(STORAGE_KEYS.UNIFIED_WALLET_MASTER);
+      const chainCode = localStorage.getItem(STORAGE_KEYS.UNIFIED_WALLET_CHAINCODE);
+      const source = localStorage.getItem(STORAGE_KEYS.UNIFIED_WALLET_SOURCE) as WalletSource;
+      const derivationMode = localStorage.getItem(STORAGE_KEYS.UNIFIED_WALLET_DERIVATION_MODE) as DerivationMode;
+      const storedBasePath = localStorage.getItem(STORAGE_KEYS.UNIFIED_WALLET_BASE_PATH);
 
       console.log("🔐 UnifiedKeyManager initializing...", {
         hasMnemonic: !!encryptedMnemonic,
@@ -301,7 +294,7 @@ export class UnifiedKeyManager {
     }
 
     // Clear any existing mnemonic storage (so file import takes precedence)
-    localStorage.removeItem(STORAGE_KEY_ENCRYPTED_MNEMONIC);
+    localStorage.removeItem(STORAGE_KEYS.UNIFIED_WALLET_MNEMONIC);
 
     this.mnemonic = null; // No mnemonic when importing from file
     this.masterKey = masterKey;
@@ -709,12 +702,12 @@ export class UnifiedKeyManager {
     this.isInitializing = false;
     this.initializePromise = null;
 
-    localStorage.removeItem(STORAGE_KEY_ENCRYPTED_MNEMONIC);
-    localStorage.removeItem(STORAGE_KEY_ENCRYPTED_MASTER);
-    localStorage.removeItem(STORAGE_KEY_CHAIN_CODE);
-    localStorage.removeItem(STORAGE_KEY_WALLET_SOURCE);
-    localStorage.removeItem(STORAGE_KEY_DERIVATION_MODE);
-    localStorage.removeItem(STORAGE_KEY_BASE_PATH);
+    localStorage.removeItem(STORAGE_KEYS.UNIFIED_WALLET_MNEMONIC);
+    localStorage.removeItem(STORAGE_KEYS.UNIFIED_WALLET_MASTER);
+    localStorage.removeItem(STORAGE_KEYS.UNIFIED_WALLET_CHAINCODE);
+    localStorage.removeItem(STORAGE_KEYS.UNIFIED_WALLET_SOURCE);
+    localStorage.removeItem(STORAGE_KEYS.UNIFIED_WALLET_DERIVATION_MODE);
+    localStorage.removeItem(STORAGE_KEYS.UNIFIED_WALLET_BASE_PATH);
 
     console.log("🔐 Unified wallet cleared");
   }
@@ -736,92 +729,10 @@ export class UnifiedKeyManager {
   static clearAll(): void {
     console.log("🔐 Clearing all wallet data...");
 
-    // Clear UnifiedKeyManager localStorage keys
-    localStorage.removeItem(STORAGE_KEY_ENCRYPTED_MNEMONIC);
-    localStorage.removeItem(STORAGE_KEY_ENCRYPTED_MASTER);
-    localStorage.removeItem(STORAGE_KEY_CHAIN_CODE);
-    localStorage.removeItem(STORAGE_KEY_WALLET_SOURCE);
-    localStorage.removeItem(STORAGE_KEY_DERIVATION_MODE);
-    localStorage.removeItem(STORAGE_KEY_BASE_PATH);
+    // Clear ALL sphere_* keys from localStorage in one go
+    clearAllSphereData();
 
-    // Clear L1 wallet storage
-    localStorage.removeItem("wallet_main");
-
-    // Clear L3 selected address
-    localStorage.removeItem("l3_selected_address_path");
-    localStorage.removeItem("l3_selected_address_index"); // Legacy key
-
-    // Clear UI preferences
-    localStorage.removeItem("wallet-active-layer");
-
-    // Clear ALL per-address wallet data (tokens, nametags)
-    // This is important - without this, nametags are found locally
-    // and IPNS check is skipped on re-import
-    const keysToRemove: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith("unicity_wallet_")) {
-        keysToRemove.push(key);
-      }
-    }
-    for (const key of keysToRemove) {
-      localStorage.removeItem(key);
-    }
-    if (keysToRemove.length > 0) {
-      console.log(`🔐 Cleared ${keysToRemove.length} per-address wallet entries`);
-    }
-
-    // Also clear transaction history
-    localStorage.removeItem("unicity_transaction_history");
-
-    // Clear chat history (localStorage only, NO IPFS sync)
-    // We don't want to propagate chat deletion to other devices when user deletes wallet
-    // We clear directly here instead of calling repository methods to avoid circular dependencies
-    console.log("🔐 Clearing chat history (localStorage only, no IPFS sync)...");
-
-    // Clear chat sessions and messages
-    const chatSessionsKey = "sphere_agent_chat_sessions";
-    const chatSessionsRaw = localStorage.getItem(chatSessionsKey);
-    if (chatSessionsRaw) {
-      try {
-        const sessions = JSON.parse(chatSessionsRaw);
-        // Remove all message stores
-        if (Array.isArray(sessions)) {
-          sessions.forEach((session: { id: string }) => {
-            localStorage.removeItem(`sphere_agent_chat_messages:${session.id}`);
-          });
-          console.log(`🔐 Cleared ${sessions.length} chat sessions and messages`);
-        }
-      } catch (err) {
-        console.warn("🔐 Failed to parse chat sessions:", err);
-      }
-    }
-    localStorage.removeItem(chatSessionsKey);
-
-    // Clear chat tombstones
-    localStorage.removeItem("sphere_agent_chat_tombstones");
-
-    // Clear chat IPFS state (version counters, CIDs, sequence numbers)
-    // We scan all keys to find IPFS-related chat storage keys
-    const chatIpfsKeys: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && (
-        key.startsWith("ipfs_chat_version_") ||
-        key.startsWith("ipfs_chat_cid_") ||
-        key.startsWith("ipfs_chat_seq_")
-      )) {
-        chatIpfsKeys.push(key);
-      }
-    }
-    for (const key of chatIpfsKeys) {
-      localStorage.removeItem(key);
-    }
-    if (chatIpfsKeys.length > 0) {
-      console.log(`🔐 Cleared ${chatIpfsKeys.length} chat IPFS state keys`);
-    }
-
-    // Reset singleton instance
+    // Reset singleton instance (in-memory state)
     if (UnifiedKeyManager.instance) {
       UnifiedKeyManager.instance.mnemonic = null;
       UnifiedKeyManager.instance.masterKey = null;
@@ -845,24 +756,24 @@ export class UnifiedKeyManager {
   private saveToStorage(): void {
     if (this.mnemonic) {
       const encryptedMnemonic = this.encrypt(this.mnemonic);
-      localStorage.setItem(STORAGE_KEY_ENCRYPTED_MNEMONIC, encryptedMnemonic);
+      localStorage.setItem(STORAGE_KEYS.UNIFIED_WALLET_MNEMONIC, encryptedMnemonic);
     } else if (this.masterKey) {
       const encryptedMaster = this.encrypt(this.masterKey);
-      localStorage.setItem(STORAGE_KEY_ENCRYPTED_MASTER, encryptedMaster);
+      localStorage.setItem(STORAGE_KEYS.UNIFIED_WALLET_MASTER, encryptedMaster);
     }
 
     if (this.chainCode) {
       // Chain code is not secret (derived from public data in BIP32)
       // but we store it for convenience
-      localStorage.setItem(STORAGE_KEY_CHAIN_CODE, this.chainCode);
+      localStorage.setItem(STORAGE_KEYS.UNIFIED_WALLET_CHAINCODE, this.chainCode);
     } else {
       // Remove chain code if not present (WIF HMAC mode)
-      localStorage.removeItem(STORAGE_KEY_CHAIN_CODE);
+      localStorage.removeItem(STORAGE_KEYS.UNIFIED_WALLET_CHAINCODE);
     }
 
-    localStorage.setItem(STORAGE_KEY_WALLET_SOURCE, this.source);
-    localStorage.setItem(STORAGE_KEY_DERIVATION_MODE, this.derivationMode);
-    localStorage.setItem(STORAGE_KEY_BASE_PATH, this.basePath);
+    localStorage.setItem(STORAGE_KEYS.UNIFIED_WALLET_SOURCE, this.source);
+    localStorage.setItem(STORAGE_KEYS.UNIFIED_WALLET_DERIVATION_MODE, this.derivationMode);
+    localStorage.setItem(STORAGE_KEYS.UNIFIED_WALLET_BASE_PATH, this.basePath);
   }
 
   private encrypt(data: string): string {

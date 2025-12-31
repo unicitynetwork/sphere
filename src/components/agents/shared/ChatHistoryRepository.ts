@@ -16,14 +16,12 @@
 
 import type { ChatMessage } from '../../../hooks/useAgentChat';
 import { getChatHistoryIpfsService } from './ChatHistoryIpfsService';
+import { STORAGE_KEYS, STORAGE_KEY_GENERATORS } from '../../../config/storageKeys';
 
 // Maximum storage size (in bytes) before cleanup is triggered - ~4MB to leave room
 const MAX_STORAGE_SIZE = 4 * 1024 * 1024;
 // Maximum number of sessions to keep per agent
 const MAX_SESSIONS_PER_AGENT = 50;
-// Storage keys
-const SESSIONS_KEY = 'sphere_agent_chat_sessions';
-const MESSAGES_KEY_PREFIX = 'sphere_agent_chat_messages';
 
 export interface ChatSession {
   id: string;
@@ -82,7 +80,7 @@ export class ChatHistoryRepository {
   }
 
   private getMessagesKey(sessionId: string): string {
-    return `${MESSAGES_KEY_PREFIX}:${sessionId}`;
+    return STORAGE_KEY_GENERATORS.agentChatMessages(sessionId);
   }
 
   // ==========================================
@@ -93,7 +91,7 @@ export class ChatHistoryRepository {
     if (!this.isLocalStorageAvailable()) return [];
 
     try {
-      const raw = localStorage.getItem(SESSIONS_KEY);
+      const raw = localStorage.getItem(STORAGE_KEYS.AGENT_CHAT_SESSIONS);
       if (!raw) return [];
       const sessions: ChatSession[] = JSON.parse(raw);
       return sessions.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -117,7 +115,7 @@ export class ChatHistoryRepository {
     if (!this.isLocalStorageAvailable()) return;
 
     try {
-      localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+      localStorage.setItem(STORAGE_KEYS.AGENT_CHAT_SESSIONS, JSON.stringify(sessions));
     } catch (e) {
       if (e instanceof DOMException &&
           (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
@@ -125,7 +123,7 @@ export class ChatHistoryRepository {
         this.cleanupOldSessions();
         // Retry once
         try {
-          localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+          localStorage.setItem(STORAGE_KEYS.AGENT_CHAT_SESSIONS, JSON.stringify(sessions));
         } catch {
           console.error('[ChatHistory] Failed to save sessions after cleanup');
         }
@@ -251,7 +249,7 @@ export class ChatHistoryRepository {
     }
 
     // Clear sessions
-    localStorage.removeItem(SESSIONS_KEY);
+    localStorage.removeItem(STORAGE_KEYS.AGENT_CHAT_SESSIONS);
     this.notifyUpdate();
   }
 
@@ -273,10 +271,10 @@ export class ChatHistoryRepository {
     });
 
     // Clear sessions
-    localStorage.removeItem(SESSIONS_KEY);
+    localStorage.removeItem(STORAGE_KEYS.AGENT_CHAT_SESSIONS);
 
     // Also clear tombstones (since wallet is being deleted)
-    localStorage.removeItem('sphere_agent_chat_tombstones');
+    localStorage.removeItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES);
 
     // Note: We do NOT call getChatHistoryIpfsService().recordBulkDeletion()
     // because this is a local-only operation (wallet deletion)

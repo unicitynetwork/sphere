@@ -23,6 +23,7 @@ import { getSyncCoordinator } from "./SyncCoordinator";
 import { getTokenBackupService } from "./TokenBackupService";
 // Note: retryWithBackoff was used for DHT publish, now handled by HTTP primary path
 import { getBootstrapPeers, getConfiguredCustomPeers, getBackendPeerId, getAllBackendGatewayUrls, IPNS_RESOLUTION_CONFIG, IPFS_CONFIG } from "../../../../config/ipfs.config";
+import { STORAGE_KEY_PREFIXES } from "../../../../config/storageKeys";
 
 // Configure @noble/ed25519 to use sync sha512 (required for getPublicKey without WebCrypto)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -135,9 +136,6 @@ interface IpnsProgressiveResult {
 
 const HKDF_INFO = "ipfs-storage-ed25519-v1";
 const SYNC_DEBOUNCE_MS = 5000;
-const VERSION_STORAGE_PREFIX = "ipfs_version_";
-const CID_STORAGE_PREFIX = "ipfs_last_cid_";
-const PENDING_IPNS_PREFIX = "ipfs_pending_ipns_";
 
 // ==========================================
 // IpfsStorageService
@@ -506,8 +504,8 @@ export class IpfsStorageService {
     if (oldIpnsName === newIpnsName) return;
 
     // Migrate version counter
-    const oldVersionKey = `${VERSION_STORAGE_PREFIX}${oldIpnsName}`;
-    const newVersionKey = `${VERSION_STORAGE_PREFIX}${newIpnsName}`;
+    const oldVersionKey = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${oldIpnsName}`;
+    const newVersionKey = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${newIpnsName}`;
     const version = localStorage.getItem(oldVersionKey);
     if (version && !localStorage.getItem(newVersionKey)) {
       localStorage.setItem(newVersionKey, version);
@@ -516,8 +514,8 @@ export class IpfsStorageService {
     }
 
     // Migrate last CID
-    const oldCidKey = `${CID_STORAGE_PREFIX}${oldIpnsName}`;
-    const newCidKey = `${CID_STORAGE_PREFIX}${newIpnsName}`;
+    const oldCidKey = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${oldIpnsName}`;
+    const newCidKey = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${newIpnsName}`;
     const lastCid = localStorage.getItem(oldCidKey);
     if (lastCid && !localStorage.getItem(newCidKey)) {
       localStorage.setItem(newCidKey, lastCid);
@@ -588,14 +586,12 @@ export class IpfsStorageService {
   // IPNS Publishing
   // ==========================================
 
-  private readonly IPNS_SEQ_STORAGE_PREFIX = "ipns_seq_";
-
   /**
    * Get the last IPNS sequence number from storage
    */
   private getIpnsSequenceNumber(): bigint {
     if (!this.cachedIpnsName) return 0n;
-    const key = `${this.IPNS_SEQ_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPNS_SEQ}${this.cachedIpnsName}`;
     const stored = localStorage.getItem(key);
     return stored ? BigInt(stored) : 0n;
   }
@@ -605,7 +601,7 @@ export class IpfsStorageService {
    */
   private setIpnsSequenceNumber(seq: bigint): void {
     if (!this.cachedIpnsName) return;
-    const key = `${this.IPNS_SEQ_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPNS_SEQ}${this.cachedIpnsName}`;
     localStorage.setItem(key, seq.toString());
   }
 
@@ -1423,7 +1419,7 @@ export class IpfsStorageService {
    */
   private getVersionCounter(): number {
     if (!this.cachedIpnsName) return 0;
-    const key = `${VERSION_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${this.cachedIpnsName}`;
     return parseInt(localStorage.getItem(key) || "0", 10);
   }
 
@@ -1432,7 +1428,7 @@ export class IpfsStorageService {
    */
   private incrementVersionCounter(): number {
     if (!this.cachedIpnsName) return 1;
-    const key = `${VERSION_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${this.cachedIpnsName}`;
     const current = this.getVersionCounter();
     const next = current + 1;
     localStorage.setItem(key, String(next));
@@ -1444,7 +1440,7 @@ export class IpfsStorageService {
    */
   private setVersionCounter(version: number): void {
     if (!this.cachedIpnsName) return;
-    const key = `${VERSION_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${this.cachedIpnsName}`;
     localStorage.setItem(key, String(version));
   }
 
@@ -1453,7 +1449,7 @@ export class IpfsStorageService {
    */
   private getLastCid(): string | null {
     if (!this.cachedIpnsName) return null;
-    const key = `${CID_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${this.cachedIpnsName}`;
     return localStorage.getItem(key);
   }
 
@@ -1462,7 +1458,7 @@ export class IpfsStorageService {
    */
   private setLastCid(cid: string): void {
     if (!this.cachedIpnsName) return;
-    const key = `${CID_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${this.cachedIpnsName}`;
     localStorage.setItem(key, cid);
   }
 
@@ -1475,7 +1471,7 @@ export class IpfsStorageService {
    */
   private getPendingIpnsPublish(): string | null {
     if (!this.cachedIpnsName) return null;
-    const key = `${PENDING_IPNS_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_PENDING_IPNS}${this.cachedIpnsName}`;
     return localStorage.getItem(key);
   }
 
@@ -1484,7 +1480,7 @@ export class IpfsStorageService {
    */
   private setPendingIpnsPublish(cid: string): void {
     if (!this.cachedIpnsName) return;
-    const key = `${PENDING_IPNS_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_PENDING_IPNS}${this.cachedIpnsName}`;
     localStorage.setItem(key, cid);
     console.log(`📦 IPNS publish marked as pending for CID: ${cid.slice(0, 16)}...`);
   }
@@ -1494,7 +1490,7 @@ export class IpfsStorageService {
    */
   private clearPendingIpnsPublish(): void {
     if (!this.cachedIpnsName) return;
-    const key = `${PENDING_IPNS_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_PENDING_IPNS}${this.cachedIpnsName}`;
     localStorage.removeItem(key);
   }
 

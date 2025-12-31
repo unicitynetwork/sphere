@@ -7,14 +7,13 @@
  */
 
 import type { MemoryState } from "../types";
-
-const MEMORY_KEY_PREFIX = 'unicity_agent_memory';
+import { STORAGE_KEY_GENERATORS } from "../config/storageKeys";
 
 /**
  * Generate storage key for memory data
  */
 function getMemoryKey(userId: string, activityId: string): string {
-    return `${MEMORY_KEY_PREFIX}:${userId}:${activityId}`;
+    return STORAGE_KEY_GENERATORS.agentMemory(userId, activityId);
 }
 
 /**
