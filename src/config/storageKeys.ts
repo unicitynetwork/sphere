@@ -57,9 +57,6 @@ export const STORAGE_KEYS = {
   // BIP32 derivation path for selected L3 address
   L3_SELECTED_ADDRESS_PATH: 'sphere_l3_selected_address_path',
 
-  // LEGACY: Selected address index (deprecated, migrating to path-based)
-  L3_SELECTED_ADDRESS_INDEX: 'sphere_l3_selected_address_index',
-
   // LEGACY: L3 selected address index (migrated to path-based)
   L3_SELECTED_ADDRESS_INDEX_LEGACY: 'sphere_l3_selected_address_index',
 
@@ -125,12 +122,6 @@ export const STORAGE_KEYS = {
   // ============================================================================
   // REGISTRY CACHE
   // ============================================================================
-
-  // Cached token definitions from registry
-  IDS_CACHE: 'sphere_ids_cache',
-
-  // Registry cache timestamp
-  IDS_TIMESTAMP: 'sphere_ids_timestamp',
 
   // Unicity IDs cache (from GitHub)
   UNICITY_IDS_CACHE: 'sphere_unicity_ids_cache',

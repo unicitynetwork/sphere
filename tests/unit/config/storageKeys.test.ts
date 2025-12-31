@@ -19,14 +19,11 @@ describe("STORAGE_KEYS", () => {
     }
   });
 
-  it("should have unique key values (except intentional legacy duplicates)", () => {
+  it("should have unique key values", () => {
     const values = Object.values(STORAGE_KEYS);
     const uniqueValues = new Set(values);
 
-    // L3_SELECTED_ADDRESS_INDEX and L3_SELECTED_ADDRESS_INDEX_LEGACY intentionally share same value
-    // for migration purposes, so we expect 1 less unique value
-    const expectedDuplicates = 1;
-    expect(uniqueValues.size).toBe(values.length - expectedDuplicates);
+    expect(uniqueValues.size).toBe(values.length);
   });
 
   it("should contain expected wallet keys", () => {
