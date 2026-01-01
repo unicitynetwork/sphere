@@ -1,4 +1,4 @@
-import { Plus, ArrowUpRight, ArrowDownUp, Sparkles, Loader2, Coins, Layers, Bell, CheckCircle, XCircle, Key, Download, Upload, Clock } from 'lucide-react';
+import { Plus, ArrowUpRight, ArrowDownUp, Sparkles, Loader2, Coins, Layers, Bell, CheckCircle, XCircle, Download, Upload, Clock, MoreVertical } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
@@ -13,12 +13,21 @@ import { FaucetService } from '../services/FaucetService';
 import { SeedPhraseModal } from '../modals/SeedPhraseModal';
 import { useIpfsStorage } from '../hooks/useIpfsStorage';
 import { TransactionHistoryModal } from '../modals/TransactionHistoryModal';
+import { SettingsModal } from '../modals/SettingsModal';
+import { L1BalanceDisplay } from '../components/L1BalanceDisplay';
+import { L1WalletModal } from '../../L1/modals/L1WalletModal';
+import { BackupWalletModal, LogoutConfirmModal } from '../../shared/modals';
+import { useL1Wallet } from '../../L1/hooks/useL1Wallet';
+import { UnifiedKeyManager } from '../../shared/services/UnifiedKeyManager';
+import { SaveWalletModal } from '../../L1/components/modals';
 
 type Tab = 'assets' | 'tokens';
 
 export function L3WalletView({ showBalances }: { showBalances: boolean }) {
   const { identity, assets, tokens, isLoadingAssets, isLoadingIdentity, nametag, getSeedPhrase } = useWallet();
   const { exportTxf, importTxf, isExportingTxf, isImportingTxf, isSyncing, isEnabled: isIpfsEnabled } = useIpfsStorage();
+  const { totalBalance: l1TotalBalance, deleteWallet } = useL1Wallet();
+
   const [activeTab, setActiveTab] = useState<Tab>('assets');
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const [isSwapModalOpen, setIsSwapModalOpen] = useState(false);
@@ -34,6 +43,13 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
   const [initialSyncComplete, setInitialSyncComplete] = useState(false);
   const hasSyncStarted = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // New modal states
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isL1WalletOpen, setIsL1WalletOpen] = useState(false);
+  const [isBackupOpen, setIsBackupOpen] = useState(false);
+  const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
+  const [isSaveWalletOpen, setIsSaveWalletOpen] = useState(false);
 
   const { pendingCount } = useIncomingPaymentRequests();
 
@@ -144,6 +160,52 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
     }
   }, [importTxf]);
 
+  // Check if mnemonic is available
+  const hasMnemonic = useMemo(() => {
+    try {
+      const keyManager = UnifiedKeyManager.getInstance("user-pin-1234");
+      return keyManager.getMnemonic() !== null;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  // Handle export wallet file
+  const handleExportWalletFile = () => {
+    setIsSaveWalletOpen(true);
+  };
+
+  // Handle save wallet
+  const handleSaveWallet = (filename: string, password?: string) => {
+    try {
+      const keyManager = UnifiedKeyManager.getInstance("user-pin-1234");
+      keyManager.downloadJSON(filename, { password });
+      setIsSaveWalletOpen(false);
+    } catch (err) {
+      console.error('Failed to save wallet:', err);
+    }
+  };
+
+  // Handle logout
+  const handleLogout = async () => {
+    try {
+      await deleteWallet();
+    } catch (err) {
+      console.error('Failed to logout:', err);
+    }
+  };
+
+  // Handle backup and logout
+  const handleBackupAndLogout = () => {
+    setIsLogoutConfirmOpen(false);
+    setIsBackupOpen(true);
+  };
+
+  // Format L1 balance for settings modal
+  const formatL1Balance = (balance: number) => {
+    return balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
   if (isLoadingIdentity) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -158,7 +220,7 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* L2 Specific Header Stats */}
+      {/* Header Stats */}
       <div className="px-6 mb-6 shrink-0">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
@@ -170,36 +232,37 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
           </div>
 
           <div className="flex items-center gap-2">
-                 <button
-                    onClick={() => setIsHistoryOpen(true)}
-                    className="p-1.5 rounded-lg hover:bg-neutral-200/50 dark:hover:bg-white/10 transition-colors group"
-                    title="Transaction history"
-                 >
-                    <Clock className="w-5 h-5 text-neutral-400 dark:text-neutral-500 group-hover:text-neutral-900 dark:group-hover:text-white transition-colors" />
-                 </button>
-                 <button
-                    onClick={handleShowSeedPhrase}
-                    className="p-1.5 rounded-lg hover:bg-neutral-200/50 dark:hover:bg-white/10 transition-colors group"
-                    title="View recovery phrase"
-                 >
-                    <Key className="w-5 h-5 text-neutral-400 dark:text-neutral-500 group-hover:text-neutral-900 dark:group-hover:text-white transition-colors" />
-                 </button>
-                 <button
-                    onClick={() => setIsRequestsOpen(true)}
-                    className="relative p-1.5 rounded-lg hover:bg-neutral-200/50 dark:hover:bg-white/10 transition-colors group"
-                 >
-                    <Bell className={`w-5 h-5 ${pendingCount > 0 ? 'text-neutral-900 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`} />
-                    {pendingCount > 0 && (
-                        <span className="absolute top-0 right-0 flex h-2.5 w-2.5">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500 border-2 border-white dark:border-[#0a0a0a]"></span>
-                        </span>
-                    )}
-                 </button>
-            </div>
+            <button
+              onClick={() => setIsHistoryOpen(true)}
+              className="p-1.5 rounded-lg hover:bg-neutral-200/50 dark:hover:bg-white/10 transition-colors group"
+              title="Transaction history"
+            >
+              <Clock className="w-5 h-5 text-neutral-400 dark:text-neutral-500 group-hover:text-neutral-900 dark:group-hover:text-white transition-colors" />
+            </button>
+            <button
+              onClick={() => setIsRequestsOpen(true)}
+              className="relative p-1.5 rounded-lg hover:bg-neutral-200/50 dark:hover:bg-white/10 transition-colors group"
+            >
+              <Bell className={`w-5 h-5 ${pendingCount > 0 ? 'text-neutral-900 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`} />
+              {pendingCount > 0 && (
+                <span className="absolute top-0 right-0 flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500 border-2 border-white dark:border-[#0a0a0a]"></span>
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-1.5 rounded-lg hover:bg-neutral-200/50 dark:hover:bg-white/10 transition-colors group"
+              title="Settings"
+            >
+              <MoreVertical className="w-5 h-5 text-neutral-400 dark:text-neutral-500 group-hover:text-neutral-900 dark:group-hover:text-white transition-colors" />
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 mb-4">
+        {/* Main Balance */}
+        <div className="flex items-center gap-2 mb-1">
           <h2 className="text-3xl text-neutral-900 dark:text-white font-bold tracking-tight">
             {showBalances
               ? `$${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -210,7 +273,15 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
           )}
         </div>
 
-        {/* L2 Actions - Speed focused */}
+        {/* L1 Balance Display - Clickable */}
+        <div className="mb-4">
+          <L1BalanceDisplay
+            showBalances={showBalances}
+            onClick={() => setIsL1WalletOpen(true)}
+          />
+        </div>
+
+        {/* Actions - Speed focused */}
         <div className="grid grid-cols-3 gap-3">
           <motion.button
             whileHover={{ scale: isFaucetLoading ? 1 : 1.02, y: isFaucetLoading ? 0 : -2 }}
@@ -309,7 +380,7 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
         </div>
       </div>
 
-      {/* L2 Assets List */}
+      {/* Assets List */}
       <div className="p-6 pt-0 flex-1 overflow-y-auto custom-scrollbar">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -443,19 +514,54 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
           )}
         </div>
       </div>
+
+      {/* Existing Modals */}
       <SendModal isOpen={isSendModalOpen} onClose={() => setIsSendModalOpen(false)} />
-
       <SwapModal isOpen={isSwapModalOpen} onClose={() => setIsSwapModalOpen(false)} />
-
       <PaymentRequestsModal isOpen={isRequestsOpen} onClose={() => setIsRequestsOpen(false)} />
-
       <SeedPhraseModal
         isOpen={isSeedPhraseOpen}
         onClose={() => setIsSeedPhraseOpen(false)}
         seedPhrase={seedPhrase}
       />
-
       <TransactionHistoryModal isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} />
+
+      {/* New Modals */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        onOpenL1Wallet={() => setIsL1WalletOpen(true)}
+        onBackupWallet={() => setIsBackupOpen(true)}
+        onLogout={() => setIsLogoutConfirmOpen(true)}
+        l1Balance={formatL1Balance(l1TotalBalance)}
+      />
+
+      <L1WalletModal
+        isOpen={isL1WalletOpen}
+        onClose={() => setIsL1WalletOpen(false)}
+        showBalances={showBalances}
+      />
+
+      <BackupWalletModal
+        isOpen={isBackupOpen}
+        onClose={() => setIsBackupOpen(false)}
+        onExportWalletFile={handleExportWalletFile}
+        onShowRecoveryPhrase={handleShowSeedPhrase}
+      />
+
+      <LogoutConfirmModal
+        isOpen={isLogoutConfirmOpen}
+        onClose={() => setIsLogoutConfirmOpen(false)}
+        onBackupAndLogout={handleBackupAndLogout}
+        onLogoutWithoutBackup={handleLogout}
+      />
+
+      <SaveWalletModal
+        show={isSaveWalletOpen}
+        onConfirm={handleSaveWallet}
+        onCancel={() => setIsSaveWalletOpen(false)}
+        hasMnemonic={hasMnemonic}
+      />
     </div>
   );
 }
