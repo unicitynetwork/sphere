@@ -115,6 +115,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
   const currentAgentId = useRef(agent.id);
   const currentNametag = useRef<string | null>(null);
   const lastSavedMessagesRef = useRef<string>('');
+  const isMountedRef = useRef(true);
 
   // Get nametag from wallet for user identification
   const { nametag } = useWallet();
@@ -127,9 +128,11 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     deleteSession,
     clearAllHistory,
     resetCurrentSession,
+    showDeleteSuccess,
     saveCurrentMessages,
     searchSessions,
     syncState,
+    syncImmediately,
     justDeleted,
   } = useChatHistory({
     agentId: agent.id,
@@ -182,6 +185,14 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
       console.warn('Failed to copy text');
     }
   };
+
+  // Track component mount state for async operations
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Reset state when agent changes
   useEffect(() => {
@@ -418,20 +429,41 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     }
   }, [loadSession, setMessages, useMockMode]);
 
-  const handleDeleteSession = (sessionId: string) => {
+  const handleDeleteSession = async (sessionId: string) => {
+    const wasCurrentSession = currentSession?.id === sessionId;
     deleteSession(sessionId);
     setShowDeleteConfirm(null);
 
     // If we deleted the current session, start a new chat
-    if (currentSession?.id === sessionId) {
+    if (wasCurrentSession) {
       handleNewChat();
+    }
+
+    // Wait for IPFS sync then show success
+    try {
+      await syncImmediately();
+      if (isMountedRef.current) {
+        showDeleteSuccess();
+      }
+    } catch (error) {
+      console.error('Failed to sync after deleting session:', error);
     }
   };
 
-  const handleClearAllHistory = () => {
+  const handleClearAllHistory = async () => {
     clearAllHistory();
     setShowClearAllConfirm(false);
     handleNewChat();
+
+    // Sync in background, show success after completion
+    try {
+      await syncImmediately();
+      if (isMountedRef.current) {
+        showDeleteSuccess();
+      }
+    } catch (error) {
+      console.error('Failed to sync after clearing history:', error);
+    }
   };
 
   const getActionLabel = (cardData: TCardData): string => {

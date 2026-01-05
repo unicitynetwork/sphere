@@ -975,9 +975,24 @@ export class ChatHistoryIpfsService {
   async syncNow(): Promise<ChatSyncResult> {
     console.log(`💬 syncNow called`);
 
+    // If already syncing, wait for current sync to complete then run another
     if (this.isSyncing) {
-      console.log(`💬 syncNow: already syncing, skipping`);
-      return { success: false, timestamp: Date.now(), error: "Sync in progress" };
+      console.log(`💬 syncNow: already syncing, waiting for completion...`);
+      // Wait for current sync to finish
+      await new Promise<void>((resolve) => {
+        const checkInterval = setInterval(() => {
+          if (!this.isSyncing) {
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }, 100);
+        // Timeout after 30 seconds
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          resolve();
+        }, 30000);
+      });
+      console.log(`💬 syncNow: previous sync completed, starting new sync`);
     }
 
     this.isSyncing = true;
@@ -1202,9 +1217,7 @@ export class ChatHistoryIpfsService {
     };
 
     localStorage.setItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES, JSON.stringify(tombstones));
-
-    // Trigger sync
-    this.scheduleSync();
+    // Sync is triggered by ChatHistoryRepository.notifyUpdate() → TanStack hook
   }
 
   /**
@@ -1226,9 +1239,7 @@ export class ChatHistoryIpfsService {
     }
 
     localStorage.setItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES, JSON.stringify(tombstones));
-
-    // Trigger sync
-    this.scheduleSync();
+    // Sync is triggered by ChatHistoryRepository.notifyUpdate() → TanStack hook
   }
 
   /**

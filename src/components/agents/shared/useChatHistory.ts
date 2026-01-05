@@ -30,6 +30,7 @@ interface UseChatHistoryReturn {
   deleteSession: (sessionId: string) => void;
   clearAllHistory: () => void;
   resetCurrentSession: () => void;
+  showDeleteSuccess: () => void;
 
   // Message management
   saveCurrentMessages: (messages: ChatMessage[]) => void;
@@ -43,6 +44,7 @@ interface UseChatHistoryReturn {
 
   // IPFS sync status (TanStack Query based)
   syncState: SyncState;
+  syncImmediately: () => Promise<unknown>;
 }
 
 export function useChatHistory({
@@ -59,7 +61,7 @@ export function useChatHistory({
   const userIdRef = useRef<string | undefined>(userId);
 
   // TanStack Query based IPFS sync
-  const { syncState } = useChatHistorySync({
+  const { syncState, syncImmediately } = useChatHistorySync({
     userId,
     enabled: enabled && !!userId,
   });
@@ -123,6 +125,7 @@ export function useChatHistory({
   }, []);
 
   // Delete a session
+  // Note: Does NOT show success message - caller should call showDeleteSuccess() after sync
   const deleteSession = useCallback((sessionId: string) => {
     chatHistoryRepository.deleteSession(sessionId);
     setSessions(prev => prev.filter(s => s.id !== sessionId));
@@ -131,22 +134,21 @@ export function useChatHistory({
     if (currentSessionRef.current?.id === sessionId) {
       setCurrentSession(null);
     }
-
-    // Show success message
-    setJustDeleted(true);
-    setTimeout(() => setJustDeleted(false), 2000);
   }, []);
 
   // Clear all history for this agent and user
+  // Note: Does NOT show success message - caller should call showDeleteSuccess() after sync
   const clearAllHistory = useCallback(() => {
     chatHistoryRepository.deleteAllSessionsForAgent(agentId, userIdRef.current);
     setSessions([]);
     setCurrentSession(null);
+  }, [agentId]);
 
-    // Show success message
+  // Show delete success message (call after sync completes)
+  const showDeleteSuccess = useCallback(() => {
     setJustDeleted(true);
     setTimeout(() => setJustDeleted(false), 2000);
-  }, [agentId]);
+  }, []);
 
   // Reset current session (for starting new chat)
   const resetCurrentSession = useCallback(() => {
@@ -202,10 +204,12 @@ export function useChatHistory({
     deleteSession,
     clearAllHistory,
     resetCurrentSession,
+    showDeleteSuccess,
     saveCurrentMessages,
     searchSessions,
     isLoading,
     justDeleted,
     syncState,
+    syncImmediately,
   };
 }

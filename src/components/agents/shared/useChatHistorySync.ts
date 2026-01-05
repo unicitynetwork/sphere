@@ -10,13 +10,14 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useRef, useEffect, useState } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 import { getChatHistoryIpfsService, type SyncStep } from './ChatHistoryIpfsService';
 
 // Query keys
 export const chatHistorySyncKeys = {
   all: ['chat-history-sync'] as const,
   ipns: (userId: string) => [...chatHistorySyncKeys.all, 'ipns', userId] as const,
+  status: () => [...chatHistorySyncKeys.all, 'status'] as const,
 };
 
 interface UseChatHistorySyncOptions {
@@ -54,24 +55,35 @@ export function useChatHistorySync({
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingSyncRef = useRef(false);
 
-  // Track detailed step from IPFS service
-  const [currentStep, setCurrentStep] = useState<SyncStep>('idle');
-  const [stepProgress, setStepProgress] = useState<string>('');
+  // Global sync status via TanStack Query (shared across all components)
+  const { data: serviceStatus } = useQuery({
+    queryKey: chatHistorySyncKeys.status(),
+    queryFn: () => {
+      const ipfsService = getChatHistoryIpfsService();
+      return ipfsService.getStatus();
+    },
+    staleTime: Infinity, // Only update via setQueryData from subscription
+    gcTime: Infinity,    // Never garbage collect
+  });
 
-  // Subscribe to IPFS service status changes
+  const currentStep = serviceStatus?.currentStep ?? 'idle';
+  const stepProgress = serviceStatus?.stepProgress ?? '';
+
+  // Subscribe to IPFS service status changes and update TanStack Query cache
   useEffect(() => {
-    if (!enabled || !userId) return;
-
     const ipfsService = getChatHistoryIpfsService();
 
+    // Update cache with current status on mount
+    queryClient.setQueryData(chatHistorySyncKeys.status(), ipfsService.getStatus());
+
+    // Subscribe to future changes and update cache
     const unsubscribe = ipfsService.onStatusChange(() => {
       const status = ipfsService.getStatus();
-      setCurrentStep(status.currentStep);
-      setStepProgress(status.stepProgress || '');
+      queryClient.setQueryData(chatHistorySyncKeys.status(), status);
     });
 
     return unsubscribe;
-  }, [enabled, userId]);
+  }, [queryClient]);
 
   // Query: Initial load and periodic sync from IPNS
   const {
@@ -183,16 +195,21 @@ export function useChatHistorySync({
     };
   }, []);
 
+  // Derive sync state from service's currentStep (global) rather than mutation state (local)
+  // This ensures consistent status across component remounts
+  const isServiceSyncing = currentStep !== 'idle' && currentStep !== 'complete' && currentStep !== 'error';
+  const isServiceUploading = currentStep === 'building-data' || currentStep === 'uploading' || currentStep === 'publishing-ipns';
+
   // Computed state for UI
   const syncState: SyncState = {
     isInitialLoading,
-    isFetching,
+    isFetching: isFetching || isServiceSyncing,
     isRefetching,
     fetchError: fetchError as Error | null,
-    isUploading,
+    isUploading: isUploading || isServiceUploading,
     uploadError: uploadError as Error | null,
-    isSyncing: isFetching || isUploading,
-    isError: !!fetchError || !!uploadError,
+    isSyncing: isFetching || isUploading || isServiceSyncing,
+    isError: !!fetchError || !!uploadError || currentStep === 'error',
     lastSyncTime: syncResult?.timestamp || null,
     sessionCount: syncResult?.sessionCount ?? null,
     currentStep,
