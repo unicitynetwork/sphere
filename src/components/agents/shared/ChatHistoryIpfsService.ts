@@ -89,6 +89,7 @@ export interface ChatSyncStatus {
 // Different HKDF info string creates a separate key for chat storage
 const HKDF_INFO_CHAT = "ipfs-chat-history-ed25519-v1";
 const SYNC_DEBOUNCE_MS = 3000;
+const TOMBSTONE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 // ==========================================
 // ChatHistoryIpfsService
@@ -147,6 +148,9 @@ export class ChatHistoryIpfsService {
     if (this.autoSyncEnabled) {
       return;
     }
+
+    // Clean up old tombstones on startup (once per session)
+    this.cleanupOldTombstones();
 
     this.boundSyncHandler = () => {
       this.hasPendingChanges = true;
@@ -1256,6 +1260,38 @@ export class ChatHistoryIpfsService {
 
     localStorage.setItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES, JSON.stringify(tombstones));
     // Sync is triggered by ChatHistoryRepository.notifyUpdate() → TanStack hook
+  }
+
+  /**
+   * Clean up tombstones older than TOMBSTONE_MAX_AGE_MS (30 days)
+   * Old tombstones are unlikely to be needed for sync conflict resolution
+   * and just waste storage space.
+   */
+  cleanupOldTombstones(): number {
+    const tombstonesRaw = localStorage.getItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES);
+    if (!tombstonesRaw) return 0;
+
+    const tombstones: Record<string, ChatTombstone> = JSON.parse(tombstonesRaw);
+    const now = Date.now();
+    const cutoffTime = now - TOMBSTONE_MAX_AGE_MS;
+
+    let removedCount = 0;
+    const remainingTombstones: Record<string, ChatTombstone> = {};
+
+    for (const [sessionId, tombstone] of Object.entries(tombstones)) {
+      if (tombstone.deletedAt >= cutoffTime) {
+        remainingTombstones[sessionId] = tombstone;
+      } else {
+        removedCount++;
+      }
+    }
+
+    if (removedCount > 0) {
+      localStorage.setItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES, JSON.stringify(remainingTombstones));
+      console.log(`💬 Cleaned up ${removedCount} old tombstone(s) (older than 30 days)`);
+    }
+
+    return removedCount;
   }
 
   /**
