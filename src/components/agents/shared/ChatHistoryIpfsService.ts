@@ -972,27 +972,18 @@ export class ChatHistoryIpfsService {
     }
   }
 
+  // Queue for pending sync requests (coalesces multiple requests into one)
+  private pendingSyncResolvers: Array<(result: ChatSyncResult) => void> = [];
+
   async syncNow(): Promise<ChatSyncResult> {
     console.log(`💬 syncNow called`);
 
-    // If already syncing, wait for current sync to complete then run another
+    // If already syncing, queue this request and wait for next sync
     if (this.isSyncing) {
-      console.log(`💬 syncNow: already syncing, waiting for completion...`);
-      // Wait for current sync to finish
-      await new Promise<void>((resolve) => {
-        const checkInterval = setInterval(() => {
-          if (!this.isSyncing) {
-            clearInterval(checkInterval);
-            resolve();
-          }
-        }, 100);
-        // Timeout after 30 seconds
-        setTimeout(() => {
-          clearInterval(checkInterval);
-          resolve();
-        }, 30000);
+      console.log(`💬 syncNow: already syncing, queuing request...`);
+      return new Promise<ChatSyncResult>((resolve) => {
+        this.pendingSyncResolvers.push(resolve);
       });
-      console.log(`💬 syncNow: previous sync completed, starting new sync`);
     }
 
     this.isSyncing = true;
@@ -1048,7 +1039,27 @@ export class ChatHistoryIpfsService {
     } finally {
       this.isSyncing = false;
 
-      if (this.pendingSync) {
+      // Handle coalesced sync requests - run ONE more sync to resolve all queued promises
+      if (this.pendingSyncResolvers.length > 0) {
+        const resolvers = this.pendingSyncResolvers;
+        this.pendingSyncResolvers = [];
+        console.log(`💬 syncNow: resolving ${resolvers.length} queued request(s) with a final sync`);
+
+        // Run one final sync that captures the latest localStorage state
+        // This single sync handles all the changes that were queued
+        this.syncNow().then((result) => {
+          resolvers.forEach(resolve => resolve(result));
+        }).catch((error) => {
+          // On error, still resolve with an error result
+          const errorResult: ChatSyncResult = {
+            success: false,
+            timestamp: Date.now(),
+            error: String(error),
+          };
+          resolvers.forEach(resolve => resolve(errorResult));
+        });
+      } else if (this.pendingSync) {
+        // Handle debounced sync requests (from scheduleSync)
         this.pendingSync = false;
         this.scheduleSync();
       } else {
