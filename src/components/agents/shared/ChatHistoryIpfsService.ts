@@ -75,6 +75,7 @@ export type SyncStep =
 export interface ChatSyncStatus {
   initialized: boolean;
   isSyncing: boolean;
+  hasPendingSync: boolean; // True when sync is scheduled but not yet started (debounce period)
   lastSync: ChatSyncResult | null;
   ipnsName: string | null;
   currentStep: SyncStep;
@@ -851,8 +852,12 @@ export class ChatHistoryIpfsService {
     }
     console.log(`💬 Scheduling sync in ${SYNC_DEBOUNCE_MS}ms`);
     this.syncTimer = setTimeout(() => {
+      this.syncTimer = null;
       this.syncNow().catch(console.error);
     }, SYNC_DEBOUNCE_MS);
+
+    // Notify listeners that a sync is now pending
+    this.notifyStatusListeners();
   }
 
   /**
@@ -1312,6 +1317,7 @@ export class ChatHistoryIpfsService {
     return {
       initialized: this.helia !== null,
       isSyncing: this.isSyncing,
+      hasPendingSync: this.syncTimer !== null || this.hasPendingChanges,
       lastSync: this.lastSync,
       ipnsName: this.cachedIpnsName,
       currentStep: this.currentStep,
