@@ -35,6 +35,7 @@ import {
   SendModal,
 } from "../components/modals";
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
+import { VestingDisplay } from "../components/VestingDisplay";
 import { HistoryView } from "../views";
 
 interface L1WalletModalProps {
@@ -78,6 +79,8 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     currentBlockHeight,
     analyzeTransaction,
     invalidateWallet,
+    vestingBalances,
+    isClassifyingVesting,
   } = useL1Wallet(selectedAddress);
 
   const addresses = wallet?.addresses.map((a) => a.address) ?? [];
@@ -226,14 +229,14 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="absolute inset-0 z-50 flex items-center justify-center p-2"
         >
           {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm rounded-2xl"
             onClick={onClose}
           />
 
@@ -243,7 +246,7 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ type: "spring", duration: 0.5 }}
-            className="relative w-full max-w-md max-h-[85vh] bg-white dark:bg-neutral-900 rounded-3xl shadow-2xl overflow-hidden flex flex-col"
+            className="relative w-[94%] max-h-[92%] bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
           >
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-neutral-200 dark:border-neutral-800">
@@ -302,6 +305,13 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
                       {showBalances ? `${formatBalance(totalBalance)} ALPHA` : '••••••'}
                     </h2>
                   </div>
+
+                  {/* Vesting Display */}
+                  <VestingDisplay
+                    showBalances={showBalances}
+                    balances={vestingBalances}
+                    isClassifying={isClassifyingVesting}
+                  />
 
                   {/* Active Address */}
                   <div className="bg-neutral-100 dark:bg-neutral-800/50 rounded-xl p-3">

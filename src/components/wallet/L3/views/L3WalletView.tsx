@@ -1,6 +1,7 @@
 import { Plus, ArrowUpRight, ArrowDownUp, Sparkles, Loader2, Coins, Layers, CheckCircle, XCircle, Download, Upload, Eye, EyeOff } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
+import { AggregatedAsset } from '../data/model';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useWallet } from '../hooks/useWallet';
 import { CreateWalletFlow } from '../../onboarding/CreateWalletFlow';
@@ -13,8 +14,6 @@ import { SeedPhraseModal } from '../modals/SeedPhraseModal';
 import { useIpfsStorage } from '../hooks/useIpfsStorage';
 import { TransactionHistoryModal } from '../modals/TransactionHistoryModal';
 import { SettingsModal } from '../modals/SettingsModal';
-import { L1BalanceDisplay } from '../components/L1BalanceDisplay';
-import { L1WalletModal } from '../../L1/modals/L1WalletModal';
 import { BackupWalletModal, LogoutConfirmModal } from '../../shared/modals';
 import { useL1Wallet } from '../../L1/hooks/useL1Wallet';
 import { UnifiedKeyManager } from '../../shared/services/UnifiedKeyManager';
@@ -31,6 +30,8 @@ interface L3WalletViewProps {
   setIsRequestsOpen: (value: boolean) => void;
   isSettingsOpen: boolean;
   setIsSettingsOpen: (value: boolean) => void;
+  isL1WalletOpen: boolean;
+  setIsL1WalletOpen: (value: boolean) => void;
 }
 
 export function L3WalletView({
@@ -42,6 +43,7 @@ export function L3WalletView({
   setIsRequestsOpen,
   isSettingsOpen,
   setIsSettingsOpen,
+  setIsL1WalletOpen,
 }: L3WalletViewProps) {
   const { identity, assets, tokens, isLoadingAssets, isLoadingIdentity, nametag, getSeedPhrase } = useWallet();
   const { exportTxf, importTxf, isExportingTxf, isImportingTxf, isSyncing, isEnabled: isIpfsEnabled } = useIpfsStorage();
@@ -62,7 +64,6 @@ export function L3WalletView({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // New modal states
-  const [isL1WalletOpen, setIsL1WalletOpen] = useState(false);
   const [isBackupOpen, setIsBackupOpen] = useState(false);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
   const [isSaveWalletOpen, setIsSaveWalletOpen] = useState(false);
@@ -82,9 +83,29 @@ export function L3WalletView({
   }, [isSyncing, isIpfsEnabled, initialSyncComplete]);
 
 
+  // Create L1 ALPHA asset
+  const l1AlphaAsset = useMemo(() => {
+    // Convert ALPHA balance to satoshis (8 decimals)
+    const satoshis = BigInt(Math.round(l1TotalBalance * 100000000));
+    return new AggregatedAsset({
+      coinId: 'l1-alpha',
+      symbol: 'ALPHA',
+      name: 'Unicity Mainnet',
+      totalAmount: satoshis.toString(),
+      decimals: 8,
+      tokenCount: 1,
+      iconUrl: null,
+      priceUsd: 1.0, // 1:1 with USD for now
+      priceEur: 0.92,
+      change24h: 0,
+    });
+  }, [l1TotalBalance]);
+
   const totalValue = useMemo(() => {
-    return assets.reduce((sum, asset) => sum + asset.getTotalFiatValue('USD'), 0);
-  }, [assets]);
+    const l3Value = assets.reduce((sum, asset) => sum + asset.getTotalFiatValue('USD'), 0);
+    const l1Value = l1AlphaAsset.getTotalFiatValue('USD');
+    return l3Value + l1Value;
+  }, [assets, l1AlphaAsset]);
 
   // Debug: Log spinner visibility conditions
   const shouldShowSpinner = isSyncing && isIpfsEnabled && !initialSyncComplete;
@@ -223,12 +244,12 @@ export function L3WalletView({
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative">
       {/* Main Balance - Centered with Eye Toggle */}
-      <div className="px-6 mb-4 shrink-0">
-        <div className="flex flex-col items-center justify-center mb-4">
-          <div className="flex items-center gap-2">
-            <h2 className="text-3xl text-neutral-900 dark:text-white font-bold tracking-tight">
+      <div className="px-6 mb-6 shrink-0">
+        <div className="flex flex-col items-center justify-center mb-6 pt-2">
+          <div className="flex items-center gap-3">
+            <h2 className="text-4xl text-neutral-900 dark:text-white font-bold tracking-tight">
               {showBalances
                 ? `$${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                 : '••••••'}
@@ -237,21 +258,14 @@ export function L3WalletView({
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => setShowBalances(!showBalances)}
-              className="p-1 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg transition-colors text-neutral-400 dark:text-neutral-500 hover:text-neutral-900 dark:hover:text-white"
+              className="p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg transition-colors text-neutral-400 dark:text-neutral-500 hover:text-neutral-900 dark:hover:text-white"
               title={showBalances ? "Hide balances" : "Show balances"}
             >
-              {showBalances ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+              {showBalances ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
             </motion.button>
             {isSyncing && isIpfsEnabled && (
-              <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+              <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
             )}
-          </div>
-          {/* L1 Balance Display - Clickable */}
-          <div className="mt-2">
-            <L1BalanceDisplay
-              showBalances={showBalances}
-              onClick={() => setIsL1WalletOpen(true)}
-            />
           </div>
         </div>
 
@@ -434,17 +448,30 @@ export function L3WalletView({
                   transition={{ duration: 0.2 }}
                   className="space-y-2"
                 >
-                  {assets.length === 0 ? (
+                  {assets.length === 0 && l1TotalBalance === 0 ? (
                     <EmptyState />
                   ) : (
-                    assets.map((asset, index) => (
+                    <>
+                      {/* L1 ALPHA - always first, clickable */}
                       <AssetRow
-                        key={asset.coinId}
-                        asset={asset}
+                        key="l1-alpha"
+                        asset={l1AlphaAsset}
                         showBalances={showBalances}
-                        delay={index * 0.05}
+                        delay={0}
+                        layer="L1"
+                        onClick={() => setIsL1WalletOpen(true)}
                       />
-                    ))
+                      {/* L3 Assets */}
+                      {assets.map((asset, index) => (
+                        <AssetRow
+                          key={asset.coinId}
+                          asset={asset}
+                          showBalances={showBalances}
+                          delay={(index + 1) * 0.05}
+                          layer="L3"
+                        />
+                      ))}
+                    </>
                   )}
                 </motion.div>
               )}
@@ -508,12 +535,6 @@ export function L3WalletView({
         onBackupWallet={() => setIsBackupOpen(true)}
         onLogout={() => setIsLogoutConfirmOpen(true)}
         l1Balance={formatL1Balance(l1TotalBalance)}
-      />
-
-      <L1WalletModal
-        isOpen={isL1WalletOpen}
-        onClose={() => setIsL1WalletOpen(false)}
-        showBalances={showBalances}
       />
 
       <BackupWalletModal

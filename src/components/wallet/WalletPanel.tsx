@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { L3WalletView } from './L3/views/L3WalletView';
 import { useWallet } from './L3/hooks/useWallet';
 import { useIncomingPaymentRequests } from './L3/hooks/useIncomingPaymentRequests';
+import { L1WalletModal } from './L1/modals/L1WalletModal';
 
 export function WalletPanel() {
   const [showBalances, setShowBalances] = useState(true);
@@ -11,6 +12,7 @@ export function WalletPanel() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isRequestsOpen, setIsRequestsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isL1WalletOpen, setIsL1WalletOpen] = useState(false);
   const { identity, nametag, isLoadingIdentity } = useWallet();
   const { pendingCount } = useIncomingPaymentRequests();
 
@@ -125,8 +127,17 @@ export function WalletPanel() {
           setIsRequestsOpen={setIsRequestsOpen}
           isSettingsOpen={isSettingsOpen}
           setIsSettingsOpen={setIsSettingsOpen}
+          isL1WalletOpen={isL1WalletOpen}
+          setIsL1WalletOpen={setIsL1WalletOpen}
         />
       </div>
+
+      {/* L1 Wallet Modal - renders over entire panel including header */}
+      <L1WalletModal
+        isOpen={isL1WalletOpen}
+        onClose={() => setIsL1WalletOpen(false)}
+        showBalances={showBalances}
+      />
     </div>
   );
 }
