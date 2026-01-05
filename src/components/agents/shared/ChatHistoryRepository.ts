@@ -153,13 +153,15 @@ export class ChatHistoryRepository {
 
     if (initialMessage) {
       this.saveMessages(session.id, [initialMessage]);
-    } else {
-      // Trigger IPFS sync even without initial message
-      try {
-        getChatHistoryIpfsService().scheduleSync();
-      } catch (e) {
-        console.warn('[ChatHistory] Failed to schedule IPFS sync:', e);
-      }
+    }
+
+    // Immediately sync session creation to IPFS (critical operation)
+    try {
+      getChatHistoryIpfsService().syncImmediately().catch(e => {
+        console.warn('[ChatHistory] Failed to sync session creation:', e);
+      });
+    } catch (e) {
+      console.warn('[ChatHistory] Failed to trigger IPFS sync:', e);
     }
 
     this.notifyUpdate();
@@ -190,9 +192,13 @@ export class ChatHistoryRepository {
       localStorage.removeItem(this.getMessagesKey(sessionId));
     }
 
-    // Record tombstone for IPFS sync
+    // Record tombstone and immediately sync to IPFS (critical operation)
     try {
-      getChatHistoryIpfsService().recordSessionDeletion(sessionId);
+      const ipfsService = getChatHistoryIpfsService();
+      ipfsService.recordSessionDeletion(sessionId);
+      ipfsService.syncImmediately().catch(e => {
+        console.warn('[ChatHistory] Failed to sync session deletion:', e);
+      });
     } catch (e) {
       console.warn('[ChatHistory] Failed to record IPFS tombstone:', e);
     }
@@ -216,10 +222,14 @@ export class ChatHistoryRepository {
       }
     });
 
-    // Record tombstones for IPFS sync
+    // Record tombstones and immediately sync to IPFS (critical operation)
     if (agentSessions.length > 0) {
       try {
-        getChatHistoryIpfsService().recordBulkDeletion(agentSessions.map(s => s.id));
+        const ipfsService = getChatHistoryIpfsService();
+        ipfsService.recordBulkDeletion(agentSessions.map(s => s.id));
+        ipfsService.syncImmediately().catch(e => {
+          console.warn('[ChatHistory] Failed to sync bulk deletion:', e);
+        });
       } catch (e) {
         console.warn('[ChatHistory] Failed to record IPFS bulk tombstones:', e);
       }
@@ -239,10 +249,14 @@ export class ChatHistoryRepository {
       localStorage.removeItem(this.getMessagesKey(s.id));
     });
 
-    // Record tombstones for IPFS sync
+    // Record tombstones and immediately sync to IPFS (critical operation)
     if (sessions.length > 0) {
       try {
-        getChatHistoryIpfsService().recordBulkDeletion(sessions.map(s => s.id));
+        const ipfsService = getChatHistoryIpfsService();
+        ipfsService.recordBulkDeletion(sessions.map(s => s.id));
+        ipfsService.syncImmediately().catch(e => {
+          console.warn('[ChatHistory] Failed to sync clear all:', e);
+        });
       } catch (e) {
         console.warn('[ChatHistory] Failed to record IPFS bulk tombstones:', e);
       }
