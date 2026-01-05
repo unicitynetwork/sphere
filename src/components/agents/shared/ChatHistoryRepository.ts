@@ -22,6 +22,8 @@ import { STORAGE_KEYS, STORAGE_KEY_GENERATORS } from '../../../config/storageKey
 const MAX_STORAGE_SIZE = 4 * 1024 * 1024;
 // Maximum number of sessions to keep per agent
 const MAX_SESSIONS_PER_AGENT = 50;
+// Maximum messages per session in localStorage (full history on IPFS)
+const MAX_MESSAGES_PER_SESSION = 100;
 
 export interface ChatSession {
   id: string;
@@ -320,15 +322,25 @@ export class ChatHistoryRepository {
 
     // Get session info for logging
     const session = this.getSession(sessionId);
-    console.log(`💬 [Repository] saveMessages: sessionId=${sessionId.slice(0, 8)}..., agentId=${session?.agentId || 'unknown'}, messageCount=${messages.length}`);
+    const totalMessageCount = messages.length;
+    console.log(`💬 [Repository] saveMessages: sessionId=${sessionId.slice(0, 8)}..., agentId=${session?.agentId || 'unknown'}, messageCount=${totalMessageCount}`);
 
     // Check storage size before saving
     if (this.getStorageSize() > MAX_STORAGE_SIZE) {
       this.cleanupOldSessions();
     }
 
+    // Trim to MAX_MESSAGES_PER_SESSION for localStorage (full history on IPFS)
+    const messagesToStore = messages.length > MAX_MESSAGES_PER_SESSION
+      ? messages.slice(-MAX_MESSAGES_PER_SESSION)
+      : messages;
+
+    if (messages.length > MAX_MESSAGES_PER_SESSION) {
+      console.log(`💬 [Repository] Trimming ${messages.length} messages to ${MAX_MESSAGES_PER_SESSION} for localStorage`);
+    }
+
     try {
-      localStorage.setItem(this.getMessagesKey(sessionId), JSON.stringify(messages));
+      localStorage.setItem(this.getMessagesKey(sessionId), JSON.stringify(messagesToStore));
 
       // Update session metadata
       const lastMessage = messages[messages.length - 1];
@@ -353,7 +365,7 @@ export class ChatHistoryRepository {
         this.cleanupOldSessions();
         // Retry once
         try {
-          localStorage.setItem(this.getMessagesKey(sessionId), JSON.stringify(messages));
+          localStorage.setItem(this.getMessagesKey(sessionId), JSON.stringify(messagesToStore));
         } catch {
           console.error('[ChatHistory] Failed to save messages after cleanup');
         }
