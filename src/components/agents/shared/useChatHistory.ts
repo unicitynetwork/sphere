@@ -66,7 +66,7 @@ export function useChatHistory({
     enabled: enabled && !!userId,
   });
 
-  // Keep refs in sync
+  // Keep refs in sync with current session
   useEffect(() => {
     currentSessionRef.current = currentSession;
   }, [currentSession]);
@@ -86,15 +86,17 @@ export function useChatHistory({
       const agentSessions = chatHistoryRepository.getSessionsForAgent(agentId, userId);
       setSessions(agentSessions);
       setIsLoading(false);
+      // Note: Active session is restored via URL param (?session=id) in AgentChat
+      setCurrentSession(null);
     };
 
-    // Reset current session when user changes
-    setCurrentSession(null);
     loadSessions();
 
     // Listen for updates from other tabs/components and IPFS sync
     const handleUpdate = () => {
-      loadSessions();
+      // Reload sessions but preserve current session if still valid
+      const agentSessions = chatHistoryRepository.getSessionsForAgent(agentId, userId);
+      setSessions(agentSessions);
     };
 
     window.addEventListener('agent-chat-history-updated', handleUpdate);
