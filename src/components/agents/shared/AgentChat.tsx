@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import { Plus, X, PanelLeftClose, Search, Trash2, Clock, MessageSquare, Activity, ChevronDown, Cloud, Check, Loader2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../../config/activities';
@@ -8,6 +7,7 @@ import { useWallet } from '../../wallet/L3/hooks/useWallet';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatHeader, ChatBubble, ChatInput, QuickActions } from './index';
 import { useChatHistory } from './useChatHistory';
+import { useUrlSession } from './useUrlSession';
 import type { SyncState } from './useChatHistorySync';
 
 // Generic sidebar item (for custom agent-specific items like bets, purchases, orders)
@@ -121,15 +121,10 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
   // Get nametag from wallet for user identification
   const { nametag } = useWallet();
 
-  // URL-based session persistence (survives responsive re-mounts)
-  const [searchParams, setSearchParams] = useSearchParams();
-  const urlSessionId = searchParams.get('session');
-
   // Chat history hook - bound to nametag so each user has their own history
   const {
     sessions,
-    currentSession,
-    loadSession,
+    currentSession: historySession, // Session created when saving messages
     deleteSession,
     clearAllHistory,
     resetCurrentSession,
@@ -144,6 +139,23 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     userId: nametag ?? undefined,
     enabled: !!nametag, // Only enable when user has a nametag
   });
+
+  // URL-based session management with TanStack Query
+  // Both mobile and desktop instances sync via URL changes automatically
+  const {
+    urlSessionId,
+    currentSession,
+    currentMessages: sessionMessages,
+    navigateToSession,
+    clearSession,
+  } = useUrlSession({ sessions });
+
+  // Update URL when a new session is created (via saveCurrentMessages)
+  useEffect(() => {
+    if (historySession?.id && historySession.id !== urlSessionId) {
+      navigateToSession(historySession.id);
+    }
+  }, [historySession?.id, urlSessionId, navigateToSession]);
 
   // Filter sessions based on search
   const filteredSessions = searchQuery.trim()
@@ -227,42 +239,26 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     }
   }, [nametag, setMessages, useMockMode]);
 
-  // Restore session from URL on mount (survives responsive re-mounts)
+  // Sync session from URL via TanStack Query
+  // When sessionMessages changes (from query), update the UI
+  // This handles both mobile and desktop instances automatically
   useEffect(() => {
-    if (urlSessionId && sessions.length > 0 && !currentSession && !hasGreeted.current) {
-      const sessionExists = sessions.some(s => s.id === urlSessionId);
-      if (sessionExists) {
-        const sessionMessages = loadSession(urlSessionId);
-        if (sessionMessages.length > 0) {
-          const agentMessages: AgentMessage<TCardData>[] = sessionMessages.map(m => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            timestamp: m.timestamp,
-            thinking: m.thinking,
-          }));
-          setExtendedMessages(agentMessages);
-          if (!useMockMode) {
-            setMessages(sessionMessages);
-          }
-          hasGreeted.current = true;
-          lastSavedMessagesRef.current = JSON.stringify(sessionMessages.map(m => ({ id: m.id, content: m.content })));
-        }
-      }
-    }
-  }, [urlSessionId, sessions, currentSession, loadSession, setMessages, useMockMode]);
+    if (!urlSessionId || sessionMessages.length === 0) return;
 
-  // Update URL when session changes (but don't clear URL until sessions are loaded)
-  useEffect(() => {
-    const currentUrlSession = searchParams.get('session');
-    if (currentSession?.id && currentSession.id !== currentUrlSession) {
-      setSearchParams({ session: currentSession.id }, { replace: true });
-    } else if (!currentSession && currentUrlSession && sessions.length > 0) {
-      // Only clear URL after sessions are loaded (to allow restore attempt first)
-      searchParams.delete('session');
-      setSearchParams(searchParams, { replace: true });
+    const agentMessages: AgentMessage<TCardData>[] = sessionMessages.map(m => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      timestamp: m.timestamp,
+      thinking: m.thinking,
+    }));
+    setExtendedMessages(agentMessages);
+    if (!useMockMode) {
+      setMessages(sessionMessages);
     }
-  }, [currentSession, searchParams, setSearchParams, sessions.length]);
+    hasGreeted.current = true;
+    lastSavedMessagesRef.current = JSON.stringify(sessionMessages.map(m => ({ id: m.id, content: m.content })));
+  }, [urlSessionId, sessionMessages, setMessages, useMockMode]);
 
   // Sync messages from useAgentChat hook (for non-mock mode)
   useEffect(() => {
@@ -443,33 +439,18 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     lastSavedMessagesRef.current = '';
     // Reset current session so a new one is created when first message is saved
     resetCurrentSession();
+    // Clear URL session param
+    clearSession();
   };
 
-  // Load a previous chat session
+  // Load a previous chat session via URL navigation
+  // TanStack Query handles the actual data loading
   const handleLoadSession = useCallback((sessionId: string) => {
-    const sessionMessages = loadSession(sessionId);
-    if (sessionMessages.length > 0) {
-      // Convert ChatMessage to AgentMessage format
-      const agentMessages: AgentMessage<TCardData>[] = sessionMessages.map(m => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        timestamp: m.timestamp,
-        thinking: m.thinking,
-      }));
-      setExtendedMessages(agentMessages);
-
-      if (!useMockMode) {
-        setMessages(sessionMessages);
-      }
-
-      hasGreeted.current = true;
-      lastSavedMessagesRef.current = JSON.stringify(sessionMessages.map(m => ({ id: m.id, content: m.content })));
-
-      // Close sidebar on mobile
-      setSidebarOpen(false);
-    }
-  }, [loadSession, setMessages, useMockMode]);
+    // Navigate to session - TanStack Query will load the data
+    navigateToSession(sessionId);
+    // Close sidebar on mobile
+    setSidebarOpen(false);
+  }, [navigateToSession]);
 
   const handleDeleteSession = async (sessionId: string) => {
     const wasCurrentSession = currentSession?.id === sessionId;
