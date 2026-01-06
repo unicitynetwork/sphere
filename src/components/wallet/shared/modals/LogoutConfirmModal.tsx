@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertTriangle, Download, LogOut, Loader2, ShieldAlert } from 'lucide-react';
+import { X, AlertTriangle, Download, LogOut, Loader2, Check } from 'lucide-react';
 import { useGlobalSyncStatus } from '../../../../hooks/useGlobalSyncStatus';
 
 interface LogoutConfirmModalProps {
@@ -18,10 +18,12 @@ export function LogoutConfirmModal({
 }: LogoutConfirmModalProps) {
   const { isAnySyncing, statusMessage } = useGlobalSyncStatus();
   const [showSyncWarning, setShowSyncWarning] = useState(false);
+  const [acceptedRisk, setAcceptedRisk] = useState(false);
 
   const handleLogoutClick = () => {
     if (isAnySyncing) {
       setShowSyncWarning(true);
+      setAcceptedRisk(false);
     } else {
       onLogoutWithoutBackup();
     }
@@ -29,12 +31,16 @@ export function LogoutConfirmModal({
 
   const handleForceLogout = () => {
     setShowSyncWarning(false);
+    setAcceptedRisk(false);
     onLogoutWithoutBackup();
   };
 
   const handleCloseSyncWarning = () => {
     setShowSyncWarning(false);
+    setAcceptedRisk(false);
   };
+
+  const canLogout = !isAnySyncing || acceptedRisk;
 
   return (
     <AnimatePresence>
@@ -78,7 +84,7 @@ export function LogoutConfirmModal({
                       {isAnySyncing ? (
                         <Loader2 className="w-8 h-8 text-amber-500 animate-spin" />
                       ) : (
-                        <LogOut className="w-8 h-8 text-green-500" />
+                        <Check className="w-8 h-8 text-green-500" />
                       )}
                     </motion.div>
 
@@ -87,54 +93,47 @@ export function LogoutConfirmModal({
                     </h3>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-2">
                       {isAnySyncing
-                        ? "Your data is being synchronized to IPFS."
+                        ? "Please wait while your data is being synchronized."
                         : "All data has been synchronized."}
                     </p>
                     <p className={`text-sm font-medium ${isAnySyncing ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}>
                       {statusMessage}
                     </p>
-                    {isAnySyncing && (
-                      <p className="text-neutral-500 text-xs mt-3">
-                        Logging out now may result in data loss on other devices.
-                        <br />
-                        Please wait for sync to complete.
-                      </p>
-                    )}
                   </div>
 
-                  <div className="px-6 pb-6 space-y-3">
-                    <motion.button
-                      whileHover={!isAnySyncing ? { scale: 1.02 } : {}}
-                      whileTap={!isAnySyncing ? { scale: 0.98 } : {}}
-                      onClick={isAnySyncing ? undefined : handleForceLogout}
-                      disabled={isAnySyncing}
-                      className={`w-full flex items-center justify-center gap-2 py-3.5 font-semibold rounded-xl transition-all ${
-                        isAnySyncing
-                          ? "bg-neutral-200 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 cursor-not-allowed"
-                          : "bg-red-600 text-white hover:bg-red-500"
-                      }`}
-                    >
-                      {isAnySyncing ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Waiting for Sync...
-                        </>
-                      ) : (
-                        <>
-                          <LogOut className="w-4 h-4" />
-                          Logout Now
-                        </>
-                      )}
-                    </motion.button>
+                  <div className="px-6 pb-6 space-y-4">
+                    {isAnySyncing && (
+                      <label className="flex items-start gap-3 cursor-pointer group">
+                        <div className="relative shrink-0 mt-0.5">
+                          <input
+                            type="checkbox"
+                            checked={acceptedRisk}
+                            onChange={(e) => setAcceptedRisk(e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-5 h-5 border-2 border-neutral-300 dark:border-neutral-600 rounded-md peer-checked:border-red-500 peer-checked:bg-red-500 transition-all flex items-center justify-center">
+                            {acceptedRisk && <Check className="w-3 h-3 text-white" />}
+                          </div>
+                        </div>
+                        <span className="text-xs text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-300 transition-colors">
+                          I understand that logging out now may result in data loss on other devices
+                        </span>
+                      </label>
+                    )}
 
                     <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={handleForceLogout}
-                      className="w-full flex items-center justify-center gap-2 py-3.5 bg-red-500/10 hover:bg-red-500 border border-red-500/30 text-red-500 hover:text-white font-semibold rounded-xl transition-all"
+                      whileHover={canLogout ? { scale: 1.02 } : {}}
+                      whileTap={canLogout ? { scale: 0.98 } : {}}
+                      onClick={canLogout ? handleForceLogout : undefined}
+                      disabled={!canLogout}
+                      className={`w-full flex items-center justify-center gap-2 py-3.5 font-semibold rounded-xl transition-all ${
+                        canLogout
+                          ? "bg-red-600 text-white hover:bg-red-500"
+                          : "bg-neutral-200 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 cursor-not-allowed"
+                      }`}
                     >
-                      <ShieldAlert className="w-4 h-4" />
-                      I Understand the Risks - Logout Now
+                      <LogOut className="w-4 h-4" />
+                      {isAnySyncing ? "Logout Now" : "Logout"}
                     </motion.button>
 
                     <button
@@ -194,7 +193,7 @@ export function LogoutConfirmModal({
                       className="w-full flex items-center justify-center gap-2 py-3.5 bg-linear-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-semibold rounded-xl transition-all shadow-lg shadow-orange-500/20"
                     >
                       <Download className="w-4 h-4" />
-                      Backup & Logout
+                      Save Backup First
                     </motion.button>
 
                     <motion.button
