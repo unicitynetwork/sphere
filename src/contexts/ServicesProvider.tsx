@@ -38,8 +38,11 @@ export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }
     initializeNostr();
 
     // Re-initialize when wallet is created/restored
-    const handleWalletLoaded = () => {
-      console.log("📢 Wallet loaded, initializing Nostr...");
+    const handleWalletLoaded = async () => {
+      console.log("📢 Wallet loaded, resetting and reinitializing Nostr...");
+      // Reset first to ensure we use the new identity's keypair
+      await nostrService.reset();
+      setIsNostrConnected(false);
       initializeNostr();
     };
 

@@ -1,7 +1,7 @@
-import { AlertTriangle, Download, Loader2, ShieldAlert, X, Trash2 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
-import { useGlobalSyncStatus } from "../../../../../hooks/useGlobalSyncStatus";
 import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { AlertTriangle, Download, Loader2, ShieldAlert, X, Trash2 } from "lucide-react";
+import { useGlobalSyncStatus } from "../../../../../hooks/useGlobalSyncStatus";
 
 interface DeleteConfirmationModalProps {
   show: boolean;
@@ -23,7 +23,6 @@ export function DeleteConfirmationModal({
 
   const handleDeleteClick = () => {
     if (isAnySyncing) {
-      // Show sync warning instead of deleting immediately
       setShowSyncWarning(true);
     } else {
       onConfirmDelete();
@@ -31,7 +30,6 @@ export function DeleteConfirmationModal({
   };
 
   const handleForceDelete = () => {
-    // User acknowledged the risk
     setShowSyncWarning(false);
     onConfirmDelete();
   };
@@ -39,12 +37,6 @@ export function DeleteConfirmationModal({
   const handleCloseSyncWarning = () => {
     setShowSyncWarning(false);
     onCancel();
-  };
-
-  // When sync completes while on sync warning screen, allow deletion
-  const handleSyncCompleteDelete = () => {
-    setShowSyncWarning(false);
-    onConfirmDelete();
   };
 
   return (
@@ -57,7 +49,6 @@ export function DeleteConfirmationModal({
     >
       <AnimatePresence mode="wait">
         {showSyncWarning ? (
-          // Sync Warning Modal
           <motion.div
             key="sync-warning"
             initial={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -67,7 +58,6 @@ export function DeleteConfirmationModal({
             className="relative w-full max-w-md bg-white dark:bg-[#111] border border-neutral-200 dark:border-white/10 rounded-3xl shadow-2xl p-6 overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Close button */}
             <button
               onClick={handleCloseSyncWarning}
               className="absolute top-4 right-4 p-1.5 rounded-full bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-500 dark:text-neutral-400 transition-colors"
@@ -122,7 +112,7 @@ export function DeleteConfirmationModal({
               <motion.button
                 whileHover={!isAnySyncing ? { scale: 1.02 } : {}}
                 whileTap={!isAnySyncing ? { scale: 0.98 } : {}}
-                onClick={isAnySyncing ? undefined : handleSyncCompleteDelete}
+                onClick={isAnySyncing ? undefined : handleForceDelete}
                 disabled={isAnySyncing}
                 className={`w-full py-3 rounded-xl font-medium flex items-center justify-center gap-2 transition-all ${
                   isAnySyncing
@@ -155,7 +145,6 @@ export function DeleteConfirmationModal({
             </motion.div>
           </motion.div>
         ) : (
-          // Original Delete Confirmation Modal
           <motion.div
             key="delete-confirm"
             initial={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -194,8 +183,7 @@ export function DeleteConfirmationModal({
                 </span>
               </p>
               <p className="text-neutral-500 text-xs mt-2">
-                If you haven't saved your backup, your funds will be lost
-                forever.
+                If you haven't saved your backup, your funds will be lost forever.
               </p>
             </motion.div>
 

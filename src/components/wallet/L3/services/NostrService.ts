@@ -103,6 +103,31 @@ export class NostrService {
     }
   }
 
+  /**
+   * Reset the NostrService connection to reinitialize with current identity.
+   * Call this when wallet changes (new wallet created or restored) to ensure
+   * the correct keypair is used for encryption/decryption.
+   */
+  async reset(): Promise<void> {
+    console.log("🔄 Resetting NostrService connection...");
+
+    // Disconnect existing client
+    if (this.client) {
+      try {
+        await this.client.disconnect();
+      } catch (err) {
+        console.warn("Error disconnecting Nostr client:", err);
+      }
+      this.client = null;
+    }
+
+    this.isConnected = false;
+    this.isConnecting = false;
+    this.connectPromise = null;
+
+    console.log("✅ NostrService reset complete, ready for reconnection");
+  }
+
   private async doConnect(): Promise<void> {
     const identity = await this.identityManager.getCurrentIdentity();
     if (!identity) throw new Error("No identity found for Nostr");
@@ -229,9 +254,11 @@ export class NostrService {
     if (saved) {
       return parseInt(saved);
     } else {
-      const now = Math.floor(Date.now() / 1000);
-      localStorage.setItem(STORAGE_KEYS.NOSTR_LAST_SYNC, now.toString());
-      return now;
+      // For new wallets, set lastSync to 5 minutes ago to catch any tokens
+      // that were sent during wallet creation (e.g., from faucet)
+      const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 300;
+      localStorage.setItem(STORAGE_KEYS.NOSTR_LAST_SYNC, fiveMinutesAgo.toString());
+      return fiveMinutesAgo;
     }
   }
 
