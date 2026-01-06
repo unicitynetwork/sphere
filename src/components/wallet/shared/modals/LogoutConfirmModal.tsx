@@ -75,30 +75,85 @@ export function LogoutConfirmModal({
                       <X className="w-4 h-4" />
                     </motion.button>
 
-                    <motion.div
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      transition={{ delay: 0.1, type: "spring" }}
-                      className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mb-4"
-                    >
-                      {isAnySyncing ? (
-                        <Loader2 className="w-8 h-8 text-amber-500 animate-spin" />
-                      ) : (
+                    {/* Animated spinner like onboarding */}
+                    {isAnySyncing ? (
+                      <div className="relative w-20 h-20 mb-4">
+                        {/* Outer Ring */}
+                        <motion.div
+                          className="absolute inset-0 border-3 border-neutral-200 dark:border-neutral-800/50 rounded-full"
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+                        />
+                        {/* Middle Ring */}
+                        <motion.div
+                          className="absolute inset-1.5 border-3 border-amber-500/30 rounded-full border-t-amber-500 border-r-amber-500"
+                          animate={{ rotate: -360 }}
+                          transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                        />
+                        {/* Inner Glow */}
+                        <div className="absolute inset-3 bg-amber-500/20 rounded-full blur-xl" />
+                        {/* Center Icon */}
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <motion.div
+                            animate={{
+                              scale: [1, 1.1, 1],
+                              opacity: [0.5, 1, 0.5],
+                            }}
+                            transition={{
+                              duration: 2,
+                              repeat: Infinity,
+                              ease: "easeInOut",
+                            }}
+                          >
+                            <Loader2 className="w-7 h-7 text-amber-500 dark:text-amber-400 animate-spin" />
+                          </motion.div>
+                        </div>
+                      </div>
+                    ) : (
+                      <motion.div
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        transition={{ delay: 0.1, type: "spring" }}
+                        className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center mb-4"
+                      >
                         <Check className="w-8 h-8 text-green-500" />
-                      )}
-                    </motion.div>
+                      </motion.div>
+                    )}
 
                     <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">
                       {isAnySyncing ? "Sync in Progress" : "Sync Complete"}
                     </h3>
-                    <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-2">
+                    <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">
                       {isAnySyncing
                         ? "Please wait while your data is being synchronized."
                         : "All data has been synchronized."}
                     </p>
-                    <p className={`text-sm font-medium ${isAnySyncing ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}>
-                      {statusMessage}
-                    </p>
+
+                    {/* Status message with pulsing dot */}
+                    {isAnySyncing && (
+                      <motion.div
+                        key={statusMessage}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="flex items-center gap-3 text-neutral-700 dark:text-neutral-300 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 rounded-xl backdrop-blur-sm border border-amber-200 dark:border-amber-700/30 mb-3"
+                      >
+                        <motion.div
+                          animate={{
+                            scale: [1, 1.2, 1],
+                            opacity: [0.5, 1, 0.5],
+                          }}
+                          transition={{
+                            duration: 1.5,
+                            repeat: Infinity,
+                          }}
+                          className="w-2.5 h-2.5 rounded-full bg-amber-500 dark:bg-amber-400 shrink-0"
+                        />
+                        <span className="text-left text-sm font-medium">
+                          {statusMessage}
+                        </span>
+                      </motion.div>
+                    )}
+
                   </div>
 
                   <div className="px-6 pb-6 space-y-4">
