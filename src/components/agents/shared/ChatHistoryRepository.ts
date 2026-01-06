@@ -22,6 +22,8 @@ import { STORAGE_KEYS, STORAGE_KEY_GENERATORS } from '../../../config/storageKey
 const MAX_STORAGE_SIZE = 4 * 1024 * 1024;
 // Maximum number of sessions to keep per agent
 const MAX_SESSIONS_PER_AGENT = 50;
+// Maximum messages per session in localStorage (full history on IPFS)
+const MAX_MESSAGES_PER_SESSION = 100;
 
 export interface ChatSession {
   id: string;
@@ -153,13 +155,15 @@ export class ChatHistoryRepository {
 
     if (initialMessage) {
       this.saveMessages(session.id, [initialMessage]);
-    } else {
-      // Trigger IPFS sync even without initial message
-      try {
-        getChatHistoryIpfsService().scheduleSync();
-      } catch (e) {
-        console.warn('[ChatHistory] Failed to schedule IPFS sync:', e);
-      }
+    }
+
+    // Immediately sync session creation to IPFS (critical operation)
+    try {
+      getChatHistoryIpfsService().syncImmediately().catch(e => {
+        console.warn('[ChatHistory] Failed to sync session creation:', e);
+      });
+    } catch (e) {
+      console.warn('[ChatHistory] Failed to trigger IPFS sync:', e);
     }
 
     this.notifyUpdate();
@@ -190,9 +194,13 @@ export class ChatHistoryRepository {
       localStorage.removeItem(this.getMessagesKey(sessionId));
     }
 
-    // Record tombstone for IPFS sync
+    // Record tombstone and immediately sync to IPFS (critical operation)
     try {
-      getChatHistoryIpfsService().recordSessionDeletion(sessionId);
+      const ipfsService = getChatHistoryIpfsService();
+      ipfsService.recordSessionDeletion(sessionId);
+      ipfsService.syncImmediately().catch(e => {
+        console.warn('[ChatHistory] Failed to sync session deletion:', e);
+      });
     } catch (e) {
       console.warn('[ChatHistory] Failed to record IPFS tombstone:', e);
     }
@@ -216,10 +224,14 @@ export class ChatHistoryRepository {
       }
     });
 
-    // Record tombstones for IPFS sync
+    // Record tombstones and immediately sync to IPFS (critical operation)
     if (agentSessions.length > 0) {
       try {
-        getChatHistoryIpfsService().recordBulkDeletion(agentSessions.map(s => s.id));
+        const ipfsService = getChatHistoryIpfsService();
+        ipfsService.recordBulkDeletion(agentSessions.map(s => s.id));
+        ipfsService.syncImmediately().catch(e => {
+          console.warn('[ChatHistory] Failed to sync bulk deletion:', e);
+        });
       } catch (e) {
         console.warn('[ChatHistory] Failed to record IPFS bulk tombstones:', e);
       }
@@ -239,10 +251,14 @@ export class ChatHistoryRepository {
       localStorage.removeItem(this.getMessagesKey(s.id));
     });
 
-    // Record tombstones for IPFS sync
+    // Record tombstones and immediately sync to IPFS (critical operation)
     if (sessions.length > 0) {
       try {
-        getChatHistoryIpfsService().recordBulkDeletion(sessions.map(s => s.id));
+        const ipfsService = getChatHistoryIpfsService();
+        ipfsService.recordBulkDeletion(sessions.map(s => s.id));
+        ipfsService.syncImmediately().catch(e => {
+          console.warn('[ChatHistory] Failed to sync clear all:', e);
+        });
       } catch (e) {
         console.warn('[ChatHistory] Failed to record IPFS bulk tombstones:', e);
       }
@@ -306,15 +322,25 @@ export class ChatHistoryRepository {
 
     // Get session info for logging
     const session = this.getSession(sessionId);
-    console.log(`💬 [Repository] saveMessages: sessionId=${sessionId.slice(0, 8)}..., agentId=${session?.agentId || 'unknown'}, messageCount=${messages.length}`);
+    const totalMessageCount = messages.length;
+    console.log(`💬 [Repository] saveMessages: sessionId=${sessionId.slice(0, 8)}..., agentId=${session?.agentId || 'unknown'}, messageCount=${totalMessageCount}`);
 
     // Check storage size before saving
     if (this.getStorageSize() > MAX_STORAGE_SIZE) {
       this.cleanupOldSessions();
     }
 
+    // Trim to MAX_MESSAGES_PER_SESSION for localStorage (full history on IPFS)
+    const messagesToStore = messages.length > MAX_MESSAGES_PER_SESSION
+      ? messages.slice(-MAX_MESSAGES_PER_SESSION)
+      : messages;
+
+    if (messages.length > MAX_MESSAGES_PER_SESSION) {
+      console.log(`💬 [Repository] Trimming ${messages.length} messages to ${MAX_MESSAGES_PER_SESSION} for localStorage`);
+    }
+
     try {
-      localStorage.setItem(this.getMessagesKey(sessionId), JSON.stringify(messages));
+      localStorage.setItem(this.getMessagesKey(sessionId), JSON.stringify(messagesToStore));
 
       // Update session metadata
       const lastMessage = messages[messages.length - 1];
@@ -339,7 +365,7 @@ export class ChatHistoryRepository {
         this.cleanupOldSessions();
         // Retry once
         try {
-          localStorage.setItem(this.getMessagesKey(sessionId), JSON.stringify(messages));
+          localStorage.setItem(this.getMessagesKey(sessionId), JSON.stringify(messagesToStore));
         } catch {
           console.error('[ChatHistory] Failed to save messages after cleanup');
         }

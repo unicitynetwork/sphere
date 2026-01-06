@@ -75,6 +75,7 @@ export type SyncStep =
 export interface ChatSyncStatus {
   initialized: boolean;
   isSyncing: boolean;
+  hasPendingSync: boolean; // True when sync is scheduled but not yet started (debounce period)
   lastSync: ChatSyncResult | null;
   ipnsName: string | null;
   currentStep: SyncStep;
@@ -88,6 +89,7 @@ export interface ChatSyncStatus {
 // Different HKDF info string creates a separate key for chat storage
 const HKDF_INFO_CHAT = "ipfs-chat-history-ed25519-v1";
 const SYNC_DEBOUNCE_MS = 3000;
+const TOMBSTONE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 // ==========================================
 // ChatHistoryIpfsService
@@ -146,6 +148,9 @@ export class ChatHistoryIpfsService {
     if (this.autoSyncEnabled) {
       return;
     }
+
+    // Clean up old tombstones on startup (once per session)
+    this.cleanupOldTombstones();
 
     this.boundSyncHandler = () => {
       this.hasPendingChanges = true;
@@ -851,8 +856,12 @@ export class ChatHistoryIpfsService {
     }
     console.log(`💬 Scheduling sync in ${SYNC_DEBOUNCE_MS}ms`);
     this.syncTimer = setTimeout(() => {
+      this.syncTimer = null;
       this.syncNow().catch(console.error);
     }, SYNC_DEBOUNCE_MS);
+
+    // Notify listeners that a sync is now pending
+    this.notifyStatusListeners();
   }
 
   /**
@@ -972,12 +981,18 @@ export class ChatHistoryIpfsService {
     }
   }
 
+  // Queue for pending sync requests (coalesces multiple requests into one)
+  private pendingSyncResolvers: Array<(result: ChatSyncResult) => void> = [];
+
   async syncNow(): Promise<ChatSyncResult> {
     console.log(`💬 syncNow called`);
 
+    // If already syncing, queue this request and wait for next sync
     if (this.isSyncing) {
-      console.log(`💬 syncNow: already syncing, skipping`);
-      return { success: false, timestamp: Date.now(), error: "Sync in progress" };
+      console.log(`💬 syncNow: already syncing, queuing request...`);
+      return new Promise<ChatSyncResult>((resolve) => {
+        this.pendingSyncResolvers.push(resolve);
+      });
     }
 
     this.isSyncing = true;
@@ -1033,7 +1048,27 @@ export class ChatHistoryIpfsService {
     } finally {
       this.isSyncing = false;
 
-      if (this.pendingSync) {
+      // Handle coalesced sync requests - run ONE more sync to resolve all queued promises
+      if (this.pendingSyncResolvers.length > 0) {
+        const resolvers = this.pendingSyncResolvers;
+        this.pendingSyncResolvers = [];
+        console.log(`💬 syncNow: resolving ${resolvers.length} queued request(s) with a final sync`);
+
+        // Run one final sync that captures the latest localStorage state
+        // This single sync handles all the changes that were queued
+        this.syncNow().then((result) => {
+          resolvers.forEach(resolve => resolve(result));
+        }).catch((error) => {
+          // On error, still resolve with an error result
+          const errorResult: ChatSyncResult = {
+            success: false,
+            timestamp: Date.now(),
+            error: String(error),
+          };
+          resolvers.forEach(resolve => resolve(errorResult));
+        });
+      } else if (this.pendingSync) {
+        // Handle debounced sync requests (from scheduleSync)
         this.pendingSync = false;
         this.scheduleSync();
       } else {
@@ -1202,9 +1237,7 @@ export class ChatHistoryIpfsService {
     };
 
     localStorage.setItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES, JSON.stringify(tombstones));
-
-    // Trigger sync
-    this.scheduleSync();
+    // Sync is triggered by ChatHistoryRepository.notifyUpdate() → TanStack hook
   }
 
   /**
@@ -1226,9 +1259,39 @@ export class ChatHistoryIpfsService {
     }
 
     localStorage.setItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES, JSON.stringify(tombstones));
+    // Sync is triggered by ChatHistoryRepository.notifyUpdate() → TanStack hook
+  }
 
-    // Trigger sync
-    this.scheduleSync();
+  /**
+   * Clean up tombstones older than TOMBSTONE_MAX_AGE_MS (30 days)
+   * Old tombstones are unlikely to be needed for sync conflict resolution
+   * and just waste storage space.
+   */
+  cleanupOldTombstones(): number {
+    const tombstonesRaw = localStorage.getItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES);
+    if (!tombstonesRaw) return 0;
+
+    const tombstones: Record<string, ChatTombstone> = JSON.parse(tombstonesRaw);
+    const now = Date.now();
+    const cutoffTime = now - TOMBSTONE_MAX_AGE_MS;
+
+    let removedCount = 0;
+    const remainingTombstones: Record<string, ChatTombstone> = {};
+
+    for (const [sessionId, tombstone] of Object.entries(tombstones)) {
+      if (tombstone.deletedAt >= cutoffTime) {
+        remainingTombstones[sessionId] = tombstone;
+      } else {
+        removedCount++;
+      }
+    }
+
+    if (removedCount > 0) {
+      localStorage.setItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES, JSON.stringify(remainingTombstones));
+      console.log(`💬 Cleaned up ${removedCount} old tombstone(s) (older than 30 days)`);
+    }
+
+    return removedCount;
   }
 
   /**
@@ -1290,6 +1353,7 @@ export class ChatHistoryIpfsService {
     return {
       initialized: this.helia !== null,
       isSyncing: this.isSyncing,
+      hasPendingSync: this.syncTimer !== null || this.hasPendingChanges,
       lastSync: this.lastSync,
       ipnsName: this.cachedIpnsName,
       currentStep: this.currentStep,

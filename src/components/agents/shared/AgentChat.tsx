@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, X, PanelLeftClose, Search, Trash2, Clock, MessageSquare, Activity, ChevronDown, Cloud, Check, Loader2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../../config/activities';
@@ -115,9 +116,14 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
   const currentAgentId = useRef(agent.id);
   const currentNametag = useRef<string | null>(null);
   const lastSavedMessagesRef = useRef<string>('');
+  const isMountedRef = useRef(true);
 
   // Get nametag from wallet for user identification
   const { nametag } = useWallet();
+
+  // URL-based session persistence (survives responsive re-mounts)
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlSessionId = searchParams.get('session');
 
   // Chat history hook - bound to nametag so each user has their own history
   const {
@@ -127,9 +133,11 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     deleteSession,
     clearAllHistory,
     resetCurrentSession,
+    showDeleteSuccess,
     saveCurrentMessages,
     searchSessions,
     syncState,
+    syncImmediately,
     justDeleted,
   } = useChatHistory({
     agentId: agent.id,
@@ -183,6 +191,14 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     }
   };
 
+  // Track component mount state for async operations
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Reset state when agent changes
   useEffect(() => {
     if (currentAgentId.current !== agent.id) {
@@ -210,6 +226,43 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
       }
     }
   }, [nametag, setMessages, useMockMode]);
+
+  // Restore session from URL on mount (survives responsive re-mounts)
+  useEffect(() => {
+    if (urlSessionId && sessions.length > 0 && !currentSession && !hasGreeted.current) {
+      const sessionExists = sessions.some(s => s.id === urlSessionId);
+      if (sessionExists) {
+        const sessionMessages = loadSession(urlSessionId);
+        if (sessionMessages.length > 0) {
+          const agentMessages: AgentMessage<TCardData>[] = sessionMessages.map(m => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: m.timestamp,
+            thinking: m.thinking,
+          }));
+          setExtendedMessages(agentMessages);
+          if (!useMockMode) {
+            setMessages(sessionMessages);
+          }
+          hasGreeted.current = true;
+          lastSavedMessagesRef.current = JSON.stringify(sessionMessages.map(m => ({ id: m.id, content: m.content })));
+        }
+      }
+    }
+  }, [urlSessionId, sessions, currentSession, loadSession, setMessages, useMockMode]);
+
+  // Update URL when session changes (but don't clear URL until sessions are loaded)
+  useEffect(() => {
+    const currentUrlSession = searchParams.get('session');
+    if (currentSession?.id && currentSession.id !== currentUrlSession) {
+      setSearchParams({ session: currentSession.id }, { replace: true });
+    } else if (!currentSession && currentUrlSession && sessions.length > 0) {
+      // Only clear URL after sessions are loaded (to allow restore attempt first)
+      searchParams.delete('session');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [currentSession, searchParams, setSearchParams, sessions.length]);
 
   // Sync messages from useAgentChat hook (for non-mock mode)
   useEffect(() => {
@@ -262,9 +315,9 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     return () => clearTimeout(timeoutId);
   }, [extendedMessages, isTyping, saveCurrentMessages]);
 
-  // Greeting message
+  // Greeting message (skip if restoring session from URL)
   useEffect(() => {
-    if (!hasGreeted.current && extendedMessages.length === 0 && agent.greetingMessage) {
+    if (!hasGreeted.current && extendedMessages.length === 0 && agent.greetingMessage && !urlSessionId) {
       hasGreeted.current = true;
       if (useMockMode) {
         setExtendedMessages([{
@@ -282,7 +335,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
         }]);
       }
     }
-  }, [agent.greetingMessage, extendedMessages.length, setMessages, useMockMode]);
+  }, [agent.greetingMessage, extendedMessages.length, setMessages, useMockMode, urlSessionId]);
 
   const scrollToBottom = useCallback((instant = false) => {
     const el = messagesContainerRef.current;
@@ -418,20 +471,41 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     }
   }, [loadSession, setMessages, useMockMode]);
 
-  const handleDeleteSession = (sessionId: string) => {
+  const handleDeleteSession = async (sessionId: string) => {
+    const wasCurrentSession = currentSession?.id === sessionId;
     deleteSession(sessionId);
     setShowDeleteConfirm(null);
 
     // If we deleted the current session, start a new chat
-    if (currentSession?.id === sessionId) {
+    if (wasCurrentSession) {
       handleNewChat();
+    }
+
+    // Wait for IPFS sync then show success
+    try {
+      await syncImmediately();
+      if (isMountedRef.current) {
+        showDeleteSuccess();
+      }
+    } catch (error) {
+      console.error('Failed to sync after deleting session:', error);
     }
   };
 
-  const handleClearAllHistory = () => {
+  const handleClearAllHistory = async () => {
     clearAllHistory();
     setShowClearAllConfirm(false);
     handleNewChat();
+
+    // Sync in background, show success after completion
+    try {
+      await syncImmediately();
+      if (isMountedRef.current) {
+        showDeleteSuccess();
+      }
+    } catch (error) {
+      console.error('Failed to sync after clearing history:', error);
+    }
   };
 
   const getActionLabel = (cardData: TCardData): string => {
@@ -988,7 +1062,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
   return (
     <>
       {/* Layout with left sidebar for chat history */}
-      <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden grid grid-cols-[auto_1fr] relative lg:shadow-xl dark:lg:shadow-2xl h-full min-h-0 theme-transition">
+      <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden relative lg:grid lg:grid-cols-[auto_1fr] lg:shadow-xl dark:lg:shadow-2xl h-full min-h-0 theme-transition">
         <div className={`absolute -top-20 -right-20 w-96 h-96 ${bgGradient.from} rounded-full blur-3xl`} />
         <div className={`absolute -bottom-20 -left-20 w-96 h-96 ${bgGradient.to} rounded-full blur-3xl`} />
         {renderHistorySidebar()}
