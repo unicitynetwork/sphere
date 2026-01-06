@@ -349,6 +349,30 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     try {
       UnifiedKeyManager.clearAll();
       await createWallet();
+
+      // Save L1 wallet to storage (same as import flow)
+      const keyManager = getUnifiedKeyManager();
+      const basePath = keyManager.getBasePath();
+      const defaultPath = `${basePath}/0/0`;
+      const derived = keyManager.deriveAddressFromPath(defaultPath);
+
+      const l1Wallet: L1Wallet = {
+        masterPrivateKey: keyManager.getMasterKeyHex() || "",
+        chainCode: keyManager.getChainCodeHex() || undefined,
+        addresses: [{
+          index: 0,
+          address: derived.l1Address,
+          privateKey: derived.privateKey,
+          publicKey: derived.publicKey,
+          path: defaultPath,
+          isChange: false,
+          createdAt: new Date().toISOString(),
+        }],
+        isBIP32: keyManager.getDerivationMode() === "bip32",
+      };
+      saveWalletToStorage("main", l1Wallet);
+      console.log("💾 Saved L1 wallet for new wallet");
+
       setStep("nametag");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to generate keys";
@@ -356,7 +380,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     } finally {
       setIsBusy(false);
     }
-  }, [isBusy, createWallet]);
+  }, [isBusy, createWallet, getUnifiedKeyManager]);
 
   // Action: Restore wallet from mnemonic
   const handleRestoreWallet = useCallback(async () => {
@@ -434,9 +458,19 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         console.log(`✅ Verified nametag "${cleanTag}" available via IPNS`);
       }
 
-      // Step 4: Reload
-      console.log("🏷️ Step 4: All steps completed, reloading...");
-      window.location.reload();
+      // Step 4: Notify app that wallet is ready (instead of reload)
+      console.log("🏷️ Step 4: All steps completed, notifying app...");
+
+      // Signal wallet creation - this triggers Nostr service initialization
+      window.dispatchEvent(new Event("wallet-loaded"));
+      // Trigger UI updates
+      window.dispatchEvent(new Event("wallet-updated"));
+
+      // Wait a moment for Nostr to initialize, then close onboarding
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Set step to null/complete to trigger navigation away from onboarding
+      setStep("start"); // This will trigger the existing identity/nametag check in useEffect
     } catch (e) {
       const message = e instanceof Error ? e.message : "Minting failed";
       console.error("❌ Nametag minting failed:", e);

@@ -20,6 +20,7 @@ import { IpfsStorageService } from "../services/IpfsStorageService";
 import { useServices } from "../../../../contexts/useServices";
 import type { NostrService } from "../services/NostrService";
 import { OutboxRecoveryService } from "../services/OutboxRecoveryService";
+import { L1_KEYS } from "../../L1/hooks/useL1Wallet";
 
 export const KEYS = {
   IDENTITY: ["wallet", "identity"],
@@ -44,8 +45,23 @@ export const useWallet = () => {
       queryClient.refetchQueries({ queryKey: KEYS.AGGREGATED });
     };
 
+    // Handle wallet-loaded event (triggered after wallet creation/restoration)
+    // This ensures identity, nametag, and L1 wallet queries are refreshed
+    const handleWalletLoaded = () => {
+      console.log("📢 useWallet: wallet-loaded event received, refreshing queries...");
+      queryClient.invalidateQueries({ queryKey: KEYS.IDENTITY });
+      queryClient.invalidateQueries({ queryKey: KEYS.NAMETAG });
+      queryClient.invalidateQueries({ queryKey: L1_KEYS.WALLET });
+      queryClient.refetchQueries({ queryKey: KEYS.TOKENS });
+      queryClient.refetchQueries({ queryKey: KEYS.AGGREGATED });
+    };
+
     window.addEventListener("wallet-updated", handleWalletUpdate);
-    return () => window.removeEventListener("wallet-updated", handleWalletUpdate);
+    window.addEventListener("wallet-loaded", handleWalletLoaded);
+    return () => {
+      window.removeEventListener("wallet-updated", handleWalletUpdate);
+      window.removeEventListener("wallet-loaded", handleWalletLoaded);
+    };
   }, [queryClient]);
 
   // Initialize IPFS storage service for automatic token sync (disabled by default)
