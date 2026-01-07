@@ -321,10 +321,35 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
                         onClick={() => setShowDropdown(prev => !prev)}
                         className="w-full flex items-center justify-between gap-2 p-2 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition-colors"
                       >
-                        <span className="text-xs font-mono text-neutral-700 dark:text-neutral-300 truncate">
-                          {selectedAddress.slice(0, 20)}...{selectedAddress.slice(-10)}
-                        </span>
-                        <ChevronDown className={`w-4 h-4 text-neutral-500 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
+                        {(() => {
+                          const currentNametagInfo = nametagState[selectedAddress];
+                          if (!currentNametagInfo || currentNametagInfo.ipnsLoading) {
+                            return (
+                              <span className="flex items-center gap-2 text-xs">
+                                <Loader2 className="w-3 h-3 animate-spin text-neutral-400" />
+                                <span className="font-mono text-neutral-700 dark:text-neutral-300 truncate">
+                                  {selectedAddress.slice(0, 16)}...{selectedAddress.slice(-8)}
+                                </span>
+                              </span>
+                            );
+                          }
+                          if (currentNametagInfo.nametag) {
+                            return (
+                              <span className="flex items-center gap-2 text-xs">
+                                <span className="font-medium text-blue-600 dark:text-blue-400">@{currentNametagInfo.nametag}</span>
+                                <span className="font-mono text-neutral-400 dark:text-neutral-500 text-xs">
+                                  ({selectedAddress.slice(0, 8)}...{selectedAddress.slice(-6)})
+                                </span>
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className="text-xs font-mono text-neutral-700 dark:text-neutral-300 truncate">
+                              {selectedAddress.slice(0, 16)}...{selectedAddress.slice(-8)}
+                            </span>
+                          );
+                        })()}
+                        <ChevronDown className={`w-4 h-4 text-neutral-500 transition-transform shrink-0 ${showDropdown ? 'rotate-180' : ''}`} />
                       </button>
 
                       <AnimatePresence>
@@ -346,6 +371,8 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
                               {addresses.map(addr => {
                                 const nametagInfo = nametagState[addr];
                                 const isSelected = addr === selectedAddress;
+                                const walletAddrInfo = wallet?.addresses.find(a => a.address === addr);
+                                const isChange = walletAddrInfo?.isChange;
                                 return (
                                   <button
                                     key={addr}
@@ -353,12 +380,31 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
                                       onSelectAddress(addr);
                                       setShowDropdown(false);
                                     }}
-                                    className={`w-full text-left px-3 py-2 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+                                    className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
                                   >
-                                    {nametagInfo?.nametag ? (
-                                      <span className="text-blue-600 dark:text-blue-400 font-medium">@{nametagInfo.nametag}</span>
-                                    ) : (
-                                      <span className="font-mono text-neutral-700 dark:text-neutral-300">{addr.slice(0, 16)}...{addr.slice(-8)}</span>
+                                    <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isSelected ? 'bg-blue-500' : 'bg-transparent'}`} />
+                                    <div className="flex-1 min-w-0">
+                                      {!nametagInfo || nametagInfo.ipnsLoading ? (
+                                        <span className="flex items-center gap-1.5">
+                                          <Loader2 className="w-3 h-3 animate-spin text-neutral-400" />
+                                          <span className="font-mono text-neutral-700 dark:text-neutral-300 truncate">{addr.slice(0, 12)}...{addr.slice(-6)}</span>
+                                        </span>
+                                      ) : nametagInfo.nametag ? (
+                                        <span className="flex items-center gap-2">
+                                          <span className="text-blue-600 dark:text-blue-400 font-medium">@{nametagInfo.nametag}</span>
+                                          <span className="font-mono text-neutral-400 dark:text-neutral-500 text-xs">({addr.slice(0, 8)}...{addr.slice(-6)})</span>
+                                        </span>
+                                      ) : nametagInfo.hasL3Inventory ? (
+                                        <span className="flex items-center gap-1.5">
+                                          <span className="font-mono text-neutral-700 dark:text-neutral-300 truncate">{addr.slice(0, 12)}...{addr.slice(-6)}</span>
+                                          <span className="px-1 py-0.5 bg-purple-500/20 text-purple-600 dark:text-purple-400 text-[9px] font-bold rounded shrink-0">L3</span>
+                                        </span>
+                                      ) : (
+                                        <span className="font-mono text-neutral-700 dark:text-neutral-300 truncate">{addr.slice(0, 12)}...{addr.slice(-6)}</span>
+                                      )}
+                                    </div>
+                                    {isChange && (
+                                      <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[9px] font-bold rounded shrink-0">Change</span>
                                     )}
                                   </button>
                                 );

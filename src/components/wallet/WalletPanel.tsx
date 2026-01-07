@@ -1,14 +1,14 @@
-import { Wallet, Copy, Check, Clock, Bell, MoreVertical } from 'lucide-react';
+import { Wallet, Clock, Bell, MoreVertical } from 'lucide-react';
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { L3WalletView } from './L3/views/L3WalletView';
 import { useWallet } from './L3/hooks/useWallet';
 import { useIncomingPaymentRequests } from './L3/hooks/useIncomingPaymentRequests';
 import { L1WalletModal } from './L1/modals/L1WalletModal';
+import { AddressSelector } from './shared/components';
 
 export function WalletPanel() {
   const [showBalances, setShowBalances] = useState(true);
-  const [copied, setCopied] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isRequestsOpen, setIsRequestsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -20,17 +20,6 @@ export function WalletPanel() {
   if (isLoadingIdentity || !identity || !nametag) {
     return null;
   }
-
-  const handleCopyNametag = async () => {
-    if (!nametag) return;
-    try {
-      await navigator.clipboard.writeText(`${nametag}`);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy nametag:', err);
-    }
-  };
 
   return (
     <div className="bg-white/60 dark:bg-neutral-900/90 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden h-full relative lg:shadow-xl dark:lg:shadow-2xl flex flex-col transition-all duration-500 theme-transition">
@@ -55,26 +44,7 @@ export function WalletPanel() {
 
             <div className="flex flex-col">
               <span className="text-sm sm:text-base text-neutral-900 dark:text-white font-medium tracking-wide">Wallet</span>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] sm:text-xs text-neutral-500">
-                  {nametag ? `@${nametag}` : 'AgentSphere'}
-                </span>
-                {nametag && (
-                  <motion.button
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    onClick={handleCopyNametag}
-                    className="p-1 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded transition-colors"
-                    title="Copy nametag"
-                  >
-                    {copied ? (
-                      <Check className="w-3 h-3 text-emerald-500" />
-                    ) : (
-                      <Copy className="w-3 h-3 text-neutral-500" />
-                    )}
-                  </motion.button>
-                )}
-              </div>
+              <AddressSelector currentNametag={nametag} compact />
             </div>
           </div>
 
