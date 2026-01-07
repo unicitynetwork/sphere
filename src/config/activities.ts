@@ -110,7 +110,10 @@ export const agents: AgentConfig[] = [
     greetingMessage: "Welcome to the P2P Prediction Marketplace! 🏟️ Right now I'm only able to help you make predictions on sports games. I can help you check odds, make a prediction and show you what your active predictions are. What are we looking at ? English Premier League ? IPL ? Let me know and we can have some fun.",
     backendActivityId: 'sports',
     quickActions: [
-      { label: 'Live odds', message: 'Show me live odds' },
+      { label: 'Basketball', message: 'Show me basketball' },
+      { label: 'Soccer', message: 'Show me soccer' },
+      { label: 'Tennis', message: 'Show me tennis' },
+      { label: 'Cricket', message: 'Show me cricket' },
       { label: 'My bets', message: 'Show my bets' },
     ],
     contentType: 'match',

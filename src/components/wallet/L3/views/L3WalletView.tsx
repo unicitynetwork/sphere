@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
 import { AggregatedAsset } from '../data/model';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useWallet } from '../hooks/useWallet';
 import { CreateWalletFlow } from '../../onboarding/CreateWalletFlow';
 import { TokenRow } from '../../shared/components';
@@ -45,6 +46,7 @@ export function L3WalletView({
   setIsSettingsOpen,
   setIsL1WalletOpen,
 }: L3WalletViewProps) {
+  const navigate = useNavigate();
   const { identity, assets, tokens, isLoadingAssets, isLoadingIdentity, nametag, getSeedPhrase } = useWallet();
   const { exportTxf, importTxf, isExportingTxf, isImportingTxf, isSyncing, isEnabled: isIpfsEnabled } = useIpfsStorage();
   const { totalBalance: l1TotalBalance, deleteWallet } = useL1Wallet();
@@ -215,6 +217,7 @@ export function L3WalletView({
   const handleLogout = async () => {
     try {
       await deleteWallet();
+      navigate('/');
     } catch (err) {
       console.error('Failed to logout:', err);
     }
