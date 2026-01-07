@@ -342,10 +342,10 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
                           if (currentNametagInfo.nametag) {
                             return (
                               <span className="flex items-center gap-2 text-xs">
-                                <span className="font-medium text-blue-600 dark:text-blue-400">@{currentNametagInfo.nametag}</span>
-                                <span className="font-mono text-neutral-400 dark:text-neutral-500 text-xs">
-                                  ({selectedAddress.slice(0, 8)}...{selectedAddress.slice(-6)})
+                                <span className="font-mono text-neutral-700 dark:text-neutral-300">
+                                  {selectedAddress.slice(0, 12)}...{selectedAddress.slice(-6)}
                                 </span>
+                                <span className="font-medium text-blue-600 dark:text-blue-400">@{currentNametagInfo.nametag}</span>
                               </span>
                             );
                           }
@@ -397,8 +397,8 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
                                         </span>
                                       ) : nametagInfo.nametag ? (
                                         <span className="flex items-center gap-2">
+                                          <span className="font-mono text-neutral-700 dark:text-neutral-300">{addr.slice(0, 12)}...{addr.slice(-6)}</span>
                                           <span className="text-blue-600 dark:text-blue-400 font-medium">@{nametagInfo.nametag}</span>
-                                          <span className="font-mono text-neutral-400 dark:text-neutral-500 text-xs">({addr.slice(0, 8)}...{addr.slice(-6)})</span>
                                         </span>
                                       ) : nametagInfo.hasL3Inventory ? (
                                         <span className="flex items-center gap-1.5">

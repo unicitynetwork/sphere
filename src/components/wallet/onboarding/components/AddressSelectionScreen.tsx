@@ -131,14 +131,6 @@ export function AddressSelectionScreen({
                     Change
                   </span>
                 )}
-                {/* Balance indicator */}
-                {selectedAddress?.balanceLoading ? (
-                  <span className="text-[10px] text-neutral-400">...</span>
-                ) : selectedAddress?.l1Balance && selectedAddress.l1Balance > 0 ? (
-                  <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px] font-medium rounded shrink-0">
-                    {selectedAddress.l1Balance.toFixed(2)} ALPHA
-                  </span>
-                ) : null}
                 {/* Nametag or loading indicator */}
                 {selectedAddress?.ipnsLoading ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-neutral-400" />
@@ -195,14 +187,6 @@ export function AddressSelectionScreen({
                         Change
                       </span>
                     )}
-                    {/* Balance indicator */}
-                    {addr.balanceLoading ? (
-                      <span className="text-[10px] text-neutral-400">...</span>
-                    ) : addr.l1Balance && addr.l1Balance > 0 ? (
-                      <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px] font-medium rounded shrink-0">
-                        {addr.l1Balance.toFixed(2)} ALPHA
-                      </span>
-                    ) : null}
                     {/* Nametag or loading indicator */}
                     {addr.ipnsLoading ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-neutral-400" />
