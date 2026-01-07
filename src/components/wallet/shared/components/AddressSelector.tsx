@@ -20,7 +20,12 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
   const [isGenerating, setIsGenerating] = useState(false);
 
   const { wallet, invalidateWallet } = useL1Wallet();
-  const { nametagState } = useAddressNametags(wallet?.addresses);
+  const { nametagState, addressesWithNametags } = useAddressNametags(wallet?.addresses);
+
+  // Check if any address is still loading nametag from IPNS
+  const isAnyAddressLoading = useMemo(() => {
+    return addressesWithNametags.some(addr => addr.ipnsLoading);
+  }, [addressesWithNametags]);
 
   // Get current selected path from localStorage
   const selectedPath = localStorage.getItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
@@ -58,17 +63,16 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
   };
 
   const handleNewAddress = async () => {
-    if (!wallet || isGenerating) return;
+    if (!wallet || isGenerating || isAnyAddressLoading) return;
     setIsGenerating(true);
+
     try {
       const addr = generateAddress(wallet);
       const updated = loadWalletFromStorage("main");
-      if (updated) {
+
+      if (updated && addr.path) {
         invalidateWallet();
-        // Select the new address
-        if (addr.path) {
-          localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, addr.path);
-        }
+        localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, addr.path);
         WalletRepository.getInstance().resetInMemoryState();
         setShowDropdown(false);
         window.location.reload();
@@ -145,7 +149,7 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="fixed inset-0 z-40"
+                className="fixed inset-0 z-40 bg-black/10"
                 onClick={() => setShowDropdown(false)}
               />
               <motion.div
@@ -156,16 +160,20 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
                 className="absolute left-0 top-full mt-2 z-50 min-w-[280px] bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl overflow-hidden"
               >
                 {/* Header */}
-                <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
-                  <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                    Addresses ({sortedAddresses.length})
+                <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 flex items-center gap-1.5">
+                    {isAnyAddressLoading && (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    )}
+                    {isAnyAddressLoading ? 'Checking nametags...' : `Addresses (${sortedAddresses.length})`}
                   </span>
                   <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
+                    whileHover={{ scale: (isGenerating || isAnyAddressLoading) ? 1 : 1.05 }}
+                    whileTap={{ scale: (isGenerating || isAnyAddressLoading) ? 1 : 0.95 }}
                     onClick={handleNewAddress}
-                    disabled={isGenerating}
-                    className="flex items-center gap-1 px-2 py-1 text-xs bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-lg transition-colors disabled:opacity-50"
+                    disabled={isGenerating || isAnyAddressLoading}
+                    className="flex items-center gap-1 px-2 py-1 text-xs bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                    title={isAnyAddressLoading ? 'Wait for nametag check to complete' : 'Create new address'}
                   >
                     {isGenerating ? (
                       <Loader2 className="w-3 h-3 animate-spin" />

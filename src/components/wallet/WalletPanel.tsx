@@ -29,7 +29,7 @@ export function WalletPanel() {
       <div className="absolute -bottom-20 -left-20 w-80 h-80 rounded-full blur-3xl bg-purple-500/5 dark:bg-purple-500/10" />
 
       {/* TOP BAR: Title & Actions */}
-      <div className="p-3 sm:p-4 lg:p-6 pb-2 relative z-10 shrink-0">
+      <div className="p-3 sm:p-4 lg:p-6 pb-2 relative z-20 shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 sm:gap-3">
             <motion.div
@@ -87,7 +87,7 @@ export function WalletPanel() {
       </div>
 
       {/* CONTENT AREA - L3 Only */}
-      <div className="flex-1 relative overflow-hidden">
+      <div className="flex-1 relative z-0 overflow-hidden">
         <L3WalletView
           showBalances={showBalances}
           setShowBalances={setShowBalances}

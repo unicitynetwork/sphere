@@ -32,6 +32,10 @@ export interface DerivedAddressInfo {
   ipnsName?: string;
   ipnsLoading?: boolean;
   ipnsError?: string;
+  /** L1 balance in ALPHA (for gap limit detection) */
+  l1Balance?: number;
+  /** Whether L1 balance check is in progress */
+  balanceLoading?: boolean;
 }
 
 interface AddressSelectionScreenProps {
@@ -61,9 +65,9 @@ export function AddressSelectionScreen({
   onContinue,
   onBack,
 }: AddressSelectionScreenProps) {
-  // Show addresses that are: checked (IPNS done) OR from L1 wallet (e.g., .dat import)
+  // Show addresses that are: checked (both IPNS and balance done) OR from L1 wallet
   const visibleAddresses = derivedAddresses.filter(
-    (a) => !a.ipnsLoading || a.fromL1Wallet
+    (a) => (!a.ipnsLoading && !a.balanceLoading) || a.fromL1Wallet
   );
   const selectedAddress =
     visibleAddresses.find((a) => a.path === selectedAddressPath) ||
@@ -106,7 +110,7 @@ export function AddressSelectionScreen({
           <div className="w-full bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 rounded-xl py-3 md:py-3.5 px-4 flex items-center gap-3">
             <Loader2 className="w-5 h-5 animate-spin text-purple-500" />
             <span className="text-sm text-neutral-500 dark:text-neutral-400">
-              Checking for nametags...
+              Checking addresses...
             </span>
           </div>
         ) : (
@@ -127,6 +131,15 @@ export function AddressSelectionScreen({
                     Change
                   </span>
                 )}
+                {/* Balance indicator */}
+                {selectedAddress?.balanceLoading ? (
+                  <span className="text-[10px] text-neutral-400">...</span>
+                ) : selectedAddress?.l1Balance && selectedAddress.l1Balance > 0 ? (
+                  <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px] font-medium rounded shrink-0">
+                    {selectedAddress.l1Balance.toFixed(2)} ALPHA
+                  </span>
+                ) : null}
+                {/* Nametag or loading indicator */}
                 {selectedAddress?.ipnsLoading ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-neutral-400" />
                 ) : selectedAddress?.hasNametag ? (
@@ -182,6 +195,15 @@ export function AddressSelectionScreen({
                         Change
                       </span>
                     )}
+                    {/* Balance indicator */}
+                    {addr.balanceLoading ? (
+                      <span className="text-[10px] text-neutral-400">...</span>
+                    ) : addr.l1Balance && addr.l1Balance > 0 ? (
+                      <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px] font-medium rounded shrink-0">
+                        {addr.l1Balance.toFixed(2)} ALPHA
+                      </span>
+                    ) : null}
+                    {/* Nametag or loading indicator */}
                     {addr.ipnsLoading ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-neutral-400" />
                     ) : addr.hasNametag ? (
@@ -197,12 +219,12 @@ export function AddressSelectionScreen({
                 ))}
               </div>
 
-              {/* Loading indicator while IPNS is checking, or Derive New Address button */}
+              {/* Loading indicator while checking, or Derive New Address button */}
               {isCheckingIpns ||
-              derivedAddresses.some((a) => a.ipnsLoading) ? (
+              derivedAddresses.some((a) => a.ipnsLoading || a.balanceLoading) ? (
                 <div className="w-full px-4 py-3 flex items-center gap-3 border-t border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400">
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span className="text-sm">Checking for nametags...</span>
+                  <span className="text-sm">Checking addresses...</span>
                 </div>
               ) : (
                 <button

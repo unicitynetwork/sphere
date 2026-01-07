@@ -13,6 +13,7 @@ import {
   loadWalletFromStorage,
   connect as connectL1,
   isWebSocketConnected,
+  getBalance,
   type Wallet as L1Wallet,
 } from "../../L1/sdk";
 import type { DerivedAddressInfo } from "../components/AddressSelectionScreen";
@@ -191,15 +192,19 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         existingNametag: existingNametag?.name,
         privateKey: hasLocalNametag ? undefined : l3Identity.privateKey,
         ipnsLoading: !hasLocalNametag,
+        balanceLoading: true, // Always check balance for gap limit
       },
     ]);
   }, [derivedAddresses.length, getUnifiedKeyManager]);
 
-  // Effect: Fetch nametags from IPNS sequentially
+  // Effect: Fetch nametags from IPNS and L1 balance sequentially
   useEffect(() => {
     if (step !== "addressSelection" || derivedAddresses.length === 0 || isCheckingIpns) return;
 
-    const nextToCheck = derivedAddresses.find((addr) => addr.ipnsLoading && addr.privateKey);
+    // Find next address that needs checking (either IPNS or balance)
+    const nextToCheck = derivedAddresses.find(
+      (addr) => (addr.ipnsLoading && addr.privateKey) || addr.balanceLoading
+    );
 
     if (!nextToCheck) {
       console.log("🔍 All current addresses checked");
@@ -210,58 +215,86 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       setIsCheckingIpns(true);
       const addr = nextToCheck;
       const chainLabel = addr.isChange ? "change" : "external";
-      console.log(`🔍 Checking IPNS for ${chainLabel} #${addr.index} (path: ${addr.path})...`);
+      console.log(`🔍 Checking ${chainLabel} #${addr.index} (path: ${addr.path})...`);
 
-      try {
-        const result = await fetchNametagFromIpns(addr.privateKey!);
-        console.log(`🔍 IPNS result for ${chainLabel} (path: ${addr.path}): ${result.nametag || "none"} (via ${result.source})`);
+      let foundNametag: string | undefined;
+      let nametagData: DerivedAddressInfo["nametagData"];
+      let ipnsName: string | undefined;
+      let ipnsError: string | undefined;
+      let l1Balance = 0;
 
-        setDerivedAddresses((prev) =>
-          prev.map((a) =>
-            a.path === addr.path
-              ? {
-                  ...a,
-                  ipnsName: result.ipnsName,
-                  hasNametag: !!result.nametag,
-                  existingNametag: result.nametag || undefined,
-                  nametagData: result.nametagData,
-                  ipnsLoading: false,
-                  ipnsError: result.error,
-                  privateKey: undefined,
-                }
-              : a
-          )
-        );
-
-        if (result.nametag && !firstFoundNametagPath) {
-          console.log(`✅ Found FIRST nametag "${result.nametag}" at ${chainLabel} #${addr.index}, auto-selecting`);
-          setFirstFoundNametagPath(addr.path);
-          setSelectedAddressPath(addr.path);
-        } else if (result.nametag) {
-          console.log(`✅ Found another nametag "${result.nametag}" at ${chainLabel} #${addr.index}`);
+      // Fetch IPNS nametag if needed
+      if (addr.ipnsLoading && addr.privateKey) {
+        try {
+          const result = await fetchNametagFromIpns(addr.privateKey);
+          console.log(`🔍 IPNS result for ${chainLabel} (path: ${addr.path}): ${result.nametag || "none"} (via ${result.source})`);
+          foundNametag = result.nametag || undefined;
+          nametagData = result.nametagData;
+          ipnsName = result.ipnsName;
+          ipnsError = result.error;
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          console.warn(`🔍 IPNS fetch error for ${chainLabel} (path: ${addr.path}):`, message);
+          ipnsError = message;
         }
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : "Unknown error";
-        console.warn(`🔍 IPNS fetch error for ${chainLabel} (path: ${addr.path}):`, message);
-        setDerivedAddresses((prev) =>
-          prev.map((a) =>
-            a.path === addr.path
-              ? {
-                  ...a,
-                  ipnsLoading: false,
-                  ipnsError: message,
-                  privateKey: undefined,
-                }
-              : a
-          )
-        );
+      } else if (addr.existingNametag) {
+        foundNametag = addr.existingNametag;
+      }
+
+      // Fetch L1 balance
+      if (addr.balanceLoading) {
+        try {
+          l1Balance = await getBalance(addr.l1Address);
+          console.log(`💰 L1 balance for ${chainLabel} #${addr.index}: ${l1Balance} ALPHA`);
+        } catch (error) {
+          console.warn(`💰 Balance fetch error for ${chainLabel} #${addr.index}:`, error);
+          l1Balance = 0;
+        }
+      } else {
+        l1Balance = addr.l1Balance ?? 0;
+      }
+
+      // Update address with results
+      setDerivedAddresses((prev) =>
+        prev.map((a) =>
+          a.path === addr.path
+            ? {
+                ...a,
+                ipnsName,
+                hasNametag: !!foundNametag,
+                existingNametag: foundNametag,
+                nametagData,
+                ipnsLoading: false,
+                ipnsError,
+                privateKey: undefined,
+                l1Balance,
+                balanceLoading: false,
+              }
+            : a
+        )
+      );
+
+      // Auto-select first found nametag
+      if (foundNametag && !firstFoundNametagPath) {
+        console.log(`✅ Found FIRST nametag "${foundNametag}" at ${chainLabel} #${addr.index}, auto-selecting`);
+        setFirstFoundNametagPath(addr.path);
+        setSelectedAddressPath(addr.path);
+      } else if (foundNametag) {
+        console.log(`✅ Found another nametag "${foundNametag}" at ${chainLabel} #${addr.index}`);
       }
 
       setIsCheckingIpns(false);
 
-      if (autoDeriveDuringIpnsCheck && derivedAddresses.length < 10) {
-        console.log(`🔍 Deriving next address (#${derivedAddresses.length})...`);
+      // Gap limit logic: continue deriving if address has nametag OR L1 balance OR L3 tokens
+      // Stop deriving if address has NO activity at all (gap detected)
+      const hasL3Tokens = WalletRepository.checkTokensForAddress(addr.l3Address);
+      const hasActivity = !!foundNametag || l1Balance > 0 || hasL3Tokens;
+
+      if (autoDeriveDuringIpnsCheck && hasActivity && derivedAddresses.length < 20) {
+        console.log(`🔍 Address has activity (nametag: ${!!foundNametag}, L1: ${l1Balance}, L3: ${hasL3Tokens}), deriving next (#${derivedAddresses.length})...`);
         await deriveNextAddressInternal();
+      } else if (!hasActivity) {
+        console.log(`🔍 Gap detected at ${chainLabel} #${addr.index} (no nametag, no L1 balance, no L3 tokens). Stopping auto-derive.`);
       }
     };
 
@@ -291,6 +324,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
           existingNametag: existingNametag?.name,
           privateKey: hasLocalNametag ? undefined : l3Identity.privateKey,
           ipnsLoading: !hasLocalNametag,
+          balanceLoading: true, // Always check balance for gap limit
         });
       }
 
@@ -505,6 +539,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
           existingNametag: existingNametag?.name,
           privateKey: hasLocalNametag ? undefined : l3Identity.privateKey,
           ipnsLoading: !hasLocalNametag,
+          balanceLoading: true, // Check balance for gap limit
         },
       ]);
     } catch (e) {
@@ -562,6 +597,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
               fromL1Wallet: true,
               privateKey: enableIpnsFetching ? l3Identity.privateKey : undefined,
               ipnsLoading: enableIpnsFetching,
+              balanceLoading: true, // Check balance for gap limit
             });
           }
 

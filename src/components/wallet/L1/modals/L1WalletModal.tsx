@@ -84,7 +84,10 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
   } = useL1Wallet(selectedAddress);
 
   const addresses = wallet?.addresses.map((a) => a.address) ?? [];
-  const { nametagState } = useAddressNametags(wallet?.addresses);
+  const { nametagState, addressesWithNametags } = useAddressNametags(wallet?.addresses);
+
+  // Check if any address is still loading nametag from IPNS
+  const isAnyAddressLoading = addressesWithNametags.some(addr => addr.ipnsLoading);
 
   const showMessage = useCallback((type: MessageType, title: string, message: string, txids?: string[]) => {
     setMessageModal({ show: true, type, title, message, txids });
@@ -133,7 +136,7 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
   }, [isOpen]);
 
   const onNewAddress = async () => {
-    if (!wallet) return;
+    if (!wallet || isAnyAddressLoading) return;
     try {
       const addr = generateAddress(wallet);
       const updated = loadWalletFromStorage("main");
@@ -315,7 +318,10 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
 
                   {/* Active Address */}
                   <div className="bg-neutral-100 dark:bg-neutral-800/50 rounded-xl p-3">
-                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2">Active Address</p>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2 flex items-center gap-1.5">
+                      {isAnyAddressLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                      {isAnyAddressLoading ? 'Checking nametags...' : 'Active Address'}
+                    </p>
                     <div className="relative">
                       <button
                         onClick={() => setShowDropdown(prev => !prev)}
@@ -432,7 +438,9 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
                       </button>
                       <button
                         onClick={onNewAddress}
-                        className="p-1.5 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-500 transition-colors"
+                        disabled={isAnyAddressLoading}
+                        className="p-1.5 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={isAnyAddressLoading ? 'Wait for nametag check to complete' : 'Create new address'}
                       >
                         <Plus className="w-4 h-4" />
                       </button>
