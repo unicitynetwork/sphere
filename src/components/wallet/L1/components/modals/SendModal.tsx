@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { X, ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
 import { vestingState } from "../../sdk/vestingState";
+import type { VestingMode, VestingBalances } from "../../sdk/types";
 
 interface SendModalProps {
   show: boolean;
@@ -14,15 +15,32 @@ export function SendModal({ show, selectedAddress, onClose, onSend }: SendModalP
   const [destination, setDestination] = useState("");
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [vestingMode, setVestingMode] = useState<VestingMode>("all");
+  const [balances, setBalances] = useState<VestingBalances>({ vested: 0n, unvested: 0n, all: 0n });
 
-  // Reset on close
+  // Reset on close and sync balances when modal opens
   useEffect(() => {
     if (!show) {
       setDestination("");
       setAmount("");
       setError(null);
+      setVestingMode("all");
+    } else {
+      // Sync balances when modal opens
+      setBalances(vestingState.getAllBalances(selectedAddress));
     }
-  }, [show]);
+  }, [show, selectedAddress]);
+
+  const handleModeChange = (mode: VestingMode) => {
+    vestingState.setMode(mode);
+    setVestingMode(mode);
+    // Reset amount when mode changes
+    setAmount("");
+  };
+
+  const getCurrentBalance = (): bigint => {
+    return balances[vestingMode];
+  };
 
   const handleSend = async () => {
     if (!destination.trim() || !amount.trim()) {
@@ -83,75 +101,114 @@ export function SendModal({ show, selectedAddress, onClose, onSend }: SendModalP
             initial={{ x: 20, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
           >
-                <div className="mb-6">
-                  <label className="text-sm text-neutral-500 dark:text-neutral-400 block mb-2">
-                    Destination Address
-                  </label>
-                  <input
-                    autoFocus
-                    value={destination}
-                    onChange={(e) => setDestination(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                    className="w-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-xl py-3 px-4 text-neutral-900 dark:text-white focus:border-green-500 outline-none font-mono text-sm"
-                    placeholder="Enter wallet address"
-                  />
-                </div>
+            {/* Vesting Mode Selector */}
+            <div className="mb-5">
+              <label className="text-sm text-neutral-500 dark:text-neutral-400 block mb-2">
+                Coin Type
+              </label>
+              <div className="flex gap-3">
+                {([
+                  { value: 'all' as VestingMode, label: 'All', balance: balances.all },
+                  { value: 'vested' as VestingMode, label: 'Vested', balance: balances.vested },
+                  { value: 'unvested' as VestingMode, label: 'Unvested', balance: balances.unvested },
+                ]).map((option) => {
+                  const isSelected = vestingMode === option.value;
+                  const colorClass = option.value === 'vested'
+                    ? 'border-green-500 bg-green-500/10 text-green-600 dark:text-green-400'
+                    : option.value === 'unvested'
+                      ? 'border-orange-500 bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                      : 'border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400';
 
-                <div className="mb-6">
-                  <div className="flex justify-between text-sm mb-2">
-                    <label className="text-neutral-500 dark:text-neutral-400">Amount</label>
-                    <span className="text-neutral-500 dark:text-neutral-400">
-                      Available:{" "}
-                      <span className="text-neutral-900 dark:text-white">
-                        {(Number(vestingState.getBalance(selectedAddress)) / 1e8).toFixed(8)} ALPHA
-                      </span>
-                    </span>
-                  </div>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      step="any"
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                      className="w-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-xl py-3 px-4 pr-32 text-neutral-900 dark:text-white text-2xl font-mono focus:border-green-500 outline-none"
-                      placeholder="0.00"
-                    />
-                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const balance = Number(vestingState.getBalance(selectedAddress)) / 1e8;
-                          setAmount(String(Math.floor(balance * 0.25 * 1e8) / 1e8));
-                        }}
-                        className="px-2 py-1 text-xs bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 rounded hover:bg-neutral-300 dark:hover:bg-neutral-700"
-                      >
-                        25%
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const balance = Number(vestingState.getBalance(selectedAddress)) / 1e8;
-                          setAmount(String(Math.floor(balance * 0.5 * 1e8) / 1e8));
-                        }}
-                        className="px-2 py-1 text-xs bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 rounded hover:bg-neutral-300 dark:hover:bg-neutral-700"
-                      >
-                        50%
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const balance = Number(vestingState.getBalance(selectedAddress)) / 1e8;
-                          setAmount(String(balance));
-                        }}
-                        className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded"
-                      >
-                        MAX
-                      </button>
-                    </div>
-                  </div>
-                  {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => handleModeChange(option.value)}
+                      className={`flex-1 py-3 px-4 rounded-xl border-2 transition-all ${
+                        isSelected
+                          ? colorClass
+                          : 'border-neutral-200 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:border-neutral-300 dark:hover:border-neutral-600'
+                      }`}
+                    >
+                      <div className="text-sm font-semibold">{option.label}</div>
+                      <div className="text-xs font-mono mt-1">
+                        {(Number(option.balance) / 1e8).toFixed(4)}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className="text-sm text-neutral-500 dark:text-neutral-400 block mb-2">
+                Destination Address
+              </label>
+              <input
+                autoFocus
+                value={destination}
+                onChange={(e) => setDestination(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                className="w-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-xl py-3 px-4 text-neutral-900 dark:text-white focus:border-green-500 outline-none font-mono text-sm"
+                placeholder="Enter wallet address"
+              />
+            </div>
+
+            <div className="mb-6">
+              <div className="flex justify-between text-sm mb-2">
+                <label className="text-neutral-500 dark:text-neutral-400">Amount</label>
+                <span className="text-neutral-500 dark:text-neutral-400">
+                  Available:{" "}
+                  <span className="text-neutral-900 dark:text-white">
+                    {(Number(getCurrentBalance()) / 1e8).toFixed(8)} ALPHA
+                  </span>
+                </span>
+              </div>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="any"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                  className="w-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-xl py-3 px-4 pr-32 text-neutral-900 dark:text-white text-2xl font-mono focus:border-green-500 outline-none"
+                  placeholder="0.00"
+                />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const balance = Number(getCurrentBalance()) / 1e8;
+                      setAmount(String(Math.floor(balance * 0.25 * 1e8) / 1e8));
+                    }}
+                    className="px-2 py-1 text-xs bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 rounded hover:bg-neutral-300 dark:hover:bg-neutral-700"
+                  >
+                    25%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const balance = Number(getCurrentBalance()) / 1e8;
+                      setAmount(String(Math.floor(balance * 0.5 * 1e8) / 1e8));
+                    }}
+                    className="px-2 py-1 text-xs bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 rounded hover:bg-neutral-300 dark:hover:bg-neutral-700"
+                  >
+                    50%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const balance = Number(getCurrentBalance()) / 1e8;
+                      setAmount(String(balance));
+                    }}
+                    className="px-2 py-1 text-xs bg-green-600 hover:bg-green-500 text-white rounded"
+                  >
+                    MAX
+                  </button>
                 </div>
+              </div>
+              {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
+            </div>
 
             <button
               onClick={handleSend}

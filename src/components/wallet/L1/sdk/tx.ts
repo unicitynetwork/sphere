@@ -408,14 +408,14 @@ export async function createTransactionPlan(
   const senderAddress = fromAddress || defaultAddr.address;
   const amountSats = Math.floor(amountAlpha * SAT);
 
-  // Check if we have classified UTXOs for vesting mode filtering
+  // Get UTXOs filtered by current vesting mode (set in SendModal)
   let utxos: UTXO[];
   const currentMode = vestingState.getMode();
 
   if (vestingState.hasClassifiedData(senderAddress)) {
-    // Use vesting-filtered UTXOs based on current mode
+    // Use vesting-filtered UTXOs based on selected mode
     utxos = vestingState.getFilteredUtxos(senderAddress);
-    console.log(`Using ${utxos.length} vesting-filtered UTXOs (mode: ${currentMode})`);
+    console.log(`Using ${utxos.length} ${currentMode} UTXOs`);
   } else {
     // Fall back to all UTXOs if not yet classified
     utxos = await getUtxo(senderAddress);
@@ -423,8 +423,8 @@ export async function createTransactionPlan(
   }
 
   if (!Array.isArray(utxos) || utxos.length === 0) {
-    const modeText = currentMode !== 'all' ? ` (${currentMode} mode)` : '';
-    throw new Error(`No UTXOs available for address${modeText}: ` + senderAddress);
+    const modeText = currentMode !== 'all' ? ` (${currentMode} coins)` : '';
+    throw new Error(`No UTXOs available${modeText} for address: ` + senderAddress);
   }
 
   return collectUtxosForAmount(utxos, amountSats, toAddress, senderAddress);

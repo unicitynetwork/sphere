@@ -14,7 +14,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { TransactionPlan, VestingMode, VestingBalances, WalletAddress } from "../sdk";
+import type { TransactionPlan, VestingBalances, WalletAddress } from "../sdk";
 import {
   QRModal,
   SaveWalletModal,
@@ -23,7 +23,7 @@ import {
   BridgeModal,
   SendModal,
 } from "../components/modals";
-import { VestingSelector } from "../components/VestingSelector";
+import { VestingDisplay } from "../components/VestingDisplay";
 import { useAddressNametags } from "../hooks/useAddressNametags";
 
 // Animated balance display component
@@ -93,7 +93,6 @@ interface MainWalletViewProps {
   isSending: boolean;
   onConfirmSend: () => Promise<void>;
   vestingProgress?: { current: number; total: number } | null;
-  onVestingModeChange?: (mode: VestingMode) => void;
   vestingBalances?: VestingBalances;
 }
 
@@ -116,7 +115,6 @@ export function MainWalletView({
   isSending,
   onConfirmSend,
   vestingProgress,
-  onVestingModeChange,
   vestingBalances,
 }: MainWalletViewProps) {
   const [showQR, setShowQR] = useState(false);
@@ -407,14 +405,12 @@ export function MainWalletView({
         )}
       </div>
 
-      {/* Vesting Selector */}
+      {/* Vesting Display */}
       <div className="px-3 sm:px-4 lg:px-6 mb-2 sm:mb-3">
-        <VestingSelector
-          address={selectedAddress}
-          onModeChange={onVestingModeChange}
-          classificationProgress={vestingProgress}
+        <VestingDisplay
           showBalances={showBalances}
           balances={vestingBalances}
+          isClassifying={!!vestingProgress}
         />
       </div>
 
