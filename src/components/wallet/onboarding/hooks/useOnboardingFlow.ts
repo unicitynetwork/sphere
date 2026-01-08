@@ -11,8 +11,6 @@ import { IpfsStorageService } from "../../L3/services/IpfsStorageService";
 import {
   saveWalletToStorage,
   loadWalletFromStorage,
-  connect as connectL1,
-  isWebSocketConnected,
   getBalance,
   type Wallet as L1Wallet,
 } from "../../L1/sdk";
@@ -123,15 +121,6 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const [firstFoundNametagPath, setFirstFoundNametagPath] = useState<string | null>(null);
   const [autoDeriveDuringIpnsCheck, setAutoDeriveDuringIpnsCheck] = useState(true);
   const [ipnsFetchingNametag, setIpnsFetchingNametag] = useState(false);
-
-  // Connect to L1 WebSocket on mount (needed for wallet scanning)
-  useEffect(() => {
-    if (!isWebSocketConnected()) {
-      connectL1().catch((err) => {
-        console.warn("Failed to connect to L1 WebSocket:", err);
-      });
-    }
-  }, []);
 
   // Effect: Fetch nametag from IPNS when identity exists but nametag doesn't
   useEffect(() => {

@@ -5,8 +5,10 @@
 import { AnimatePresence } from "framer-motion";
 import { useOnboardingFlow } from "./hooks/useOnboardingFlow";
 import { useWalletImport } from "./hooks/useWalletImport";
+import { useOnboardingConnectionStatus } from "./hooks/useOnboardingConnectionStatus";
 import { WalletScanModal } from "../L1/components/modals/WalletScanModal";
 import { LoadPasswordModal } from "../L1/components/modals/LoadPasswordModal";
+import { ConnectionStatus } from "../L1/components/ConnectionStatus";
 
 // Import screen components
 import {
@@ -22,6 +24,9 @@ import {
 export type { OnboardingStep } from "./hooks/useOnboardingFlow";
 
 export function CreateWalletFlow() {
+  // L1 connection status hook
+  const connection = useOnboardingConnectionStatus();
+
   // Main onboarding flow hook
   const {
     // Step management
@@ -74,6 +79,22 @@ export function CreateWalletFlow() {
     setError,
     setIsBusy,
   });
+
+  // Show connection status immediately on start screen if not connected
+  // L1 connection is needed for wallet operations (scanning, balance checks, etc.)
+  if (!connection.isConnected && step === "start") {
+    return (
+      <div className="flex flex-col items-center justify-center p-4 md:p-8 text-center relative">
+        <ConnectionStatus
+          state={connection.state}
+          message={connection.message}
+          error={connection.error}
+          onRetry={connection.manualConnect}
+          onCancel={connection.cancelConnect}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-center justify-center p-4 md:p-8 text-center relative">
