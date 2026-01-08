@@ -15,8 +15,6 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  generateAddress,
-  loadWalletFromStorage,
   createTransactionPlan,
   createAndSignTransaction,
   broadcast,
@@ -36,6 +34,7 @@ import {
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
 import { VestingDisplay } from "../components/VestingDisplay";
 import { HistoryView } from "../views";
+import { NewAddressModal } from "../../shared/modals/NewAddressModal";
 
 interface L1WalletModalProps {
   isOpen: boolean;
@@ -68,6 +67,7 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     message: string;
     txids?: string[];
   }>({ show: false, type: "info", title: "", message: "" });
+  const [showNewAddressModal, setShowNewAddressModal] = useState(false);
 
   const {
     wallet,
@@ -119,18 +119,15 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     }
   }, [isOpen]);
 
-  const onNewAddress = async () => {
+  const onNewAddress = () => {
     if (!wallet || isAnyAddressLoading) return;
-    try {
-      const addr = generateAddress(wallet);
-      const updated = loadWalletFromStorage("main");
-      if (updated) {
-        invalidateWallet();
-        setSelectedAddress(addr.address);
-      }
-    } catch {
-      showMessage("error", "Error", "Failed to generate address");
-    }
+    setShowNewAddressModal(true);
+  };
+
+  const handleNewAddressSuccess = () => {
+    invalidateWallet();
+    setShowNewAddressModal(false);
+    window.location.reload();
   };
 
   const onSendTransaction = async (destination: string, amount: string) => {
@@ -535,6 +532,15 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
               txids={messageModal.txids}
               onClose={closeMessage}
             />
+
+            {wallet && (
+              <NewAddressModal
+                isOpen={showNewAddressModal}
+                onClose={() => setShowNewAddressModal(false)}
+                wallet={wallet}
+                onSuccess={handleNewAddressSuccess}
+              />
+            )}
           </motion.div>
         </motion.div>
       )}
