@@ -108,6 +108,21 @@ export function useOnboardingConnectionStatus() {
     return () => clearInterval(interval);
   }, [status.state, attemptConnect]);
 
+  // Auto-reconnect when browser comes back online
+  useEffect(() => {
+    const handleOnline = () => {
+      if (!isMountedRef.current) return;
+
+      // If we're in error or disconnected state, try to reconnect
+      if (status.state === "error" || status.state === "disconnected") {
+        attemptConnect();
+      }
+    };
+
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, [status.state, attemptConnect]);
+
   return {
     ...status,
     isConnected: status.state === "connected",
