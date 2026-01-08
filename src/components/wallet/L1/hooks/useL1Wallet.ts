@@ -366,13 +366,19 @@ export function useL1Wallet(selectedAddressProp?: string) {
       return results;
     },
     onSuccess: () => {
-      // Invalidate balance and transactions after sending
+      // Invalidate balance, transactions and vesting after sending
       if (selectedAddress) {
+        // Clear vestingState cache first (UTXOs changed)
+        vestingState.clearAddressCache(selectedAddress);
+
         queryClient.invalidateQueries({
           queryKey: L1_KEYS.BALANCE(selectedAddress),
         });
         queryClient.invalidateQueries({
           queryKey: L1_KEYS.TRANSACTIONS(selectedAddress),
+        });
+        queryClient.invalidateQueries({
+          queryKey: L1_KEYS.VESTING(selectedAddress),
         });
       }
     },

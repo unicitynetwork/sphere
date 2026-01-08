@@ -92,7 +92,6 @@ interface MainWalletViewProps {
   txPlan: TransactionPlan | null;
   isSending: boolean;
   onConfirmSend: () => Promise<void>;
-  vestingProgress?: { current: number; total: number } | null;
   vestingBalances?: VestingBalances;
 }
 
@@ -114,7 +113,6 @@ export function MainWalletView({
   txPlan,
   isSending,
   onConfirmSend,
-  vestingProgress,
   vestingBalances,
 }: MainWalletViewProps) {
   const [showQR, setShowQR] = useState(false);
@@ -410,7 +408,6 @@ export function MainWalletView({
         <VestingDisplay
           showBalances={showBalances}
           balances={vestingBalances}
-          isClassifying={!!vestingProgress}
         />
       </div>
 

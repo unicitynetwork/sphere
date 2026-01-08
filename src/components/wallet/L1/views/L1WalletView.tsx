@@ -8,7 +8,7 @@ import {
   createTransactionPlan,
   createAndSignTransaction,
   broadcast,
-  type VestingMode,
+  vestingState,
   type TransactionPlan,
 } from "../sdk";
 import { useL1Wallet } from "../hooks";
@@ -45,11 +45,12 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     isLoadingTransactions,
     currentBlockHeight,
     vestingBalances,
-    isLoadingVesting,
     deleteWallet,
     analyzeTransaction,
-    setVestingMode,
     invalidateWallet,
+    invalidateBalance,
+    invalidateTransactions,
+    invalidateVesting,
   } = useL1Wallet(selectedAddress);
 
   // Derive addresses from wallet
@@ -99,16 +100,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       }
     }
   }, [selectedAddress, wallet]);
-
-  // Vesting progress for UI - show loading only on initial load, not on refetch
-  const vestingProgress = isLoadingVesting
-    ? { current: 0, total: 1 }
-    : null;
-
-  // Handle vesting mode change
-  const handleVestingModeChange = useCallback((mode: VestingMode) => {
-    setVestingMode(mode);
-  }, [setVestingMode]);
 
   // Delete wallet
   const onDeleteWallet = async () => {
@@ -210,6 +201,14 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       }
 
       setTxPlan(null);
+
+      // Invalidate queries to refresh data after sending
+      if (results.length > 0) {
+        vestingState.clearAddressCache(selectedAddress);
+        invalidateBalance();
+        invalidateTransactions();
+        invalidateVesting();
+      }
 
       if (errors.length > 0) {
         if (results.length > 0) {
@@ -333,8 +332,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         txPlan={txPlan}
         isSending={isSending}
         onConfirmSend={onConfirmSend}
-        vestingProgress={vestingProgress}
-        onVestingModeChange={handleVestingModeChange}
         vestingBalances={vestingBalances}
       />
       <MessageModal
