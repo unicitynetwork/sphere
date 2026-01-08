@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import {
   importWallet,
   exportWallet,
@@ -26,6 +26,7 @@ import { loadWalletFromUnifiedKeyManager, getUnifiedKeyManager } from "../sdk/un
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { KEYS as L3_KEYS } from "../../L3/hooks/useWallet";
+import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 // Query keys for L1 wallet
 export const L1_KEYS = {
@@ -38,8 +39,36 @@ export const L1_KEYS = {
 };
 
 
-export function useL1Wallet(selectedAddress?: string) {
+export function useL1Wallet(selectedAddressProp?: string) {
   const queryClient = useQueryClient();
+
+  // Query: Wallet from UnifiedKeyManager
+  const walletQuery = useQuery({
+    queryKey: L1_KEYS.WALLET,
+    queryFn: async () => {
+      const wallet = await loadWalletFromUnifiedKeyManager();
+      return wallet;
+    },
+    staleTime: Infinity, // Wallet doesn't change unless we mutate it
+  });
+
+  // Compute selected address: use prop if provided, else derive from localStorage path
+  const selectedAddress = useMemo(() => {
+    if (selectedAddressProp) return selectedAddressProp;
+
+    const wallet = walletQuery.data;
+    if (!wallet || wallet.addresses.length === 0) return "";
+
+    const storedPath = localStorage.getItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
+    if (storedPath) {
+      const addrFromPath = wallet.addresses.find(a => a.path === storedPath);
+      if (addrFromPath) return addrFromPath.address;
+    }
+
+    // Default to first address
+    return wallet.addresses[0]?.address || "";
+  }, [selectedAddressProp, walletQuery.data]);
+
   const selectedAddressRef = useRef<string>(selectedAddress || "");
 
   // Update ref when address changes
@@ -92,16 +121,6 @@ export function useL1Wallet(selectedAddress?: string) {
       }
     };
   }, [queryClient]);
-
-  // Query: Wallet from UnifiedKeyManager
-  const walletQuery = useQuery({
-    queryKey: L1_KEYS.WALLET,
-    queryFn: async () => {
-      const wallet = await loadWalletFromUnifiedKeyManager();
-      return wallet;
-    },
-    staleTime: Infinity, // Wallet doesn't change unless we mutate it
-  });
 
   // Query: Balance for selected address
   const balanceQuery = useQuery({
@@ -347,13 +366,19 @@ export function useL1Wallet(selectedAddress?: string) {
       return results;
     },
     onSuccess: () => {
-      // Invalidate balance and transactions after sending
+      // Invalidate balance, transactions and vesting after sending
       if (selectedAddress) {
+        // Clear vestingState cache first (UTXOs changed)
+        vestingState.clearAddressCache(selectedAddress);
+
         queryClient.invalidateQueries({
           queryKey: L1_KEYS.BALANCE(selectedAddress),
         });
         queryClient.invalidateQueries({
           queryKey: L1_KEYS.TRANSACTIONS(selectedAddress),
+        });
+        queryClient.invalidateQueries({
+          queryKey: L1_KEYS.VESTING(selectedAddress),
         });
       }
     },

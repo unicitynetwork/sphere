@@ -123,28 +123,79 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
       if (addr.path) initializedAddressesRef.current.add(addr.path);
     });
 
-    // Add new addresses to state with loading state
-    // PATH is the primary key - index and isChange are for display only
-    const newStates: AddressWithNametag[] = newAddresses.map((addr) => {
-      return {
-        address: addr.address,
-        path: addr.path!,  // PATH is the primary key
-        index: addr.index,  // For display only
-        isChange: addr.isChange,  // For display only
-        ipnsLoading: true,
-        hasNametag: false,
-        nametag: undefined,
-        firstFetchTime: Date.now(),
-      };
-    });
+    // Initialize addresses and fetch nametags
+    const initializeAndFetch = async () => {
+      // Add new addresses to state - check local storage first before marking as loading
+      // PATH is the primary key - index and isChange are for display only
+      const newStates: AddressWithNametag[] = await Promise.all(newAddresses.map(async (addr) => {
+        // Check local storage first via L3 identity
+        try {
+          const identityManager = IdentityManager.getInstance(SESSION_KEY);
+          const l3Identity = await identityManager.deriveIdentityFromPath(addr.path!);
+          const localNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+          const localTokens = WalletRepository.checkTokensForAddress(l3Identity.address);
 
-    setAddressesWithNametags(prev => [...prev, ...newStates]);
+          if (localNametag) {
+            console.log(`🔍 [L1] Found local nametag for ${addr.address.slice(0, 12)}...: ${localNametag.name}`);
+            return {
+              address: addr.address,
+              path: addr.path!,
+              index: addr.index,
+              isChange: addr.isChange,
+              ipnsLoading: false,  // No need to fetch - already have it locally
+              hasNametag: true,
+              nametag: localNametag.name,
+              l3Address: l3Identity.address,
+              hasL3Inventory: true,
+              firstFetchTime: Date.now(),
+            };
+          }
 
-    // Fetch nametags using PATH as the identifier
-    const fetchNewAddresses = async () => {
-      for (const addr of newAddresses) {
+          // Has tokens but no nametag - still need to check IPNS but mark inventory
+          if (localTokens) {
+            return {
+              address: addr.address,
+              path: addr.path!,
+              index: addr.index,
+              isChange: addr.isChange,
+              ipnsLoading: true,
+              hasNametag: false,
+              nametag: undefined,
+              l3Address: l3Identity.address,
+              hasL3Inventory: true,
+              firstFetchTime: Date.now(),
+            };
+          }
+        } catch (error) {
+          console.warn(`[L1] Error checking local nametag for ${addr.address.slice(0, 12)}...`, error);
+        }
+
+        // Default: need to fetch from IPNS
+        return {
+          address: addr.address,
+          path: addr.path!,
+          index: addr.index,
+          isChange: addr.isChange,
+          ipnsLoading: true,
+          hasNametag: false,
+          nametag: undefined,
+          firstFetchTime: Date.now(),
+        };
+      }));
+
+      if (!mountedRef.current) return;
+
+      setAddressesWithNametags(prev => [...prev, ...newStates]);
+
+      // Filter addresses that need IPNS fetching (those still loading)
+      const addressesNeedingFetch = newStates.filter(s => s.ipnsLoading);
+
+      // Fetch nametags using PATH as the identifier
+      for (const state of addressesNeedingFetch) {
         if (!mountedRef.current) return;
-        if (!addr.path) continue;
+
+        const addr = newAddresses.find(a => a.path === state.path);
+        if (!addr?.path) continue;
 
         // Skip if already fetching (use path as key)
         if (fetchInProgressRef.current.has(addr.path)) continue;
@@ -182,7 +233,7 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
       }
     };
 
-    fetchNewAddresses();
+    initializeAndFetch();
   }, [addresses, fetchSingleNametag]);
 
   // Continuous polling for addresses without nametags

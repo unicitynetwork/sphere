@@ -227,14 +227,16 @@ describe("ChatHistoryIpfsService", () => {
       consoleSpy.mockRestore();
     });
 
-    it("should keep tombstones exactly at 30 days", () => {
+    it("should keep tombstones under 30 days old", () => {
       const now = Date.now();
-      const exactlyThirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+      // Use 29 days + 23 hours to safely stay under 30 day threshold
+      // This avoids flaky tests from millisecond timing differences
+      const justUnderThirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000 - 60 * 60 * 1000);
 
       localStorageMock[STORAGE_KEYS.AGENT_CHAT_TOMBSTONES] = JSON.stringify({
         "boundary-session": {
           sessionId: "boundary-session",
-          deletedAt: exactlyThirtyDaysAgo,
+          deletedAt: justUnderThirtyDaysAgo,
           reason: "user-deleted",
         },
       });

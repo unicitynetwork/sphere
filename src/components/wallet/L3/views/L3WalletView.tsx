@@ -49,7 +49,7 @@ export function L3WalletView({
   const navigate = useNavigate();
   const { identity, assets, tokens, isLoadingAssets, isLoadingIdentity, nametag, getSeedPhrase } = useWallet();
   const { exportTxf, importTxf, isExportingTxf, isImportingTxf, isSyncing, isEnabled: isIpfsEnabled } = useIpfsStorage();
-  const { totalBalance: l1TotalBalance, deleteWallet } = useL1Wallet();
+  const { balance: l1Balance, deleteWallet } = useL1Wallet();
 
   const [activeTab, setActiveTab] = useState<Tab>('assets');
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
@@ -88,7 +88,7 @@ export function L3WalletView({
   // Create L1 ALPHA asset
   const l1AlphaAsset = useMemo(() => {
     // Convert ALPHA balance to satoshis (8 decimals)
-    const satoshis = BigInt(Math.round(l1TotalBalance * 100000000));
+    const satoshis = BigInt(Math.round(l1Balance * 100000000));
     return new AggregatedAsset({
       coinId: 'l1-alpha',
       symbol: 'ALPHA',
@@ -101,7 +101,7 @@ export function L3WalletView({
       priceEur: 0.92,
       change24h: 0,
     });
-  }, [l1TotalBalance]);
+  }, [l1Balance]);
 
   const totalValue = useMemo(() => {
     const l3Value = assets.reduce((sum, asset) => sum + asset.getTotalFiatValue('USD'), 0);
@@ -231,7 +231,7 @@ export function L3WalletView({
 
   // Format L1 balance for settings modal
   const formatL1Balance = (balance: number) => {
-    return balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return balance.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
   };
 
   if (isLoadingIdentity) {
@@ -451,7 +451,7 @@ export function L3WalletView({
                   transition={{ duration: 0.2 }}
                   className="space-y-2"
                 >
-                  {assets.length === 0 && l1TotalBalance === 0 ? (
+                  {assets.length === 0 && l1Balance === 0 ? (
                     <EmptyState />
                   ) : (
                     <>
@@ -537,7 +537,7 @@ export function L3WalletView({
         onOpenL1Wallet={() => setIsL1WalletOpen(true)}
         onBackupWallet={() => setIsBackupOpen(true)}
         onLogout={() => setIsLogoutConfirmOpen(true)}
-        l1Balance={formatL1Balance(l1TotalBalance)}
+        l1Balance={formatL1Balance(l1Balance)}
       />
 
       <BackupWalletModal
