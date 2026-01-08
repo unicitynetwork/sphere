@@ -15,8 +15,6 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  connect,
-  isWebSocketConnected,
   generateAddress,
   loadWalletFromStorage,
   createTransactionPlan,
@@ -24,8 +22,9 @@ import {
   broadcast,
   type TransactionPlan,
 } from "../sdk";
-import { useL1Wallet } from "../hooks";
+import { useL1Wallet, useConnectionStatus } from "../hooks";
 import { useAddressNametags } from "../hooks/useAddressNametags";
+import { ConnectionStatus } from "../components/ConnectionStatus";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 import {
@@ -49,8 +48,10 @@ type ViewMode = "main" | "history";
 export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalProps) {
   const [selectedAddress, setSelectedAddress] = useState<string>("");
   const [viewMode, setViewMode] = useState<ViewMode>("main");
-  const [isConnecting, setIsConnecting] = useState(() => !isWebSocketConnected());
   const [txPlan, setTxPlan] = useState<TransactionPlan | null>(null);
+
+  // Connection status hook
+  const connection = useConnectionStatus();
   const [isSending, setIsSending] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -96,23 +97,6 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
   const closeMessage = useCallback(() => {
     setMessageModal((prev) => ({ ...prev, show: false }));
   }, []);
-
-  // Connect on modal open
-  useEffect(() => {
-    if (!isOpen) return;
-    if (isWebSocketConnected()) {
-      setIsConnecting(false);
-      return;
-    }
-    (async () => {
-      try {
-        setIsConnecting(true);
-        await connect();
-      } finally {
-        setIsConnecting(false);
-      }
-    })();
-  }, [isOpen]);
 
   // Set initial selected address
   useEffect(() => {
@@ -279,7 +263,15 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto">
-              {isConnecting || isLoadingWallet ? (
+              {!connection.isConnected ? (
+                <ConnectionStatus
+                  state={connection.state}
+                  message={connection.message}
+                  error={connection.error}
+                  onRetry={connection.manualConnect}
+                  onCancel={connection.cancelConnect}
+                />
+              ) : isLoadingWallet ? (
                 <div className="flex items-center justify-center h-64">
                   <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
                 </div>
