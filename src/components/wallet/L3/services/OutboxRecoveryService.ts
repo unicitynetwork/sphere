@@ -24,6 +24,7 @@
 import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment";
 import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
 import { OutboxRepository } from "../../../../repositories/OutboxRepository";
+import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { ServiceProvider } from "./ServiceProvider";
 import type { NostrService } from "./NostrService";
 import type { IdentityManager } from "./IdentityManager";
@@ -33,6 +34,7 @@ import type {
   RecoveryDetail,
 } from "./types/OutboxTypes";
 import { IpfsStorageService } from "./IpfsStorageService";
+import { TokenRecoveryService } from "./TokenRecoveryService";
 
 // ==========================================
 // Configuration Constants
@@ -299,7 +301,12 @@ export class OutboxRecoveryService {
           break;
 
         case "PROOF_RECEIVED":
-          await this.resumeFromProofReceived(entry, outboxRepo, nostrService);
+          // SPLIT_MINT entries with proof are already complete - token is minted and saved
+          if (entry.type === "SPLIT_MINT") {
+            await this.finalizeSplitMint(entry, outboxRepo);
+          } else {
+            await this.resumeFromProofReceived(entry, outboxRepo, nostrService);
+          }
           detail.status = "recovered";
           detail.newStatus = "COMPLETED";
           break;
@@ -317,7 +324,52 @@ export class OutboxRecoveryService {
           break;
 
         case "FAILED":
-          // Requires manual intervention
+          // Check if this FAILED entry can be recovered by verifying token state
+          // Only attempt if we haven't exceeded max retries
+          if (entry.retryCount < MAX_RETRIES_PER_ENTRY) {
+            const publicKey = await this.getOwnerPublicKey();
+            if (publicKey) {
+              const walletRepo = WalletRepository.getInstance();
+              const sourceToken = walletRepo.getTokens().find(t => t.id === entry.sourceTokenId);
+              if (sourceToken) {
+                try {
+                  const recoveryService = TokenRecoveryService.getInstance();
+                  const spentCheck = await recoveryService.checkTokenSpent(sourceToken, publicKey);
+
+                  if (!spentCheck.isSpent) {
+                    // Token not spent - revert to committed state and allow retry
+                    console.log(`📤 OutboxRecovery: Token ${entry.sourceTokenId.slice(0, 8)}... not spent, attempting recovery`);
+                    const recovery = await recoveryService.handleTransferFailure(
+                      sourceToken,
+                      entry.lastError || "RECOVERY_ATTEMPT",
+                      publicKey
+                    );
+
+                    if (recovery.tokenRestored) {
+                      // Reset entry for retry
+                      outboxRepo.updateEntry(entry.id, {
+                        status: "READY_TO_SUBMIT",
+                        retryCount: entry.retryCount + 1,
+                        lastError: undefined,
+                      });
+                      window.dispatchEvent(new Event("wallet-updated"));
+                      detail.status = "recovered";
+                      detail.newStatus = "READY_TO_SUBMIT";
+                      break;
+                    }
+                  } else {
+                    // Token is spent - it's permanently failed
+                    console.log(`📤 OutboxRecovery: Token ${entry.sourceTokenId.slice(0, 8)}... is spent, marking permanently failed`);
+                    await recoveryService.handleTransferFailure(sourceToken, "ALREADY_SPENT", publicKey);
+                    window.dispatchEvent(new Event("wallet-updated"));
+                  }
+                } catch (recoveryErr) {
+                  console.warn(`📤 OutboxRecovery: Failed entry recovery failed:`, recoveryErr);
+                }
+              }
+            }
+          }
+          // If we get here, entry remains FAILED
           console.warn(`📤 OutboxRecovery: Entry ${entry.id.slice(0, 8)}... is FAILED, skipping`);
           detail.status = "skipped";
           break;
@@ -378,6 +430,34 @@ export class OutboxRecoveryService {
   ): Promise<void> {
     console.log(`📤 OutboxRecovery: Resuming from READY_TO_SUBMIT...`);
 
+    // Before retrying submission, verify token state is still valid
+    // This prevents wasting aggregator calls on tokens that were spent elsewhere
+    const publicKey = await this.getOwnerPublicKey();
+    if (publicKey && entry.sourceTokenJson) {
+      try {
+        const walletRepo = WalletRepository.getInstance();
+        const sourceToken = walletRepo.getTokens().find(t => t.id === entry.sourceTokenId);
+        if (sourceToken) {
+          const recoveryService = TokenRecoveryService.getInstance();
+          const spentCheck = await recoveryService.checkTokenSpent(sourceToken, publicKey);
+          if (spentCheck.isSpent) {
+            // Token was spent elsewhere - cannot recover this transfer
+            console.log(`📤 OutboxRecovery: Token ${entry.sourceTokenId.slice(0, 8)}... already spent, removing`);
+            await recoveryService.handleTransferFailure(sourceToken, "ALREADY_SPENT", publicKey);
+            outboxRepo.updateEntry(entry.id, {
+              status: "FAILED",
+              lastError: "Token state already spent by another transaction"
+            });
+            window.dispatchEvent(new Event("wallet-updated"));
+            return; // Don't retry
+          }
+        }
+      } catch (spentCheckError) {
+        console.warn(`📤 OutboxRecovery: Failed to check token spent status:`, spentCheckError);
+        // Continue with submission - let aggregator determine if spent
+      }
+    }
+
     // Reconstruct commitment from stored JSON
     const commitment = await this.reconstructCommitment(entry);
 
@@ -386,6 +466,27 @@ export class OutboxRecoveryService {
     const response = await client.submitTransferCommitment(commitment);
 
     if (response.status !== "SUCCESS" && response.status !== "REQUEST_ID_EXISTS") {
+      // Handle failure with recovery
+      if (publicKey && entry.sourceTokenJson) {
+        const walletRepo = WalletRepository.getInstance();
+        const sourceToken = walletRepo.getTokens().find(t => t.id === entry.sourceTokenId);
+        if (sourceToken) {
+          try {
+            const recoveryService = TokenRecoveryService.getInstance();
+            const recovery = await recoveryService.handleTransferFailure(
+              sourceToken,
+              response.status,
+              publicKey
+            );
+            console.log(`📤 OutboxRecovery: Submission failed (${response.status}), recovery: ${recovery.action}`);
+            if (recovery.tokenRestored || recovery.tokenRemoved) {
+              window.dispatchEvent(new Event("wallet-updated"));
+            }
+          } catch (recoveryErr) {
+            console.error(`📤 OutboxRecovery: Token recovery failed:`, recoveryErr);
+          }
+        }
+      }
       throw new Error(`Aggregator submission failed: ${response.status}`);
     }
 
@@ -393,6 +494,19 @@ export class OutboxRecoveryService {
     entry.status = "SUBMITTED";
 
     await this.resumeFromSubmitted(entry, outboxRepo, nostrService);
+  }
+
+  /**
+   * Get the owner's public key from identity manager
+   */
+  private async getOwnerPublicKey(): Promise<string | null> {
+    if (!this.identityManager) return null;
+    try {
+      const identity = await this.identityManager.getCurrentIdentity();
+      return identity?.publicKey || null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -432,6 +546,25 @@ export class OutboxRecoveryService {
     entry.transferTxJson = JSON.stringify(transferTx.toJSON());
 
     await this.resumeFromProofReceived(entry, outboxRepo, nostrService);
+  }
+
+  /**
+   * Finalize a SPLIT_MINT entry that has received its proof.
+   * SPLIT_MINT entries don't need Nostr delivery - the token is already
+   * minted and saved to the wallet via the onTokenMinted callback.
+   * We just mark it as completed.
+   */
+  private async finalizeSplitMint(
+    entry: OutboxEntry,
+    outboxRepo: OutboxRepository
+  ): Promise<void> {
+    console.log(`📤 OutboxRecovery: Finalizing SPLIT_MINT ${entry.id.slice(0, 8)}... (token already minted)`);
+
+    // Token should already be in wallet from onTokenMinted callback
+    // Just mark the outbox entry as completed
+    outboxRepo.updateStatus(entry.id, "COMPLETED");
+
+    console.log(`📤 SPLIT_MINT ${entry.id.slice(0, 8)}... finalized`);
   }
 
   /**

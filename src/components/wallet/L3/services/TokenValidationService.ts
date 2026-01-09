@@ -64,8 +64,108 @@ export class TokenValidationService {
   private trustBaseCacheTime = 0;
   private readonly TRUST_BASE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
+  // Spent state verification cache
+  // SPENT results are immutable - cache forever
+  // UNSPENT results could change - cache with 5-min TTL
+  private spentStateCache = new Map<string, {
+    isSpent: boolean;
+    timestamp: number;
+  }>();
+  private readonly UNSPENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes for UNSPENT
+
   constructor(aggregatorUrl: string = DEFAULT_AGGREGATOR_URL) {
     this.aggregatorUrl = aggregatorUrl;
+  }
+
+  // ==========================================
+  // Spent State Cache Methods
+  // ==========================================
+
+  /**
+   * Generate cache key for spent state verification
+   * Format: tokenId:stateHash:publicKey
+   */
+  private getSpentStateCacheKey(
+    tokenId: string,
+    stateHash: string,
+    publicKey: string
+  ): string {
+    return `${tokenId}:${stateHash}:${publicKey}`;
+  }
+
+  /**
+   * Check if spent state is cached
+   * Returns: true (SPENT), false (UNSPENT), or null (not cached/expired)
+   */
+  private getSpentStateFromCache(cacheKey: string): boolean | null {
+    const cached = this.spentStateCache.get(cacheKey);
+    if (!cached) return null;
+
+    // SPENT results never expire (immutable)
+    if (cached.isSpent) {
+      return true;
+    }
+
+    // UNSPENT results expire after TTL (state could have changed)
+    const isExpired = Date.now() - cached.timestamp > this.UNSPENT_CACHE_TTL_MS;
+    if (isExpired) {
+      this.spentStateCache.delete(cacheKey);
+      return null;
+    }
+
+    return false;
+  }
+
+  /**
+   * Store spent state result in cache
+   */
+  private cacheSpentState(cacheKey: string, isSpent: boolean): void {
+    this.spentStateCache.set(cacheKey, {
+      isSpent,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * Clear spent state cache (call on logout/address change)
+   */
+  clearSpentStateCache(): void {
+    const size = this.spentStateCache.size;
+    this.spentStateCache.clear();
+    if (size > 0) {
+      console.log(`📦 Cleared spent state cache (${size} entries)`);
+    }
+  }
+
+  /**
+   * Clear only UNSPENT cache entries
+   * Called after IPFS sync detects inventory changes
+   * SPENT entries remain cached (immutable)
+   */
+  clearUnspentCacheEntries(): void {
+    let clearedCount = 0;
+    for (const [key, entry] of this.spentStateCache.entries()) {
+      if (!entry.isSpent) {
+        this.spentStateCache.delete(key);
+        clearedCount++;
+      }
+    }
+    if (clearedCount > 0) {
+      console.log(`📦 Cleared ${clearedCount} UNSPENT cache entries after IPFS inventory change`);
+    }
+  }
+
+  /**
+   * Get cache statistics for debugging
+   */
+  getSpentStateCacheStats(): { size: number; spentCount: number; unspentCount: number } {
+    let spentCount = 0;
+    let unspentCount = 0;
+    for (const entry of this.spentStateCache.values()) {
+      if (entry.isSpent) spentCount++;
+      else unspentCount++;
+    }
+    return { size: this.spentStateCache.size, spentCount, unspentCount };
   }
 
   // ==========================================
@@ -146,8 +246,11 @@ export class TokenValidationService {
    * Validate a single token
    */
   async validateToken(token: LocalToken): Promise<TokenValidationResult> {
+    const tokenIdPrefix = token.id.slice(0, 8);
+
     // Check if token has jsonData
     if (!token.jsonData) {
+      console.log(`📦 Validation FAIL [${tokenIdPrefix}]: no jsonData`);
       return {
         isValid: false,
         reason: "Token has no jsonData field",
@@ -158,14 +261,24 @@ export class TokenValidationService {
     try {
       txfToken = JSON.parse(token.jsonData);
     } catch {
+      console.log(`📦 Validation FAIL [${tokenIdPrefix}]: invalid JSON`);
       return {
         isValid: false,
         reason: "Failed to parse token jsonData as JSON",
       };
     }
 
+    // Log token structure for debugging
+    const txf = txfToken as Record<string, unknown>;
+    const hasGenesis = !!txf.genesis;
+    const hasState = !!txf.state;
+    const hasTransactions = Array.isArray(txf.transactions);
+    const txCount = hasTransactions ? (txf.transactions as unknown[]).length : 0;
+    console.log(`📦 Validating [${tokenIdPrefix}]: genesis=${hasGenesis}, state=${hasState}, transactions=${txCount}`);
+
     // Check basic structure
     if (!this.hasValidTxfStructure(txfToken)) {
+      console.log(`📦 Validation FAIL [${tokenIdPrefix}]: missing TXF structure (genesis/state)`);
       return {
         isValid: false,
         reason: "Token jsonData missing required TXF fields (genesis, state)",
@@ -185,6 +298,7 @@ export class TokenValidationService {
         return { isValid: true, token: recovered };
       }
 
+      console.log(`📦 Validation FAIL [${tokenIdPrefix}]: uncommitted transactions, proofs not recoverable`);
       return {
         isValid: false,
         reason: `${uncommitted.length} uncommitted transaction(s), could not fetch proofs from aggregator`,
@@ -195,11 +309,13 @@ export class TokenValidationService {
     try {
       const verificationResult = await this.verifyWithSdk(txfToken);
       if (!verificationResult.success) {
+        console.log(`📦 Validation FAIL [${tokenIdPrefix}]: SDK verification failed - ${verificationResult.error}`);
         return {
           isValid: false,
           reason: verificationResult.error || "SDK verification failed",
         };
       }
+      console.log(`📦 Validation PASS [${tokenIdPrefix}]: SDK verification successful`);
     } catch (err) {
       // SDK verification is optional - log warning but don't fail
       console.warn(
@@ -776,6 +892,19 @@ export class TokenValidationService {
     const tokenId = txfToken.genesis?.data?.tokenId || token.id;
     const stateHash = getCurrentStateHash(txfToken);
 
+    // CHECK CACHE FIRST - avoid unnecessary SDK calls
+    const cacheKey = this.getSpentStateCacheKey(tokenId, stateHash, publicKey);
+    const cachedResult = this.getSpentStateFromCache(cacheKey);
+    if (cachedResult !== null) {
+      return {
+        tokenId,
+        localId: token.id,
+        stateHash,
+        spent: cachedResult,
+      };
+    }
+
+    // CACHE MISS - verify with SDK
     try {
       // Parse SDK token
       const { Token } = await import(
@@ -794,13 +923,19 @@ export class TokenValidationService {
         pubKeyBytes
       );
 
+      const spent = isSpent === true;
+
+      // STORE IN CACHE - SPENT forever, UNSPENT with TTL
+      this.cacheSpentState(cacheKey, spent);
+
       return {
         tokenId,
         localId: token.id,
         stateHash,
-        spent: isSpent === true,
+        spent,
       };
     } catch (err) {
+      // Don't cache errors - allow retry
       return {
         tokenId,
         localId: token.id,
@@ -892,12 +1027,19 @@ export class TokenValidationService {
         "@unicitylabs/state-transition-sdk/lib/token/Token"
       );
 
+      // Log what we're trying to parse
+      const txf = txfToken as Record<string, unknown>;
+      const txCount = Array.isArray(txf.transactions) ? txf.transactions.length : 0;
+      console.log(`📦 SDK fromJSON: parsing token with ${txCount} transactions`);
+
       // Parse token from JSON
       const sdkToken = await Token.fromJSON(txfToken);
+      console.log(`📦 SDK fromJSON: success, token reconstructed`);
 
       // Get trust base
       const trustBase = await this.getTrustBase();
       if (!trustBase) {
+        console.log(`📦 SDK verify: skipped (no trust base)`);
         return { success: true }; // Skip verification if no trust base
       }
 
@@ -906,14 +1048,24 @@ export class TokenValidationService {
       const result = await sdkToken.verify(trustBase as any);
 
       if (!result.isSuccessful) {
+        // Log detailed verification result
+        console.log(`📦 SDK verify: FAILED`, {
+          isSuccessful: result.isSuccessful,
+          result: String(result),
+          // Try to extract more details if available
+          details: typeof result === 'object' ? JSON.stringify(result, null, 2) : result
+        });
         return {
           success: false,
           error: String(result) || "Verification failed",
         };
       }
 
+      console.log(`📦 SDK verify: SUCCESS`);
       return { success: true };
-    } catch {
+    } catch (err) {
+      // Log the specific error for debugging
+      console.warn(`📦 SDK verification exception:`, err instanceof Error ? err.message : err);
       // Return success if SDK is not available - validation is optional
       return { success: true };
     }

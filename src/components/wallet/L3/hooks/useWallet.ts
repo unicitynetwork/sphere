@@ -13,13 +13,14 @@ import { NametagService } from "../services/NametagService";
 import { RegistryService } from "../services/RegistryService";
 import { useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { TokenSplitExecutor } from "../services/transfer/TokenSplitExecutor";
+import { TokenSplitExecutor, type SplitPersistenceCallbacks } from "../services/transfer/TokenSplitExecutor";
 import { TokenSplitCalculator } from "../services/transfer/TokenSplitCalculator";
 import { TokenId } from "@unicitylabs/state-transition-sdk/lib/token/TokenId";
 import { IpfsStorageService } from "../services/IpfsStorageService";
 import { useServices } from "../../../../contexts/useServices";
 import type { NostrService } from "../services/NostrService";
 import { OutboxRecoveryService } from "../services/OutboxRecoveryService";
+import { TokenRecoveryService } from "../services/TokenRecoveryService";
 
 export const KEYS = {
   IDENTITY: ["wallet", "identity"],
@@ -471,16 +472,79 @@ export const useWallet = () => {
           walletAddress,
           recipientNametag,
           recipientPubkey,
+          ownerPublicKey: identity.publicKey,
         } : undefined;
 
         const executor = new TokenSplitExecutor();
+
+        // Create persistence callbacks for save-before-submit pattern
+        // This ensures change tokens are saved IMMEDIATELY after minting
+        // before any further aggregator submissions (critical for crash safety)
+        const ipfsService = IpfsStorageService.getInstance(identityManager);
+        const persistenceCallbacks: SplitPersistenceCallbacks = {
+          onTokenMinted: async (sdkToken: SdkToken<any>, isChangeToken: boolean) => {
+            if (isChangeToken) {
+              // Save change token IMMEDIATELY after mint proof received
+              // This is the critical safety point - token is now persisted locally
+              saveChangeTokenToWallet(sdkToken, params.coinId);
+
+              // CRITICAL: Force immediate cache refresh to ensure IPFS sync sees this token
+              // Without this, the 100ms debounce in refreshWallet() can cause the token
+              // to be missed if onPreTransferSync is called immediately after
+              walletRepo.forceRefreshCache();
+
+              console.log(`🔒 Change token saved immediately after mint (crash-safe)`);
+            }
+          },
+          onPreTransferSync: async () => {
+            // Sync to IPFS before submitting transfer to aggregator
+            // This ensures we have a backup before the final commitment
+            // CRITICAL: Must retry if sync is already in progress to ensure
+            // the change token (just saved) is included in the sync
+            const MAX_RETRIES = 10;
+            const RETRY_DELAY_MS = 1000;
+
+            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+              try {
+                const result = await ipfsService.syncNow();
+
+                if (result.success) {
+                  console.log(`☁️ Pre-transfer IPFS sync completed (tokens backed up)`);
+                  return true;
+                }
+
+                // Sync failed - check if it was because another sync is in progress
+                if (result.error === "Sync already in progress" || result.error === "Another tab is syncing") {
+                  console.log(`⏳ Pre-transfer sync: waiting for in-progress sync (attempt ${attempt}/${MAX_RETRIES})...`);
+                  // Wait for current sync to complete, then retry
+                  await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+                  continue;
+                }
+
+                // Other error - log and fail
+                console.error(`❌ Pre-transfer IPFS sync failed: ${result.error}`);
+                return false;
+              } catch (err) {
+                console.error(`❌ Pre-transfer IPFS sync error (attempt ${attempt}):`, err);
+                if (attempt === MAX_RETRIES) {
+                  return false;
+                }
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+              }
+            }
+
+            console.error(`❌ Pre-transfer IPFS sync failed after ${MAX_RETRIES} attempts`);
+            return false;
+          },
+        };
 
         const splitResult = await executor.executeSplitPlan(
           plan,
           recipientAddress,
           signingService,
           (burnedId) => walletRepo.removeToken(burnedId, undefined, true), // Skip history for split
-          outboxContext
+          outboxContext,
+          persistenceCallbacks
         );
 
         // Add transaction history for the actual sent amount
@@ -519,9 +583,8 @@ export const useWallet = () => {
           }
         }
 
-        for (const keptToken of splitResult.tokensKeptBySender) {
-          saveChangeTokenToWallet(keptToken, params.coinId);
-        }
+        // NOTE: Change tokens are now saved IMMEDIATELY via persistenceCallbacks.onTokenMinted
+        // during the mint phase, not here after the split completes (crash-safe pattern)
 
         // Mark all outbox entries as completed
         for (const outboxEntryId of splitResult.outboxEntryIds) {
@@ -536,13 +599,11 @@ export const useWallet = () => {
           outboxRepo.removeSplitGroup(splitResult.splitGroupId);
         }
 
-        // Final IPFS sync after split completion
-        if (walletAddress) {
-          const ipfsService = IpfsStorageService.getInstance(identityManager);
-          await ipfsService.syncNow().catch(err => {
-            console.warn("⚠️ Final IPFS sync after split failed:", err);
-          });
-        }
+        // Final IPFS sync after split completion (sync outbox status updates)
+        // Note: ipfsService already created above for persistence callbacks
+        await ipfsService.syncNow().catch(err => {
+          console.warn("⚠️ Final IPFS sync after split failed:", err);
+        });
       }
 
       return true;
@@ -649,6 +710,28 @@ export const useWallet = () => {
     const res = await client.submitTransferCommitment(transferCommitment);
 
     if (res.status !== "SUCCESS" && res.status !== "REQUEST_ID_EXISTS") {
+      // Recover token before marking outbox as failed
+      try {
+        const uiToken = walletRepo.getTokens().find(t => t.id === uiId);
+        const identity = await identityManager.getCurrentIdentity();
+        if (uiToken && identity?.publicKey) {
+          const recoveryService = TokenRecoveryService.getInstance();
+          const recovery = await recoveryService.handleTransferFailure(
+            uiToken,
+            res.status,
+            identity.publicKey
+          );
+          console.log(`📤 Transfer failed: ${res.status}, recovery: ${recovery.action}`);
+
+          // Refresh wallet UI if token was modified
+          if (recovery.tokenRestored || recovery.tokenRemoved) {
+            window.dispatchEvent(new Event("wallet-updated"));
+          }
+        }
+      } catch (recoveryErr) {
+        console.error(`📤 Token recovery failed:`, recoveryErr);
+      }
+
       outboxRepo.updateEntry(outboxEntry.id, {
         status: "FAILED",
         lastError: `Aggregator error: ${res.status}`,
@@ -734,6 +817,26 @@ export const useWallet = () => {
     // Get SDK token JSON and validate TXF structure
     const sdkJson = sdkToken.toJSON() as any;
 
+    // DETAILED LOGGING: Understand SDK output structure
+    const sdkKeys = Object.keys(sdkJson);
+    const hasGenesis = !!sdkJson.genesis;
+    const hasState = !!sdkJson.state;
+    const hasTransactions = Array.isArray(sdkJson.transactions);
+    const txCount = hasTransactions ? sdkJson.transactions.length : 0;
+
+    console.log(`📦 SDK toJSON() output for change token:`, {
+      keys: sdkKeys,
+      hasGenesis,
+      hasState,
+      hasTransactions,
+      transactionCount: txCount,
+      // Log first transaction's structure if exists
+      firstTx: txCount > 0 ? {
+        keys: Object.keys(sdkJson.transactions[0] || {}),
+        hasInclusionProof: !!sdkJson.transactions[0]?.inclusionProof,
+      } : null,
+    });
+
     // Ensure the JSON has required TXF structure (genesis, state)
     // This is critical for IPFS sync to work properly
     if (!sdkJson.genesis || !sdkJson.state) {
@@ -744,10 +847,12 @@ export const useWallet = () => {
       });
       // Still try to save - maybe the fields are named differently
     } else {
-      console.log(`✅ Change token has valid TXF structure`);
+      console.log(`✅ Change token has valid TXF structure (genesis + state + ${txCount} tx)`);
     }
 
     // Ensure TXF compatibility fields exist
+    // IMPORTANT: We spread sdkJson first, so its transactions are preserved
+    // The explicit transactions line below only provides a fallback if undefined
     const txfJson = {
       ...sdkJson,
       version: sdkJson.version || "2.0",
@@ -757,6 +862,10 @@ export const useWallet = () => {
         genesisDataJSONHash: "0000" + "0".repeat(60),
       },
     };
+
+    // Verify transactions were preserved
+    const finalTxCount = Array.isArray(txfJson.transactions) ? txfJson.transactions.length : 0;
+    console.log(`📦 Final TXF structure: ${finalTxCount} transactions preserved`);
 
     // Extract token ID for logging
     const genesisTokenId = sdkJson.genesis?.data?.tokenId;

@@ -803,6 +803,30 @@ export class WalletRepository {
     }, 100); // 100ms debounce at source
   }
 
+  /**
+   * Force immediate cache refresh, bypassing the 100ms debounce.
+   *
+   * CRITICAL: Use this when a token MUST be visible to IPFS sync immediately.
+   * The normal refreshWallet() debounces by 100ms which can cause race conditions
+   * when IPFS sync is triggered immediately after saving a token.
+   *
+   * This method:
+   * 1. Cancels any pending debounced refresh
+   * 2. Dispatches wallet-updated event immediately
+   *
+   * Use case: After saving change token during split, before triggering IPFS sync.
+   */
+  forceRefreshCache(): void {
+    // Cancel any pending debounced refresh
+    if (this._refreshDebounceTimer) {
+      clearTimeout(this._refreshDebounceTimer);
+      this._refreshDebounceTimer = null;
+    }
+    // Note: this._wallet is already updated by saveWallet() which is called before this
+    // We just need to dispatch the event immediately
+    window.dispatchEvent(new Event("wallet-updated"));
+  }
+
   // ==========================================
   // Tombstone Methods (IPFS sync)
   // ==========================================
@@ -922,6 +946,59 @@ export class WalletRepository {
       }
       console.log(`💀 Pruned tombstones from ${originalCount} to ${this._tombstones.length}`);
     }
+  }
+
+  /**
+   * Remove a specific tombstone entry
+   * Used for recovery when tombstone is detected as invalid (token not actually spent)
+   */
+  removeTombstone(tokenId: string, stateHash: string): boolean {
+    const initialLength = this._tombstones.length;
+    this._tombstones = this._tombstones.filter(
+      t => !(t.tokenId === tokenId && t.stateHash === stateHash)
+    );
+
+    if (this._tombstones.length < initialLength && this._wallet) {
+      this.saveWallet(this._wallet);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Revert a token to its last committed state
+   * Replaces the token in wallet with a reverted version
+   * Used for recovery when a transfer fails but token is still valid
+   */
+  revertTokenToCommittedState(localId: string, revertedToken: Token): boolean {
+    if (!this._wallet) {
+      console.warn(`📦 Cannot revert token: no wallet loaded`);
+      return false;
+    }
+
+    // Find the token index by localId
+    const tokenIndex = this._wallet.tokens.findIndex(t => t.id === localId);
+
+    if (tokenIndex === -1) {
+      console.warn(`📦 Cannot revert token ${localId.slice(0, 8)}...: not found in wallet`);
+      return false;
+    }
+
+    // Replace the token with the reverted version
+    const updatedTokens = [...this._wallet.tokens];
+    updatedTokens[tokenIndex] = revertedToken;
+
+    this._wallet = new Wallet(
+      this._wallet.id,
+      this._wallet.name,
+      this._wallet.address,
+      updatedTokens
+    );
+
+    this.saveWallet(this._wallet);
+    console.log(`📦 Reverted token ${localId.slice(0, 8)}... to committed state`);
+
+    return true;
   }
 
   // ==========================================

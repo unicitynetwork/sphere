@@ -9,6 +9,7 @@ import {
 } from "../services/IpfsStorageService";
 import { IdentityManager } from "../services/IdentityManager";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { getTokenValidationService } from "../services/TokenValidationService";
 import type { Token } from "../data/model";
 
 // Query keys
@@ -126,6 +127,27 @@ export function useIpfsStorage() {
         if (result.nametag) {
           walletRepo.setNametag(result.nametag);
         }
+
+        // CRITICAL: Validate restored tokens against aggregator to detect spent tokens
+        // that bypassed tombstone checks (e.g., tokens with different state hashes)
+        const identity = await identityManager.getCurrentIdentity();
+        if (identity?.publicKey) {
+          console.log(`📦 Running post-restore spent token validation...`);
+          const validationService = getTokenValidationService();
+          const allTokens = walletRepo.getTokens();
+          const validationResult = await validationService.checkSpentTokens(allTokens, identity.publicKey);
+
+          if (validationResult.spentTokens.length > 0) {
+            console.log(`📦 Found ${validationResult.spentTokens.length} spent token(s) during restore validation:`);
+            for (const spent of validationResult.spentTokens) {
+              console.log(`📦   - Removing spent token ${spent.tokenId.slice(0, 8)}...`);
+              walletRepo.removeToken(spent.localId, undefined, true); // skipHistory
+            }
+            window.dispatchEvent(new Event("wallet-updated"));
+          } else {
+            console.log(`📦 Post-restore validation: all ${allTokens.length} token(s) are valid`);
+          }
+        }
       }
 
       return result;
@@ -151,6 +173,27 @@ export function useIpfsStorage() {
         }
         if (result.nametag) {
           walletRepo.setNametag(result.nametag);
+        }
+
+        // CRITICAL: Validate restored tokens against aggregator to detect spent tokens
+        // that bypassed tombstone checks (e.g., tokens with different state hashes)
+        const identity = await identityManager.getCurrentIdentity();
+        if (identity?.publicKey) {
+          console.log(`📦 Running post-restore spent token validation...`);
+          const validationService = getTokenValidationService();
+          const allTokens = walletRepo.getTokens();
+          const validationResult = await validationService.checkSpentTokens(allTokens, identity.publicKey);
+
+          if (validationResult.spentTokens.length > 0) {
+            console.log(`📦 Found ${validationResult.spentTokens.length} spent token(s) during restore validation:`);
+            for (const spent of validationResult.spentTokens) {
+              console.log(`📦   - Removing spent token ${spent.tokenId.slice(0, 8)}...`);
+              walletRepo.removeToken(spent.localId, undefined, true); // skipHistory
+            }
+            window.dispatchEvent(new Event("wallet-updated"));
+          } else {
+            console.log(`📦 Post-restore validation: all ${allTokens.length} token(s) are valid`);
+          }
         }
       }
 

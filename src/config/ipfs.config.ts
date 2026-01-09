@@ -110,9 +110,9 @@ export const IPFS_CONFIG = {
  */
 export const IPNS_RESOLUTION_CONFIG = {
   /** Wait this long for initial responses before selecting best record */
-  initialTimeoutMs: 10000,
+  initialTimeoutMs: 3000, // Reduced from 10s - dead nodes fail fast (~100ms)
   /** Maximum wait for all gateway responses (late arrivals handled separately) */
-  maxWaitMs: 30000,
+  maxWaitMs: 15000, // Reduced from 30s - faster overall resolution
   /** Minimum polling interval for background IPNS re-fetch (active tab) */
   pollingIntervalMinMs: 45000,
   /** Maximum polling interval (jitter applied between min and max, active tab) */
@@ -122,9 +122,9 @@ export const IPNS_RESOLUTION_CONFIG = {
   /** Maximum polling interval when tab is inactive/hidden (4.5 minutes with jitter) */
   inactivePollingIntervalMaxMs: 270000,
   /** Per-gateway request timeout (for routing API) */
-  perGatewayTimeoutMs: 25000,
+  perGatewayTimeoutMs: 5000, // Reduced from 25s - dead nodes timeout quickly
   /** Gateway path resolution timeout (fast path) */
-  gatewayPathTimeoutMs: 5000,
+  gatewayPathTimeoutMs: 3000, // Reduced from 5s - faster path timeout
 };
 
 /**
