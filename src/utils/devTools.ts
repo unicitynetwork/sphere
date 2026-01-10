@@ -15,6 +15,7 @@ import { MintTransactionData } from "@unicitylabs/state-transition-sdk/lib/trans
 import type { IMintTransactionReason } from "@unicitylabs/state-transition-sdk/lib/transaction/IMintTransactionReason";
 import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
 import { RequestId } from "@unicitylabs/state-transition-sdk/lib/api/RequestId";
+import { InclusionProof } from "@unicitylabs/state-transition-sdk/lib/transaction/InclusionProof";
 import type { TxfToken, TxfInclusionProof, TxfTransaction, TxfGenesis } from "../components/wallet/L3/services/types/TxfTypes";
 import type { OutboxEntry } from "../components/wallet/L3/services/types/OutboxTypes";
 
@@ -135,6 +136,29 @@ async function reconstructMintCommitment(
 }
 
 /**
+ * Check if a proof JSON is an INCLUSION proof (has authenticator) vs EXCLUSION proof (no authenticator).
+ * Uses SDK's InclusionProof class for proper type-safe checking.
+ *
+ * Per SDK: InclusionProof.authenticator is `Authenticator | null`
+ * - If authenticator is present: inclusion proof (commitment exists in tree)
+ * - If authenticator is null: exclusion proof (commitment NOT in tree, e.g., after tree reset)
+ */
+function isInclusionProofNotExclusion(proofJson: TxfInclusionProof | null): boolean {
+  if (!proofJson) return false;
+
+  try {
+    // Use SDK's InclusionProof to properly parse and check
+    const sdkProof = InclusionProof.fromJSON(proofJson);
+    // SDK defines: authenticator: Authenticator | null
+    // null = exclusion proof, non-null = inclusion proof
+    return sdkProof.authenticator !== null;
+  } catch {
+    // If parsing fails, check raw JSON as fallback
+    return proofJson.authenticator !== null && proofJson.authenticator !== undefined;
+  }
+}
+
+/**
  * Wait for mint inclusion proof using the SDK
  */
 async function waitForMintProofWithSDK(
@@ -147,7 +171,8 @@ async function waitForMintProofWithSDK(
 
     // If trust base verification is skipped, use direct polling
     if (ServiceProvider.isTrustBaseVerificationSkipped()) {
-      return await pollForProofNoVerify(commitment.requestId.toString(), timeoutMs);
+      // Use toJSON() to get hex format, not toString() which gives human-readable format
+      return await pollForProofNoVerify(commitment.requestId.toJSON(), timeoutMs);
     }
 
     const signal = AbortSignal.timeout(timeoutMs);
@@ -172,7 +197,8 @@ async function waitForProofWithSDK(
 
     // If trust base verification is skipped, use direct polling
     if (ServiceProvider.isTrustBaseVerificationSkipped()) {
-      return await pollForProofNoVerify(commitment.requestId.toString(), timeoutMs);
+      // Use toJSON() to get hex format, not toString() which gives human-readable format
+      return await pollForProofNoVerify(commitment.requestId.toJSON(), timeoutMs);
     }
 
     const signal = AbortSignal.timeout(timeoutMs);
@@ -187,6 +213,10 @@ async function waitForProofWithSDK(
 /**
  * Poll for proof without verification (dev mode)
  * Uses the SDK's StateTransitionClient.getInclusionProof() method
+ *
+ * IMPORTANT: This function waits for an actual INCLUSION proof (with authenticator),
+ * not just any proof. An exclusion proof (no authenticator) means the commitment
+ * hasn't been included in the tree yet, so we keep polling.
  */
 async function pollForProofNoVerify(
   requestIdStr: string,
@@ -202,11 +232,23 @@ async function pollForProofNoVerify(
       const response = await client.getInclusionProof(requestId);
 
       if (response.inclusionProof) {
-        console.warn("⚠️ Returning inclusion proof WITHOUT verification (dev mode)");
-        return response.inclusionProof.toJSON() as TxfInclusionProof;
+        const proofJson = response.inclusionProof.toJSON() as TxfInclusionProof;
+
+        // Check if this is an actual INCLUSION proof (has authenticator)
+        // An exclusion proof (no authenticator) means the commitment hasn't been
+        // included in the aggregator tree yet - keep polling
+        if (isInclusionProofNotExclusion(proofJson)) {
+          console.warn("⚠️ Returning inclusion proof WITHOUT verification (dev mode)");
+          return proofJson;
+        } else {
+          // Got exclusion proof - commitment not yet in tree, keep polling
+          console.log("   Polling: got exclusion proof (no authenticator), waiting for inclusion...");
+          await new Promise(resolve => setTimeout(resolve, intervalMs));
+          continue;
+        }
       }
 
-      // Proof not ready yet, keep polling
+      // No proof at all, keep polling
       await new Promise(resolve => setTimeout(resolve, intervalMs));
     } catch (error: unknown) {
       // 404 means proof not ready yet, keep polling
@@ -509,17 +551,28 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
             console.log(`   genesis: Fetching proof by requestId...`);
             proof = await fetchProofByRequestId(correctRequestId);
 
-            if (proof) {
-              console.log(`   ✅ genesis: Proof fetched successfully`);
+            // Check if we got an INCLUSION proof vs EXCLUSION proof using SDK's InclusionProof class
+            // An exclusion proof means the commitment doesn't exist in the tree (tree was reset)
+            if (isInclusionProofNotExclusion(proof)) {
+              console.log(`   ✅ genesis: Inclusion proof fetched successfully`);
             } else {
-              // Proof not found - try to resubmit commitment (tree reset scenario)
-              console.log(`   genesis: Proof not found - resubmitting commitment...`);
+              // Got exclusion proof or no proof - need to resubmit commitment
+              // This happens when the aggregator tree has been reset
+              if (proof && !isInclusionProofNotExclusion(proof)) {
+                console.log(`   ⚠️ genesis: Got EXCLUSION proof (no authenticator) - tree was reset`);
+              } else {
+                console.log(`   genesis: No proof found`);
+              }
+              console.log(`   genesis: Resubmitting commitment to get new inclusion proof...`);
               const submitResult = await submitMintCommitmentToAggregator(result.commitment);
               console.log(`   genesis: Submission result: ${submitResult.status}`);
               if (submitResult.success) {
                 proof = await waitForMintProofWithSDK(result.commitment, 60000);
-                if (proof) {
-                  console.log(`   ✅ genesis: Mint commitment resubmitted successfully`);
+                if (isInclusionProofNotExclusion(proof)) {
+                  console.log(`   ✅ genesis: New inclusion proof obtained after resubmission`);
+                } else if (proof) {
+                  console.warn(`   ⚠️ genesis: Got proof but still missing authenticator (exclusion proof)`);
+                  proof = null; // Don't use an exclusion proof
                 } else {
                   console.warn(`   ⚠️ genesis: Timeout waiting for proof after resubmission`);
                 }
@@ -548,8 +601,8 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
         console.log(`✅ Nametag proof refreshed`);
       } else {
         // Check if original proof is still valid - if so, that's OK
-        const originalProof = nametagTxf.genesis?.inclusionProof;
-        if (originalProof?.authenticator) {
+        const originalProof = nametagTxf.genesis?.inclusionProof as TxfInclusionProof | null;
+        if (isInclusionProofNotExclusion(originalProof)) {
           console.log(`ℹ️ Keeping original proof (new proof from aggregator incomplete)`);
           console.log(`💡 The dev aggregator may not return complete proofs - your original token is still valid`);
           succeeded++;
