@@ -12,14 +12,38 @@ export class ServiceProvider {
   private static _aggregatorClient: AggregatorClient | null = null;
   private static _stateTransitionClient: StateTransitionClient | null = null;
   private static _rootTrustBase: RootTrustBase | null = null;
+  private static _runtimeAggregatorUrl: string | null = null;
+
+  /**
+   * Get the current aggregator URL (runtime override or default from env)
+   */
+  static getAggregatorUrl(): string {
+    return this._runtimeAggregatorUrl || UNICITY_AGGREGATOR_URL;
+  }
+
+  /**
+   * Set a runtime aggregator URL override (dev tools only)
+   * Pass null to reset to default from environment variable
+   */
+  static setAggregatorUrl(url: string | null): void {
+    this._runtimeAggregatorUrl = url;
+    this.reset();
+  }
+
+  /**
+   * Reset all singleton instances (used when aggregator URL changes)
+   * Note: RootTrustBase is kept as it's aggregator-independent
+   */
+  static reset(): void {
+    this._aggregatorClient = null;
+    this._stateTransitionClient = null;
+  }
 
   static get aggregatorClient(): AggregatorClient {
     if (!this._aggregatorClient) {
-      console.log("Initializing AggregatorClient...");
-      this._aggregatorClient = new AggregatorClient(
-        UNICITY_AGGREGATOR_URL,
-        API_KEY
-      );
+      const url = this.getAggregatorUrl();
+      console.log(`Initializing AggregatorClient with URL: ${url}`);
+      this._aggregatorClient = new AggregatorClient(url, API_KEY);
     }
     return this._aggregatorClient;
   }
