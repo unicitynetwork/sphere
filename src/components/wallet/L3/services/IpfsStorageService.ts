@@ -24,6 +24,7 @@ import { getTokenBackupService } from "./TokenBackupService";
 // Note: retryWithBackoff was used for DHT publish, now handled by HTTP primary path
 import { getBootstrapPeers, getConfiguredCustomPeers, getBackendPeerId, getAllBackendGatewayUrls, IPNS_RESOLUTION_CONFIG, IPFS_CONFIG } from "../../../../config/ipfs.config";
 import { STORAGE_KEY_PREFIXES } from "../../../../config/storageKeys";
+import { isNametagCorrupted } from "../../../../utils/tokenValidation";
 
 // Configure @noble/ed25519 to use sync sha512 (required for getPublicKey without WebCrypto)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2097,10 +2098,15 @@ export class IpfsStorageService {
     // IMPORT METADATA & ARCHIVES
     // ==========================================
 
-    // Import nametag if local doesn't have one
+    // Import nametag if local doesn't have one AND remote nametag is valid
     if (nametag && !walletRepo.getNametag()) {
-      walletRepo.setNametag(nametag);
-      console.log(`📦 Imported nametag "${nametag.name}" from remote`);
+      // Double-check validation (parseTxfStorageData already validates, but be defensive)
+      if (isNametagCorrupted(nametag)) {
+        console.warn("📦 Skipping corrupted nametag import from IPFS - will be cleared on next sync");
+      } else {
+        walletRepo.setNametag(nametag);
+        console.log(`📦 Imported nametag "${nametag.name}" from remote`);
+      }
     }
 
     // Merge archived and forked tokens from remote
@@ -2538,8 +2544,13 @@ export class IpfsStorageService {
 
               // Also sync nametag from remote if local doesn't have one
               if (!nametag && mergeResult.merged._nametag) {
-                walletRepo.setNametag(mergeResult.merged._nametag);
-                console.log(`📦 Synced nametag "${mergeResult.merged._nametag.name}" from IPFS to local`);
+                // Validate before setting - prevent importing corrupted nametag
+                if (isNametagCorrupted(mergeResult.merged._nametag)) {
+                  console.warn("📦 Skipping corrupted nametag from conflict resolution - will be cleared on next sync");
+                } else {
+                  walletRepo.setNametag(mergeResult.merged._nametag);
+                  console.log(`📦 Synced nametag "${mergeResult.merged._nametag.name}" from IPFS to local`);
+                }
               }
 
               // Extract tokens from merged data for re-sync
@@ -3075,6 +3086,36 @@ export class IpfsStorageService {
    */
   isCurrentlySyncing(): boolean {
     return this.isSyncing || this.isInitialSyncing;
+  }
+
+  /**
+   * Clear corrupted nametag from both local and IPFS storage.
+   * This breaks the import loop by publishing clean state to IPFS.
+   *
+   * Call this when corrupted nametag is detected to ensure the corruption
+   * is cleared from BOTH local storage AND the remote IPFS backup.
+   */
+  async clearCorruptedNametagAndSync(): Promise<void> {
+    console.log("🧹 Clearing corrupted nametag from local and IPFS storage...");
+
+    // 1. Clear from local storage
+    const walletRepo = WalletRepository.getInstance();
+    try {
+      walletRepo.clearNametag();
+      console.log("✅ Cleared corrupted nametag from local storage");
+    } catch (error) {
+      console.error("Failed to clear local nametag:", error);
+    }
+
+    // 2. Force sync to IPFS to overwrite remote with clean state (no nametag)
+    // This prevents the next sync from re-importing the corrupted data
+    try {
+      await this.syncNow({ forceIpnsPublish: true });
+      console.log("✅ Published clean state to IPFS (corrupted nametag removed)");
+    } catch (error) {
+      console.error("Failed to sync clean state to IPFS:", error);
+      // Even if IPFS sync fails, local is cleared - IPFS will be fixed on next successful sync
+    }
   }
 
   // ==========================================

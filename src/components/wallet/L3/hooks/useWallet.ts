@@ -104,16 +104,25 @@ export const useWallet = () => {
       // CRITICAL: Check for corrupted nametag and treat as "no nametag exists"
       // This allows the user to create a new Unicity ID if their data is corrupted
       if (isNametagCorrupted(nametagData)) {
-        console.warn("🚨 Corrupted nametag detected, treating as no nametag exists", {
+        console.warn("🚨 Corrupted nametag detected, clearing from local and IPFS", {
           address: identity.address.slice(0, 20) + "...",
           name: nametagData?.name,
           corruption: "token is empty or missing required fields",
         });
 
-        // Clear corrupted nametag from storage
+        // Clear from both local and IPFS storage (breaks import loop)
+        // Note: This is a sync queryFn - IPFS clear happens in background
         try {
-          walletRepo.clearNametag();
-          console.log("✅ Cleared corrupted nametag from storage");
+          walletRepo.clearNametag(); // Clear local immediately
+
+          // Trigger IPFS clear in background (don't await in queryFn)
+          // This publishes clean state to IPFS, overwriting the corrupted nametag
+          const storageService = IpfsStorageService.getInstance(identityManager);
+          storageService.clearCorruptedNametagAndSync().catch((err) => {
+            console.error("Background IPFS nametag clear failed:", err);
+          });
+
+          console.log("✅ Initiated nametag clear from local and IPFS");
         } catch (error) {
           console.error("Failed to clear corrupted nametag:", error);
         }
