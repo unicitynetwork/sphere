@@ -136,16 +136,24 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         if (result.nametag && result.nametagData) {
           console.log(`🔍 [Complete Setup] Found nametag: ${result.nametag}`);
 
-          WalletRepository.saveNametagForAddress(identity.address, {
-            name: result.nametagData.name,
-            token: result.nametagData.token,
-            timestamp: result.nametagData.timestamp || Date.now(),
-            format: result.nametagData.format || "TXF",
-            version: "1.0",
-          });
+          try {
+            WalletRepository.saveNametagForAddress(identity.address, {
+              name: result.nametagData.name,
+              token: result.nametagData.token,
+              timestamp: result.nametagData.timestamp || Date.now(),
+              format: result.nametagData.format || "TXF",
+              version: "1.0",
+            });
 
-          console.log("✅ [Complete Setup] Nametag found, proceeding to wallet...");
-          window.location.reload();
+            console.log("✅ [Complete Setup] Nametag found and saved, proceeding to wallet...");
+            window.location.reload();
+          } catch (validationError) {
+            // Token data from IPFS is corrupted - skip saving, continue without nametag
+            console.warn(`⚠️ [Complete Setup] Nametag "${result.nametag}" has corrupted token data - skipping save:`,
+              validationError instanceof Error ? validationError.message : validationError
+            );
+            setIpnsFetchingNametag(false);
+          }
         } else {
           console.log("🔍 [Complete Setup] No nametag found in IPNS");
           setIpnsFetchingNametag(false);
@@ -675,17 +683,28 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
       await IpfsStorageService.resetInstance();
 
-      // Save nametags from IPNS
+      // Save nametags from IPNS (skip corrupted tokens gracefully)
       for (const addr of derivedAddresses) {
         if (addr.hasNametag && addr.nametagData && addr.l3Address) {
           console.log(`💾 Saving nametag for ${addr.l3Address.slice(0, 20)}...`);
-          WalletRepository.saveNametagForAddress(addr.l3Address, {
-            name: addr.nametagData.name,
-            token: addr.nametagData.token,
-            timestamp: addr.nametagData.timestamp || Date.now(),
-            format: addr.nametagData.format || "TXF",
-            version: "1.0",
-          });
+          try {
+            WalletRepository.saveNametagForAddress(addr.l3Address, {
+              name: addr.nametagData.name,
+              token: addr.nametagData.token,
+              timestamp: addr.nametagData.timestamp || Date.now(),
+              format: addr.nametagData.format || "TXF",
+              version: "1.0",
+            });
+            console.log(`💾 Saved IPNS-fetched nametag "${addr.nametagData.name}" for address ${addr.l3Address.slice(0, 20)}...`);
+          } catch (validationError) {
+            // Token data from IPFS is corrupted/invalid - skip saving but don't break flow
+            // The user can still use the address, they'll just need to re-mint the nametag
+            console.warn(`⚠️ Skipping corrupted nametag "${addr.nametagData.name}" for ${addr.l3Address.slice(0, 20)}... - token validation failed:`,
+              validationError instanceof Error ? validationError.message : validationError
+            );
+            // Mark this address as NOT having a valid nametag since we couldn't save it
+            addr.hasNametag = false;
+          }
         }
       }
 
