@@ -4,7 +4,7 @@
  */
 
 import type { NametagData } from "../../../../../repositories/WalletRepository";
-import type { OutboxEntry } from "./OutboxTypes";
+import type { OutboxEntry, MintOutboxEntry } from "./OutboxTypes";
 
 // ==========================================
 // Storage Format (for IPFS)
@@ -29,8 +29,9 @@ export interface TxfStorageData {
   _nametag?: NametagData;
   _tombstones?: TombstoneEntry[];  // State-hash-aware tombstones (spent token states)
   _outbox?: OutboxEntry[];         // Pending transfers (CRITICAL for recovery)
+  _mintOutbox?: MintOutboxEntry[]; // Pending mints (CRITICAL for recovery)
   // Dynamic keys for tokens: _<tokenId>
-  [key: string]: TxfToken | TxfMeta | NametagData | TombstoneEntry[] | OutboxEntry[] | undefined;
+  [key: string]: TxfToken | TxfMeta | NametagData | TombstoneEntry[] | OutboxEntry[] | MintOutboxEntry[] | undefined;
 }
 
 /**

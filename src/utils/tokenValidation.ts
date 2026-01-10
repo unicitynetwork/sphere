@@ -73,8 +73,9 @@ export function validateTokenJson(
     errors.push(`${context}Token missing required 'state' object`);
   } else {
     const state = t.state as Record<string, unknown>;
-    if (!state.predicate || typeof state.predicate !== "object") {
-      errors.push(`${context}Token state missing required 'predicate' object`);
+    // Predicate is hex-encoded CBOR string, not an object
+    if (!state.predicate || typeof state.predicate !== "string") {
+      errors.push(`${context}Token state missing required 'predicate' string`);
     }
   }
 

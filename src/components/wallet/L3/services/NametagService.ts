@@ -15,6 +15,9 @@ import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predica
 import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
 import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenState";
 import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
+import { OutboxRepository } from "../../../../repositories/OutboxRepository";
+import { createMintOutboxEntry, type MintOutboxEntry } from "./types/OutboxTypes";
+import { IpfsStorageService } from "./IpfsStorageService";
 import type { StateTransitionClient } from "@unicitylabs/state-transition-sdk/lib/StateTransitionClient";
 import type { InclusionProof } from "@unicitylabs/state-transition-sdk/lib/transaction/InclusionProof";
 
@@ -100,6 +103,15 @@ export class NametagService {
         };
       }
 
+      // Check if there's already a pending mint for this nametag (prevent duplicate mints)
+      const outboxRepo = OutboxRepository.getInstance();
+      if (outboxRepo.isNametagMintInProgress(cleanTag)) {
+        return {
+          status: "error",
+          message: `A mint for nametag "${cleanTag}" is already in progress`,
+        };
+      }
+
       const identity = await this.identityManager.getCurrentIdentity();
       if (!identity)
         return { status: "error", message: "Wallet identity not found" };
@@ -159,82 +171,142 @@ export class NametagService {
     }
   }
 
+  /**
+   * Mint a nametag on the blockchain using the safe outbox pattern.
+   *
+   * CRITICAL SAFETY: The salt and commitment data are saved to the outbox
+   * and synced to IPFS BEFORE submitting to the aggregator. This ensures
+   * that if the app crashes after submission, the mint can be recovered.
+   *
+   * Flow:
+   * 1. Generate salt and create MintTransactionData + MintCommitment
+   * 2. Save to outbox IMMEDIATELY (before network calls)
+   * 3. Sync to IPFS and wait for success (abort if fails)
+   * 4. Submit to aggregator (with retries)
+   * 5. Wait for inclusion proof
+   * 6. Create final token with proof
+   * 7. Update outbox and save to storage
+   */
   private async mintNametagOnBlockchain(
     nametag: string,
     ownerAddress: DirectAddress,
     secret: Buffer
   ): Promise<Token<any> | null> {
+    const outboxRepo = OutboxRepository.getInstance();
+    let outboxEntryId: string | null = null;
+
     try {
       const client = ServiceProvider.stateTransitionClient;
       const rootTrustBase = ServiceProvider.getRootTrustBase();
 
       const nametagTokenId = await TokenId.fromNameTag(nametag);
-
       const nametagTokenType = new TokenType(
         Buffer.from(UNICITY_TOKEN_TYPE_HEX, "hex")
       );
 
-      const signingService = await SigningService.createFromSecret(secret);
+      // 1. Generate salt ONCE (CRITICAL: must be saved before any network calls)
+      const salt = Buffer.alloc(32);
+      window.crypto.getRandomValues(salt);
 
+      // 2. Create mint transaction data with the salt
+      const mintData = await MintTransactionData.createFromNametag(
+        nametag,
+        nametagTokenType,
+        ownerAddress,
+        salt,
+        ownerAddress
+      );
+
+      // 3. Create commitment (derives requestId)
+      const commitment = await MintCommitment.create(mintData);
+
+      // 4. ⭐ SAVE TO OUTBOX BEFORE ANY NETWORK CALLS
+      // Note: ownerAddress is stored in mintDataJson, so we just store its string representation for reference
+      const outboxEntry: MintOutboxEntry = createMintOutboxEntry(
+        "MINT_NAMETAG",
+        UNICITY_TOKEN_TYPE_HEX,
+        ownerAddress.address, // Store the address string
+        salt.toString("hex"),
+        commitment.requestId.toString(),
+        JSON.stringify(mintData.toJSON()),
+        nametag
+      );
+
+      outboxRepo.addMintEntry(outboxEntry);
+      outboxEntryId = outboxEntry.id;
+      console.log(`📦 Saved mint commitment to outbox: ${outboxEntryId}`);
+
+      // 5. ⭐ SYNC TO IPFS BEFORE SUBMITTING TO AGGREGATOR
+      try {
+        const ipfsService = IpfsStorageService.getInstance(this.identityManager);
+        await ipfsService.syncNow({ forceIpnsPublish: true });
+        outboxRepo.updateMintEntry(outboxEntryId, { status: "READY_TO_SUBMIT" });
+        console.log(`📦 IPFS sync complete, ready to submit`);
+      } catch (ipfsError) {
+        console.error("IPFS sync failed, aborting mint:", ipfsError);
+        outboxRepo.removeMintEntry(outboxEntryId);
+        throw new Error("IPFS sync failed - mint aborted for safety");
+      }
+
+      // 6. Submit to aggregator (with retries - same commitment can be resubmitted)
       const MAX_RETRIES = 3;
-      let commitment: MintCommitment<any> | null = null;
+      let submitSuccess = false;
 
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-          const salt = Buffer.alloc(32);
-          window.crypto.getRandomValues(salt);
-
-          const mintData = await MintTransactionData.createFromNametag(
-            nametag,
-            nametagTokenType,
-            ownerAddress,
-            salt,
-            ownerAddress
-          );
-
-          commitment = await MintCommitment.create(mintData);
-
           console.log(`Submitting commitment (attempt ${attempt})...`);
           const response = await client.submitMintCommitment(commitment);
 
-          if (response.status === "SUCCESS") {
-            console.log("Commitment success!");
+          if (response.status === "SUCCESS" || response.status === "REQUEST_ID_EXISTS") {
+            console.log(`Commitment ${response.status === "REQUEST_ID_EXISTS" ? "already exists" : "success"}!`);
+            submitSuccess = true;
             break;
           } else {
             console.warn(`Commitment failed: ${response.status}`);
-            if (attempt === MAX_RETRIES)
-              throw new Error(`Failed after ${MAX_RETRIES} attempts`);
+            if (attempt === MAX_RETRIES) {
+              throw new Error(`Failed after ${MAX_RETRIES} attempts: ${response.status}`);
+            }
             await new Promise((r) => setTimeout(r, 1000 * attempt));
           }
         } catch (error) {
           console.error(`Attempt ${attempt} error`, error);
           if (attempt === MAX_RETRIES) throw error;
+          await new Promise((r) => setTimeout(r, 1000 * attempt));
         }
       }
 
-      if (!commitment) throw new Error("Failed to create commitment");
+      if (!submitSuccess) {
+        throw new Error("Failed to submit commitment after retries");
+      }
+
+      outboxRepo.updateMintEntry(outboxEntryId, { status: "SUBMITTED" });
       console.log("Waiting for inclusion proof...");
 
-      // Use no-verify version in dev mode when trust base verification is skipped
+      // 7. Wait for inclusion proof
       const inclusionProof = ServiceProvider.isTrustBaseVerificationSkipped()
         ? await waitInclusionProofNoVerify(client, commitment)
         : await waitInclusionProof(rootTrustBase, client, commitment);
 
+      // 8. Create genesis transaction from proof
       const genesisTransaction = commitment.toTransaction(inclusionProof);
 
-      const txData = commitment.transactionData;
-      const mintSalt = txData.salt;
+      // Update outbox with proof
+      outboxRepo.updateMintEntry(outboxEntryId, {
+        status: "PROOF_RECEIVED",
+        inclusionProofJson: JSON.stringify(inclusionProof.toJSON()),
+        mintTransactionJson: JSON.stringify(genesisTransaction.toJSON()),
+      });
 
+      // 9. Create final token
+      const signingService = await SigningService.createFromSecret(secret);
       const nametagPredicate = await UnmaskedPredicate.create(
         nametagTokenId,
         nametagTokenType,
         signingService,
         HashAlgorithm.SHA256,
-        mintSalt
+        salt
       );
 
-      // In dev mode, skip verification by using Token.fromJSON()
-      // Otherwise use Token.mint() which verifies against trust base
       let token: Token<any>;
       if (ServiceProvider.isTrustBaseVerificationSkipped()) {
         console.warn("⚠️ Creating token WITHOUT verification (dev mode)");
@@ -255,10 +327,23 @@ export class NametagService {
         );
       }
 
+      // 10. Update outbox with final token and mark complete
+      outboxRepo.updateMintEntry(outboxEntryId, {
+        status: "COMPLETED",
+        tokenJson: JSON.stringify(token.toJSON()),
+      });
+
       console.log(`✅ Nametag minted: ${nametag}`);
       return token;
     } catch (error) {
       console.error("Minting on blockchain failed", error);
+      if (outboxEntryId) {
+        const entry = outboxRepo.getMintEntry(outboxEntryId);
+        outboxRepo.updateMintEntry(outboxEntryId, {
+          lastError: error instanceof Error ? error.message : String(error),
+          retryCount: (entry?.retryCount || 0) + 1,
+        });
+      }
       return null;
     }
   }

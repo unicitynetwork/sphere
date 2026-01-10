@@ -22,7 +22,7 @@ import {
   archivedKeyFromTokenId,
   forkedKeyFromTokenIdAndState,
 } from "./types/TxfTypes";
-import type { OutboxEntry } from "./types/OutboxTypes";
+import type { OutboxEntry, MintOutboxEntry } from "./types/OutboxTypes";
 import {
   safeParseTxfToken,
   safeParseTxfMeta,
@@ -171,7 +171,8 @@ export function buildTxfStorageData(
   tombstones?: TombstoneEntry[],
   archivedTokens?: Map<string, TxfToken>,
   forkedTokens?: Map<string, TxfToken>,
-  outboxEntries?: OutboxEntry[]
+  outboxEntries?: OutboxEntry[],
+  mintOutboxEntries?: MintOutboxEntry[]
 ): TxfStorageData {
   const storageData: TxfStorageData = {
     _meta: {
@@ -202,6 +203,11 @@ export function buildTxfStorageData(
   // Add outbox entries (CRITICAL for transfer recovery)
   if (outboxEntries && outboxEntries.length > 0) {
     storageData._outbox = outboxEntries;
+  }
+
+  // Add mint outbox entries (CRITICAL for mint recovery)
+  if (mintOutboxEntries && mintOutboxEntries.length > 0) {
+    storageData._mintOutbox = mintOutboxEntries;
   }
 
   // Add each active token with _<tokenId> key
@@ -246,6 +252,7 @@ export function parseTxfStorageData(data: unknown): {
   archivedTokens: Map<string, TxfToken>;
   forkedTokens: Map<string, TxfToken>;
   outboxEntries: OutboxEntry[];
+  mintOutboxEntries: MintOutboxEntry[];
   validationErrors: string[];
 } {
   const result: {
@@ -256,6 +263,7 @@ export function parseTxfStorageData(data: unknown): {
     archivedTokens: Map<string, TxfToken>;
     forkedTokens: Map<string, TxfToken>;
     outboxEntries: OutboxEntry[];
+    mintOutboxEntries: MintOutboxEntry[];
     validationErrors: string[];
   } = {
     tokens: [],
@@ -265,6 +273,7 @@ export function parseTxfStorageData(data: unknown): {
     archivedTokens: new Map(),
     forkedTokens: new Map(),
     outboxEntries: [],
+    mintOutboxEntries: [],
     validationErrors: [],
   };
 
@@ -339,6 +348,27 @@ export function parseTxfStorageData(data: unknown): {
         result.outboxEntries.push(entry as OutboxEntry);
       } else {
         result.validationErrors.push("Invalid outbox entry structure");
+      }
+    }
+  }
+
+  // Extract mint outbox entries (CRITICAL for mint recovery)
+  if (storageData._mintOutbox && Array.isArray(storageData._mintOutbox)) {
+    for (const entry of storageData._mintOutbox) {
+      // Basic validation for MintOutboxEntry structure
+      if (
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as MintOutboxEntry).id === "string" &&
+        typeof (entry as MintOutboxEntry).status === "string" &&
+        typeof (entry as MintOutboxEntry).type === "string" &&
+        typeof (entry as MintOutboxEntry).salt === "string" &&
+        typeof (entry as MintOutboxEntry).requestIdHex === "string" &&
+        typeof (entry as MintOutboxEntry).mintDataJson === "string"
+      ) {
+        result.mintOutboxEntries.push(entry as MintOutboxEntry);
+      } else {
+        result.validationErrors.push("Invalid mint outbox entry structure");
       }
     }
   }

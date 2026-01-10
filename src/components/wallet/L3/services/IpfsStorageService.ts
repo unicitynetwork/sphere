@@ -1922,13 +1922,20 @@ export class IpfsStorageService {
     const rawTombstones = (remoteTxf as Record<string, unknown>)._tombstones;
     console.log(`📦 Raw remote _tombstones field:`, rawTombstones);
 
-    const { tokens: remoteTokens, nametag, tombstones: remoteTombstones, archivedTokens: remoteArchived, forkedTokens: remoteForked, outboxEntries: remoteOutbox } = parseTxfStorageData(remoteTxf);
+    const { tokens: remoteTokens, nametag, tombstones: remoteTombstones, archivedTokens: remoteArchived, forkedTokens: remoteForked, outboxEntries: remoteOutbox, mintOutboxEntries: remoteMintOutbox } = parseTxfStorageData(remoteTxf);
 
     // Import outbox entries from remote (CRITICAL for transfer recovery)
     if (remoteOutbox && remoteOutbox.length > 0) {
       const outboxRepo = OutboxRepository.getInstance();
       outboxRepo.importFromRemote(remoteOutbox);
       console.log(`📦 Imported ${remoteOutbox.length} outbox entries from remote`);
+    }
+
+    // Import mint outbox entries from remote (CRITICAL for mint recovery)
+    if (remoteMintOutbox && remoteMintOutbox.length > 0) {
+      const outboxRepo = OutboxRepository.getInstance();
+      outboxRepo.importMintEntriesFromRemote(remoteMintOutbox);
+      console.log(`📦 Imported ${remoteMintOutbox.length} mint outbox entries from remote`);
     }
 
     // Debug: Log parsed tombstones (now TombstoneEntry[])
@@ -2522,7 +2529,7 @@ export class IpfsStorageService {
               }
 
               // Merge archived, forked tokens, and outbox entries from remote
-              const { archivedTokens: remoteArchived, forkedTokens: remoteForked, outboxEntries: remoteOutbox } = parseTxfStorageData(remoteTxf);
+              const { archivedTokens: remoteArchived, forkedTokens: remoteForked, outboxEntries: remoteOutbox, mintOutboxEntries: remoteMintOutbox } = parseTxfStorageData(remoteTxf);
               if (remoteArchived.size > 0) {
                 const archivedMergedCount = walletRepo.mergeArchivedTokens(remoteArchived);
                 if (archivedMergedCount > 0) {
@@ -2540,6 +2547,12 @@ export class IpfsStorageService {
                 const outboxRepo = OutboxRepository.getInstance();
                 outboxRepo.importFromRemote(remoteOutbox);
                 console.log(`📦 Imported ${remoteOutbox.length} outbox entries from remote during conflict resolution`);
+              }
+              // Import mint outbox entries from remote (CRITICAL for mint recovery)
+              if (remoteMintOutbox && remoteMintOutbox.length > 0) {
+                const outboxRepo = OutboxRepository.getInstance();
+                outboxRepo.importMintEntriesFromRemote(remoteMintOutbox);
+                console.log(`📦 Imported ${remoteMintOutbox.length} mint outbox entries from remote during conflict resolution`);
               }
 
               // Also sync nametag from remote if local doesn't have one
@@ -2616,6 +2629,7 @@ export class IpfsStorageService {
       const outboxRepo = OutboxRepository.getInstance();
       outboxRepo.setCurrentAddress(wallet.address);
       const outboxEntries = outboxRepo.getAllForSync();
+      const mintOutboxEntries = outboxRepo.getAllMintEntriesForSync();
 
       const meta: Omit<TxfMeta, "formatVersion"> = {
         version: newVersion,
@@ -2624,9 +2638,9 @@ export class IpfsStorageService {
         lastCid: this.getLastCid() || undefined,
       };
 
-      const txfStorageData = buildTxfStorageData(tokensToSync, meta, nametag || undefined, tombstones, archivedTokens, forkedTokens, outboxEntries);
-      if (tombstones.length > 0 || archivedTokens.size > 0 || forkedTokens.size > 0 || outboxEntries.length > 0) {
-        console.log(`📦 Including ${tombstones.length} tombstone(s), ${archivedTokens.size} archived, ${forkedTokens.size} forked, ${outboxEntries.length} outbox in sync`);
+      const txfStorageData = buildTxfStorageData(tokensToSync, meta, nametag || undefined, tombstones, archivedTokens, forkedTokens, outboxEntries, mintOutboxEntries);
+      if (tombstones.length > 0 || archivedTokens.size > 0 || forkedTokens.size > 0 || outboxEntries.length > 0 || mintOutboxEntries.length > 0) {
+        console.log(`📦 Including ${tombstones.length} tombstone(s), ${archivedTokens.size} archived, ${forkedTokens.size} forked, ${outboxEntries.length} outbox, ${mintOutboxEntries.length} mint outbox in sync`);
       }
 
       // 4. Ensure backend is connected before storing
