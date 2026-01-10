@@ -18,6 +18,7 @@
 import { deriveIpnsNameFromPrivateKey } from "./IpnsUtils";
 import { unmarshalIPNSRecord } from "ipns";
 import { getBackendGatewayUrl, getAllBackendGatewayUrls, IPNS_RESOLUTION_CONFIG } from "../../../../config/ipfs.config";
+import { validateTokenJson } from "../../../../utils/tokenValidation";
 
 export interface IpnsNametagResult {
   ipnsName: string;
@@ -50,12 +51,42 @@ export async function fetchNametagFromIpns(
     // 2. Try HTTP gateway (fast path)
     const result = await fetchViaHttpGateway(ipnsName);
     if (result) {
+      // CRITICAL: Validate token data before returning
+      // Do NOT fallback to empty object - that causes data corruption!
+      const token = result.data.token;
+
+      if (!token || typeof token !== 'object' || Object.keys(token).length === 0) {
+        console.warn(`IPNS nametag "${result.name}" has missing/empty token data - rejecting`);
+        return {
+          ipnsName,
+          nametag: null,
+          source: "none",
+          error: "Nametag token data is missing or empty",
+        };
+      }
+
+      // Validate token structure
+      const validation = validateTokenJson(token, {
+        context: `IPNS nametag "${result.name}"`,
+        requireInclusionProof: false, // IPNS data might have stripped proofs
+      });
+
+      if (!validation.isValid) {
+        console.warn(`IPNS nametag "${result.name}" has invalid token structure:`, validation.errors);
+        return {
+          ipnsName,
+          nametag: null,
+          source: "none",
+          error: `Invalid token structure: ${validation.errors[0]}`,
+        };
+      }
+
       return {
         ipnsName,
         nametag: result.name,
         nametagData: {
           name: result.name,
-          token: result.data.token || {},
+          token: token,
           timestamp: result.data.timestamp,
           format: result.data.format,
         },

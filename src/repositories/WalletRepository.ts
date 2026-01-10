@@ -2,6 +2,7 @@ import { Token, Wallet, TokenStatus } from "../components/wallet/L3/data/model";
 import type { TombstoneEntry, TxfToken, TxfTransaction } from "../components/wallet/L3/services/types/TxfTypes";
 import { v4 as uuidv4 } from "uuid";
 import { STORAGE_KEYS, STORAGE_KEY_GENERATORS, STORAGE_KEY_PREFIXES } from "../config/storageKeys";
+import { assertValidNametagData, sanitizeNametagForLogging, validateTokenJson } from "../utils/tokenValidation";
 
 /**
  * Interface for nametag data (one per identity)
@@ -114,9 +115,26 @@ export class WalletRepository {
    * Save nametag for an address without loading the full wallet
    * Used during onboarding when we fetch nametag from IPNS
    * Creates minimal wallet structure if needed
+   *
+   * CRITICAL: Validates nametag data before saving to prevent corruption.
+   * Will throw if nametag.token is empty or invalid.
    */
   static saveNametagForAddress(address: string, nametag: NametagData): void {
     if (!address || !nametag) return;
+
+    // CRITICAL VALIDATION: Prevent saving corrupted nametag data
+    // This check prevents the bug where `token: {}` was saved
+    try {
+      assertValidNametagData(nametag, "saveNametagForAddress");
+    } catch (validationError) {
+      console.error("❌ BLOCKED: Attempted to save invalid nametag data:", {
+        address: address.slice(0, 20) + "...",
+        nametagInfo: sanitizeNametagForLogging(nametag),
+        error: validationError instanceof Error ? validationError.message : String(validationError),
+      });
+      // Do NOT save corrupted data - throw to alert caller
+      throw validationError;
+    }
 
     const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
     try {
@@ -142,6 +160,7 @@ export class WalletRepository {
       console.log(`💾 Saved IPNS-fetched nametag "${nametag.name}" for address ${address.slice(0, 20)}...`);
     } catch (error) {
       console.error("Error saving nametag for address:", error);
+      throw error; // Re-throw to alert caller of storage failure
     }
   }
 
@@ -472,6 +491,30 @@ export class WalletRepository {
       return;
     }
 
+    // CRITICAL: Validate token data before storing
+    if (token.jsonData) {
+      try {
+        const tokenJson = JSON.parse(token.jsonData);
+        const validation = validateTokenJson(tokenJson, {
+          context: `addToken(${token.id})`,
+          requireInclusionProof: false, // Proofs may be stripped in some flows
+        });
+        if (!validation.isValid) {
+          console.error(`❌ BLOCKED: Attempted to add token with invalid data:`, {
+            tokenId: token.id,
+            errors: validation.errors,
+          });
+          throw new Error(`Invalid token data: ${validation.errors[0]}`);
+        }
+      } catch (parseError) {
+        if (parseError instanceof SyntaxError) {
+          console.error(`❌ BLOCKED: Token jsonData is not valid JSON:`, token.id);
+          throw new Error(`Token jsonData is not valid JSON`);
+        }
+        throw parseError;
+      }
+    }
+
     const currentTokens = this._wallet.tokens;
 
     const isDuplicate = currentTokens.some((existing) =>
@@ -530,6 +573,30 @@ export class WalletRepository {
     if (!this._wallet) {
       console.error("💾 Repository: Wallet not initialized!");
       return;
+    }
+
+    // CRITICAL: Validate token data before storing
+    if (token.jsonData) {
+      try {
+        const tokenJson = JSON.parse(token.jsonData);
+        const validation = validateTokenJson(tokenJson, {
+          context: `updateToken(${token.id})`,
+          requireInclusionProof: false, // Proofs may be stripped in some flows
+        });
+        if (!validation.isValid) {
+          console.error(`❌ BLOCKED: Attempted to update token with invalid data:`, {
+            tokenId: token.id,
+            errors: validation.errors,
+          });
+          throw new Error(`Invalid token data: ${validation.errors[0]}`);
+        }
+      } catch (parseError) {
+        if (parseError instanceof SyntaxError) {
+          console.error(`❌ BLOCKED: Token jsonData is not valid JSON:`, token.id);
+          throw new Error(`Token jsonData is not valid JSON`);
+        }
+        throw parseError;
+      }
     }
 
     // Find the existing token by genesis tokenId
@@ -743,11 +810,26 @@ export class WalletRepository {
   /**
    * Set the nametag for the current wallet/identity
    * Only one nametag is allowed per identity
+   *
+   * CRITICAL: Validates nametag data before saving to prevent corruption.
+   * Will throw if nametag.token is empty or invalid.
    */
   setNametag(nametag: NametagData): void {
     if (!this._wallet) {
       console.error("Cannot set nametag: wallet not initialized");
       return;
+    }
+
+    // CRITICAL VALIDATION: Prevent saving corrupted nametag data
+    try {
+      assertValidNametagData(nametag, "setNametag");
+    } catch (validationError) {
+      console.error("❌ BLOCKED: Attempted to set invalid nametag data:", {
+        address: this._wallet.address.slice(0, 20) + "...",
+        nametagInfo: sanitizeNametagForLogging(nametag),
+        error: validationError instanceof Error ? validationError.message : String(validationError),
+      });
+      throw validationError;
     }
 
     this._nametag = nametag;

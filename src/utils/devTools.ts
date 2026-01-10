@@ -10,8 +10,11 @@ import { Token, TokenStatus } from "../components/wallet/L3/data/model";
 import { ServiceProvider } from "../components/wallet/L3/services/ServiceProvider";
 import { OutboxRepository } from "../repositories/OutboxRepository";
 import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment";
+import { MintCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/MintCommitment";
+import { MintTransactionData } from "@unicitylabs/state-transition-sdk/lib/transaction/MintTransactionData";
+import type { IMintTransactionReason } from "@unicitylabs/state-transition-sdk/lib/transaction/IMintTransactionReason";
 import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
-import type { TxfToken, TxfInclusionProof, TxfTransaction } from "../components/wallet/L3/services/types/TxfTypes";
+import type { TxfToken, TxfInclusionProof, TxfTransaction, TxfGenesis } from "../components/wallet/L3/services/types/TxfTypes";
 import type { OutboxEntry } from "../components/wallet/L3/services/types/OutboxTypes";
 
 // Type declarations for window extension
@@ -66,6 +69,92 @@ async function submitCommitmentToAggregator(
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return { success: false, status: msg };
+  }
+}
+
+/**
+ * Submit a mint commitment to the aggregator
+ * Returns: "SUCCESS" | "REQUEST_ID_EXISTS" | error message
+ */
+async function submitMintCommitmentToAggregator(
+  commitment: MintCommitment<IMintTransactionReason>
+): Promise<{ success: boolean; status: string }> {
+  try {
+    const client = ServiceProvider.stateTransitionClient;
+    const response = await client.submitMintCommitment(commitment);
+
+    if (response.status === "SUCCESS" || response.status === "REQUEST_ID_EXISTS") {
+      return { success: true, status: response.status };
+    }
+    return { success: false, status: response.status };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { success: false, status: msg };
+  }
+}
+
+/**
+ * Reconstruct a MintCommitment from TxfGenesisData
+ * This allows refreshing mint proofs after aggregator tree reset.
+ *
+ * Uses MintTransactionData.fromJSON() to parse the genesis data and
+ * then creates a MintCommitment from it.
+ */
+async function reconstructMintCommitment(
+  genesis: TxfGenesis
+): Promise<{ commitment: MintCommitment<IMintTransactionReason> | null; error?: string }> {
+  try {
+    const data = genesis.data;
+
+    // Convert TxfGenesisData to IMintTransactionDataJson format
+    // The formats are similar but coinData needs conversion
+    const mintDataJson = {
+      tokenId: data.tokenId,
+      tokenType: data.tokenType,
+      tokenData: data.tokenData || null,
+      coinData: data.coinData && data.coinData.length > 0
+        ? { coins: data.coinData.map(([id, amount]) => ({ coinId: id, amount })) }
+        : null,
+      recipient: data.recipient,
+      salt: data.salt,
+      recipientDataHash: data.recipientDataHash,
+      reason: data.reason ? JSON.parse(data.reason) : null,
+    };
+
+    // Use SDK's fromJSON to properly reconstruct the MintTransactionData
+    const mintTransactionData = await MintTransactionData.fromJSON(mintDataJson);
+
+    // Create commitment from transaction data
+    const commitment = await MintCommitment.create(mintTransactionData);
+    return { commitment };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { commitment: null, error: msg };
+  }
+}
+
+/**
+ * Wait for mint inclusion proof using the SDK
+ */
+async function waitForMintProofWithSDK(
+  commitment: MintCommitment<IMintTransactionReason>,
+  timeoutMs: number = 30000
+): Promise<TxfInclusionProof | null> {
+  try {
+    const trustBase = ServiceProvider.getRootTrustBase();
+    const client = ServiceProvider.stateTransitionClient;
+
+    // If trust base verification is skipped, use direct polling
+    if (ServiceProvider.isTrustBaseVerificationSkipped()) {
+      return await pollForProofNoVerify(commitment.requestId.toString(), timeoutMs);
+    }
+
+    const signal = AbortSignal.timeout(timeoutMs);
+    const inclusionProof = await waitInclusionProof(trustBase, client, commitment, signal);
+    return inclusionProof.toJSON() as TxfInclusionProof;
+  } catch (error) {
+    console.warn("Failed to wait for mint proof via SDK:", error);
+    return null;
   }
 }
 
@@ -201,20 +290,30 @@ async function fetchProofByRequestId(
 
 /**
  * Try to recover a token using OutboxEntry if available
- * This handles the case where commitment was never submitted or proof never received
+ * This handles the case where commitment was never submitted or proof never received.
+ *
+ * @param tokenId - The token ID to recover
+ * @param forceResubmit - If true, accept any entry with commitmentJson (for tree reset scenario)
+ *                        If false, only accept uncommitted entries (READY_TO_SUBMIT, SUBMITTED)
  */
 async function tryRecoverFromOutbox(
-  tokenId: string
+  tokenId: string,
+  forceResubmit: boolean = false
 ): Promise<{ recovered: boolean; proof?: TxfInclusionProof; message: string }> {
   try {
     const outboxRepo = OutboxRepository.getInstance();
     const entries = outboxRepo.getAllEntries();
 
     // Find matching outbox entry by tokenId
-    const entry = entries.find((e: OutboxEntry) =>
-      e.sourceTokenId === tokenId &&
-      (e.status === "READY_TO_SUBMIT" || e.status === "SUBMITTED")
-    );
+    const entry = entries.find((e: OutboxEntry) => {
+      if (e.sourceTokenId !== tokenId) return false;
+      if (forceResubmit) {
+        // Tree reset: accept any entry with commitment data, including PROOF_RECEIVED
+        return !!e.commitmentJson;
+      }
+      // Normal: only uncommitted entries
+      return e.status === "READY_TO_SUBMIT" || e.status === "SUBMITTED";
+    });
 
     if (!entry) {
       return { recovered: false, message: "No matching outbox entry found" };
@@ -269,8 +368,8 @@ function stripProofsAndCollectHashes(txf: TxfToken): {
   const stripped = JSON.parse(JSON.stringify(txf)) as TxfToken;
   let hasUncommittedTransactions = false;
 
-  // Handle genesis proof
-  if (stripped.genesis.inclusionProof) {
+  // Handle genesis proof (check if genesis exists first - SDK Token format may differ)
+  if (stripped.genesis && stripped.genesis.inclusionProof) {
     const proof = stripped.genesis.inclusionProof;
     const genesisStateHash = proof.authenticator.stateHash;
     // Try to extract requestId from the authenticator data
@@ -343,10 +442,15 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
 
   const repo = WalletRepository.getInstance();
   const tokens = repo.getTokens();
+  const nametag = repo.getNametag();
 
-  console.log(`📦 Found ${tokens.length} tokens to process`);
+  // Include nametag token if present
+  const hasNametag = !!(nametag?.token);
 
-  if (tokens.length === 0) {
+  const totalToProcess = tokens.length + (hasNametag ? 1 : 0);
+  console.log(`📦 Found ${tokens.length} tokens${hasNametag ? ` + 1 nametag ("${nametag?.name}")` : ""} to process`);
+
+  if (totalToProcess === 0) {
     console.log("No tokens found in wallet");
     console.groupEnd();
     return {
@@ -356,6 +460,127 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
       errors: [],
       duration: Date.now() - startTime,
     };
+  }
+
+  // Process nametag first if present
+  if (hasNametag && nametag?.token) {
+    console.group(`🏷️ Nametag "${nametag.name}"`);
+
+    // Debug: log the raw nametag data from storage
+    console.log(`   Raw nametag from storage:`, {
+      name: nametag.name,
+      tokenType: typeof nametag.token,
+      tokenIsNull: nametag.token === null,
+      tokenIsUndefined: nametag.token === undefined,
+      format: nametag.format,
+      version: nametag.version,
+    });
+
+    // The token is already an object from storage (NametagData.token is typed as object)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nametagTxf = nametag.token as any;
+
+    // Debug: log structure to help diagnose format differences
+    const keys = Object.keys(nametagTxf);
+    console.log(`   Token structure keys (${keys.length}): ${keys.join(", ") || "(empty)"}`);
+
+    if (keys.length === 0) {
+      console.error("   ❌ Nametag token is empty - may need to re-mint");
+      console.log("   Raw token value:", nametag.token);
+      errors.push({ tokenId: `nametag:${nametag.name}`, error: "Token data is empty" });
+      failed++;
+      console.groupEnd();
+    } else if (!nametagTxf.genesis) {
+      console.error("   ❌ Nametag token has no 'genesis' property");
+      console.log("   Full structure:", JSON.stringify(nametagTxf, null, 2).slice(0, 1000));
+      errors.push({ tokenId: `nametag:${nametag.name}`, error: "Invalid token structure - no genesis" });
+      failed++;
+      console.groupEnd();
+    } else {
+      // We have a valid nametag token with genesis
+      const genesis = nametagTxf.genesis;
+      console.log(`   Genesis keys: ${Object.keys(genesis).join(", ")}`);
+
+      // Get the inclusion proof from genesis (SDK format: genesis.inclusionProof)
+      const genesisProof = genesis.inclusionProof;
+      if (!genesisProof) {
+        console.warn("   ⚠️ Genesis has no inclusionProof - may already be stripped or never had one");
+      }
+
+      // Extract requestId from existing proof if present
+      let requestId: string | undefined;
+      if (genesisProof?.authenticator?.stateHash) {
+        requestId = genesisProof.authenticator.stateHash;
+        console.log(`   Found requestId from existing proof: ${requestId!.slice(0, 20)}...`);
+      }
+
+      // Try to refresh the proof
+      let proof: TxfInclusionProof | null = null;
+
+      // Strategy 1: Try direct fetch if we have a requestId
+      if (requestId) {
+        console.log(`   genesis: Fetching proof by requestId...`);
+        proof = await fetchProofByRequestId(requestId);
+        if (proof) {
+          console.log(`   ✅ genesis: Proof fetched successfully`);
+        }
+      }
+
+      // Strategy 2: Tree reset - reconstruct and resubmit mint commitment
+      if (!proof) {
+        console.log(`   genesis: Proof not found - reconstructing mint commitment...`);
+
+        // The genesis.data should contain MintTransactionData in SDK format
+        // which is compatible with our reconstructMintCommitment function
+        const genesisData = genesis.data;
+        if (genesisData && genesisData.salt) {
+          try {
+            // Create a TxfGenesis-like structure for reconstruction
+            const txfGenesis = {
+              data: genesisData,
+              inclusionProof: genesisProof,
+            } as TxfGenesis;
+
+            const result = await reconstructMintCommitment(txfGenesis);
+            if (result.commitment) {
+              const submitResult = await submitMintCommitmentToAggregator(result.commitment);
+              console.log(`   genesis: Submission result: ${submitResult.status}`);
+              if (submitResult.success) {
+                proof = await waitForMintProofWithSDK(result.commitment, 60000);
+                if (proof) {
+                  console.log(`   ✅ genesis: Mint commitment resubmitted successfully`);
+                } else {
+                  console.warn(`   ⚠️ genesis: Timeout waiting for proof after resubmission`);
+                }
+              }
+            } else {
+              console.warn(`   ❌ genesis: Cannot reconstruct mint: ${result.error}`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`   ❌ genesis: Reconstruction error: ${msg}`);
+          }
+        } else {
+          console.warn(`   ❌ genesis: Missing genesis.data or salt for reconstruction`);
+        }
+      }
+
+      if (proof) {
+        // Update the token with the new proof
+        nametagTxf.genesis.inclusionProof = proof;
+        const updatedNametag = {
+          ...nametag,
+          token: nametagTxf,
+        };
+        repo.setNametag(updatedNametag);
+        succeeded++;
+        console.log(`✅ Nametag proof refreshed`);
+      } else {
+        failed++;
+        errors.push({ tokenId: `nametag:${nametag.name}`, error: "Failed to refresh genesis proof" });
+      }
+    }
+    console.groupEnd();
   }
 
   // Process tokens sequentially for clear progress tracking
@@ -420,7 +645,41 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
         }
       }
 
-      // Strategy 2: If no proof yet and this is an uncommitted transaction, try outbox recovery
+      // Strategy 2: Proof not found but requestId exists - tree reset scenario
+      // Try to resubmit the commitment and get a new proof
+      if (!proof && requestId) {
+        console.log(`   ${label}: Proof not found - attempting commitment resubmission (tree reset)...`);
+
+        if (type === "genesis") {
+          // Genesis: reconstruct MintCommitment from TxfGenesisData
+          const result = await reconstructMintCommitment(stripped.genesis);
+          if (result.commitment) {
+            const submitResult = await submitMintCommitmentToAggregator(result.commitment);
+            console.log(`   ${label}: Mint submission result: ${submitResult.status}`);
+            if (submitResult.success) {
+              proof = await waitForMintProofWithSDK(result.commitment, 60000);
+              if (proof) {
+                console.log(`   ✅ ${label}: Mint commitment resubmitted successfully`);
+              } else {
+                console.warn(`   ⚠️ ${label}: Timeout waiting for mint proof after resubmission`);
+              }
+            }
+          } else {
+            console.warn(`   ❌ ${label}: Cannot reconstruct mint: ${result.error}`);
+          }
+        } else {
+          // Transfer: use OutboxEntry with forceResubmit=true for tree reset
+          const recovery = await tryRecoverFromOutbox(token.id, true);
+          if (recovery.recovered && recovery.proof) {
+            proof = recovery.proof;
+            console.log(`   ✅ ${label}: ${recovery.message}`);
+          } else {
+            console.warn(`   ⚠️ ${label}: ${recovery.message}`);
+          }
+        }
+      }
+
+      // Strategy 3: No requestId - uncommitted transaction, try regular outbox recovery
       if (!proof && !requestId) {
         console.log(`   ${label}: No requestId - attempting outbox recovery...`);
         const recovery = await tryRecoverFromOutbox(token.id);
@@ -433,12 +692,18 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
         }
       }
 
-      // Strategy 3: If still no proof, log detailed error
+      // Strategy 4: If still no proof, log detailed error with recovery tips
       if (!proof) {
         allProofsSucceeded = false;
-        const errorMsg = requestId
-          ? `${label}: proof not found on aggregator (requestId: ${requestId.slice(0, 16)}...)`
-          : `${label}: uncommitted transaction - no outbox entry found for recovery`;
+        let errorMsg: string;
+        if (type === "genesis") {
+          errorMsg = `${label}: failed to refresh genesis proof - mint commitment reconstruction failed`;
+        } else if (requestId) {
+          errorMsg = `${label}: transfer proof not found - no OutboxEntry available (received token?)`;
+          console.log(`   💡 If this is a received token, ask the sender to re-transfer`);
+        } else {
+          errorMsg = `${label}: uncommitted transaction - no outbox entry found for recovery`;
+        }
         proofErrors.push(errorMsg);
         console.warn(`   ❌ ${errorMsg}`);
         continue;
@@ -498,7 +763,7 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
   console.groupEnd();
 
   return {
-    totalTokens: tokens.length,
+    totalTokens: totalToProcess,
     succeeded,
     failed,
     errors,

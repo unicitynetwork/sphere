@@ -21,6 +21,7 @@ import { useServices } from "../../../../contexts/useServices";
 import type { NostrService } from "../services/NostrService";
 import { OutboxRecoveryService } from "../services/OutboxRecoveryService";
 import { L1_KEYS } from "../../L1/hooks/useL1Wallet";
+import { isNametagCorrupted } from "../../../../utils/tokenValidation";
 
 export const KEYS = {
   IDENTITY: ["wallet", "identity"],
@@ -97,7 +98,30 @@ export const useWallet = () => {
         }
       }
 
-      return nametagService.getActiveNametag();
+      // Get nametag from repository
+      const nametagData = walletRepo.getNametag();
+
+      // CRITICAL: Check for corrupted nametag and treat as "no nametag exists"
+      // This allows the user to create a new Unicity ID if their data is corrupted
+      if (isNametagCorrupted(nametagData)) {
+        console.warn("🚨 Corrupted nametag detected, treating as no nametag exists", {
+          address: identity.address.slice(0, 20) + "...",
+          name: nametagData?.name,
+          corruption: "token is empty or missing required fields",
+        });
+
+        // Clear corrupted nametag from storage
+        try {
+          walletRepo.clearNametag();
+          console.log("✅ Cleared corrupted nametag from storage");
+        } catch (error) {
+          console.error("Failed to clear corrupted nametag:", error);
+        }
+
+        return null; // Treat as "no nametag exists" - user can create new Unicity ID
+      }
+
+      return nametagData?.name || null;
     },
     enabled: !!identityQuery.data?.address,
   });

@@ -28,6 +28,7 @@ import {
   safeParseTxfMeta,
   validateTokenEntry,
 } from "./types/TxfSchemas";
+import { validateNametagData } from "../../../../utils/tokenValidation";
 
 // ==========================================
 // Token → TXF Conversion
@@ -179,8 +180,18 @@ export function buildTxfStorageData(
     },
   };
 
+  // Validate nametag before exporting to IPFS
   if (nametag) {
-    storageData._nametag = nametag;
+    const nametagValidation = validateNametagData(nametag, {
+      requireInclusionProof: false, // May have stripped proofs
+      context: "IPFS export",
+    });
+    if (nametagValidation.isValid) {
+      storageData._nametag = nametag;
+    } else {
+      // Log error but DO NOT export corrupted nametag data
+      console.error("❌ Skipping corrupted nametag during IPFS export:", nametagValidation.errors);
+    }
   }
 
   // Add tombstones for spent token states (prevents zombie token resurrection)
@@ -278,9 +289,20 @@ export function parseTxfStorageData(data: unknown): {
     }
   }
 
-  // Extract nametag (less strict validation)
+  // Extract and validate nametag
   if (storageData._nametag && typeof storageData._nametag === "object") {
-    result.nametag = storageData._nametag as NametagData;
+    const nametagValidation = validateNametagData(storageData._nametag, {
+      requireInclusionProof: false, // IPFS data may have stripped proofs
+      context: "IPFS import",
+    });
+    if (nametagValidation.isValid) {
+      result.nametag = storageData._nametag as NametagData;
+    } else {
+      // Log warning but include validation errors
+      console.warn("Nametag validation failed during IPFS import:", nametagValidation.errors);
+      result.validationErrors.push(`Nametag validation: ${nametagValidation.errors.join(", ")}`);
+      // Do NOT import corrupted nametag - prevents token: {} bug
+    }
   }
 
   // Extract tombstones (state-hash-aware entries)
