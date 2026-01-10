@@ -13,6 +13,7 @@ export class ServiceProvider {
   private static _stateTransitionClient: StateTransitionClient | null = null;
   private static _rootTrustBase: RootTrustBase | null = null;
   private static _runtimeAggregatorUrl: string | null = null;
+  private static _skipTrustBaseVerification: boolean = false;
 
   /**
    * Get the current aggregator URL (runtime override or default from env)
@@ -37,6 +38,27 @@ export class ServiceProvider {
   static reset(): void {
     this._aggregatorClient = null;
     this._stateTransitionClient = null;
+  }
+
+  /**
+   * Check if trust base verification is being skipped (dev mode only)
+   */
+  static isTrustBaseVerificationSkipped(): boolean {
+    return this._skipTrustBaseVerification;
+  }
+
+  /**
+   * Enable or disable trust base verification bypass (dev tools only)
+   * When enabled, SDK verification calls will be skipped to allow
+   * connecting to aggregators with different trust bases.
+   */
+  static setSkipTrustBaseVerification(skip: boolean): void {
+    this._skipTrustBaseVerification = skip;
+    if (skip) {
+      console.warn("⚠️ Trust base verification is now DISABLED - dev mode only!");
+    } else {
+      console.log("✅ Trust base verification is now ENABLED");
+    }
   }
 
   static get aggregatorClient(): AggregatorClient {

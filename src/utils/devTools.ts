@@ -17,6 +17,9 @@ declare global {
     devRefreshProofs: () => Promise<RefreshProofsResult>;
     devSetAggregatorUrl: (url: string | null) => void;
     devGetAggregatorUrl: () => string;
+    devSkipTrustBaseVerification: () => void;
+    devEnableTrustBaseVerification: () => void;
+    devIsTrustBaseVerificationSkipped: () => boolean;
   }
 }
 
@@ -316,6 +319,37 @@ export function devGetAggregatorUrl(): string {
 }
 
 /**
+ * Skip trust base verification (dev mode only)
+ * Use when connecting to aggregators with different trust bases
+ *
+ * Usage from browser console:
+ *   window.devSkipTrustBaseVerification()
+ */
+export function devSkipTrustBaseVerification(): void {
+  ServiceProvider.setSkipTrustBaseVerification(true);
+}
+
+/**
+ * Re-enable trust base verification
+ *
+ * Usage from browser console:
+ *   window.devEnableTrustBaseVerification()
+ */
+export function devEnableTrustBaseVerification(): void {
+  ServiceProvider.setSkipTrustBaseVerification(false);
+}
+
+/**
+ * Check if trust base verification is currently skipped
+ *
+ * Usage from browser console:
+ *   window.devIsTrustBaseVerificationSkipped()
+ */
+export function devIsTrustBaseVerificationSkipped(): boolean {
+  return ServiceProvider.isTrustBaseVerificationSkipped();
+}
+
+/**
  * Display help for all available dev commands
  *
  * Usage from browser console:
@@ -337,6 +371,15 @@ export function devHelp(): void {
   console.log("    Pass null to reset to default from environment variable");
   console.log("    Example: devSetAggregatorUrl('https://aggregator.example.com')");
   console.log("");
+  console.log("  devSkipTrustBaseVerification()");
+  console.log("    Disable trust base verification (for connecting to different aggregators)");
+  console.log("");
+  console.log("  devEnableTrustBaseVerification()");
+  console.log("    Re-enable trust base verification");
+  console.log("");
+  console.log("  devIsTrustBaseVerificationSkipped()");
+  console.log("    Check if trust base verification is currently disabled");
+  console.log("");
   console.log("  devRefreshProofs()");
   console.log("    Re-fetch all Unicity proofs for tokens in the wallet");
   console.log("    Strips existing proofs and requests fresh ones from aggregator");
@@ -355,5 +398,8 @@ export function registerDevTools(): void {
   window.devRefreshProofs = devRefreshProofs;
   window.devSetAggregatorUrl = devSetAggregatorUrl;
   window.devGetAggregatorUrl = devGetAggregatorUrl;
+  window.devSkipTrustBaseVerification = devSkipTrustBaseVerification;
+  window.devEnableTrustBaseVerification = devEnableTrustBaseVerification;
+  window.devIsTrustBaseVerificationSkipped = devIsTrustBaseVerificationSkipped;
   console.log("🛠️ Dev tools registered. Type devHelp() for available commands.");
 }

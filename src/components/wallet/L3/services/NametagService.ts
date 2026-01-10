@@ -41,6 +41,12 @@ export class NametagService {
   }
 
   async isNametagAvailable(nametag: string): Promise<boolean> {
+    // Skip verification in dev mode if trust base verification is disabled
+    if (ServiceProvider.isTrustBaseVerificationSkipped()) {
+      console.warn("⚠️ Skipping nametag availability check (trust base verification disabled)");
+      return true;
+    }
+
     const nametagTokenId = await TokenId.fromNameTag(nametag);
     const isAlreadyMinted = await ServiceProvider.stateTransitionClient.isMinted(
       ServiceProvider.getRootTrustBase(),
