@@ -15,9 +15,39 @@ import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predica
 import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
 import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenState";
 import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
+import type { StateTransitionClient } from "@unicitylabs/state-transition-sdk/lib/StateTransitionClient";
+import type { InclusionProof } from "@unicitylabs/state-transition-sdk/lib/transaction/InclusionProof";
 
 const UNICITY_TOKEN_TYPE_HEX =
   "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9ef0efbe397867509";
+
+/**
+ * Wait for inclusion proof WITHOUT verification (dev mode only).
+ * This polls the aggregator until a proof is available, but skips trust base verification.
+ */
+async function waitInclusionProofNoVerify(
+  client: StateTransitionClient,
+  commitment: MintCommitment<any>,
+  signal: AbortSignal = AbortSignal.timeout(10000),
+  interval: number = 1000
+): Promise<InclusionProof> {
+  while (!signal.aborted) {
+    try {
+      const response = await client.getInclusionProof(commitment.requestId);
+      if (response.inclusionProof) {
+        console.warn("⚠️ Returning inclusion proof WITHOUT verification (dev mode)");
+        return response.inclusionProof;
+      }
+    } catch (err: any) {
+      // 404 means proof not ready yet, keep polling
+      if (err?.status !== 404) {
+        throw err;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
+  throw new Error("Timeout waiting for inclusion proof");
+}
 
 export type MintResult =
   | { status: "success"; token: Token<any> }
@@ -184,11 +214,11 @@ export class NametagService {
 
       if (!commitment) throw new Error("Failed to create commitment");
       console.log("Waiting for inclusion proof...");
-      const inclusionProof = await waitInclusionProof(
-        rootTrustBase,
-        client,
-        commitment
-      );
+
+      // Use no-verify version in dev mode when trust base verification is skipped
+      const inclusionProof = ServiceProvider.isTrustBaseVerificationSkipped()
+        ? await waitInclusionProofNoVerify(client, commitment)
+        : await waitInclusionProof(rootTrustBase, client, commitment);
 
       const genesisTransaction = commitment.toTransaction(inclusionProof);
 
@@ -203,11 +233,27 @@ export class NametagService {
         mintSalt
       );
 
-      const token = Token.mint(
-        rootTrustBase,
-        new TokenState(nametagPredicate, null),
-        genesisTransaction
-      );
+      // In dev mode, skip verification by using Token.fromJSON()
+      // Otherwise use Token.mint() which verifies against trust base
+      let token: Token<any>;
+      if (ServiceProvider.isTrustBaseVerificationSkipped()) {
+        console.warn("⚠️ Creating token WITHOUT verification (dev mode)");
+        const tokenState = new TokenState(nametagPredicate, null);
+        const tokenJson = {
+          version: "2.0",
+          state: tokenState.toJSON(),
+          genesis: genesisTransaction.toJSON(),
+          transactions: [],
+          nametags: [],
+        };
+        token = await Token.fromJSON(tokenJson);
+      } else {
+        token = await Token.mint(
+          rootTrustBase,
+          new TokenState(nametagPredicate, null),
+          genesisTransaction
+        );
+      }
 
       console.log(`✅ Nametag minted: ${nametag}`);
       return token;

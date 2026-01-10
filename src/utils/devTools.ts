@@ -369,7 +369,8 @@ export function devHelp(): void {
   console.log("  devSetAggregatorUrl(url)");
   console.log("    Change the aggregator URL at runtime");
   console.log("    Pass null to reset to default from environment variable");
-  console.log("    Example: devSetAggregatorUrl('https://aggregator.example.com')");
+  console.log("    Example: devSetAggregatorUrl('/dev-rpc')  // Uses Vite proxy");
+  console.log("    Proxied routes: /rpc (testnet), /dev-rpc (dev aggregator)");
   console.log("");
   console.log("  devSkipTrustBaseVerification()");
   console.log("    Disable trust base verification (for connecting to different aggregators)");
