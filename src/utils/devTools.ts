@@ -19,6 +19,19 @@ import { InclusionProof } from "@unicitylabs/state-transition-sdk/lib/transactio
 import type { TxfToken, TxfInclusionProof, TxfTransaction, TxfGenesis } from "../components/wallet/L3/services/types/TxfTypes";
 import type { OutboxEntry } from "../components/wallet/L3/services/types/OutboxTypes";
 
+// Imports for devTopup (fungible token minting)
+import { TokenType } from "@unicitylabs/state-transition-sdk/lib/token/TokenType";
+import { TokenId } from "@unicitylabs/state-transition-sdk/lib/token/TokenId";
+import { Token as SdkToken } from "@unicitylabs/state-transition-sdk/lib/token/Token";
+import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenState";
+import { TokenCoinData } from "@unicitylabs/state-transition-sdk/lib/token/fungible/TokenCoinData";
+import { CoinId } from "@unicitylabs/state-transition-sdk/lib/token/fungible/CoinId";
+import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
+import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
+import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
+import { IdentityManager } from "../components/wallet/L3/services/IdentityManager";
+import { IpfsStorageService } from "../components/wallet/L3/services/IpfsStorageService";
+
 // Type declarations for window extension
 declare global {
   interface Window {
@@ -29,8 +42,42 @@ declare global {
     devSkipTrustBaseVerification: () => void;
     devEnableTrustBaseVerification: () => void;
     devIsTrustBaseVerificationSkipped: () => boolean;
+    devTopup: (coins?: string[]) => Promise<TopupResult>;
   }
 }
+
+/**
+ * Result of the topup operation
+ */
+export interface TopupResult {
+  success: boolean;
+  mintedTokens: Array<{ coin: string; amount: string; tokenId: string }>;
+  errors: Array<{ coin: string; error: string }>;
+  duration: number;
+}
+
+/**
+ * Coin configuration for dev topup
+ */
+const DEV_COIN_CONFIG = {
+  bitcoin: {
+    coinId: "86bc190fcf7b2d07c6078de93db803578760148b16d4431aa2f42a3241ff0daa",
+    amount: BigInt("100000000"), // 1 BTC (8 decimals)
+    symbol: "BTC",
+  },
+  solana: {
+    coinId: "dee5f8ce778562eec90e9c38a91296a023210ccc76ff4c29d527ac3eb64ade93",
+    amount: BigInt("1000000000000"), // 1000 SOL (9 decimals)
+    symbol: "SOL",
+  },
+  ethereum: {
+    coinId: "3c2450f2fd867e7bb60c6a69d7ad0e53ce967078c201a3ecaa6074ed4c0deafb",
+    amount: BigInt("42000000000000000000"), // 42 ETH (18 decimals)
+    symbol: "ETH",
+  },
+} as const;
+
+const UNICITY_TOKEN_TYPE_HEX = "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9ef0efbe397867509";
 
 /**
  * Result of the proof refresh operation
@@ -804,6 +851,230 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
 }
 
 /**
+ * Mint a single fungible token with the specified coin configuration.
+ * Internal helper for devTopup().
+ */
+async function mintFungibleToken(
+  _coinName: string,
+  coinConfig: { coinId: string; amount: bigint; symbol: string },
+  identityManager: IdentityManager,
+  secret: Buffer
+): Promise<{ success: boolean; token?: Token; tokenId?: string; error?: string }> {
+  try {
+    // 1. Generate random tokenId and salt
+    const tokenIdBytes = new Uint8Array(32);
+    window.crypto.getRandomValues(tokenIdBytes);
+    const tokenId = new TokenId(tokenIdBytes);
+
+    const salt = new Uint8Array(32);
+    window.crypto.getRandomValues(salt);
+
+    // 2. Create token type
+    const tokenType = new TokenType(Buffer.from(UNICITY_TOKEN_TYPE_HEX, "hex"));
+
+    // 3. Get recipient address
+    const ownerAddress = await identityManager.getWalletAddress();
+    if (!ownerAddress) throw new Error("No wallet address");
+
+    // 4. Create coin data
+    const coinIdBuffer = Buffer.from(coinConfig.coinId, "hex");
+    const coinId = new CoinId(coinIdBuffer);
+    const coinData = TokenCoinData.create([[coinId, coinConfig.amount]]);
+
+    // 5. Create mint transaction data
+    const mintData = await MintTransactionData.create(
+      tokenId,
+      tokenType,
+      null, // tokenData
+      coinData,
+      ownerAddress,
+      Buffer.from(salt),
+      null, // recipientDataHash
+      null  // reason
+    );
+
+    // 6. Create commitment
+    const commitment = await MintCommitment.create(mintData);
+
+    // 7. Submit to aggregator
+    const client = ServiceProvider.stateTransitionClient;
+    const response = await client.submitMintCommitment(commitment);
+
+    if (response.status !== "SUCCESS" && response.status !== "REQUEST_ID_EXISTS") {
+      return { success: false, error: `Submission failed: ${response.status}` };
+    }
+
+    // 8. Wait for inclusion proof
+    let proof: TxfInclusionProof | null;
+    if (ServiceProvider.isTrustBaseVerificationSkipped()) {
+      proof = await pollForProofNoVerify(commitment.requestId.toJSON(), 60000);
+    } else {
+      const sdkProof = await waitInclusionProof(
+        ServiceProvider.getRootTrustBase(),
+        client,
+        commitment
+      );
+      proof = sdkProof.toJSON() as TxfInclusionProof;
+    }
+
+    if (!proof || !isInclusionProofNotExclusion(proof)) {
+      return { success: false, error: "Failed to get inclusion proof" };
+    }
+
+    // 9. Create token with predicate
+    const signingService = await SigningService.createFromSecret(secret);
+    const predicate = await UnmaskedPredicate.create(
+      tokenId,
+      tokenType,
+      signingService,
+      HashAlgorithm.SHA256,
+      Buffer.from(salt)
+    );
+
+    // 10. Create SDK token
+    const genesisTransaction = commitment.toTransaction(
+      InclusionProof.fromJSON(proof)
+    );
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let sdkToken: SdkToken<any>;
+    if (ServiceProvider.isTrustBaseVerificationSkipped()) {
+      // Dev mode: create without verification
+      const tokenJson = {
+        version: "2.0",
+        state: new TokenState(predicate, null).toJSON(),
+        genesis: genesisTransaction.toJSON(),
+        transactions: [],
+        nametags: [],
+      };
+      sdkToken = await SdkToken.fromJSON(tokenJson);
+    } else {
+      sdkToken = await SdkToken.mint(
+        ServiceProvider.getRootTrustBase(),
+        new TokenState(predicate, null),
+        genesisTransaction
+      );
+    }
+
+    // 11. Create app Token and save to wallet
+    const appToken = new Token({
+      id: crypto.randomUUID(),
+      name: coinConfig.symbol,
+      type: "fungible",
+      jsonData: JSON.stringify(sdkToken.toJSON()),
+      status: TokenStatus.CONFIRMED,
+      symbol: coinConfig.symbol,
+      amount: coinConfig.amount.toString(),
+      coinId: coinConfig.coinId,
+      timestamp: Date.now(),
+    });
+
+    const walletRepo = WalletRepository.getInstance();
+    walletRepo.addToken(appToken);
+
+    return {
+      success: true,
+      token: appToken,
+      tokenId: Buffer.from(tokenIdBytes).toString("hex"),
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
+/**
+ * Mint fungible tokens directly to the current wallet (dev/testing only).
+ *
+ * This function mints tokens locally using the SDK and aggregator, without
+ * relying on the external faucet service. Tokens are saved to local storage
+ * and synced to IPFS.
+ *
+ * Usage from browser console:
+ *   await devTopup()                     // Mint BTC, SOL, ETH
+ *   await devTopup(['bitcoin'])          // Mint only BTC
+ *   await devTopup(['solana', 'ethereum']) // Mint SOL and ETH
+ *
+ * Note: Requires devSkipTrustBaseVerification() when using dev aggregators.
+ */
+export async function devTopup(
+  coins: string[] = ["bitcoin", "solana", "ethereum"]
+): Promise<TopupResult> {
+  const startTime = Date.now();
+  const mintedTokens: Array<{ coin: string; amount: string; tokenId: string }> = [];
+  const errors: Array<{ coin: string; error: string }> = [];
+
+  console.group("💰 Dev: Topup Tokens");
+  console.log(`📡 Aggregator: ${ServiceProvider.getAggregatorUrl()}`);
+  console.log(`🔐 Trust base verification: ${ServiceProvider.isTrustBaseVerificationSkipped() ? "SKIPPED" : "enabled"}`);
+  console.log(`🪙 Coins to mint: ${coins.join(", ")}`);
+
+  // Get identity
+  const identityManager = IdentityManager.getInstance();
+  const identity = await identityManager.getCurrentIdentity();
+  if (!identity) {
+    console.error("❌ No wallet identity found");
+    console.groupEnd();
+    return { success: false, mintedTokens: [], errors: [{ coin: "all", error: "No identity" }], duration: Date.now() - startTime };
+  }
+
+  const secret = Buffer.from(identity.privateKey, "hex");
+  console.log(`👛 Wallet: ${identity.address.slice(0, 20)}...`);
+
+  // Mint each requested coin
+  for (const coinName of coins) {
+    const config = DEV_COIN_CONFIG[coinName as keyof typeof DEV_COIN_CONFIG];
+    if (!config) {
+      console.warn(`⚠️ Unknown coin: ${coinName}`);
+      errors.push({ coin: coinName, error: "Unknown coin" });
+      continue;
+    }
+
+    console.log(`\n🪙 Minting ${config.symbol}...`);
+
+    const result = await mintFungibleToken(coinName, config, identityManager, secret);
+
+    if (result.success && result.tokenId) {
+      console.log(`   ✅ Minted ${config.amount.toString()} ${config.symbol}`);
+      console.log(`   📦 TokenID: ${result.tokenId.slice(0, 16)}...`);
+      mintedTokens.push({
+        coin: coinName,
+        amount: config.amount.toString(),
+        tokenId: result.tokenId,
+      });
+    } else {
+      console.error(`   ❌ Failed: ${result.error}`);
+      errors.push({ coin: coinName, error: result.error || "Unknown error" });
+    }
+  }
+
+  // Sync to IPFS if any tokens were minted
+  if (mintedTokens.length > 0) {
+    console.log(`\n☁️ Syncing ${mintedTokens.length} new tokens to IPFS...`);
+    try {
+      const ipfsService = IpfsStorageService.getInstance(identityManager);
+      await ipfsService.syncNow({ forceIpnsPublish: true });
+      console.log(`   ✅ IPFS sync complete`);
+    } catch (ipfsError) {
+      const msg = ipfsError instanceof Error ? ipfsError.message : String(ipfsError);
+      console.error(`   ⚠️ IPFS sync failed: ${msg}`);
+      errors.push({ coin: "ipfs", error: msg });
+    }
+  }
+
+  // Trigger UI refresh
+  window.dispatchEvent(new Event("wallet-updated"));
+
+  const duration = Date.now() - startTime;
+  const success = mintedTokens.length > 0;
+
+  console.log(`\n${success ? "✅" : "❌"} Complete: ${mintedTokens.length} minted, ${errors.length} failed (${duration}ms)`);
+  console.groupEnd();
+
+  return { success, mintedTokens, errors, duration };
+}
+
+/**
  * Set the aggregator URL at runtime (dev tools only)
  * Pass null to reset to the default from environment variable
  *
@@ -902,6 +1173,13 @@ export function devHelp(): void {
   console.log("    Strips existing proofs and requests fresh ones from aggregator");
   console.log("    Returns: { totalTokens, succeeded, failed, errors, duration }");
   console.log("");
+  console.log("  devTopup(coins?)");
+  console.log("    Mint fungible tokens to current wallet and sync to IPFS");
+  console.log("    Default coins: ['bitcoin', 'solana', 'ethereum']");
+  console.log("    Amounts: BTC=1, SOL=1000, ETH=42");
+  console.log("    Example: devTopup() or devTopup(['bitcoin'])");
+  console.log("    Note: Requires devSkipTrustBaseVerification() for dev aggregators");
+  console.log("");
   console.log("═══════════════════════════════════════════════════════════════");
   console.log("");
 }
@@ -918,5 +1196,6 @@ export function registerDevTools(): void {
   window.devSkipTrustBaseVerification = devSkipTrustBaseVerification;
   window.devEnableTrustBaseVerification = devEnableTrustBaseVerification;
   window.devIsTrustBaseVerificationSkipped = devIsTrustBaseVerificationSkipped;
+  window.devTopup = devTopup;
   console.log("🛠️ Dev tools registered. Type devHelp() for available commands.");
 }
