@@ -1,7 +1,9 @@
+import { useState, useEffect } from 'react';
 import { Sparkles, Github } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { isMock } from '../../hooks/useAgentChat';
 import { ThemeToggle } from '../theme';
+import { ServiceProvider } from '../wallet/L3/services/ServiceProvider';
 import logoUrl from '/Union.svg';
 
 const DiscordIcon = ({ className }: { className?: string }) => (
@@ -11,6 +13,26 @@ const DiscordIcon = ({ className }: { className?: string }) => (
 );
 
 export function Header() {
+  // Dev config state for showing banner when non-default settings are active
+  const [devConfig, setDevConfig] = useState(() => ServiceProvider.getDevConfig());
+
+  // Listen for dev config changes via custom event
+  useEffect(() => {
+    const handler = () => setDevConfig(ServiceProvider.getDevConfig());
+    window.addEventListener('dev-config-changed', handler);
+    return () => window.removeEventListener('dev-config-changed', handler);
+  }, []);
+
+  // Helper to get truncated hostname from URL
+  const getHostname = (url: string): string => {
+    try {
+      const hostname = new URL(url).hostname;
+      return hostname.length > 20 ? hostname.slice(0, 20) + '...' : hostname;
+    } catch {
+      return url.slice(0, 20);
+    }
+  };
+
   return (
     <header className="border-b border-neutral-200 dark:border-neutral-800/50 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-2xl sticky top-0 z-50 overflow-hidden theme-transition">
       {/* Background decorative elements */}
@@ -50,6 +72,22 @@ export function Header() {
             <div className="absolute -bottom-1 left-0 w-16 sm:w-20 h-0.5 bg-linear-to-r from-orange-500 to-transparent rounded-full" />
           </div>
         </div>
+
+        {/* Dev Mode Banner - only shown when non-default settings are active */}
+        {(devConfig.aggregatorUrl || devConfig.skipTrustBase) && (
+          <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-orange-500/10 border border-orange-500/30 text-[10px] sm:text-xs font-mono">
+            <span className="text-orange-500 font-semibold">DEV</span>
+            <span className="text-orange-400/80 hidden sm:inline">
+              {devConfig.aggregatorUrl && (
+                <span title={devConfig.aggregatorUrl}>
+                  {getHostname(devConfig.aggregatorUrl)}
+                </span>
+              )}
+              {devConfig.aggregatorUrl && devConfig.skipTrustBase && " | "}
+              {devConfig.skipTrustBase && "TB:OFF"}
+            </span>
+          </div>
+        )}
 
         <div className="flex items-center gap-1 sm:gap-2 lg:gap-3">
           {/* Social Links */}

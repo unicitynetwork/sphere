@@ -1053,8 +1053,41 @@ export async function devTopup(
     console.log(`\n☁️ Syncing ${mintedTokens.length} new tokens to IPFS...`);
     try {
       const ipfsService = IpfsStorageService.getInstance(identityManager);
-      await ipfsService.syncNow({ forceIpnsPublish: true });
-      console.log(`   ✅ IPFS sync complete`);
+
+      // Wait for any existing sync to complete (with timeout)
+      const MAX_WAIT_MS = 60000; // 60 seconds max wait
+      const POLL_INTERVAL_MS = 500;
+      const startWait = Date.now();
+
+      while (ipfsService.isCurrentlySyncing() && Date.now() - startWait < MAX_WAIT_MS) {
+        console.log(`   ⏳ Waiting for existing sync to complete...`);
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      }
+
+      if (ipfsService.isCurrentlySyncing()) {
+        console.warn(`   ⚠️ Existing sync did not complete within ${MAX_WAIT_MS / 1000}s, attempting sync anyway`);
+      }
+
+      // Now sync with the new tokens
+      const result = await ipfsService.syncNow({ forceIpnsPublish: true });
+
+      if (result.success) {
+        console.log(`   ✅ IPFS sync complete (CID: ${result.cid?.slice(0, 16)}...)`);
+      } else if (result.error === "Sync already in progress") {
+        // Retry once after waiting
+        console.log(`   ⏳ Sync still in progress, waiting and retrying...`);
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        const retryResult = await ipfsService.syncNow({ forceIpnsPublish: true });
+        if (retryResult.success) {
+          console.log(`   ✅ IPFS sync complete on retry (CID: ${retryResult.cid?.slice(0, 16)}...)`);
+        } else {
+          console.error(`   ⚠️ IPFS sync failed after retry: ${retryResult.error}`);
+          errors.push({ coin: "ipfs", error: retryResult.error || "Sync failed" });
+        }
+      } else {
+        console.error(`   ⚠️ IPFS sync failed: ${result.error}`);
+        errors.push({ coin: "ipfs", error: result.error || "Sync failed" });
+      }
     } catch (ipfsError) {
       const msg = ipfsError instanceof Error ? ipfsError.message : String(ipfsError);
       console.error(`   ⚠️ IPFS sync failed: ${msg}`);
@@ -1090,9 +1123,11 @@ export function devSetAggregatorUrl(url: string | null): void {
   console.log("🔄 Aggregator URL changed:");
   console.log(`   Old: ${oldUrl}`);
   console.log(`   New: ${newUrl}`);
+  console.log(`   📦 Setting persisted to localStorage`);
 
-  // Dispatch event to notify any listeners
+  // Dispatch events to notify UI components
   window.dispatchEvent(new Event("wallet-updated"));
+  window.dispatchEvent(new Event("dev-config-changed"));
 }
 
 /**
@@ -1114,6 +1149,8 @@ export function devGetAggregatorUrl(): string {
  */
 export function devSkipTrustBaseVerification(): void {
   ServiceProvider.setSkipTrustBaseVerification(true);
+  console.log(`   📦 Setting persisted to localStorage`);
+  window.dispatchEvent(new Event("dev-config-changed"));
 }
 
 /**
@@ -1124,6 +1161,8 @@ export function devSkipTrustBaseVerification(): void {
  */
 export function devEnableTrustBaseVerification(): void {
   ServiceProvider.setSkipTrustBaseVerification(false);
+  console.log(`   📦 Setting persisted to localStorage`);
+  window.dispatchEvent(new Event("dev-config-changed"));
 }
 
 /**
@@ -1154,16 +1193,17 @@ export function devHelp(): void {
   console.log("    Get the current Unicity aggregator URL");
   console.log("");
   console.log("  devSetAggregatorUrl(url)");
-  console.log("    Change the aggregator URL at runtime");
+  console.log("    Change the aggregator URL at runtime (persists across page reloads)");
   console.log("    Pass null to reset to default from environment variable");
   console.log("    Example: devSetAggregatorUrl('/dev-rpc')  // Uses Vite proxy");
   console.log("    Proxied routes: /rpc (testnet), /dev-rpc (dev aggregator)");
   console.log("");
   console.log("  devSkipTrustBaseVerification()");
-  console.log("    Disable trust base verification (for connecting to different aggregators)");
+  console.log("    Disable trust base verification (persists across page reloads)");
+  console.log("    Use when connecting to aggregators with different trust bases");
   console.log("");
   console.log("  devEnableTrustBaseVerification()");
-  console.log("    Re-enable trust base verification");
+  console.log("    Re-enable trust base verification (persists across page reloads)");
   console.log("");
   console.log("  devIsTrustBaseVerificationSkipped()");
   console.log("    Check if trust base verification is currently disabled");

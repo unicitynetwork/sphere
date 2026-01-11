@@ -887,6 +887,13 @@ export class TokenValidationService {
     txfToken: unknown
   ): Promise<{ success: boolean; error?: string }> {
     try {
+      // Skip SDK verification if trust base verification is bypassed (dev mode)
+      const { ServiceProvider } = await import("./ServiceProvider");
+      if (ServiceProvider.isTrustBaseVerificationSkipped()) {
+        console.log("📦 Skipping SDK verification (trust base verification bypassed)");
+        return { success: true };
+      }
+
       // Dynamic import to avoid bundling issues
       const { Token } = await import(
         "@unicitylabs/state-transition-sdk/lib/token/Token"
