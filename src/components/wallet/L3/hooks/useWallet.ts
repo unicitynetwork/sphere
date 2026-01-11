@@ -6,7 +6,7 @@ import { Token as SdkToken } from "@unicitylabs/state-transition-sdk/lib/token/T
 import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
 import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment";
 import { ServiceProvider } from "../services/ServiceProvider";
-import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
+import { waitInclusionProofWithDevBypass } from "../../../../utils/devTools";
 import { ApiService } from "../services/api";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { NametagService } from "../services/NametagService";
@@ -406,9 +406,7 @@ export const useWallet = () => {
         throw new Error(`Transfer failed: ${response.status}`);
       }
 
-      const inclusionProof = await waitInclusionProof(
-        ServiceProvider.getRootTrustBase(),
-        client,
+      const inclusionProof = await waitInclusionProofWithDevBypass(
         transferCommitment
       );
 
@@ -710,10 +708,8 @@ export const useWallet = () => {
     outboxRepo.updateEntry(outboxEntry.id, { status: "SUBMITTED" });
     console.log(`📤 Transfer submitted to aggregator (status: ${res.status})`);
 
-    // 9. Wait for inclusion proof
-    const proof = await waitInclusionProof(
-      ServiceProvider.getRootTrustBase(),
-      client,
+    // 9. Wait for inclusion proof (with dev mode bypass if enabled)
+    const proof = await waitInclusionProofWithDevBypass(
       transferCommitment
     );
 

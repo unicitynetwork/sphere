@@ -93,12 +93,17 @@ export interface RefreshProofsResult {
 
 /**
  * Internal type for tracking proof fetch requests
+ *
+ * For genesis proofs: tokenId is used to derive the requestId
+ * For transaction proofs: requestId cannot be derived from stateHash (they're different!)
+ *                         Must use OutboxEntry recovery
  */
 interface ProofRequest {
   type: "genesis" | "transaction";
   index?: number;
-  stateHash: string;
-  requestId?: string; // If we can derive it
+  tokenId?: string; // For genesis: used to derive requestId
+  // Note: For transactions, we cannot derive requestId from any available data
+  // We must use OutboxEntry recovery which has the full commitment
 }
 
 /**
@@ -156,20 +161,30 @@ async function reconstructMintCommitment(
   try {
     const data = genesis.data;
 
+    // Debug: log what we're working with
+    console.log(`   Debug genesis keys: ${genesis ? Object.keys(genesis).join(", ") : "(null)"}`);
+    console.log(`   Debug data keys: ${data ? Object.keys(data).join(", ") : "(null)"}`);
+    if (data) {
+      console.log(`   Debug data.tokenId: ${data.tokenId?.slice(0, 16)}...`);
+      console.log(`   Debug data.coinData: ${data.coinData ? `array[${data.coinData.length}]` : "(null)"}`);
+      console.log(`   Debug data.salt: ${data.salt ? data.salt.slice(0, 16) + "..." : "(null)"}`);
+    }
+
     // Convert TxfGenesisData to IMintTransactionDataJson format
-    // The formats are similar but coinData needs conversion
+    // TxfGenesisData.coinData is [string, string][] which matches TokenCoinDataJson
+    // So we just pass it through directly
     const mintDataJson = {
       tokenId: data.tokenId,
       tokenType: data.tokenType,
       tokenData: data.tokenData || null,
-      coinData: data.coinData && data.coinData.length > 0
-        ? { coins: data.coinData.map(([id, amount]) => ({ coinId: id, amount })) }
-        : null,
+      coinData: data.coinData && data.coinData.length > 0 ? data.coinData : null,
       recipient: data.recipient,
       salt: data.salt,
       recipientDataHash: data.recipientDataHash,
       reason: data.reason ? JSON.parse(data.reason) : null,
     };
+
+    console.log(`   Debug mintDataJson created successfully`);
 
     // Use SDK's fromJSON to properly reconstruct the MintTransactionData
     const mintTransactionData = await MintTransactionData.fromJSON(mintDataJson);
@@ -179,9 +194,14 @@ async function reconstructMintCommitment(
     return { commitment };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
+    console.error(`   Debug reconstruction error: ${msg}`);
     return { commitment: null, error: msg };
   }
 }
+
+// Note: To derive requestId from genesis data, we use reconstructMintCommitment()
+// which properly creates the MintCommitment with correct requestId.
+// The requestId depends on both the tokenId and the MintTransactionData.sourceState.
 
 /**
  * Check if a proof JSON is an INCLUSION proof (has authenticator) vs EXCLUSION proof (no authenticator).
@@ -314,6 +334,42 @@ async function pollForProofNoVerify(
 }
 
 /**
+ * Wait for inclusion proof with dev mode bypass.
+ *
+ * When trust base verification is skipped (dev mode), this function polls
+ * for the proof without SDK verification. Otherwise, it uses the normal
+ * SDK waitInclusionProof with trust base verification.
+ *
+ * This is the PUBLIC API for use by transfer flows (useWallet.ts, etc.)
+ *
+ * @param commitment - TransferCommitment or MintCommitment
+ * @param timeoutMs - Timeout in milliseconds (default 60s)
+ * @returns SDK InclusionProof object
+ * @throws Error if proof cannot be obtained
+ */
+export async function waitInclusionProofWithDevBypass(
+  commitment: TransferCommitment | MintCommitment<IMintTransactionReason>,
+  timeoutMs: number = 60000
+): Promise<InclusionProof> {
+  const trustBase = ServiceProvider.getRootTrustBase();
+  const client = ServiceProvider.stateTransitionClient;
+
+  // If trust base verification is skipped, use direct polling
+  if (ServiceProvider.isTrustBaseVerificationSkipped()) {
+    console.log("⚠️ Dev mode: bypassing trust base verification for proof");
+    const proofJson = await pollForProofNoVerify(commitment.requestId.toJSON(), timeoutMs);
+    if (!proofJson) {
+      throw new Error("Failed to get inclusion proof (dev mode)");
+    }
+    return InclusionProof.fromJSON(proofJson);
+  }
+
+  // Normal mode: use SDK's waitInclusionProof with trust base verification
+  const signal = AbortSignal.timeout(timeoutMs);
+  return await waitInclusionProof(trustBase, client, commitment, signal);
+}
+
+/**
  * Fetch a proof from the aggregator using requestId with retry logic
  * Uses the SDK's StateTransitionClient.getInclusionProof() method
  */
@@ -435,49 +491,37 @@ function stripProofsAndCollectHashes(txf: TxfToken): {
   const stripped = JSON.parse(JSON.stringify(txf)) as TxfToken;
   let hasUncommittedTransactions = false;
 
-  // Handle genesis proof (check if genesis exists first - SDK Token format may differ)
-  if (stripped.genesis && stripped.genesis.inclusionProof) {
-    const proof = stripped.genesis.inclusionProof;
-    const genesisStateHash = proof.authenticator.stateHash;
-    // Try to extract requestId from the authenticator data
-    // The requestId format is typically the stateHash itself or derived from it
+  // Handle genesis proof
+  // For genesis, we can derive the requestId from the tokenId
+  if (stripped.genesis) {
+    // Extract tokenId from genesis data for requestId derivation
+    const tokenId = stripped.genesis.data?.tokenId;
     requests.push({
       type: "genesis",
-      stateHash: genesisStateHash,
-      requestId: genesisStateHash, // stateHash is the requestId for lookup
+      tokenId: tokenId, // Will be used to derive requestId
     });
-    // We need to cast to unknown first since TxfGenesis expects inclusionProof to be non-null
-    // But we'll restore it before returning
+    // Strip the proof (whether inclusion or exclusion) so we can refresh it
     (stripped.genesis as { inclusionProof: TxfInclusionProof | null }).inclusionProof = null;
   }
 
   // Handle transaction proofs
+  // For transactions, we CANNOT derive requestId from stateHash or any other field
+  // We must use OutboxEntry recovery which has the full commitment data
   if (stripped.transactions && stripped.transactions.length > 0) {
     for (let i = 0; i < stripped.transactions.length; i++) {
       const tx = stripped.transactions[i];
-      if (tx.inclusionProof) {
-        // Has existing proof - we can refresh it
-        const stateHash = tx.inclusionProof.authenticator.stateHash;
-        requests.push({
-          type: "transaction",
-          index: i,
-          stateHash: stateHash,
-          requestId: stateHash, // Use stateHash as requestId for lookup
-        });
-        stripped.transactions[i] = {
-          ...tx,
-          inclusionProof: null,
-        };
-      } else {
-        // Transaction without proof - commitment may not have been submitted
-        hasUncommittedTransactions = true;
-        requests.push({
-          type: "transaction",
-          index: i,
-          stateHash: tx.newStateHash,
-          // No requestId - will need outbox recovery
-        });
-      }
+      // All transactions need OutboxEntry recovery - we can't derive requestId
+      hasUncommittedTransactions = true;
+      requests.push({
+        type: "transaction",
+        index: i,
+        // No tokenId or requestId - must use OutboxEntry recovery
+      });
+      // Strip the proof
+      stripped.transactions[i] = {
+        ...tx,
+        inclusionProof: null,
+      };
     }
   }
 
@@ -710,65 +754,76 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
     const proofErrors: string[] = [];
 
     for (const req of requests) {
-      const { type, index, requestId } = req;
+      const { type, index } = req;
       const label = `${type}${index !== undefined ? ` #${index}` : ""}`;
 
       let proof: TxfInclusionProof | null = null;
 
-      // Strategy 1: If we have a requestId, try direct fetch
-      if (requestId) {
-        console.log(`   ${label}: Fetching proof by requestId...`);
-        proof = await fetchProofByRequestId(requestId);
+      // Strategy for genesis proofs:
+      // 1. Reconstruct MintCommitment to get the correct requestId
+      // 2. Try fetching existing proof by requestId
+      // 3. If no proof (or exclusion proof), resubmit commitment
+      if (type === "genesis") {
+        // Reconstruct MintCommitment from TxfGenesisData to get the correct requestId
+        const result = await reconstructMintCommitment(stripped.genesis);
+        if (result.commitment) {
+          const derivedRequestId = result.commitment.requestId.toJSON();
+          console.log(`   ${label}: Derived requestId, fetching proof...`);
 
-        if (proof) {
-          console.log(`   ✅ ${label}: Proof fetched successfully`);
-        }
-      }
+          // Try fetching existing proof first
+          proof = await fetchProofByRequestId(derivedRequestId);
 
-      // Strategy 2: Proof not found but requestId exists - tree reset scenario
-      // Try to resubmit the commitment and get a new proof
-      if (!proof && requestId) {
-        console.log(`   ${label}: Proof not found - attempting commitment resubmission (tree reset)...`);
+          if (proof) {
+            // Check if this is an actual INCLUSION proof (has authenticator)
+            if (isInclusionProofNotExclusion(proof)) {
+              console.log(`   ✅ ${label}: Inclusion proof fetched successfully`);
+            } else {
+              console.log(`   ⚠️ ${label}: Got EXCLUSION proof (no authenticator) - tree was reset`);
+              proof = null; // Will trigger resubmission below
+            }
+          }
 
-        if (type === "genesis") {
-          // Genesis: reconstruct MintCommitment from TxfGenesisData
-          const result = await reconstructMintCommitment(stripped.genesis);
-          if (result.commitment) {
+          // If no valid proof, resubmit the commitment
+          if (!proof) {
+            console.log(`   ${label}: No valid proof - resubmitting mint commitment...`);
             const submitResult = await submitMintCommitmentToAggregator(result.commitment);
             console.log(`   ${label}: Mint submission result: ${submitResult.status}`);
             if (submitResult.success) {
               proof = await waitForMintProofWithSDK(result.commitment, 60000);
-              if (proof) {
-                console.log(`   ✅ ${label}: Mint commitment resubmitted successfully`);
+              if (isInclusionProofNotExclusion(proof)) {
+                console.log(`   ✅ ${label}: New inclusion proof obtained after resubmission`);
+              } else if (proof) {
+                console.warn(`   ⚠️ ${label}: Got proof but still missing authenticator (exclusion proof)`);
+                proof = null; // Don't use an exclusion proof
               } else {
                 console.warn(`   ⚠️ ${label}: Timeout waiting for mint proof after resubmission`);
               }
             }
-          } else {
-            console.warn(`   ❌ ${label}: Cannot reconstruct mint: ${result.error}`);
           }
         } else {
-          // Transfer: use OutboxEntry with forceResubmit=true for tree reset
-          const recovery = await tryRecoverFromOutbox(token.id, true);
-          if (recovery.recovered && recovery.proof) {
-            proof = recovery.proof;
-            console.log(`   ✅ ${label}: ${recovery.message}`);
-          } else {
-            console.warn(`   ⚠️ ${label}: ${recovery.message}`);
-          }
+          console.warn(`   ❌ ${label}: Cannot reconstruct mint commitment: ${result.error}`);
         }
       }
 
-      // Strategy 3: No requestId - uncommitted transaction, try regular outbox recovery
-      if (!proof && !requestId) {
-        console.log(`   ${label}: No requestId - attempting outbox recovery...`);
-        const recovery = await tryRecoverFromOutbox(token.id);
+      // Strategy 3: Transaction - use OutboxEntry recovery
+      // For transactions, we CANNOT derive requestId from any available data.
+      // The stateHash in authenticator is NOT the requestId!
+      // We must use OutboxEntry which has the full commitment data.
+      if (!proof && type === "transaction") {
+        console.log(`   ${label}: Attempting outbox recovery for transaction...`);
+        // Use forceResubmit=true to handle tree reset scenario
+        const recovery = await tryRecoverFromOutbox(token.id, true);
 
         if (recovery.recovered && recovery.proof) {
-          proof = recovery.proof;
-          console.log(`   ✅ ${label}: ${recovery.message}`);
+          // Verify we got an inclusion proof
+          if (isInclusionProofNotExclusion(recovery.proof)) {
+            proof = recovery.proof;
+            console.log(`   ✅ ${label}: ${recovery.message}`);
+          } else {
+            console.warn(`   ⚠️ ${label}: Recovery returned exclusion proof (no authenticator)`);
+          }
         } else {
-          console.warn(`   ❌ ${label}: ${recovery.message}`);
+          console.warn(`   ⚠️ ${label}: ${recovery.message}`);
         }
       }
 
@@ -778,11 +833,9 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
         let errorMsg: string;
         if (type === "genesis") {
           errorMsg = `${label}: failed to refresh genesis proof - mint commitment reconstruction failed`;
-        } else if (requestId) {
+        } else {
           errorMsg = `${label}: transfer proof not found - no OutboxEntry available (received token?)`;
           console.log(`   💡 If this is a received token, ask the sender to re-transfer`);
-        } else {
-          errorMsg = `${label}: uncommitted transaction - no outbox entry found for recovery`;
         }
         proofErrors.push(errorMsg);
         console.warn(`   ❌ ${errorMsg}`);

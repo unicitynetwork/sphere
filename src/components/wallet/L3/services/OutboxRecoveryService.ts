@@ -24,7 +24,7 @@
 import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment";
 import { MintCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/MintCommitment";
 import { MintTransactionData } from "@unicitylabs/state-transition-sdk/lib/transaction/MintTransactionData";
-import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
+import { waitInclusionProofWithDevBypass } from "../../../../utils/devTools";
 import { Token } from "@unicitylabs/state-transition-sdk/lib/token/Token";
 import { TokenType } from "@unicitylabs/state-transition-sdk/lib/token/TokenType";
 import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenState";
@@ -459,15 +459,8 @@ export class OutboxRecoveryService {
     // Reconstruct commitment from stored JSON
     const commitment = await this.reconstructCommitment(entry);
 
-    // Wait for inclusion proof
-    const trustBase = ServiceProvider.getRootTrustBase();
-    const client = ServiceProvider.stateTransitionClient;
-
-    const inclusionProof = await waitInclusionProof(
-      trustBase,
-      client,
-      commitment
-    );
+    // Wait for inclusion proof (with dev mode bypass if enabled)
+    const inclusionProof = await waitInclusionProofWithDevBypass(commitment);
 
     // Create transfer transaction
     const transferTx = commitment.toTransaction(inclusionProof);
@@ -732,15 +725,8 @@ export class OutboxRecoveryService {
     const mintData = await MintTransactionData.fromJSON(JSON.parse(entry.mintDataJson));
     const commitment = await MintCommitment.create(mintData);
 
-    // Wait for inclusion proof
-    const trustBase = ServiceProvider.getRootTrustBase();
-    const client = ServiceProvider.stateTransitionClient;
-
-    const inclusionProof = await waitInclusionProof(
-      trustBase,
-      client,
-      commitment
-    );
+    // Wait for inclusion proof (with dev mode bypass if enabled)
+    const inclusionProof = await waitInclusionProofWithDevBypass(commitment);
 
     // Create genesis transaction
     const genesisTransaction = commitment.toTransaction(inclusionProof);

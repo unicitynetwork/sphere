@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { IAddress } from "@unicitylabs/state-transition-sdk/lib/address/IAddress";
 import { UnmaskedPredicateReference } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicateReference";
-import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
+import { waitInclusionProofWithDevBypass } from "../../../../../utils/devTools";
 import { ServiceProvider } from "../ServiceProvider";
 import type { SplitPlan } from "./TokenSplitCalculator";
 import { Buffer } from "buffer";
@@ -226,11 +226,7 @@ export class TokenSplitExecutor {
 
     onTokenBurned(uiTokenId);
 
-    const burnInclusionProof = await waitInclusionProof(
-      this.trustBase,
-      this.client,
-      burnCommitment
-    );
+    const burnInclusionProof = await waitInclusionProofWithDevBypass(burnCommitment);
     const burnTransaction = burnCommitment.toTransaction(burnInclusionProof);
 
     // === STEP 2: MINT SPLIT TOKENS ===
@@ -249,11 +245,7 @@ export class TokenSplitExecutor {
         throw new Error(`Mint split token failed: ${res.status}`);
       }
 
-      const proof = await waitInclusionProof(
-        this.trustBase,
-        this.client,
-        commitment
-      );
+      const proof = await waitInclusionProofWithDevBypass(commitment);
 
       const commTokenIdHex = Buffer.from(
         commitment.transactionData.tokenId.bytes
@@ -357,11 +349,7 @@ export class TokenSplitExecutor {
       outboxRepo.updateStatus(transferEntryId, "SUBMITTED");
     }
 
-    const transferProof = await waitInclusionProof(
-      this.trustBase,
-      this.client,
-      transferCommitment
-    );
+    const transferProof = await waitInclusionProofWithDevBypass(transferCommitment);
 
     const transferTx = transferCommitment.toTransaction(transferProof);
 
