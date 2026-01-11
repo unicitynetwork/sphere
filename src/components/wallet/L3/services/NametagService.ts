@@ -17,7 +17,7 @@ import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenSta
 import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
 import { OutboxRepository } from "../../../../repositories/OutboxRepository";
 import { createMintOutboxEntry, type MintOutboxEntry } from "./types/OutboxTypes";
-import { IpfsStorageService } from "./IpfsStorageService";
+import { IpfsStorageService, SyncPriority } from "./IpfsStorageService";
 import type { StateTransitionClient } from "@unicitylabs/state-transition-sdk/lib/StateTransitionClient";
 import type { InclusionProof } from "@unicitylabs/state-transition-sdk/lib/transaction/InclusionProof";
 
@@ -237,9 +237,15 @@ export class NametagService {
       console.log(`📦 Saved mint commitment to outbox: ${outboxEntryId}`);
 
       // 5. ⭐ SYNC TO IPFS BEFORE SUBMITTING TO AGGREGATOR
+      // Uses HIGH priority so it jumps ahead of auto-syncs in the queue
       try {
         const ipfsService = IpfsStorageService.getInstance(this.identityManager);
-        await ipfsService.syncNow({ forceIpnsPublish: true });
+        await ipfsService.syncNow({
+          forceIpnsPublish: true,
+          priority: SyncPriority.HIGH,
+          timeout: 60000,
+          callerContext: 'nametag-mint-pre-submit',
+        });
         outboxRepo.updateMintEntry(outboxEntryId, { status: "READY_TO_SUBMIT" });
         console.log(`📦 IPFS sync complete, ready to submit`);
       } catch (ipfsError) {

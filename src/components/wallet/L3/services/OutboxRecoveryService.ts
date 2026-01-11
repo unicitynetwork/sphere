@@ -44,7 +44,7 @@ import type {
   RecoveryDetail,
 } from "./types/OutboxTypes";
 // Note: isMintRecoverable is available but we use getMintEntriesForRecovery() instead
-import { IpfsStorageService } from "./IpfsStorageService";
+import { IpfsStorageService, SyncPriority } from "./IpfsStorageService";
 import { TokenRecoveryService } from "./TokenRecoveryService";
 
 // ==========================================
@@ -300,7 +300,10 @@ export class OutboxRecoveryService {
       if (this.identityManager && (result.recovered > 0 || result.failed > 0)) {
         try {
           const ipfsService = IpfsStorageService.getInstance(this.identityManager);
-          await ipfsService.syncNow();
+          await ipfsService.syncNow({
+            priority: SyncPriority.MEDIUM,
+            callerContext: 'outbox-recovery-final',
+          });
           console.log("📤 OutboxRecovery: Final IPFS sync completed");
         } catch (syncError) {
           console.warn("📤 OutboxRecovery: Final IPFS sync failed:", syncError);
@@ -457,7 +460,10 @@ export class OutboxRecoveryService {
     // First sync to IPFS
     if (this.identityManager) {
       const ipfsService = IpfsStorageService.getInstance(this.identityManager);
-      const syncResult = await ipfsService.syncNow();
+      const syncResult = await ipfsService.syncNow({
+        priority: SyncPriority.MEDIUM,
+        callerContext: 'outbox-recovery-pending-sync',
+      });
       if (!syncResult.success) {
         throw new Error("IPFS sync failed during recovery");
       }
@@ -707,7 +713,10 @@ export class OutboxRecoveryService {
     if (result.recovered > 0 || result.failed > 0) {
       try {
         const ipfsService = IpfsStorageService.getInstance(this.identityManager);
-        await ipfsService.syncNow();
+        await ipfsService.syncNow({
+          priority: SyncPriority.MEDIUM,
+          callerContext: 'outbox-mint-recovery-final',
+        });
         console.log("📤 OutboxRecovery: Final IPFS sync after mint recovery completed");
       } catch (syncError) {
         console.warn("📤 OutboxRecovery: Final IPFS sync after mint recovery failed:", syncError);
@@ -805,7 +814,10 @@ export class OutboxRecoveryService {
 
     if (this.identityManager) {
       const ipfsService = IpfsStorageService.getInstance(this.identityManager);
-      const syncResult = await ipfsService.syncNow();
+      const syncResult = await ipfsService.syncNow({
+        priority: SyncPriority.MEDIUM,
+        callerContext: 'outbox-mint-recovery-pending-sync',
+      });
       if (!syncResult.success) {
         throw new Error("IPFS sync failed during mint recovery");
       }

@@ -210,19 +210,15 @@ export class NostrService {
     if (success) {
       // IPFS is primary source of truth - sync before marking event as processed
       // This ensures token can be recovered from Nostr if IPFS sync fails
+      // Uses HIGH priority queue so it jumps ahead of auto-syncs
       try {
-        const { IpfsStorageService } = await import("./IpfsStorageService");
+        const { IpfsStorageService, SyncPriority } = await import("./IpfsStorageService");
         const ipfsService = IpfsStorageService.getInstance(this.identityManager);
-        let syncResult = await ipfsService.syncNow();
-
-        // If sync is already in progress, wait for it to complete then sync again
-        // This ensures the newly added token gets synced before marking as processed
-        if (!syncResult.success && syncResult.error === "Sync already in progress") {
-          console.log(`⏳ Sync in progress for event ${event.id.slice(0, 8)}, waiting for completion...`);
-          await this.waitForSyncCompletion();
-          // Now sync again to include our newly added token
-          syncResult = await ipfsService.syncNow();
-        }
+        const syncResult = await ipfsService.syncNow({
+          priority: SyncPriority.HIGH,
+          timeout: 60000,
+          callerContext: 'nostr-incoming-token',
+        });
 
         if (!syncResult.success) {
           console.warn(`⚠️ IPFS sync failed for event ${event.id.slice(0, 8)}: ${syncResult.error}`);
@@ -269,34 +265,7 @@ export class NostrService {
     }
   }
 
-  /**
-   * Wait for IPFS sync to complete by listening for storage:completed event
-   * Timeout after 60 seconds to prevent infinite waiting
-   */
-  private waitForSyncCompletion(): Promise<void> {
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        console.warn(`⏰ Sync wait timed out after 60s`);
-        window.removeEventListener("ipfs-storage-event", handler);
-        resolve();
-      }, 60000);
-
-      // Use EventListener type to avoid conflict with Nostr's Event type
-      const handler: EventListener = (e) => {
-        const detail = (e as unknown as CustomEvent).detail;
-        if (detail?.type === "storage:completed" || detail?.type === "sync:state-changed") {
-          // Check if sync is no longer in progress
-          if (detail.type === "storage:completed" || detail.data?.isSyncing === false) {
-            clearTimeout(timeout);
-            window.removeEventListener("ipfs-storage-event", handler);
-            resolve();
-          }
-        }
-      };
-
-      window.addEventListener("ipfs-storage-event", handler);
-    });
-  }
+  // Note: waitForSyncCompletion() removed - SyncQueue handles queuing automatically
 
   private loadProcessedEvents() {
     try {

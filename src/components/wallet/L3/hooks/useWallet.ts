@@ -16,7 +16,7 @@ import { v4 as uuidv4 } from "uuid";
 import { TokenSplitExecutor, type SplitPersistenceCallbacks } from "../services/transfer/TokenSplitExecutor";
 import { TokenSplitCalculator } from "../services/transfer/TokenSplitCalculator";
 import { TokenId } from "@unicitylabs/state-transition-sdk/lib/token/TokenId";
-import { IpfsStorageService } from "../services/IpfsStorageService";
+import { IpfsStorageService, SyncPriority } from "../services/IpfsStorageService";
 import { useServices } from "../../../../contexts/useServices";
 import type { NostrService } from "../services/NostrService";
 import { OutboxRecoveryService } from "../services/OutboxRecoveryService";
@@ -546,42 +546,25 @@ export const useWallet = () => {
           onPreTransferSync: async () => {
             // Sync to IPFS before submitting transfer to aggregator
             // This ensures we have a backup before the final commitment
-            // CRITICAL: Must retry if sync is already in progress to ensure
-            // the change token (just saved) is included in the sync
-            const MAX_RETRIES = 10;
-            const RETRY_DELAY_MS = 1000;
+            // Uses HIGH priority so it jumps ahead of auto-syncs in the queue
+            try {
+              const result = await ipfsService.syncNow({
+                priority: SyncPriority.HIGH,
+                timeout: 60000,
+                callerContext: 'pre-transfer-sync',
+              });
 
-            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-              try {
-                const result = await ipfsService.syncNow();
-
-                if (result.success) {
-                  console.log(`☁️ Pre-transfer IPFS sync completed (tokens backed up)`);
-                  return true;
-                }
-
-                // Sync failed - check if it was because another sync is in progress
-                if (result.error === "Sync already in progress" || result.error === "Another tab is syncing") {
-                  console.log(`⏳ Pre-transfer sync: waiting for in-progress sync (attempt ${attempt}/${MAX_RETRIES})...`);
-                  // Wait for current sync to complete, then retry
-                  await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-                  continue;
-                }
-
-                // Other error - log and fail
-                console.error(`❌ Pre-transfer IPFS sync failed: ${result.error}`);
-                return false;
-              } catch (err) {
-                console.error(`❌ Pre-transfer IPFS sync error (attempt ${attempt}):`, err);
-                if (attempt === MAX_RETRIES) {
-                  return false;
-                }
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+              if (result.success) {
+                console.log(`☁️ Pre-transfer IPFS sync completed (tokens backed up)`);
+                return true;
               }
-            }
 
-            console.error(`❌ Pre-transfer IPFS sync failed after ${MAX_RETRIES} attempts`);
-            return false;
+              console.error(`❌ Pre-transfer IPFS sync failed: ${result.error}`);
+              return false;
+            } catch (err) {
+              console.error(`❌ Pre-transfer IPFS sync error:`, err);
+              return false;
+            }
           },
         };
 
@@ -648,7 +631,10 @@ export const useWallet = () => {
 
         // Final IPFS sync after split completion (sync outbox status updates)
         // Note: ipfsService already created above for persistence callbacks
-        await ipfsService.syncNow().catch(err => {
+        await ipfsService.syncNow({
+          priority: SyncPriority.MEDIUM,
+          callerContext: 'post-split-sync',
+        }).catch(err => {
           console.warn("⚠️ Final IPFS sync after split failed:", err);
         });
       }
@@ -732,9 +718,14 @@ export const useWallet = () => {
     console.log(`📤 Outbox: Created entry ${outboxEntry.id.slice(0, 8)}... for direct transfer`);
 
     // 5. CRITICAL: Sync to IPFS and WAIT for success
+    // Uses HIGH priority so it jumps ahead of auto-syncs in the queue
     try {
       const ipfsService = IpfsStorageService.getInstance(identityManager);
-      const syncResult = await ipfsService.syncNow();
+      const syncResult = await ipfsService.syncNow({
+        priority: SyncPriority.HIGH,
+        timeout: 60000,
+        callerContext: 'outbox-pre-transfer',
+      });
 
       if (!syncResult.success) {
         // Remove outbox entry since we didn't start the transfer
@@ -830,7 +821,10 @@ export const useWallet = () => {
     // 15. Final IPFS sync to update outbox status
     try {
       const ipfsService = IpfsStorageService.getInstance(identityManager);
-      await ipfsService.syncNow();
+      await ipfsService.syncNow({
+        priority: SyncPriority.MEDIUM,
+        callerContext: 'post-transfer-sync',
+      });
     } catch (err) {
       console.warn(`📤 Final IPFS sync after transfer failed:`, err);
       // Non-critical - token is transferred, outbox will be cleaned up later

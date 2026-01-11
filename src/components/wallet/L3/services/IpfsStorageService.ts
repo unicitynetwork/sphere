@@ -21,6 +21,9 @@ import { getTokenValidationService } from "./TokenValidationService";
 import { getConflictResolutionService } from "./ConflictResolutionService";
 import { getSyncCoordinator } from "./SyncCoordinator";
 import { getTokenBackupService } from "./TokenBackupService";
+import { SyncQueue, SyncPriority, type SyncOptions } from "./SyncQueue";
+// Re-export for callers
+export { SyncPriority, type SyncOptions } from "./SyncQueue";
 // Note: retryWithBackoff was used for DHT publish, now handled by HTTP primary path
 import { getBootstrapPeers, getConfiguredCustomPeers, getBackendPeerId, getAllBackendGatewayUrls, IPNS_RESOLUTION_CONFIG, IPFS_CONFIG } from "../../../../config/ipfs.config";
 // Fast HTTP-based IPNS resolution and content fetching (target: <2s sync)
@@ -161,7 +164,7 @@ export class IpfsStorageService {
   private isInitializing = false;
   private isSyncing = false;
   private isInitialSyncing = false;  // Tracks initial IPNS-based sync on startup
-  private pendingSync = false; // Track if sync was requested while another sync was running
+  private syncQueue: SyncQueue | null = null; // Lazy-initialized queue for sync requests
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
   private lastSync: StorageResult | null = null;
   private autoSyncEnabled = false;
@@ -239,6 +242,12 @@ export class IpfsStorageService {
 
     // Clean up IPNS polling and visibility listener
     this.cleanupVisibilityListener();
+
+    // Shutdown sync queue
+    if (this.syncQueue) {
+      this.syncQueue.shutdown();
+      this.syncQueue = null;
+    }
 
     if (this.syncTimer) {
       clearTimeout(this.syncTimer);
@@ -2307,22 +2316,20 @@ export class IpfsStorageService {
   // ==========================================
 
   /**
-   * Schedule a debounced sync
-   * If sync is currently running, marks pendingSync flag for execution after current sync completes
+   * Schedule a debounced sync using the queue with LOW priority (auto-coalesced)
+   * The SyncQueue handles coalescing of multiple LOW priority requests
    */
   private scheduleSync(): void {
-    // If a sync is already running, mark pending so it will run after completion
-    if (this.isSyncing) {
-      console.log(`📦 Sync in progress - marking pending sync for after completion`);
-      this.pendingSync = true;
-      return;
-    }
-
     if (this.syncTimer) {
       clearTimeout(this.syncTimer);
     }
+    // Use a small delay to batch rapid-fire wallet-updated events
     this.syncTimer = setTimeout(() => {
-      this.syncNow().catch(console.error);
+      this.syncNow({
+        priority: SyncPriority.LOW,
+        callerContext: 'auto-sync',
+        coalesce: true,
+      }).catch(console.error);
     }, SYNC_DEBOUNCE_MS);
   }
 
@@ -2555,22 +2562,37 @@ export class IpfsStorageService {
   }
 
   /**
-   * Perform immediate sync to IPFS with TXF format and validation
-   * Uses SyncCoordinator for cross-tab coordination to prevent race conditions
-   * @param options.forceIpnsPublish Force IPNS publish even if CID unchanged (for recovery when IPNS expired)
+   * Get or initialize the sync queue (lazy initialization)
    */
-  async syncNow(options?: { forceIpnsPublish?: boolean }): Promise<StorageResult> {
+  private getSyncQueue(): SyncQueue {
+    if (!this.syncQueue) {
+      this.syncQueue = new SyncQueue((opts) => this.executeSyncInternal(opts));
+    }
+    return this.syncQueue;
+  }
+
+  /**
+   * Perform sync to IPFS using the priority queue
+   * Requests are queued and processed in priority order instead of being rejected
+   *
+   * @param options.forceIpnsPublish Force IPNS publish even if CID unchanged
+   * @param options.priority Priority level (default: MEDIUM)
+   * @param options.timeout Max time to wait in queue (default: 60s)
+   * @param options.callerContext Identifier for debugging
+   * @param options.coalesce For LOW priority: batch multiple requests (default: true)
+   */
+  async syncNow(options?: SyncOptions): Promise<StorageResult> {
+    return this.getSyncQueue().enqueue(options ?? {});
+  }
+
+  /**
+   * Internal sync implementation - called by SyncQueue
+   * Uses SyncCoordinator for cross-tab coordination to prevent race conditions
+   */
+  private async executeSyncInternal(options?: { forceIpnsPublish?: boolean }): Promise<StorageResult> {
     const { forceIpnsPublish = false } = options || {};
     // Use SyncCoordinator to acquire distributed lock across browser tabs
     const coordinator = getSyncCoordinator();
-
-    if (this.isSyncing) {
-      return {
-        success: false,
-        timestamp: Date.now(),
-        error: "Sync already in progress",
-      };
-    }
 
     // Try to acquire cross-tab lock
     const lockAcquired = await coordinator.acquireLock();
@@ -3017,16 +3039,7 @@ export class IpfsStorageService {
       this.emitSyncStateChange();
       // Release cross-tab lock
       coordinator.releaseLock();
-
-      // Check if a sync was requested while we were busy
-      if (this.pendingSync) {
-        console.log(`📦 Processing pending sync request that arrived during sync`);
-        this.pendingSync = false;
-        // Use setTimeout to avoid deep recursion and allow event loop to process
-        setTimeout(() => {
-          this.scheduleSync();
-        }, 100);
-      }
+      // Note: SyncQueue handles queuing of pending sync requests automatically
     }
   }
 
