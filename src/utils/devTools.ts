@@ -44,7 +44,19 @@ declare global {
     devIsTrustBaseVerificationSkipped: () => boolean;
     devTopup: (coins?: string[]) => Promise<TopupResult>;
     devReset: () => void;
+    devRecoverCorruptedTokens: () => Promise<RecoverCorruptedTokensResult>;
+    devDumpArchivedTokens: () => void;
   }
+}
+
+/**
+ * Result of the devRecoverCorruptedTokens operation
+ */
+export interface RecoverCorruptedTokensResult {
+  success: boolean;
+  recovered: number;
+  failed: number;
+  details: Array<{ tokenId: string; status: string; error?: string }>;
 }
 
 /**
@@ -1128,6 +1140,346 @@ export async function devTopup(
 }
 
 /**
+ * Recover corrupted tokens from archive that have undefined newStateHash
+ *
+ * This fixes tokens that were received via PROXY or DIRECT address transfers
+ * but were saved incorrectly (without proper finalizeTransaction call).
+ *
+ * The recovery process uses the SDK's finalizeTransaction method (same as NostrService):
+ * 1. Load archived tokens
+ * 2. For each token with undefined newStateHash in last transaction:
+ *    - Get the transfer salt from transaction data
+ *    - Create recipient predicate using identity + salt
+ *    - Determine if PROXY or DIRECT address
+ *    - Get nametag token for PROXY addresses
+ *    - Call finalizeTransaction() to properly update the token
+ *    - Remove the tombstone and save the token
+ * 3. Sync to IPFS
+ */
+export async function devRecoverCorruptedTokens(): Promise<RecoverCorruptedTokensResult> {
+  console.group("🔧 Recovering corrupted tokens using SDK finalizeTransaction...");
+  const details: Array<{ tokenId: string; status: string; error?: string }> = [];
+  let recovered = 0;
+  let failed = 0;
+
+  try {
+    const walletRepo = WalletRepository.getInstance();
+    const archivedTokens = walletRepo.getArchivedTokens();
+
+    console.log(`📦 Found ${archivedTokens.size} archived token(s)`);
+
+    // Get identity for predicate reconstruction
+    const identityManager = IdentityManager.getInstance();
+    const identity = await identityManager.getCurrentIdentity();
+
+    if (!identity) {
+      console.error("❌ No wallet identity found");
+      console.groupEnd();
+      return {
+        success: false,
+        recovered: 0,
+        failed: archivedTokens.size,
+        details: [{ tokenId: "all", status: "No wallet identity" }],
+      };
+    }
+
+    // Get my nametag token (needed for PROXY address verification)
+    const nametagData = walletRepo.getNametag();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let myNametagToken: SdkToken<any> | null = null;
+
+    if (nametagData?.token) {
+      try {
+        myNametagToken = await SdkToken.fromJSON(nametagData.token);
+        console.log(`✅ Loaded nametag token: @${nametagData.name}`);
+      } catch (err) {
+        console.warn(`⚠️ Could not load nametag token:`, err);
+      }
+    }
+
+    const client = ServiceProvider.stateTransitionClient;
+    const rootTrustBase = ServiceProvider.getRootTrustBase();
+    const secret = Buffer.from(identity.privateKey, "hex");
+    const signingService = await SigningService.createFromSecret(secret);
+
+    for (const [tokenId, txf] of archivedTokens) {
+      try {
+        const lastTx = txf.transactions?.[txf.transactions.length - 1];
+
+        // Check if this token needs recovery
+        if (!lastTx) {
+          console.log(`   ℹ️ Token ${tokenId.slice(0, 16)}... has no transactions, skipping`);
+          details.push({ tokenId, status: "No transactions - skipped" });
+          continue;
+        }
+
+        if (lastTx.newStateHash) {
+          console.log(`   ℹ️ Token ${tokenId.slice(0, 16)}... already has newStateHash, skipping`);
+          details.push({ tokenId, status: "Already has newStateHash - skipped" });
+          continue;
+        }
+
+        console.log(`   🔧 Recovering token ${tokenId.slice(0, 16)}...`);
+
+        // Get the transfer salt from the transaction data
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const txData = lastTx.data as any;
+        const transferSalt = txData?.salt;
+        const recipient = txData?.recipient;
+
+        console.log(`      - Transfer salt: ${transferSalt ? transferSalt.slice(0, 16) + '...' : '❌ MISSING'}`);
+        console.log(`      - Recipient: ${recipient || '❌ MISSING'}`);
+
+        if (!transferSalt) {
+          console.warn(`      ⚠️ No transfer salt in transaction data, cannot recover`);
+          details.push({ tokenId, status: "No transfer salt", error: "Missing salt in transaction data" });
+          failed++;
+          continue;
+        }
+
+        // Determine if this is a PROXY or DIRECT address
+        const isProxyAddress = recipient?.startsWith("PROXY://");
+        console.log(`      - Address type: ${isProxyAddress ? 'PROXY' : 'DIRECT'}`);
+
+        // For PROXY addresses, we need the nametag token
+        if (isProxyAddress && !myNametagToken) {
+          console.warn(`      ⚠️ PROXY address but no nametag token available, cannot recover`);
+          details.push({ tokenId, status: "No nametag token for PROXY", error: "Missing nametag token" });
+          failed++;
+          continue;
+        }
+
+        // Load the source token from archived TXF (without the bad state)
+        // We need to create a "source" token that represents the state BEFORE the transfer
+        // This means we use the previousStateHash transaction data
+        console.log(`      - Loading source token from TXF...`);
+
+        // The archived TXF has the transfer transaction but with wrong state
+        // We need to reconstruct what the source token looked like
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let sourceToken: SdkToken<any>;
+        try {
+          // Create a version of the TXF that represents the SOURCE token (before transfer)
+          // This means excluding the last transaction that has the transfer
+          const sourceTxf = {
+            ...txf,
+            // The state should be the SENDER's state (from lastTx.data.sourceState)
+            state: txData.sourceState || txf.state,
+            // Include the transfer transaction - SDK needs it for finalization
+            transactions: txf.transactions,
+          };
+          sourceToken = await SdkToken.fromJSON(sourceTxf);
+          console.log(`      ✅ Source token loaded`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`      ⚠️ Failed to load source token: ${msg}`);
+          details.push({ tokenId, status: "Failed to load source token", error: msg });
+          failed++;
+          continue;
+        }
+
+        // Get genesis data for token type and ID
+        const genesisData = txf.genesis?.data;
+        if (!genesisData) {
+          console.warn(`      ⚠️ No genesis data, cannot recover`);
+          details.push({ tokenId, status: "No genesis data", error: "Missing genesis data" });
+          failed++;
+          continue;
+        }
+
+        const tokenType = TokenType.fromJSON(genesisData.tokenType);
+        const tokenIdObj = TokenId.fromJSON(genesisData.tokenId);
+
+        // Create the recipient predicate (same way NostrService does it)
+        console.log(`      - Creating recipient predicate...`);
+        const recipientPredicate = await UnmaskedPredicate.create(
+          tokenIdObj,
+          tokenType,
+          signingService,
+          HashAlgorithm.SHA256,
+          Buffer.from(transferSalt, "hex")
+        );
+
+        const recipientState = new TokenState(recipientPredicate, null);
+        console.log(`      ✅ Recipient predicate created`);
+
+        // Get the transfer transaction from SDK
+        // The lastTx is the JSON, we need to reconstruct the SDK TransferTransaction
+        const { TransferTransaction } = await import("@unicitylabs/state-transition-sdk/lib/transaction/TransferTransaction");
+        const transferTx = await TransferTransaction.fromJSON(lastTx);
+        console.log(`      ✅ Transfer transaction loaded`);
+
+        // Call finalizeTransaction - this is the key SDK method that handles everything
+        console.log(`      - Calling finalizeTransaction (${isProxyAddress ? 'with nametag' : 'no nametag'})...`);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let finalizedToken: SdkToken<any>;
+        try {
+          // Dev mode: skip trust base verification in finalizeTransaction
+          if (ServiceProvider.isTrustBaseVerificationSkipped()) {
+            console.log(`      ⚠️ Dev mode: attempting finalization without full verification`);
+            // In dev mode, we can't use finalizeTransaction because it requires valid trust base
+            // Instead, manually create the finalized token
+            const finalizedTxf = {
+              ...txf,
+              state: recipientState.toJSON(),
+              transactions: txf.transactions.map((tx, idx) => {
+                if (idx === txf.transactions.length - 1) {
+                  return {
+                    ...tx,
+                    // SDK sets newStateHash when applying the transaction
+                    // For dev mode recovery, we calculate it ourselves
+                    newStateHash: undefined, // Will be set below
+                  };
+                }
+                return tx;
+              }),
+            };
+
+            // Calculate the new state hash
+            const newStateHash = await recipientState.calculateHash();
+            const newStateHashStr = newStateHash.toJSON();
+            console.log(`      - Calculated state hash: ${newStateHashStr.slice(0, 16)}...`);
+
+            // Update the last transaction with the new state hash
+            const lastTxIndex = finalizedTxf.transactions.length - 1;
+            finalizedTxf.transactions[lastTxIndex] = {
+              ...finalizedTxf.transactions[lastTxIndex],
+              newStateHash: newStateHashStr,
+            };
+
+            finalizedToken = await SdkToken.fromJSON(finalizedTxf);
+          } else {
+            // Normal mode: use SDK's finalizeTransaction
+            const nametagTokens = isProxyAddress && myNametagToken ? [myNametagToken] : [];
+            finalizedToken = await client.finalizeTransaction(
+              rootTrustBase,
+              sourceToken,
+              recipientState,
+              transferTx,
+              nametagTokens
+            );
+          }
+          console.log(`      ✅ Token finalized successfully`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`      ❌ finalizeTransaction failed: ${msg}`);
+          details.push({ tokenId, status: "finalizeTransaction failed", error: msg });
+          failed++;
+          continue;
+        }
+
+        // Check if there's a tombstone for this token
+        const tombstones = walletRepo.getTombstones();
+        const hasTombstone = tombstones.some(t => t.tokenId === tokenId);
+
+        if (hasTombstone) {
+          console.log(`      - Removing tombstone for token`);
+          const updatedTombstones = tombstones.filter(t => t.tokenId !== tokenId);
+          // @ts-expect-error - accessing private method for recovery
+          walletRepo._tombstones = updatedTombstones;
+        }
+
+        // Get coin info from the token
+        let amount = "0";
+        let coinIdHex = tokenId;
+        const symbol = "UNK";
+
+        try {
+          if (finalizedToken.coins?.coins) {
+            const coinsMap = finalizedToken.coins.coins;
+            if (coinsMap instanceof Map) {
+              const firstEntry = coinsMap.entries().next().value;
+              if (firstEntry) {
+                const [key, val] = firstEntry;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const keyObj = key as any;
+                if (keyObj && keyObj.data) {
+                  coinIdHex = Buffer.from(keyObj.data).toString("hex");
+                } else if (Buffer.isBuffer(key)) {
+                  coinIdHex = key.toString("hex");
+                }
+                amount = val?.toString() || "0";
+              }
+            }
+          }
+        } catch {
+          // Keep default values
+        }
+
+        // Serialize the finalized token
+        const finalizedTxfJson = finalizedToken.toJSON();
+
+        // Create a new Token object with the fixed data
+        const { v4: uuidv4 } = await import("uuid");
+        const fixedToken = new Token({
+          id: uuidv4(),
+          name: `Recovered ${symbol}`,
+          type: finalizedToken.type?.toString() || tokenId,
+          symbol: symbol,
+          jsonData: JSON.stringify(finalizedTxfJson),
+          status: TokenStatus.CONFIRMED,
+          amount: amount,
+          coinId: coinIdHex,
+          timestamp: Date.now(),
+        });
+
+        // Add the recovered token to the wallet
+        walletRepo.addToken(fixedToken, true); // skipHistory = true
+
+        console.log(`      ✅ Token recovered successfully`);
+        details.push({ tokenId, status: "Recovered" });
+        recovered++;
+
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`      ❌ Failed to recover token ${tokenId.slice(0, 16)}...: ${msg}`);
+        details.push({ tokenId, status: "Failed", error: msg });
+        failed++;
+      }
+    }
+
+    // Sync to IPFS if any tokens were recovered
+    if (recovered > 0) {
+      console.log(`\n📤 Syncing recovered tokens to IPFS...`);
+      try {
+        const ipfsService = IpfsStorageService.getInstance(identityManager);
+        if (ipfsService) {
+          await ipfsService.syncNow({ forceIpnsPublish: true });
+          console.log(`   ✅ IPFS sync complete`);
+        }
+      } catch (err) {
+        console.error(`   ⚠️ IPFS sync failed:`, err);
+      }
+
+      // Trigger UI refresh
+      window.dispatchEvent(new Event("wallet-updated"));
+    }
+
+    console.log(`\n✅ Recovery complete: ${recovered} recovered, ${failed} failed`);
+    console.groupEnd();
+
+    return {
+      success: recovered > 0,
+      recovered,
+      failed,
+      details,
+    };
+
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`❌ Recovery failed: ${msg}`);
+    console.groupEnd();
+    return {
+      success: false,
+      recovered,
+      failed,
+      details: [{ tokenId: "global", status: "Failed", error: msg }],
+    };
+  }
+}
+
+/**
  * Set the aggregator URL at runtime (dev tools only)
  * Pass null to reset to the default from environment variable
  *
@@ -1260,8 +1612,203 @@ export function devHelp(): void {
   console.log("    Example: devTopup() or devTopup(['bitcoin'])");
   console.log("    Note: Requires devSkipTrustBaseVerification() for dev aggregators");
   console.log("");
+  console.log("  devRecoverCorruptedTokens()");
+  console.log("    Recover tokens from archive that have corrupted state data");
+  console.log("    Fixes tokens received via DIRECT address transfer before bug fix");
+  console.log("    Updates newStateHash and removes tombstones for recovered tokens");
+  console.log("    Returns: { success, recovered, failed, details }");
+  console.log("");
   console.log("═══════════════════════════════════════════════════════════════");
   console.log("");
+}
+
+/**
+ * Search chat messages for token transfer data containing the salt
+ * The transfer payload might still be in message history!
+ *
+ * Usage from browser console:
+ *   window.devFindTransferSalt(tokenId)
+ */
+export function devFindTransferSalt(tokenId: string): { found: boolean; salt?: string; fullPayload?: unknown } {
+  console.group(`🔍 Searching for transfer salt for token ${tokenId.slice(0, 16)}...`);
+
+  try {
+    // Get all chat messages from localStorage
+    const messagesJson = localStorage.getItem("unicity_chat_messages");
+    if (!messagesJson) {
+      console.log("No chat messages found in localStorage");
+      console.groupEnd();
+      return { found: false };
+    }
+
+    const messages = JSON.parse(messagesJson) as Array<{
+      id: string;
+      content: string;
+      type: string;
+      metadata?: Record<string, unknown>;
+    }>;
+
+    console.log(`Found ${messages.length} messages in history`);
+
+    // Search for TOKEN_TRANSFER messages or any message containing the tokenId
+    for (const msg of messages) {
+      // Check if content contains the tokenId
+      if (msg.content?.includes(tokenId) || msg.content?.includes(tokenId.slice(0, 32))) {
+        console.log(`Found message potentially containing token: ${msg.id}`);
+
+        try {
+          // Try to parse the content as JSON payload
+          const payload = JSON.parse(msg.content);
+
+          // Check for transferTx with salt
+          if (payload.transferTx) {
+            const transferTx = typeof payload.transferTx === 'string'
+              ? JSON.parse(payload.transferTx)
+              : payload.transferTx;
+
+            if (transferTx.data?.salt) {
+              console.log(`✅ Found transfer salt in message ${msg.id}!`);
+              console.log(`   Salt: ${transferTx.data.salt}`);
+              console.groupEnd();
+              return {
+                found: true,
+                salt: transferTx.data.salt,
+                fullPayload: payload,
+              };
+            }
+          }
+
+          // Check sourceToken for matching token ID
+          if (payload.sourceToken) {
+            const sourceToken = typeof payload.sourceToken === 'string'
+              ? JSON.parse(payload.sourceToken)
+              : payload.sourceToken;
+
+            if (sourceToken.genesis?.data?.tokenId === tokenId) {
+              console.log(`Found matching sourceToken in message ${msg.id}`);
+              // Look for transferTx in the same payload
+              if (payload.transferTx) {
+                const transferTx = typeof payload.transferTx === 'string'
+                  ? JSON.parse(payload.transferTx)
+                  : payload.transferTx;
+                if (transferTx.data?.salt) {
+                  console.log(`✅ Found transfer salt!`);
+                  console.log(`   Salt: ${transferTx.data.salt}`);
+                  console.groupEnd();
+                  return {
+                    found: true,
+                    salt: transferTx.data.salt,
+                    fullPayload: payload,
+                  };
+                }
+              }
+            }
+          }
+        } catch {
+          // Not JSON, skip
+        }
+      }
+
+      // Also check TOKEN_TRANSFER type messages
+      if (msg.type === 'TOKEN_TRANSFER' && msg.metadata) {
+        console.log(`Found TOKEN_TRANSFER message: ${msg.id}`);
+        console.log(`Metadata:`, msg.metadata);
+        // Check if metadata has transfer info
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const meta = msg.metadata as any;
+        if (meta?.salt) {
+          console.log(`✅ Found salt in message metadata!`);
+          console.groupEnd();
+          return { found: true, salt: meta.salt, fullPayload: msg };
+        }
+      }
+    }
+
+    console.log(`❌ No transfer salt found for token ${tokenId.slice(0, 16)}...`);
+    console.groupEnd();
+    return { found: false };
+  } catch (err) {
+    console.error("Error searching messages:", err);
+    console.groupEnd();
+    return { found: false };
+  }
+}
+
+// Add to window interface
+declare global {
+  interface Window {
+    devFindTransferSalt: (tokenId: string) => { found: boolean; salt?: string; fullPayload?: unknown };
+  }
+}
+
+/**
+ * Dump all archived tokens to console for analysis
+ * Use this to understand the structure of corrupted tokens
+ *
+ * Usage from browser console:
+ *   window.devDumpArchivedTokens()
+ */
+export function devDumpArchivedTokens(): void {
+  console.group("📦 Archived Tokens Dump");
+
+  const walletRepo = WalletRepository.getInstance();
+  const archivedTokens = walletRepo.getArchivedTokens();
+
+  console.log(`Found ${archivedTokens.size} archived token(s)`);
+
+  for (const [tokenId, txf] of archivedTokens) {
+    console.group(`\n🔸 Token: ${tokenId.slice(0, 16)}...`);
+
+    // Basic structure
+    console.log("Top-level keys:", Object.keys(txf));
+    console.log("Version:", txf.version);
+
+    // Genesis
+    console.group("📜 Genesis:");
+    console.log("Keys:", Object.keys(txf.genesis || {}));
+    if (txf.genesis?.data) {
+      console.log("genesis.data.tokenId:", txf.genesis.data.tokenId?.slice(0, 16) + '...');
+      console.log("genesis.data.tokenType:", txf.genesis.data.tokenType?.slice(0, 16) + '...');
+      console.log("genesis.data.salt:", txf.genesis.data.salt);
+      console.log("genesis.data.recipient:", txf.genesis.data.recipient);
+      console.log("genesis.data.coinData:", txf.genesis.data.coinData);
+    }
+    if (txf.genesis?.inclusionProof) {
+      console.log("genesis.inclusionProof.authenticator.stateHash:", txf.genesis.inclusionProof.authenticator?.stateHash);
+    }
+    console.groupEnd();
+
+    // State
+    console.group("🔐 State:");
+    console.log("state.data:", txf.state?.data);
+    console.log("state.predicate:", txf.state?.predicate?.slice(0, 64) + '...');
+    console.groupEnd();
+
+    // Transactions
+    console.group(`📝 Transactions (${txf.transactions?.length || 0}):`);
+    txf.transactions?.forEach((tx, idx) => {
+      console.group(`Transaction[${idx}]:`);
+      console.log("Keys:", Object.keys(tx));
+      console.log("previousStateHash:", tx.previousStateHash?.slice(0, 32) + '...');
+      console.log("newStateHash:", tx.newStateHash || '❌ MISSING');
+      console.log("predicate:", tx.predicate?.slice(0, 32) || '❌ MISSING');
+      console.log("data:", tx.data);
+      console.log("inclusionProof:", tx.inclusionProof ? '✅ present' : '❌ missing');
+      if (tx.inclusionProof) {
+        console.log("  authenticator.stateHash:", tx.inclusionProof.authenticator?.stateHash);
+        console.log("  transactionHash:", tx.inclusionProof.transactionHash?.slice(0, 32) + '...');
+      }
+      console.groupEnd();
+    });
+    console.groupEnd();
+
+    // Raw JSON for deep inspection
+    console.log("📋 Full TXF JSON:", JSON.stringify(txf, null, 2));
+
+    console.groupEnd();
+  }
+
+  console.groupEnd();
 }
 
 /**
@@ -1278,5 +1825,8 @@ export function registerDevTools(): void {
   window.devIsTrustBaseVerificationSkipped = devIsTrustBaseVerificationSkipped;
   window.devReset = devReset;
   window.devTopup = devTopup;
+  window.devRecoverCorruptedTokens = devRecoverCorruptedTokens;
+  window.devDumpArchivedTokens = devDumpArchivedTokens;
+  window.devFindTransferSalt = devFindTransferSalt;
   console.log("🛠️ Dev tools registered. Type devHelp() for available commands.");
 }
