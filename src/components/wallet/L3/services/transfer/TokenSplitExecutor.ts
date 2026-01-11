@@ -268,6 +268,11 @@ export class TokenSplitExecutor {
     const burnSalt = await sha256(seedString + "_burn_salt");
     const burnCommitment = await split.createBurnCommitment(burnSalt, signingService);
 
+    // Log the BURN RequestId (this is what marks the ORIGINAL token as spent)
+    console.log(`🔥 [SplitBurn] RequestId committed: ${burnCommitment.requestId.toString()}`);
+    console.log(`   - original token stateHash: ${(await tokenToSplit.state.calculateHash()).toJSON()}`);
+    console.log(`   - signingService.publicKey: ${Buffer.from(signingService.publicKey).toString("hex")}`);
+
     // Create outbox entry for BURN BEFORE submitting to aggregator
     // This ensures we can recover if browser crashes after burn is submitted
     let burnEntryId: string | undefined;
@@ -526,6 +531,11 @@ export class TokenSplitExecutor {
       null,
       signingService
     );
+
+    // Log the RequestId being committed (for spent detection debugging)
+    console.log(`🔑 [SplitTransfer] RequestId committed: ${transferCommitment.requestId.toString()}`);
+    console.log(`   - token stateHash: ${(await recipientTokenBeforeTransfer.state.calculateHash()).toJSON()}`);
+    console.log(`   - signingService.publicKey: ${Buffer.from(signingService.publicKey).toString("hex")}`);
 
     // Create outbox entry for transfer tracking BEFORE submitting
     // This is critical for Nostr delivery recovery

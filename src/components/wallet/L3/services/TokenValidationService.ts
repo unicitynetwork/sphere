@@ -851,7 +851,15 @@ export class TokenValidationService {
   }
 
   /**
-   * Check if a single token's current state is spent
+   * Check if a single token's current state is spent.
+   *
+   * Uses SDK's getInclusionProof to query the aggregator:
+   * - Inclusion proof (authenticator !== null) = SPENT
+   * - Exclusion proof (authenticator === null) = UNSPENT
+   *
+   * When trust base verification is skipped (dev mode), we skip the
+   * cryptographic verification of the proof but still use the SDK's
+   * aggregator query logic.
    */
   private async checkSingleTokenSpent(
     token: LocalToken,
@@ -892,10 +900,11 @@ export class TokenValidationService {
     const tokenId = txfToken.genesis?.data?.tokenId || token.id;
     const stateHash = getCurrentStateHash(txfToken);
 
-    // CHECK CACHE FIRST - avoid unnecessary SDK calls
+    // CHECK CACHE FIRST - avoid unnecessary SDK/aggregator calls
     const cacheKey = this.getSpentStateCacheKey(tokenId, stateHash, publicKey);
     const cachedResult = this.getSpentStateFromCache(cacheKey);
     if (cachedResult !== null) {
+      console.log(`📦 [SpentCheck] Cache HIT for ${tokenId.slice(0, 16)}... state=${stateHash.slice(0, 8)}... -> ${cachedResult ? 'SPENT' : 'UNSPENT'}`);
       return {
         tokenId,
         localId: token.id,
@@ -904,26 +913,130 @@ export class TokenValidationService {
       };
     }
 
-    // CACHE MISS - verify with SDK
+    console.log(`📦 [SpentCheck] Cache MISS for ${tokenId.slice(0, 16)}... state=${stateHash.slice(0, 8)}... - querying aggregator`);
+    console.log(`📦 [SpentCheck] FULL VALUES for debugging:`);
+    console.log(`   - tokenId: ${tokenId}`);
+    console.log(`   - stateHash: ${stateHash}`);
+    console.log(`   - publicKey: ${publicKey}`);
+    console.log(`   - txf.transactions.length: ${txfToken.transactions?.length || 0}`);
+    if (txfToken.transactions?.length > 0) {
+      const lastTx = txfToken.transactions[txfToken.transactions.length - 1];
+      console.log(`   - lastTx.newStateHash: ${lastTx.newStateHash}`);
+      console.log(`   - lastTx.inclusionProof?.authenticator?.stateHash: ${lastTx.inclusionProof?.authenticator?.stateHash}`);
+    }
+    console.log(`   - genesis.inclusionProof.authenticator.stateHash: ${txfToken.genesis?.inclusionProof?.authenticator?.stateHash}`);
+
+    // CACHE MISS - query aggregator
     try {
-      // Parse SDK token
-      const { Token } = await import(
-        "@unicitylabs/state-transition-sdk/lib/token/Token"
-      );
-      const sdkToken = await Token.fromJSON(txfToken);
+      const { ServiceProvider } = await import("./ServiceProvider");
+      const skipVerification = ServiceProvider.isTrustBaseVerificationSkipped();
 
-      // Convert public key to bytes for SDK
-      const pubKeyBytes = Buffer.from(publicKey, "hex");
+      let spent: boolean;
 
-      // Check if token state is spent using SDK client
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const isSpent = await (client as any).isTokenStateSpent(
-        trustBase,
-        sdkToken,
-        pubKeyBytes
-      );
+      if (skipVerification) {
+        // DEV MODE: Use SDK Token object directly, skip trust base verification only
+        // This ensures we create the exact same RequestId as the SDK
+        const { Token } = await import(
+          "@unicitylabs/state-transition-sdk/lib/token/Token"
+        );
+        const { RequestId } = await import(
+          "@unicitylabs/state-transition-sdk/lib/api/RequestId"
+        );
 
-      const spent = isSpent === true;
+        // Parse TXF into SDK Token object
+        const sdkToken = await Token.fromJSON(txfToken);
+        const pubKeyBytes = Buffer.from(publicKey, "hex");
+
+        // Verify ownership - the publicKey must match the token's predicate
+        const { PredicateEngineService } = await import(
+          "@unicitylabs/state-transition-sdk/lib/predicate/PredicateEngineService"
+        );
+        const predicate = await PredicateEngineService.createPredicate(sdkToken.state.predicate);
+        const isOwner = await predicate.isOwner(pubKeyBytes);
+        console.log(`📦 [SpentCheck] Ownership check: ${isOwner ? 'PASSED' : 'FAILED'}`);
+        if (!isOwner) {
+          console.log(`   ⚠️ PublicKey does NOT match token predicate - wrong key being used!`);
+          console.log(`   - Our pubKey: ${publicKey}`);
+        }
+
+        // Use SDK's method to calculate state hash (matches what TransferCommitment uses)
+        const calculatedStateHash = await sdkToken.state.calculateHash();
+
+        // Create RequestId exactly as SDK does internally
+        const requestId = await RequestId.create(pubKeyBytes, calculatedStateHash);
+
+        console.log(`📦 [SpentCheck] RequestId constructed via SDK:`);
+        console.log(`   - pubKeyBytes.length: ${pubKeyBytes.length}`);
+        console.log(`   - calculatedStateHash: ${calculatedStateHash.toJSON()}`);
+        console.log(`   - stateHash from JSON: ${stateHash}`);
+        console.log(`   - hashes match: ${calculatedStateHash.toJSON() === stateHash}`);
+        console.log(`   - requestId: ${requestId.toString()}`);
+
+        // Query aggregator for inclusion/exclusion proof
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const response = await (client as any).getInclusionProof(requestId);
+
+        // Log full response for debugging
+        console.log(`📦 [SpentCheck] Aggregator response for ${tokenId.slice(0, 16)}...:`);
+        console.log(`   - hasInclusionProof: ${!!response.inclusionProof}`);
+
+        if (!response.inclusionProof) {
+          console.log(`   ⚠️ No inclusionProof in response - treating as unspent`);
+          spent = false;
+        } else {
+          const proof = response.inclusionProof;
+          console.log(`   - authenticator: ${proof.authenticator !== null ? 'present' : 'null'}`);
+
+          // CRITICAL: Verify the hashpath cryptographically corresponds to our RequestId
+          // This prevents accepting a proof meant for a different RequestId
+          const pathResult = await proof.merkleTreePath.verify(
+            requestId.toBitString().toBigInt()
+          );
+
+          console.log(`   - pathValid: ${pathResult.isPathValid}`);
+          console.log(`   - pathIncluded: ${pathResult.isPathIncluded}`);
+
+          if (!pathResult.isPathValid) {
+            // Hashpath doesn't hash to claimed root - invalid proof
+            console.error(`   ❌ INVALID HASHPATH - does not hash to claimed root!`);
+            throw new Error("Invalid hashpath - does not verify against root");
+          } else if (pathResult.isPathIncluded && proof.authenticator !== null) {
+            // Valid INCLUSION proof: path leads to RequestId AND authenticator present
+            spent = true;
+            console.log(`💀 [Dev mode] Token ${tokenId.slice(0, 16)}... is SPENT (verified inclusion proof)`);
+          } else if (!pathResult.isPathIncluded && proof.authenticator === null) {
+            // Valid EXCLUSION proof: path shows deviation point, no authenticator
+            spent = false;
+            console.log(`✅ [Dev mode] Token ${tokenId.slice(0, 16)}... is UNSPENT (verified exclusion proof)`);
+          } else if (pathResult.isPathIncluded && proof.authenticator === null) {
+            // SECURITY: Path leads to our RequestId but no authenticator!
+            // This is INVALID - a rogue aggregator might be hiding the spent status
+            console.error(`   ❌ SECURITY VIOLATION: pathIncluded=true but authenticator=null!`);
+            console.error(`   This could indicate a rogue aggregator hiding spent status.`);
+            throw new Error("Invalid proof: path included but missing authenticator");
+          } else {
+            // Contradictory: authenticator present but path doesn't lead to RequestId
+            console.error(`   ❌ INVALID: authenticator present but pathIncluded=false`);
+            throw new Error("Invalid proof: authenticator present but path not included");
+          }
+        }
+      } else {
+        // PRODUCTION MODE: Use SDK's isTokenStateSpent with full verification
+        const { Token } = await import(
+          "@unicitylabs/state-transition-sdk/lib/token/Token"
+        );
+        const sdkToken = await Token.fromJSON(txfToken);
+        const pubKeyBytes = Buffer.from(publicKey, "hex");
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const isSpent = await (client as any).isTokenStateSpent(
+          trustBase,
+          sdkToken,
+          pubKeyBytes
+        );
+
+        spent = isSpent === true;
+      }
 
       // STORE IN CACHE - SPENT forever, UNSPENT with TTL
       this.cacheSpentState(cacheKey, spent);

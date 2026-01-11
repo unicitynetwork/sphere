@@ -23,6 +23,8 @@ import { OutboxRecoveryService } from "../services/OutboxRecoveryService";
 import { TokenRecoveryService } from "../services/TokenRecoveryService";
 import { L1_KEYS } from "../../L1/hooks/useL1Wallet";
 import { isNametagCorrupted } from "../../../../utils/tokenValidation";
+import { getTokenValidationService } from "../services/TokenValidationService";
+import { OutboxRepository } from "../../../../repositories/OutboxRepository";
 
 export const KEYS = {
   IDENTITY: ["wallet", "identity"],
@@ -229,7 +231,63 @@ export const useWallet = () => {
         return [];
       }
 
-      return walletRepo.getTokens();
+      let tokens = walletRepo.getTokens();
+
+      // Check for tokens with pending outbox entries (in-transit transfers)
+      // These should be filtered out as they're being transferred
+      const outboxRepo = OutboxRepository.getInstance();
+      const pendingEntries = outboxRepo.getPendingEntries();
+      if (pendingEntries.length > 0) {
+        const pendingTokenIds = new Set(pendingEntries.map(e => e.sourceTokenId));
+        const tokensInTransit = tokens.filter(t => pendingTokenIds.has(t.id));
+
+        if (tokensInTransit.length > 0) {
+          console.log(`📦 Found ${tokensInTransit.length} token(s) with pending outbox entries (in transit)`);
+          for (const token of tokensInTransit) {
+            console.log(`  🚀 Token ${token.id.slice(0, 16)}... is in transit (has outbox entry)`);
+          }
+          // Filter out tokens that are in transit (have pending outbox entries)
+          tokens = tokens.filter(t => !pendingTokenIds.has(t.id));
+        }
+      }
+
+      // Check for spent tokens on aggregator (prevents zombie token resurrection)
+      // This catches tokens that were spent but not properly removed from localStorage
+      if (tokens.length > 0 && identity.publicKey) {
+        console.log(`📦 [tokensQuery] Running spent check for ${tokens.length} token(s)...`);
+        try {
+          const validationService = getTokenValidationService();
+
+          // Clear UNSPENT cache entries to force fresh aggregator check
+          // SPENT entries remain cached (immutable)
+          validationService.clearUnspentCacheEntries();
+
+          const spentCheck = await validationService.checkSpentTokens(
+            tokens,
+            identity.publicKey,
+            { batchSize: 3 }
+          );
+
+          console.log(`📦 [tokensQuery] Spent check complete: ${spentCheck.spentTokens.length} spent, ${tokens.length - spentCheck.spentTokens.length} valid`);
+
+          if (spentCheck.spentTokens.length > 0) {
+            console.warn(`⚠️ Found ${spentCheck.spentTokens.length} spent token(s) on aggregator during wallet load`);
+            for (const spent of spentCheck.spentTokens) {
+              console.log(`  💀 Archiving spent token: ${spent.tokenId.slice(0, 16)}... (state: ${spent.stateHash.slice(0, 8)}...)`);
+              walletRepo.removeToken(spent.localId, 'spent-on-aggregator');
+            }
+            // Return updated token list after removing spent tokens
+            return walletRepo.getTokens();
+          }
+        } catch (err) {
+          // Don't fail wallet load if spent check fails - just log warning
+          console.warn('📦 [tokensQuery] Failed to check spent tokens:', err);
+        }
+      } else {
+        console.log(`📦 [tokensQuery] Skipping spent check: tokens=${tokens.length}, hasPublicKey=${!!identity.publicKey}`);
+      }
+
+      return tokens;
     },
     enabled: !!identityQuery.data?.address,
   });
@@ -396,6 +454,11 @@ export const useWallet = () => {
         null,
         signingService
       );
+
+      // Log the RequestId being committed (for spent detection debugging)
+      console.log(`🔑 [Transfer] RequestId committed: ${transferCommitment.requestId.toString()}`);
+      console.log(`   - sourceToken stateHash: ${(await sourceToken.state.calculateHash()).toJSON()}`);
+      console.log(`   - signingService.publicKey: ${Buffer.from(signingService.publicKey).toString("hex")}`);
 
       const client = ServiceProvider.stateTransitionClient;
       const response = await client.submitTransferCommitment(
