@@ -85,8 +85,9 @@ const UNICITY_TOKEN_TYPE_HEX = "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9
  */
 export interface RefreshProofsResult {
   totalTokens: number;
-  succeeded: number;
-  failed: number;
+  refreshed: number;    // Actually got new proofs from aggregator
+  kept: number;         // Couldn't refresh but original proofs were valid
+  failed: number;       // Couldn't refresh AND no valid original
   errors: Array<{ tokenId: string; error: string }>;
   duration: number;
 }
@@ -479,53 +480,42 @@ async function tryRecoverFromOutbox(
 }
 
 /**
- * Extract state hashes, requestIds and strip proofs from a TxfToken
- * Returns the modified token and the list of proof requests to make
+ * Collect proof requests from a TxfToken WITHOUT modifying it.
+ * Returns the list of proof requests needed for refresh.
  */
-function stripProofsAndCollectHashes(txf: TxfToken): {
-  stripped: TxfToken;
+function collectProofRequests(txf: TxfToken): {
   requests: ProofRequest[];
-  hasUncommittedTransactions: boolean;
+  hasTransactions: boolean;
 } {
   const requests: ProofRequest[] = [];
-  const stripped = JSON.parse(JSON.stringify(txf)) as TxfToken;
-  let hasUncommittedTransactions = false;
+  let hasTransactions = false;
 
   // Handle genesis proof
   // For genesis, we can derive the requestId from the tokenId
-  if (stripped.genesis) {
+  if (txf.genesis) {
     // Extract tokenId from genesis data for requestId derivation
-    const tokenId = stripped.genesis.data?.tokenId;
+    const tokenId = txf.genesis.data?.tokenId;
     requests.push({
       type: "genesis",
       tokenId: tokenId, // Will be used to derive requestId
     });
-    // Strip the proof (whether inclusion or exclusion) so we can refresh it
-    (stripped.genesis as { inclusionProof: TxfInclusionProof | null }).inclusionProof = null;
   }
 
   // Handle transaction proofs
   // For transactions, we CANNOT derive requestId from stateHash or any other field
   // We must use OutboxEntry recovery which has the full commitment data
-  if (stripped.transactions && stripped.transactions.length > 0) {
-    for (let i = 0; i < stripped.transactions.length; i++) {
-      const tx = stripped.transactions[i];
-      // All transactions need OutboxEntry recovery - we can't derive requestId
-      hasUncommittedTransactions = true;
+  if (txf.transactions && txf.transactions.length > 0) {
+    hasTransactions = true;
+    for (let i = 0; i < txf.transactions.length; i++) {
       requests.push({
         type: "transaction",
         index: i,
         // No tokenId or requestId - must use OutboxEntry recovery
       });
-      // Strip the proof
-      stripped.transactions[i] = {
-        ...tx,
-        inclusionProof: null,
-      };
     }
   }
 
-  return { stripped, requests, hasUncommittedTransactions };
+  return { requests, hasTransactions };
 }
 
 /**
@@ -533,18 +523,22 @@ function stripProofsAndCollectHashes(txf: TxfToken): {
  *
  * This function:
  * 1. Scans all loaded L3 tokens
- * 2. For tokens with existing proofs: re-fetches fresh proofs from the aggregator
- * 3. For tokens with uncommitted transactions: attempts recovery via OutboxEntry
- *    - Submits commitment if not already submitted (handles REQUEST_ID_EXISTS)
- *    - Waits for inclusion proof
- * 4. Updates the tokens in storage
+ * 2. Tries to fetch fresh proofs from the aggregator
+ * 3. Only updates tokens if ALL proofs were successfully fetched
+ * 4. Preserves original valid proofs if refresh fails
+ *
+ * Results:
+ * - refreshed: Actually got new proofs from aggregator
+ * - kept: Couldn't refresh but original proofs were valid (no changes made)
+ * - failed: Couldn't refresh AND no valid original proofs
  *
  * Usage from browser console: await window.devRefreshProofs()
  */
 export async function devRefreshProofs(): Promise<RefreshProofsResult> {
   const startTime = Date.now();
   const errors: Array<{ tokenId: string; error: string }> = [];
-  let succeeded = 0;
+  let refreshed = 0;
+  let kept = 0;
   let failed = 0;
 
   console.group("🔄 Dev: Refreshing Unicity Proofs");
@@ -566,7 +560,8 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
     console.groupEnd();
     return {
       totalTokens: 0,
-      succeeded: 0,
+      refreshed: 0,
+      kept: 0,
       failed: 0,
       errors: [],
       duration: Date.now() - startTime,
@@ -577,97 +572,64 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
   if (hasNametag && nametag?.token) {
     console.group(`🏷️ Nametag "${nametag.name}"`);
 
-    // Debug: log the raw nametag data from storage
-    console.log(`   Raw nametag from storage:`, {
-      name: nametag.name,
-      tokenType: typeof nametag.token,
-      tokenIsNull: nametag.token === null,
-      tokenIsUndefined: nametag.token === undefined,
-      format: nametag.format,
-      version: nametag.version,
-    });
-
     // The token is already an object from storage (NametagData.token is typed as object)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nametagTxf = nametag.token as any;
-
-    // Debug: log structure to help diagnose format differences
     const keys = Object.keys(nametagTxf);
-    console.log(`   Token structure keys (${keys.length}): ${keys.join(", ") || "(empty)"}`);
 
     if (keys.length === 0) {
       console.error("   ❌ Nametag token is empty - may need to re-mint");
-      console.log("   Raw token value:", nametag.token);
       errors.push({ tokenId: `nametag:${nametag.name}`, error: "Token data is empty" });
       failed++;
       console.groupEnd();
     } else if (!nametagTxf.genesis) {
       console.error("   ❌ Nametag token has no 'genesis' property");
-      console.log("   Full structure:", JSON.stringify(nametagTxf, null, 2).slice(0, 1000));
       errors.push({ tokenId: `nametag:${nametag.name}`, error: "Invalid token structure - no genesis" });
       failed++;
       console.groupEnd();
     } else {
-      // We have a valid nametag token with genesis
-      const genesis = nametagTxf.genesis;
-      console.log(`   Genesis keys: ${Object.keys(genesis).join(", ")}`);
+      // Check if original proof is valid (for fallback decision)
+      const originalProofValid = isInclusionProofNotExclusion(nametagTxf.genesis?.inclusionProof as TxfInclusionProof | null);
 
-      // Get the inclusion proof from genesis (SDK format: genesis.inclusionProof)
-      const genesisProof = genesis.inclusionProof;
-      if (!genesisProof) {
-        console.warn("   ⚠️ Genesis has no inclusionProof - may already be stripped or never had one");
-      }
+      // Try to fetch new proof
+      let newProof: TxfInclusionProof | null = null;
+      const genesisData = nametagTxf.genesis.data;
 
-      // Try to refresh the proof
-      let proof: TxfInclusionProof | null = null;
-
-      // For nametag proofs, we MUST reconstruct the MintCommitment to get the correct requestId
-      // (The stateHash in the authenticator is NOT the same as the requestId!)
-      const genesisData = genesis.data;
       if (genesisData && genesisData.salt) {
         try {
-          // Create a TxfGenesis-like structure for reconstruction
           const txfGenesis = {
             data: genesisData,
-            inclusionProof: genesisProof,
+            inclusionProof: nametagTxf.genesis.inclusionProof,
           } as TxfGenesis;
 
-          console.log(`   genesis: Reconstructing mint commitment to get correct requestId...`);
+          console.log(`   genesis: Reconstructing mint commitment...`);
           const result = await reconstructMintCommitment(txfGenesis);
           if (result.commitment) {
-            // Use toJSON() to get the hex string format that RequestId.fromJSON() expects
             const correctRequestId = result.commitment.requestId.toJSON();
-            console.log(`   genesis: Correct requestId (hex): ${correctRequestId.slice(0, 20)}...`);
-
-            // Try to fetch existing proof first
             console.log(`   genesis: Fetching proof by requestId...`);
-            proof = await fetchProofByRequestId(correctRequestId);
+            newProof = await fetchProofByRequestId(correctRequestId);
 
-            // Check if we got an INCLUSION proof vs EXCLUSION proof using SDK's InclusionProof class
-            // An exclusion proof means the commitment doesn't exist in the tree (tree was reset)
-            if (isInclusionProofNotExclusion(proof)) {
+            if (isInclusionProofNotExclusion(newProof)) {
               console.log(`   ✅ genesis: Inclusion proof fetched successfully`);
             } else {
-              // Got exclusion proof or no proof - need to resubmit commitment
-              // This happens when the aggregator tree has been reset
-              if (proof && !isInclusionProofNotExclusion(proof)) {
-                console.log(`   ⚠️ genesis: Got EXCLUSION proof (no authenticator) - tree was reset`);
+              // Try resubmission
+              if (newProof) {
+                console.log(`   ⚠️ genesis: Got EXCLUSION proof - tree was reset, resubmitting...`);
               } else {
-                console.log(`   genesis: No proof found`);
+                console.log(`   genesis: No proof found, resubmitting...`);
               }
-              console.log(`   genesis: Resubmitting commitment to get new inclusion proof...`);
               const submitResult = await submitMintCommitmentToAggregator(result.commitment);
               console.log(`   genesis: Submission result: ${submitResult.status}`);
               if (submitResult.success) {
-                proof = await waitForMintProofWithSDK(result.commitment, 60000);
-                if (isInclusionProofNotExclusion(proof)) {
+                newProof = await waitForMintProofWithSDK(result.commitment, 60000);
+                if (isInclusionProofNotExclusion(newProof)) {
                   console.log(`   ✅ genesis: New inclusion proof obtained after resubmission`);
-                } else if (proof) {
-                  console.warn(`   ⚠️ genesis: Got proof but still missing authenticator (exclusion proof)`);
-                  proof = null; // Don't use an exclusion proof
                 } else {
-                  console.warn(`   ⚠️ genesis: Timeout waiting for proof after resubmission`);
+                  newProof = null;
+                  console.warn(`   ⚠️ genesis: Failed to get valid proof after resubmission`);
                 }
+              } else {
+                newProof = null;
               }
             }
           } else {
@@ -681,30 +643,25 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
         console.warn(`   ❌ genesis: Missing genesis.data or salt for reconstruction`);
       }
 
-      if (proof) {
-        // Update the token with the new proof
-        nametagTxf.genesis.inclusionProof = proof;
-        const updatedNametag = {
-          ...nametag,
-          token: nametagTxf,
-        };
-        repo.setNametag(updatedNametag);
-        succeeded++;
+      // Decide: refreshed, kept, or failed
+      if (newProof) {
+        // Got new proof - update and save
+        nametagTxf.genesis.inclusionProof = newProof;
+        repo.setNametag({ ...nametag, token: nametagTxf });
+        refreshed++;
         console.log(`✅ Nametag proof refreshed`);
+      } else if (originalProofValid) {
+        // Couldn't refresh but original is valid - keep it (don't save anything)
+        kept++;
+        console.log(`ℹ️ Keeping original valid proof (couldn't refresh from aggregator)`);
       } else {
-        // Check if original proof is still valid - if so, that's OK
-        const originalProof = nametagTxf.genesis?.inclusionProof as TxfInclusionProof | null;
-        if (isInclusionProofNotExclusion(originalProof)) {
-          console.log(`ℹ️ Keeping original proof (new proof from aggregator incomplete)`);
-          console.log(`💡 The dev aggregator may not return complete proofs - your original token is still valid`);
-          succeeded++;
-        } else {
-          failed++;
-          errors.push({ tokenId: `nametag:${nametag.name}`, error: "Failed to refresh genesis proof - aggregator returns incomplete proofs" });
-        }
+        // Couldn't refresh AND original invalid
+        failed++;
+        errors.push({ tokenId: `nametag:${nametag.name}`, error: "Couldn't refresh and original proof invalid" });
+        console.warn(`❌ Failed - no valid proofs available`);
       }
+      console.groupEnd();
     }
-    console.groupEnd();
   }
 
   // Process tokens sequentially for clear progress tracking
@@ -734,149 +691,157 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
       continue;
     }
 
-    // Strip proofs and collect state hashes
-    const { stripped, requests, hasUncommittedTransactions } = stripProofsAndCollectHashes(txf);
+    // Collect proof requests WITHOUT stripping
+    const { requests, hasTransactions } = collectProofRequests(txf);
 
     if (requests.length === 0) {
-      console.log("ℹ️ No proofs to refresh (token has no proofs)");
-      succeeded++;
+      console.log("ℹ️ No proofs to refresh (token has no genesis/transactions)");
+      kept++;
       console.groupEnd();
       continue;
     }
 
-    console.log(`🔍 Processing ${requests.length} proof request(s)...`);
-    if (hasUncommittedTransactions) {
-      console.log(`⚠️ Token has uncommitted transactions - will attempt outbox recovery`);
+    console.log(`🔍 Processing ${requests.length} proof request(s) individually...`);
+    if (hasTransactions) {
+      console.log(`⚠️ Token has transactions - will attempt outbox recovery`);
     }
 
-    // Process each proof request
-    let allProofsSucceeded = true;
-    const proofErrors: string[] = [];
+    // Process each proof INDIVIDUALLY - update token proof-by-proof
+    // This supports different aggregators for different transactions
+    let anyProofRefreshed = false;
+    let anyProofFailed = false;
+    let tokenModified = false;
 
     for (const req of requests) {
       const { type, index } = req;
       const label = `${type}${index !== undefined ? ` #${index}` : ""}`;
 
-      let proof: TxfInclusionProof | null = null;
-
-      // Strategy for genesis proofs:
-      // 1. Reconstruct MintCommitment to get the correct requestId
-      // 2. Try fetching existing proof by requestId
-      // 3. If no proof (or exclusion proof), resubmit commitment
+      // Get the current/original proof for this request
+      let originalProof: TxfInclusionProof | null = null;
       if (type === "genesis") {
-        // Reconstruct MintCommitment from TxfGenesisData to get the correct requestId
-        const result = await reconstructMintCommitment(stripped.genesis);
+        originalProof = txf.genesis?.inclusionProof as TxfInclusionProof | null;
+      } else if (type === "transaction" && index !== undefined) {
+        originalProof = txf.transactions?.[index]?.inclusionProof as TxfInclusionProof | null;
+      }
+      const originalProofValid = isInclusionProofNotExclusion(originalProof);
+
+      let newProof: TxfInclusionProof | null = null;
+
+      // Strategy for genesis proofs
+      if (type === "genesis") {
+        const result = await reconstructMintCommitment(txf.genesis);
         if (result.commitment) {
           const derivedRequestId = result.commitment.requestId.toJSON();
-          console.log(`   ${label}: Derived requestId, fetching proof...`);
+          console.log(`   ${label}: Fetching proof...`);
 
-          // Try fetching existing proof first
-          proof = await fetchProofByRequestId(derivedRequestId);
+          newProof = await fetchProofByRequestId(derivedRequestId);
 
-          if (proof) {
-            // Check if this is an actual INCLUSION proof (has authenticator)
-            if (isInclusionProofNotExclusion(proof)) {
-              console.log(`   ✅ ${label}: Inclusion proof fetched successfully`);
+          if (isInclusionProofNotExclusion(newProof)) {
+            console.log(`   ✅ ${label}: Inclusion proof fetched`);
+          } else {
+            // Try resubmission
+            if (newProof) {
+              console.log(`   ⚠️ ${label}: Got EXCLUSION proof, resubmitting...`);
             } else {
-              console.log(`   ⚠️ ${label}: Got EXCLUSION proof (no authenticator) - tree was reset`);
-              proof = null; // Will trigger resubmission below
+              console.log(`   ${label}: No proof found, resubmitting...`);
             }
-          }
-
-          // If no valid proof, resubmit the commitment
-          if (!proof) {
-            console.log(`   ${label}: No valid proof - resubmitting mint commitment...`);
             const submitResult = await submitMintCommitmentToAggregator(result.commitment);
-            console.log(`   ${label}: Mint submission result: ${submitResult.status}`);
+            console.log(`   ${label}: Submission result: ${submitResult.status}`);
             if (submitResult.success) {
-              proof = await waitForMintProofWithSDK(result.commitment, 60000);
-              if (isInclusionProofNotExclusion(proof)) {
-                console.log(`   ✅ ${label}: New inclusion proof obtained after resubmission`);
-              } else if (proof) {
-                console.warn(`   ⚠️ ${label}: Got proof but still missing authenticator (exclusion proof)`);
-                proof = null; // Don't use an exclusion proof
+              newProof = await waitForMintProofWithSDK(result.commitment, 60000);
+              if (isInclusionProofNotExclusion(newProof)) {
+                console.log(`   ✅ ${label}: New proof obtained after resubmission`);
               } else {
-                console.warn(`   ⚠️ ${label}: Timeout waiting for mint proof after resubmission`);
+                newProof = null;
+                console.warn(`   ⚠️ ${label}: Failed to get valid proof`);
               }
+            } else {
+              newProof = null;
             }
           }
         } else {
-          console.warn(`   ❌ ${label}: Cannot reconstruct mint commitment: ${result.error}`);
+          console.warn(`   ❌ ${label}: Cannot reconstruct: ${result.error}`);
         }
       }
 
-      // Strategy 3: Transaction - use OutboxEntry recovery
-      // For transactions, we CANNOT derive requestId from any available data.
-      // The stateHash in authenticator is NOT the requestId!
-      // We must use OutboxEntry which has the full commitment data.
-      if (!proof && type === "transaction") {
-        console.log(`   ${label}: Attempting outbox recovery for transaction...`);
-        // Use forceResubmit=true to handle tree reset scenario
+      // Strategy for transaction proofs - use OutboxEntry recovery
+      if (type === "transaction") {
+        console.log(`   ${label}: Attempting outbox recovery...`);
         const recovery = await tryRecoverFromOutbox(token.id, true);
 
-        if (recovery.recovered && recovery.proof) {
-          // Verify we got an inclusion proof
-          if (isInclusionProofNotExclusion(recovery.proof)) {
-            proof = recovery.proof;
-            console.log(`   ✅ ${label}: ${recovery.message}`);
-          } else {
-            console.warn(`   ⚠️ ${label}: Recovery returned exclusion proof (no authenticator)`);
-          }
+        if (recovery.recovered && recovery.proof && isInclusionProofNotExclusion(recovery.proof)) {
+          newProof = recovery.proof;
+          console.log(`   ✅ ${label}: ${recovery.message}`);
         } else {
           console.warn(`   ⚠️ ${label}: ${recovery.message}`);
         }
       }
 
-      // Strategy 4: If still no proof, log detailed error with recovery tips
-      if (!proof) {
-        allProofsSucceeded = false;
-        let errorMsg: string;
+      // Decide what to do with this individual proof
+      if (newProof) {
+        // Got new proof - update this specific proof in the token
         if (type === "genesis") {
-          errorMsg = `${label}: failed to refresh genesis proof - mint commitment reconstruction failed`;
-        } else {
-          errorMsg = `${label}: transfer proof not found - no OutboxEntry available (received token?)`;
+          (txf.genesis as { inclusionProof: TxfInclusionProof | null }).inclusionProof = newProof;
+        } else if (type === "transaction" && index !== undefined) {
+          txf.transactions[index] = {
+            ...txf.transactions[index],
+            inclusionProof: newProof,
+          } as TxfTransaction;
+        }
+        anyProofRefreshed = true;
+        tokenModified = true;
+        console.log(`   🔄 ${label}: Updated with new proof`);
+      } else if (originalProofValid) {
+        // Couldn't get new proof but original is valid - keep it
+        console.log(`   ℹ️ ${label}: Keeping original valid proof`);
+      } else {
+        // Couldn't get new proof AND original was invalid - this is a failure
+        anyProofFailed = true;
+        console.warn(`   ❌ ${label}: No valid proof available`);
+        if (type === "transaction") {
           console.log(`   💡 If this is a received token, ask the sender to re-transfer`);
         }
-        proofErrors.push(errorMsg);
-        console.warn(`   ❌ ${errorMsg}`);
-        continue;
-      }
-
-      // Re-attach the proof to the stripped token
-      if (type === "genesis") {
-        (stripped.genesis as { inclusionProof: TxfInclusionProof | null }).inclusionProof = proof;
-      } else if (type === "transaction" && index !== undefined) {
-        stripped.transactions[index] = {
-          ...stripped.transactions[index],
-          inclusionProof: proof,
-        } as TxfTransaction;
       }
     }
 
-    // Create updated token
-    const updatedToken = new Token({
-      ...token,
-      jsonData: JSON.stringify(stripped),
-      status: allProofsSucceeded ? TokenStatus.CONFIRMED : token.status,
-    });
-
-    // Update in repository
-    try {
-      repo.updateToken(updatedToken);
-      if (allProofsSucceeded) {
-        succeeded++;
-        console.log(`✅ Token updated successfully`);
-      } else {
-        // Partial success - some proofs failed
+    // Save token if any proof was modified
+    if (tokenModified) {
+      const updatedToken = new Token({
+        ...token,
+        jsonData: JSON.stringify(txf),
+        status: anyProofFailed ? token.status : TokenStatus.CONFIRMED,
+      });
+      try {
+        repo.updateToken(updatedToken);
+        console.log(`💾 Token saved with updated proofs`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`❌ Failed to save token:`, msg);
+        errors.push({ tokenId: token.id, error: `Save error: ${msg}` });
         failed++;
-        errors.push({ tokenId: token.id, error: proofErrors.join("; ") });
-        console.warn(`⚠️ Token updated with partial proofs`);
+        console.groupEnd();
+        continue;
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`❌ Failed to update token:`, msg);
-      errors.push({ tokenId: token.id, error: `Update error: ${msg}` });
+    }
+
+    // Categorize the token result
+    if (anyProofRefreshed && !anyProofFailed) {
+      refreshed++;
+      console.log(`✅ Token: all proofs valid (some refreshed)`);
+    } else if (anyProofRefreshed && anyProofFailed) {
+      // Partial success - some refreshed, some failed
+      refreshed++;
+      errors.push({ tokenId: token.id, error: "Some proofs couldn't be refreshed" });
+      console.warn(`⚠️ Token: partial success (some proofs refreshed, some failed)`);
+    } else if (!anyProofFailed) {
+      // No refreshes but all originals were valid
+      kept++;
+      console.log(`ℹ️ Token: keeping all original valid proofs`);
+    } else {
+      // No refreshes and some proofs are invalid
       failed++;
+      errors.push({ tokenId: token.id, error: "Some proofs invalid and couldn't be refreshed" });
+      console.warn(`❌ Token: has invalid proofs that couldn't be refreshed`);
     }
 
     console.groupEnd();
@@ -886,7 +851,7 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
   window.dispatchEvent(new Event("wallet-updated"));
 
   const duration = Date.now() - startTime;
-  console.log(`\n✅ Complete: ${succeeded} succeeded, ${failed} failed (${duration}ms)`);
+  console.log(`\n✅ Complete: ${refreshed} refreshed, ${kept} kept, ${failed} failed (${duration}ms)`);
   if (failed > 0) {
     console.log(`\n💡 Tips for failed tokens:`);
     console.log(`   - If commitment wasn't submitted: check if OutboxEntry exists`);
@@ -897,7 +862,8 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
 
   return {
     totalTokens: totalToProcess,
-    succeeded,
+    refreshed,
+    kept,
     failed,
     errors,
     duration,
