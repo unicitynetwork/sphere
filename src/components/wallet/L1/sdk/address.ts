@@ -1,8 +1,5 @@
 import CryptoJS from "crypto-js";
-import elliptic from "elliptic";
-import { createBech32 } from "./bech32";
-
-const ec = new elliptic.ec("secp256k1");
+import { generateAddressInfo, ec } from "../../shared/utils/cryptoUtils";
 
 // secp256k1 curve order
 const CURVE_ORDER = BigInt(
@@ -152,26 +149,7 @@ export function generateHDAddressBIP32(
 
   const derived = deriveKeyAtPath(masterPriv, chainCode, fullPath);
 
-  const keyPair = ec.keyFromPrivate(derived.privateKey);
-  const publicKey = keyPair.getPublic(true, "hex");
-
-  // HASH160 (SHA256 -> RIPEMD160)
-  const sha = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKey)).toString();
-  const hash160 = CryptoJS.RIPEMD160(CryptoJS.enc.Hex.parse(sha)).toString();
-
-  const programBytes = Uint8Array.from(
-    hash160.match(/../g)!.map((x) => parseInt(x, 16))
-  );
-
-  const address = createBech32("alpha", 0, programBytes);
-
-  return {
-    address,
-    privateKey: derived.privateKey,
-    publicKey,
-    index,
-    path: fullPath,
-  };
+  return generateAddressInfo(derived.privateKey, index, fullPath);
 }
 
 // ============================================
@@ -198,29 +176,7 @@ export function generateAddressFromMasterKey(
   // Use left 32 bytes for private key
   const childPrivateKey = hmacOutput.substring(0, 64);
 
-  // Generate key pair from the derived key
-  const keyPair = ec.keyFromPrivate(childPrivateKey);
-  const publicKey = keyPair.getPublic(true, "hex");
-
-  // HASH160 (SHA256 -> RIPEMD160)
-  const sha = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKey)).toString();
-  const hash160 = CryptoJS.RIPEMD160(CryptoJS.enc.Hex.parse(sha)).toString();
-
-  // Witness program = 20 bytes of HASH160
-  const programBytes = Uint8Array.from(
-    hash160.match(/../g)!.map((x) => parseInt(x, 16))
-  );
-
-  // Bech32 encode with alpha prefix
-  const address = createBech32("alpha", 0, programBytes);
-
-  return {
-    address,
-    privateKey: childPrivateKey,
-    publicKey,
-    index,
-    path: derivationPath,
-  };
+  return generateAddressInfo(childPrivateKey, index, derivationPath);
 }
 
 // ============================================
@@ -259,27 +215,7 @@ export function generateHDAddress(
   index: number
 ) {
   const child = deriveChildKey(masterPriv, chainCode, index);
+  const path = `m/44'/0'/0'/${index}`;
 
-  const keyPair = ec.keyFromPrivate(child.privateKey);
-  const publicKey = keyPair.getPublic(true, "hex");
-
-  // HASH160 (SHA256 -> RIPEMD)
-  const sha = CryptoJS.SHA256(CryptoJS.enc.Hex.parse(publicKey)).toString();
-  const hash160 = CryptoJS.RIPEMD160(CryptoJS.enc.Hex.parse(sha)).toString();
-
-  // witness program = 20 bytes of HASH160
-  const programBytes = Uint8Array.from(
-    hash160.match(/../g)!.map((x) => parseInt(x, 16))
-  );
-
-  // Bech32 encode
-  const address = createBech32("alpha", 0, programBytes);
-
-  return {
-    address,
-    privateKey: child.privateKey,
-    publicKey,
-    index,
-    path: `m/44'/0'/0'/${index}`,
-  };
+  return generateAddressInfo(child.privateKey, index, path);
 }

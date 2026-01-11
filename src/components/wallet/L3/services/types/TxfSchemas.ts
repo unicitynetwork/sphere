@@ -56,8 +56,9 @@ export const TxfInclusionProofSchema = z.object({
 export const TxfGenesisDataSchema = z.object({
   tokenId: hexString64,
   tokenType: hexString64,
-  coinData: z.array(z.tuple([z.string(), z.string()])),
-  tokenData: z.string(),
+  coinData: z.array(z.tuple([z.string(), z.string()])).optional().default([]),
+  // tokenData can be null/undefined in stored data, coerce to empty string
+  tokenData: z.string().nullable().optional().transform((v) => v ?? ""),
   salt: hexString64,
   recipient: z.string(),
   recipientDataHash: z.string().nullable(),
@@ -70,7 +71,8 @@ export const TxfGenesisSchema = z.object({
 });
 
 export const TxfStateSchema = z.object({
-  data: z.string(),
+  // state.data can be null/undefined in stored data, coerce to empty string
+  data: z.string().nullable().optional().transform((v) => v ?? ""),
   predicate: z.string(),
 });
 
@@ -149,7 +151,13 @@ export function safeParseTxfToken(data: unknown): z.infer<typeof TxfTokenSchema>
   if (result.success) {
     return result.data;
   }
+  // Log detailed errors for debugging
   console.warn("TxfToken validation failed:", result.error.format());
+  // Show specific field errors
+  const flatErrors = result.error.flatten();
+  if (Object.keys(flatErrors.fieldErrors).length > 0) {
+    console.warn("Field errors:", flatErrors.fieldErrors);
+  }
   return null;
 }
 

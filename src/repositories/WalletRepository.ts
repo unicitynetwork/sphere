@@ -1,10 +1,8 @@
 import { Token, Wallet, TokenStatus } from "../components/wallet/L3/data/model";
 import type { TombstoneEntry, TxfToken, TxfTransaction } from "../components/wallet/L3/services/types/TxfTypes";
 import { v4 as uuidv4 } from "uuid";
-
-const LEGACY_STORAGE_KEY = "unicity_wallet_data";
-const STORAGE_KEY_PREFIX = "unicity_wallet_";
-const STORAGE_KEY_HISTORY = "unicity_transaction_history";
+import { STORAGE_KEYS, STORAGE_KEY_GENERATORS, STORAGE_KEY_PREFIXES } from "../config/storageKeys";
+import { assertValidNametagData, sanitizeNametagForLogging, validateTokenJson } from "../utils/tokenValidation";
 
 /**
  * Interface for nametag data (one per identity)
@@ -80,7 +78,7 @@ export class WalletRepository {
   static checkNametagForAddress(address: string): NametagData | null {
     if (!address) return null;
 
-    const storageKey = `${STORAGE_KEY_PREFIX}${address}`;
+    const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
     try {
       const json = localStorage.getItem(storageKey);
       if (json) {
@@ -100,7 +98,7 @@ export class WalletRepository {
   static checkTokensForAddress(address: string): boolean {
     if (!address) return false;
 
-    const storageKey = `${STORAGE_KEY_PREFIX}${address}`;
+    const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
     try {
       const json = localStorage.getItem(storageKey);
       if (json) {
@@ -117,11 +115,28 @@ export class WalletRepository {
    * Save nametag for an address without loading the full wallet
    * Used during onboarding when we fetch nametag from IPNS
    * Creates minimal wallet structure if needed
+   *
+   * CRITICAL: Validates nametag data before saving to prevent corruption.
+   * Will throw if nametag.token is empty or invalid.
    */
   static saveNametagForAddress(address: string, nametag: NametagData): void {
     if (!address || !nametag) return;
 
-    const storageKey = `${STORAGE_KEY_PREFIX}${address}`;
+    // CRITICAL VALIDATION: Prevent saving corrupted nametag data
+    // This check prevents the bug where `token: {}` was saved
+    try {
+      assertValidNametagData(nametag, "saveNametagForAddress");
+    } catch (validationError) {
+      console.error("❌ BLOCKED: Attempted to save invalid nametag data:", {
+        address: address.slice(0, 20) + "...",
+        nametagInfo: sanitizeNametagForLogging(nametag),
+        error: validationError instanceof Error ? validationError.message : String(validationError),
+      });
+      // Do NOT save corrupted data - throw to alert caller
+      throw validationError;
+    }
+
+    const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
     try {
       // Load existing wallet data or create minimal structure
       let walletData: StoredWallet;
@@ -145,6 +160,7 @@ export class WalletRepository {
       console.log(`💾 Saved IPNS-fetched nametag "${nametag.name}" for address ${address.slice(0, 20)}...`);
     } catch (error) {
       console.error("Error saving nametag for address:", error);
+      throw error; // Re-throw to alert caller of storage failure
     }
   }
 
@@ -178,7 +194,7 @@ export class WalletRepository {
    * Generate storage key for a specific address
    */
   private getStorageKey(address: string): string {
-    return `${STORAGE_KEY_PREFIX}${address}`;
+    return STORAGE_KEY_GENERATORS.walletByAddress(address);
   }
 
   /**
@@ -191,7 +207,7 @@ export class WalletRepository {
     }
 
     try {
-      const legacyJson = localStorage.getItem(LEGACY_STORAGE_KEY);
+      const legacyJson = localStorage.getItem(STORAGE_KEYS.WALLET_DATA_LEGACY);
       if (!legacyJson) {
         this._migrationComplete = true;
         return;
@@ -217,13 +233,13 @@ export class WalletRepository {
       // Check if already migrated
       if (localStorage.getItem(newKey)) {
         console.log("Wallet already migrated, removing legacy key");
-        localStorage.removeItem(LEGACY_STORAGE_KEY);
+        localStorage.removeItem(STORAGE_KEYS.WALLET_DATA_LEGACY);
         this._migrationComplete = true;
         return;
       }
 
       localStorage.setItem(newKey, legacyJson);
-      localStorage.removeItem(LEGACY_STORAGE_KEY);
+      localStorage.removeItem(STORAGE_KEYS.WALLET_DATA_LEGACY);
       console.log(`Successfully migrated wallet for ${parsed.address}`);
       this._migrationComplete = true;
     } catch (error) {
@@ -356,7 +372,7 @@ export class WalletRepository {
   // Transaction History Methods
   private loadTransactionHistory() {
     try {
-      const json = localStorage.getItem(STORAGE_KEY_HISTORY);
+      const json = localStorage.getItem(STORAGE_KEYS.TRANSACTION_HISTORY);
       if (json) {
         this._transactionHistory = JSON.parse(json);
       }
@@ -368,7 +384,7 @@ export class WalletRepository {
 
   private saveTransactionHistory() {
     try {
-      localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(this._transactionHistory));
+      localStorage.setItem(STORAGE_KEYS.TRANSACTION_HISTORY, JSON.stringify(this._transactionHistory));
     } catch (error) {
       console.error("Failed to save transaction history", error);
     }
@@ -475,6 +491,30 @@ export class WalletRepository {
       return;
     }
 
+    // CRITICAL: Validate token data before storing
+    if (token.jsonData) {
+      try {
+        const tokenJson = JSON.parse(token.jsonData);
+        const validation = validateTokenJson(tokenJson, {
+          context: `addToken(${token.id})`,
+          requireInclusionProof: false, // Proofs may be stripped in some flows
+        });
+        if (!validation.isValid) {
+          console.error(`❌ BLOCKED: Attempted to add token with invalid data:`, {
+            tokenId: token.id,
+            errors: validation.errors,
+          });
+          throw new Error(`Invalid token data: ${validation.errors[0]}`);
+        }
+      } catch (parseError) {
+        if (parseError instanceof SyntaxError) {
+          console.error(`❌ BLOCKED: Token jsonData is not valid JSON:`, token.id);
+          throw new Error(`Token jsonData is not valid JSON`);
+        }
+        throw parseError;
+      }
+    }
+
     const currentTokens = this._wallet.tokens;
 
     const isDuplicate = currentTokens.some((existing) =>
@@ -533,6 +573,30 @@ export class WalletRepository {
     if (!this._wallet) {
       console.error("💾 Repository: Wallet not initialized!");
       return;
+    }
+
+    // CRITICAL: Validate token data before storing
+    if (token.jsonData) {
+      try {
+        const tokenJson = JSON.parse(token.jsonData);
+        const validation = validateTokenJson(tokenJson, {
+          context: `updateToken(${token.id})`,
+          requireInclusionProof: false, // Proofs may be stripped in some flows
+        });
+        if (!validation.isValid) {
+          console.error(`❌ BLOCKED: Attempted to update token with invalid data:`, {
+            tokenId: token.id,
+            errors: validation.errors,
+          });
+          throw new Error(`Invalid token data: ${validation.errors[0]}`);
+        }
+      } catch (parseError) {
+        if (parseError instanceof SyntaxError) {
+          console.error(`❌ BLOCKED: Token jsonData is not valid JSON:`, token.id);
+          throw new Error(`Token jsonData is not valid JSON`);
+        }
+        throw parseError;
+      }
     }
 
     // Find the existing token by genesis tokenId
@@ -678,7 +742,7 @@ export class WalletRepository {
       localStorage.removeItem(storageKey);
     }
     // Also remove legacy key if it exists
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    localStorage.removeItem(STORAGE_KEYS.WALLET_DATA_LEGACY);
     this._wallet = null;
     this._currentAddress = null;
     this._nametag = null;
@@ -710,18 +774,18 @@ export class WalletRepository {
   static clearAllWalletStorage(): void {
     console.log("🗑️ Clearing all wallet storage from localStorage...");
 
-    // Find and remove all keys that start with STORAGE_KEY_PREFIX
+    // Find and remove all keys that start with wallet address prefix
     const keysToRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key && key.startsWith(STORAGE_KEY_PREFIX)) {
+      if (key && key.startsWith(STORAGE_KEY_PREFIXES.WALLET_ADDRESS)) {
         keysToRemove.push(key);
       }
     }
 
     // Also remove legacy key and transaction history
-    keysToRemove.push(LEGACY_STORAGE_KEY);
-    keysToRemove.push(STORAGE_KEY_HISTORY);
+    keysToRemove.push(STORAGE_KEYS.WALLET_DATA_LEGACY);
+    keysToRemove.push(STORAGE_KEYS.TRANSACTION_HISTORY);
 
     // Remove all found keys
     for (const key of keysToRemove) {
@@ -746,11 +810,26 @@ export class WalletRepository {
   /**
    * Set the nametag for the current wallet/identity
    * Only one nametag is allowed per identity
+   *
+   * CRITICAL: Validates nametag data before saving to prevent corruption.
+   * Will throw if nametag.token is empty or invalid.
    */
   setNametag(nametag: NametagData): void {
     if (!this._wallet) {
       console.error("Cannot set nametag: wallet not initialized");
       return;
+    }
+
+    // CRITICAL VALIDATION: Prevent saving corrupted nametag data
+    try {
+      assertValidNametagData(nametag, "setNametag");
+    } catch (validationError) {
+      console.error("❌ BLOCKED: Attempted to set invalid nametag data:", {
+        address: this._wallet.address.slice(0, 20) + "...",
+        nametagInfo: sanitizeNametagForLogging(nametag),
+        error: validationError instanceof Error ? validationError.message : String(validationError),
+      });
+      throw validationError;
     }
 
     this._nametag = nametag;

@@ -26,6 +26,8 @@ import { getBootstrapPeers, getConfiguredCustomPeers, getBackendPeerId, getAllBa
 // Fast HTTP-based IPNS resolution and content fetching (target: <2s sync)
 import { getIpfsHttpResolver } from "./IpfsHttpResolver";
 import { getIpfsMetrics, type IpfsMetricsSnapshot, type IpfsSource } from "./IpfsMetrics";
+import { STORAGE_KEY_PREFIXES } from "../../../../config/storageKeys";
+import { isNametagCorrupted } from "../../../../utils/tokenValidation";
 
 // Configure @noble/ed25519 to use sync sha512 (required for getPublicKey without WebCrypto)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -138,9 +140,6 @@ interface IpnsProgressiveResult {
 
 const HKDF_INFO = "ipfs-storage-ed25519-v1";
 const SYNC_DEBOUNCE_MS = 5000;
-const VERSION_STORAGE_PREFIX = "ipfs_version_";
-const CID_STORAGE_PREFIX = "ipfs_last_cid_";
-const PENDING_IPNS_PREFIX = "ipfs_pending_ipns_";
 
 // ==========================================
 // IpfsStorageService
@@ -509,8 +508,8 @@ export class IpfsStorageService {
     if (oldIpnsName === newIpnsName) return;
 
     // Migrate version counter
-    const oldVersionKey = `${VERSION_STORAGE_PREFIX}${oldIpnsName}`;
-    const newVersionKey = `${VERSION_STORAGE_PREFIX}${newIpnsName}`;
+    const oldVersionKey = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${oldIpnsName}`;
+    const newVersionKey = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${newIpnsName}`;
     const version = localStorage.getItem(oldVersionKey);
     if (version && !localStorage.getItem(newVersionKey)) {
       localStorage.setItem(newVersionKey, version);
@@ -519,8 +518,8 @@ export class IpfsStorageService {
     }
 
     // Migrate last CID
-    const oldCidKey = `${CID_STORAGE_PREFIX}${oldIpnsName}`;
-    const newCidKey = `${CID_STORAGE_PREFIX}${newIpnsName}`;
+    const oldCidKey = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${oldIpnsName}`;
+    const newCidKey = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${newIpnsName}`;
     const lastCid = localStorage.getItem(oldCidKey);
     if (lastCid && !localStorage.getItem(newCidKey)) {
       localStorage.setItem(newCidKey, lastCid);
@@ -591,14 +590,12 @@ export class IpfsStorageService {
   // IPNS Publishing
   // ==========================================
 
-  private readonly IPNS_SEQ_STORAGE_PREFIX = "ipns_seq_";
-
   /**
    * Get the last IPNS sequence number from storage
    */
   private getIpnsSequenceNumber(): bigint {
     if (!this.cachedIpnsName) return 0n;
-    const key = `${this.IPNS_SEQ_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPNS_SEQ}${this.cachedIpnsName}`;
     const stored = localStorage.getItem(key);
     return stored ? BigInt(stored) : 0n;
   }
@@ -608,7 +605,7 @@ export class IpfsStorageService {
    */
   private setIpnsSequenceNumber(seq: bigint): void {
     if (!this.cachedIpnsName) return;
-    const key = `${this.IPNS_SEQ_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPNS_SEQ}${this.cachedIpnsName}`;
     localStorage.setItem(key, seq.toString());
   }
 
@@ -1493,7 +1490,7 @@ export class IpfsStorageService {
    */
   private getVersionCounter(): number {
     if (!this.cachedIpnsName) return 0;
-    const key = `${VERSION_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${this.cachedIpnsName}`;
     return parseInt(localStorage.getItem(key) || "0", 10);
   }
 
@@ -1502,7 +1499,7 @@ export class IpfsStorageService {
    */
   private incrementVersionCounter(): number {
     if (!this.cachedIpnsName) return 1;
-    const key = `${VERSION_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${this.cachedIpnsName}`;
     const current = this.getVersionCounter();
     const next = current + 1;
     localStorage.setItem(key, String(next));
@@ -1514,7 +1511,7 @@ export class IpfsStorageService {
    */
   private setVersionCounter(version: number): void {
     if (!this.cachedIpnsName) return;
-    const key = `${VERSION_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${this.cachedIpnsName}`;
     localStorage.setItem(key, String(version));
   }
 
@@ -1523,7 +1520,7 @@ export class IpfsStorageService {
    */
   private getLastCid(): string | null {
     if (!this.cachedIpnsName) return null;
-    const key = `${CID_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${this.cachedIpnsName}`;
     return localStorage.getItem(key);
   }
 
@@ -1532,7 +1529,7 @@ export class IpfsStorageService {
    */
   private setLastCid(cid: string): void {
     if (!this.cachedIpnsName) return;
-    const key = `${CID_STORAGE_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${this.cachedIpnsName}`;
     localStorage.setItem(key, cid);
   }
 
@@ -1545,7 +1542,7 @@ export class IpfsStorageService {
    */
   private getPendingIpnsPublish(): string | null {
     if (!this.cachedIpnsName) return null;
-    const key = `${PENDING_IPNS_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_PENDING_IPNS}${this.cachedIpnsName}`;
     return localStorage.getItem(key);
   }
 
@@ -1554,7 +1551,7 @@ export class IpfsStorageService {
    */
   private setPendingIpnsPublish(cid: string): void {
     if (!this.cachedIpnsName) return;
-    const key = `${PENDING_IPNS_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_PENDING_IPNS}${this.cachedIpnsName}`;
     localStorage.setItem(key, cid);
     console.log(`📦 IPNS publish marked as pending for CID: ${cid.slice(0, 16)}...`);
   }
@@ -1564,7 +1561,7 @@ export class IpfsStorageService {
    */
   private clearPendingIpnsPublish(): void {
     if (!this.cachedIpnsName) return;
-    const key = `${PENDING_IPNS_PREFIX}${this.cachedIpnsName}`;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_PENDING_IPNS}${this.cachedIpnsName}`;
     localStorage.removeItem(key);
   }
 
@@ -2057,13 +2054,20 @@ export class IpfsStorageService {
     const rawTombstones = (remoteTxf as Record<string, unknown>)._tombstones;
     console.log(`📦 Raw remote _tombstones field:`, rawTombstones);
 
-    const { tokens: remoteTokens, nametag, tombstones: remoteTombstones, archivedTokens: remoteArchived, forkedTokens: remoteForked, outboxEntries: remoteOutbox } = parseTxfStorageData(remoteTxf);
+    const { tokens: remoteTokens, nametag, tombstones: remoteTombstones, archivedTokens: remoteArchived, forkedTokens: remoteForked, outboxEntries: remoteOutbox, mintOutboxEntries: remoteMintOutbox } = parseTxfStorageData(remoteTxf);
 
     // Import outbox entries from remote (CRITICAL for transfer recovery)
     if (remoteOutbox && remoteOutbox.length > 0) {
       const outboxRepo = OutboxRepository.getInstance();
       outboxRepo.importFromRemote(remoteOutbox);
       console.log(`📦 Imported ${remoteOutbox.length} outbox entries from remote`);
+    }
+
+    // Import mint outbox entries from remote (CRITICAL for mint recovery)
+    if (remoteMintOutbox && remoteMintOutbox.length > 0) {
+      const outboxRepo = OutboxRepository.getInstance();
+      outboxRepo.importMintEntriesFromRemote(remoteMintOutbox);
+      console.log(`📦 Imported ${remoteMintOutbox.length} mint outbox entries from remote`);
     }
 
     // Debug: Log parsed tombstones (now TombstoneEntry[])
@@ -2235,10 +2239,15 @@ export class IpfsStorageService {
     // IMPORT METADATA & ARCHIVES
     // ==========================================
 
-    // Import nametag if local doesn't have one
+    // Import nametag if local doesn't have one AND remote nametag is valid
     if (nametag && !walletRepo.getNametag()) {
-      walletRepo.setNametag(nametag);
-      console.log(`📦 Imported nametag "${nametag.name}" from remote`);
+      // Double-check validation (parseTxfStorageData already validates, but be defensive)
+      if (isNametagCorrupted(nametag)) {
+        console.warn("📦 Skipping corrupted nametag import from IPFS - will be cleared on next sync");
+      } else {
+        walletRepo.setNametag(nametag);
+        console.log(`📦 Imported nametag "${nametag.name}" from remote`);
+      }
     }
 
     // Merge archived and forked tokens from remote
@@ -2727,7 +2736,7 @@ export class IpfsStorageService {
               }
 
               // Merge archived, forked tokens, and outbox entries from remote
-              const { archivedTokens: remoteArchived, forkedTokens: remoteForked, outboxEntries: remoteOutbox } = parseTxfStorageData(remoteTxf);
+              const { archivedTokens: remoteArchived, forkedTokens: remoteForked, outboxEntries: remoteOutbox, mintOutboxEntries: remoteMintOutbox } = parseTxfStorageData(remoteTxf);
               if (remoteArchived.size > 0) {
                 const archivedMergedCount = walletRepo.mergeArchivedTokens(remoteArchived);
                 if (archivedMergedCount > 0) {
@@ -2746,11 +2755,22 @@ export class IpfsStorageService {
                 outboxRepo.importFromRemote(remoteOutbox);
                 console.log(`📦 Imported ${remoteOutbox.length} outbox entries from remote during conflict resolution`);
               }
+              // Import mint outbox entries from remote (CRITICAL for mint recovery)
+              if (remoteMintOutbox && remoteMintOutbox.length > 0) {
+                const outboxRepo = OutboxRepository.getInstance();
+                outboxRepo.importMintEntriesFromRemote(remoteMintOutbox);
+                console.log(`📦 Imported ${remoteMintOutbox.length} mint outbox entries from remote during conflict resolution`);
+              }
 
               // Also sync nametag from remote if local doesn't have one
               if (!nametag && mergeResult.merged._nametag) {
-                walletRepo.setNametag(mergeResult.merged._nametag);
-                console.log(`📦 Synced nametag "${mergeResult.merged._nametag.name}" from IPFS to local`);
+                // Validate before setting - prevent importing corrupted nametag
+                if (isNametagCorrupted(mergeResult.merged._nametag)) {
+                  console.warn("📦 Skipping corrupted nametag from conflict resolution - will be cleared on next sync");
+                } else {
+                  walletRepo.setNametag(mergeResult.merged._nametag);
+                  console.log(`📦 Synced nametag "${mergeResult.merged._nametag.name}" from IPFS to local`);
+                }
               }
 
               // Extract tokens from merged data for re-sync
@@ -2816,6 +2836,7 @@ export class IpfsStorageService {
       const outboxRepo = OutboxRepository.getInstance();
       outboxRepo.setCurrentAddress(wallet.address);
       const outboxEntries = outboxRepo.getAllForSync();
+      const mintOutboxEntries = outboxRepo.getAllMintEntriesForSync();
 
       const meta: Omit<TxfMeta, "formatVersion"> = {
         version: newVersion,
@@ -2824,9 +2845,9 @@ export class IpfsStorageService {
         lastCid: this.getLastCid() || undefined,
       };
 
-      const txfStorageData = buildTxfStorageData(tokensToSync, meta, nametag || undefined, tombstones, archivedTokens, forkedTokens, outboxEntries);
-      if (tombstones.length > 0 || archivedTokens.size > 0 || forkedTokens.size > 0 || outboxEntries.length > 0) {
-        console.log(`📦 Including ${tombstones.length} tombstone(s), ${archivedTokens.size} archived, ${forkedTokens.size} forked, ${outboxEntries.length} outbox in sync`);
+      const txfStorageData = buildTxfStorageData(tokensToSync, meta, nametag || undefined, tombstones, archivedTokens, forkedTokens, outboxEntries, mintOutboxEntries);
+      if (tombstones.length > 0 || archivedTokens.size > 0 || forkedTokens.size > 0 || outboxEntries.length > 0 || mintOutboxEntries.length > 0) {
+        console.log(`📦 Including ${tombstones.length} tombstone(s), ${archivedTokens.size} archived, ${forkedTokens.size} forked, ${outboxEntries.length} outbox, ${mintOutboxEntries.length} mint outbox in sync`);
       }
 
       // 4. Ensure backend is connected before storing
@@ -3376,6 +3397,36 @@ export class IpfsStorageService {
     httpResolver.invalidateIpnsCache();
     getIpfsMetrics().reset();
     console.log("📦 IPFS cache and metrics cleared");
+  }
+
+  /**
+   * Clear corrupted nametag from both local and IPFS storage.
+   * This breaks the import loop by publishing clean state to IPFS.
+   *
+   * Call this when corrupted nametag is detected to ensure the corruption
+   * is cleared from BOTH local storage AND the remote IPFS backup.
+   */
+  async clearCorruptedNametagAndSync(): Promise<void> {
+    console.log("🧹 Clearing corrupted nametag from local and IPFS storage...");
+
+    // 1. Clear from local storage
+    const walletRepo = WalletRepository.getInstance();
+    try {
+      walletRepo.clearNametag();
+      console.log("✅ Cleared corrupted nametag from local storage");
+    } catch (error) {
+      console.error("Failed to clear local nametag:", error);
+    }
+
+    // 2. Force sync to IPFS to overwrite remote with clean state (no nametag)
+    // This prevents the next sync from re-importing the corrupted data
+    try {
+      await this.syncNow({ forceIpnsPublish: true });
+      console.log("✅ Published clean state to IPFS (corrupted nametag removed)");
+    } catch (error) {
+      console.error("Failed to sync clean state to IPFS:", error);
+      // Even if IPFS sync fails, local is cleared - IPFS will be fixed on next successful sync
+    }
   }
 
   // ==========================================

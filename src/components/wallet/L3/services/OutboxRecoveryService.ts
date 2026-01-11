@@ -22,17 +22,28 @@
  */
 
 import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment";
-import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
+import { MintCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/MintCommitment";
+import { MintTransactionData } from "@unicitylabs/state-transition-sdk/lib/transaction/MintTransactionData";
+import { waitInclusionProofWithDevBypass } from "../../../../utils/devTools";
+import { Token } from "@unicitylabs/state-transition-sdk/lib/token/Token";
+import { TokenType } from "@unicitylabs/state-transition-sdk/lib/token/TokenType";
+import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenState";
+import { TokenId } from "@unicitylabs/state-transition-sdk/lib/token/TokenId";
+import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
+import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
+import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
 import { OutboxRepository } from "../../../../repositories/OutboxRepository";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
 import { ServiceProvider } from "./ServiceProvider";
 import type { NostrService } from "./NostrService";
 import type { IdentityManager } from "./IdentityManager";
 import type {
   OutboxEntry,
+  MintOutboxEntry,
   RecoveryResult,
   RecoveryDetail,
 } from "./types/OutboxTypes";
+// Note: isMintRecoverable is available but we use getMintEntriesForRecovery() instead
 import { IpfsStorageService } from "./IpfsStorageService";
 import { TokenRecoveryService } from "./TokenRecoveryService";
 
@@ -83,21 +94,25 @@ export class OutboxRecoveryService {
   }
 
   /**
-   * Check if there are any pending entries that need recovery
+   * Check if there are any pending entries that need recovery (transfers or mints)
    */
   hasPendingRecovery(walletAddress: string): boolean {
     const outboxRepo = OutboxRepository.getInstance();
     outboxRepo.setCurrentAddress(walletAddress);
-    return outboxRepo.getPendingCount() > 0;
+    const pendingTransfers = outboxRepo.getPendingCount();
+    const pendingMints = outboxRepo.getPendingMintEntries().length;
+    return pendingTransfers > 0 || pendingMints > 0;
   }
 
   /**
-   * Get count of pending entries
+   * Get count of pending entries (transfers + mints)
    */
   getPendingCount(walletAddress: string): number {
     const outboxRepo = OutboxRepository.getInstance();
     outboxRepo.setCurrentAddress(walletAddress);
-    return outboxRepo.getPendingCount();
+    const pendingTransfers = outboxRepo.getPendingCount();
+    const pendingMints = outboxRepo.getPendingMintEntries().length;
+    return pendingTransfers + pendingMints;
   }
 
   // ==========================================
@@ -148,24 +163,59 @@ export class OutboxRecoveryService {
     const outboxRepo = OutboxRepository.getInstance();
     outboxRepo.setCurrentAddress(this.walletAddress);
 
-    const pendingCount = outboxRepo.getPendingCount();
-    if (pendingCount === 0) return; // Nothing to do
+    // Check both transfer and mint entries
+    const pendingTransfers = outboxRepo.getPendingEntries();
+    const pendingMints = outboxRepo.getMintEntriesForRecovery();
+    const totalPending = pendingTransfers.length + pendingMints.length;
+
+    if (totalPending === 0) return; // Nothing to do
 
     // Get entries that are ready for retry (respect backoff)
-    const pendingEntries = outboxRepo.getPendingEntries();
-    const readyForRetry = pendingEntries.filter(entry => this.isReadyForRetry(entry));
+    const transfersReadyForRetry = pendingTransfers.filter(entry => this.isReadyForRetry(entry));
+    const mintsReadyForRetry = pendingMints.filter(entry => this.isMintReadyForRetry(entry));
+    const totalReady = transfersReadyForRetry.length + mintsReadyForRetry.length;
 
-    if (readyForRetry.length === 0) {
+    if (totalReady === 0) {
       // All entries in backoff, don't log every 60s
       return;
     }
 
-    console.log(`📤 OutboxRecovery: Periodic check - ${readyForRetry.length}/${pendingCount} entries ready for retry`);
+    console.log(`📤 OutboxRecovery: Periodic check - ${totalReady}/${totalPending} entries ready for retry (transfers: ${transfersReadyForRetry.length}, mints: ${mintsReadyForRetry.length})`);
 
-    await this.recoverPendingTransfers(this.walletAddress, this.nostrServiceRef);
+    // Recover transfers
+    if (transfersReadyForRetry.length > 0) {
+      await this.recoverPendingTransfers(this.walletAddress, this.nostrServiceRef);
+    }
+
+    // Recover mints
+    if (mintsReadyForRetry.length > 0) {
+      await this.recoverPendingMints(this.walletAddress);
+    }
 
     // Cleanup old COMPLETED entries only (not pending ones - those may complete later)
     outboxRepo.cleanupCompleted(COMPLETED_CLEANUP_AGE_MS);
+  }
+
+  /**
+   * Check if a mint entry is ready for retry based on exponential backoff
+   */
+  private isMintReadyForRetry(entry: MintOutboxEntry): boolean {
+    if (entry.status === "FAILED") return false;
+    if (entry.status === "COMPLETED") return false;
+
+    // Check retry count - entries at or beyond max will be marked FAILED during recovery
+    if (entry.retryCount >= MAX_RETRIES_PER_ENTRY) {
+      return true; // Let recoverMintEntry handle marking it as FAILED
+    }
+
+    // Calculate backoff delay based on retry count
+    const backoffDelay = Math.min(
+      ENTRY_BACKOFF_BASE_MS * Math.pow(2, entry.retryCount),
+      ENTRY_MAX_BACKOFF_MS
+    );
+
+    const timeSinceLastUpdate = Date.now() - entry.updatedAt;
+    return timeSinceLastUpdate >= backoffDelay;
   }
 
   /**
@@ -522,15 +572,8 @@ export class OutboxRecoveryService {
     // Reconstruct commitment from stored JSON
     const commitment = await this.reconstructCommitment(entry);
 
-    // Wait for inclusion proof
-    const trustBase = ServiceProvider.getRootTrustBase();
-    const client = ServiceProvider.stateTransitionClient;
-
-    const inclusionProof = await waitInclusionProof(
-      trustBase,
-      client,
-      commitment
-    );
+    // Wait for inclusion proof (with dev mode bypass if enabled)
+    const inclusionProof = await waitInclusionProofWithDevBypass(commitment);
 
     // Create transfer transaction
     const transferTx = commitment.toTransaction(inclusionProof);
@@ -609,6 +652,322 @@ export class OutboxRecoveryService {
     } catch (error) {
       throw new Error(`Failed to reconstruct commitment: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  // ==========================================
+  // Mint Recovery Methods
+  // ==========================================
+
+  /**
+   * Recover all pending mint entries
+   * Called on startup and periodically
+   */
+  async recoverPendingMints(walletAddress: string): Promise<RecoveryResult> {
+    const result: RecoveryResult = {
+      recovered: 0,
+      failed: 0,
+      skipped: 0,
+      details: [],
+    };
+
+    if (!this.identityManager) {
+      console.warn("📤 OutboxRecovery: Cannot recover mints - no identity manager");
+      return result;
+    }
+
+    const outboxRepo = OutboxRepository.getInstance();
+    outboxRepo.setCurrentAddress(walletAddress);
+
+    const mintEntries = outboxRepo.getMintEntriesForRecovery();
+
+    if (mintEntries.length === 0) {
+      return result;
+    }
+
+    console.log(`📤 OutboxRecovery: Found ${mintEntries.length} pending mint entries`);
+
+    for (const entry of mintEntries) {
+      const detail = await this.recoverMintEntry(entry, outboxRepo);
+      result.details.push(detail);
+
+      switch (detail.status) {
+        case "recovered":
+          result.recovered++;
+          break;
+        case "failed":
+          result.failed++;
+          break;
+        case "skipped":
+          result.skipped++;
+          break;
+      }
+    }
+
+    // Final IPFS sync after mint recovery
+    if (result.recovered > 0 || result.failed > 0) {
+      try {
+        const ipfsService = IpfsStorageService.getInstance(this.identityManager);
+        await ipfsService.syncNow();
+        console.log("📤 OutboxRecovery: Final IPFS sync after mint recovery completed");
+      } catch (syncError) {
+        console.warn("📤 OutboxRecovery: Final IPFS sync after mint recovery failed:", syncError);
+      }
+    }
+
+    console.log(`📤 OutboxRecovery: Mint recovery complete - ${result.recovered} recovered, ${result.failed} failed, ${result.skipped} skipped`);
+    return result;
+  }
+
+  /**
+   * Recover a single mint outbox entry
+   */
+  private async recoverMintEntry(
+    entry: MintOutboxEntry,
+    outboxRepo: OutboxRepository
+  ): Promise<RecoveryDetail> {
+    const detail: RecoveryDetail = {
+      entryId: entry.id,
+      status: "skipped",
+      previousStatus: entry.status,
+    };
+
+    console.log(`📤 OutboxRecovery: Processing mint entry ${entry.id.slice(0, 8)}... (status=${entry.status}, type=${entry.type})`);
+
+    // Check retry count
+    if (entry.retryCount >= MAX_RETRIES_PER_ENTRY) {
+      outboxRepo.updateMintStatus(entry.id, "FAILED", `Max retries exceeded (${MAX_RETRIES_PER_ENTRY})`);
+      detail.status = "failed";
+      detail.error = `Max retries exceeded (${MAX_RETRIES_PER_ENTRY})`;
+      return detail;
+    }
+
+    try {
+      switch (entry.status) {
+        case "PENDING_IPFS_SYNC":
+          await this.resumeMintFromPendingIpfs(entry, outboxRepo);
+          detail.status = "recovered";
+          detail.newStatus = "COMPLETED";
+          break;
+
+        case "READY_TO_SUBMIT":
+          await this.resumeMintFromReadyToSubmit(entry, outboxRepo);
+          detail.status = "recovered";
+          detail.newStatus = "COMPLETED";
+          break;
+
+        case "SUBMITTED":
+          await this.resumeMintFromSubmitted(entry, outboxRepo);
+          detail.status = "recovered";
+          detail.newStatus = "COMPLETED";
+          break;
+
+        case "PROOF_RECEIVED":
+          await this.resumeMintFromProofReceived(entry, outboxRepo);
+          detail.status = "recovered";
+          detail.newStatus = "COMPLETED";
+          break;
+
+        case "COMPLETED":
+          detail.status = "skipped";
+          break;
+
+        case "FAILED":
+          console.warn(`📤 OutboxRecovery: Mint entry ${entry.id.slice(0, 8)}... is FAILED, skipping`);
+          detail.status = "skipped";
+          break;
+
+        default:
+          // NOSTR_SENT is not applicable to mints
+          detail.status = "skipped";
+          break;
+      }
+    } catch (error) {
+      console.error(`📤 OutboxRecovery: Failed to recover mint entry ${entry.id.slice(0, 8)}...`, error);
+      outboxRepo.updateMintEntry(entry.id, {
+        lastError: error instanceof Error ? error.message : String(error),
+        retryCount: entry.retryCount + 1,
+      });
+      detail.status = "failed";
+      detail.error = error instanceof Error ? error.message : String(error);
+    }
+
+    return detail;
+  }
+
+  /**
+   * Resume mint from PENDING_IPFS_SYNC: Sync to IPFS, then continue
+   */
+  private async resumeMintFromPendingIpfs(
+    entry: MintOutboxEntry,
+    outboxRepo: OutboxRepository
+  ): Promise<void> {
+    console.log(`📤 OutboxRecovery: Resuming mint from PENDING_IPFS_SYNC...`);
+
+    if (this.identityManager) {
+      const ipfsService = IpfsStorageService.getInstance(this.identityManager);
+      const syncResult = await ipfsService.syncNow();
+      if (!syncResult.success) {
+        throw new Error("IPFS sync failed during mint recovery");
+      }
+    }
+
+    outboxRepo.updateMintStatus(entry.id, "READY_TO_SUBMIT");
+    entry.status = "READY_TO_SUBMIT";
+
+    await this.resumeMintFromReadyToSubmit(entry, outboxRepo);
+  }
+
+  /**
+   * Resume mint from READY_TO_SUBMIT: Submit to aggregator, wait for proof
+   */
+  private async resumeMintFromReadyToSubmit(
+    entry: MintOutboxEntry,
+    outboxRepo: OutboxRepository
+  ): Promise<void> {
+    console.log(`📤 OutboxRecovery: Resuming mint from READY_TO_SUBMIT...`);
+
+    // Reconstruct MintCommitment from stored MintTransactionData
+    const mintData = await MintTransactionData.fromJSON(JSON.parse(entry.mintDataJson));
+    const commitment = await MintCommitment.create(mintData);
+
+    // Submit to aggregator (idempotent - REQUEST_ID_EXISTS is ok)
+    const client = ServiceProvider.stateTransitionClient;
+    const response = await client.submitMintCommitment(commitment);
+
+    if (response.status !== "SUCCESS" && response.status !== "REQUEST_ID_EXISTS") {
+      throw new Error(`Aggregator mint submission failed: ${response.status}`);
+    }
+
+    outboxRepo.updateMintStatus(entry.id, "SUBMITTED");
+    entry.status = "SUBMITTED";
+
+    await this.resumeMintFromSubmitted(entry, outboxRepo);
+  }
+
+  /**
+   * Resume mint from SUBMITTED: Wait for inclusion proof, then create token
+   */
+  private async resumeMintFromSubmitted(
+    entry: MintOutboxEntry,
+    outboxRepo: OutboxRepository
+  ): Promise<void> {
+    console.log(`📤 OutboxRecovery: Resuming mint from SUBMITTED...`);
+
+    // Reconstruct MintCommitment
+    const mintData = await MintTransactionData.fromJSON(JSON.parse(entry.mintDataJson));
+    const commitment = await MintCommitment.create(mintData);
+
+    // Wait for inclusion proof (with dev mode bypass if enabled)
+    const inclusionProof = await waitInclusionProofWithDevBypass(commitment);
+
+    // Create genesis transaction
+    const genesisTransaction = commitment.toTransaction(inclusionProof);
+
+    // Update entry with proof data
+    outboxRepo.updateMintEntry(entry.id, {
+      status: "PROOF_RECEIVED",
+      inclusionProofJson: JSON.stringify(inclusionProof.toJSON()),
+      mintTransactionJson: JSON.stringify(genesisTransaction.toJSON()),
+    });
+    entry.status = "PROOF_RECEIVED";
+    entry.inclusionProofJson = JSON.stringify(inclusionProof.toJSON());
+    entry.mintTransactionJson = JSON.stringify(genesisTransaction.toJSON());
+
+    await this.resumeMintFromProofReceived(entry, outboxRepo);
+  }
+
+  /**
+   * Resume mint from PROOF_RECEIVED: Create final token and save to storage
+   */
+  private async resumeMintFromProofReceived(
+    entry: MintOutboxEntry,
+    outboxRepo: OutboxRepository
+  ): Promise<void> {
+    console.log(`📤 OutboxRecovery: Resuming mint from PROOF_RECEIVED...`);
+
+    if (!entry.mintTransactionJson || !this.identityManager) {
+      throw new Error("Missing data for mint token creation");
+    }
+
+    // Reconstruct data needed for token creation
+    const mintData = await MintTransactionData.fromJSON(JSON.parse(entry.mintDataJson));
+    const genesisTransaction = JSON.parse(entry.mintTransactionJson);
+
+    // Get signing service from identity
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (!identity) {
+      throw new Error("No identity available for mint recovery");
+    }
+
+    const secret = Buffer.from(identity.privateKey, "hex");
+    const signingService = await SigningService.createFromSecret(secret);
+
+    // Reconstruct token type and ID
+    const tokenType = new TokenType(Buffer.from(entry.tokenTypeHex, "hex"));
+    const salt = Buffer.from(entry.salt, "hex");
+
+    // For nametag mints, derive token ID from nametag
+    let tokenId: TokenId;
+    if (entry.type === "MINT_NAMETAG" && entry.nametag) {
+      tokenId = await TokenId.fromNameTag(entry.nametag);
+    } else {
+      // For generic mints, get token ID from mint data
+      tokenId = mintData.tokenId;
+    }
+
+    // Create predicate
+    const predicate = await UnmaskedPredicate.create(
+      tokenId,
+      tokenType,
+      signingService,
+      HashAlgorithm.SHA256,
+      salt
+    );
+
+    // Create final token
+    const tokenState = new TokenState(predicate, null);
+    const trustBase = ServiceProvider.getRootTrustBase();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let token: Token<any>;
+    if (ServiceProvider.isTrustBaseVerificationSkipped()) {
+      console.warn("⚠️ Creating recovered token WITHOUT verification (dev mode)");
+      const tokenJson = {
+        version: "2.0",
+        state: tokenState.toJSON(),
+        genesis: genesisTransaction,
+        transactions: [],
+        nametags: [],
+      };
+      token = await Token.fromJSON(tokenJson);
+    } else {
+      // Import genesis transaction properly
+      const { MintTransaction } = await import("@unicitylabs/state-transition-sdk/lib/transaction/MintTransaction");
+      const mintTx = await MintTransaction.fromJSON(genesisTransaction);
+      token = await Token.mint(trustBase, tokenState, mintTx);
+    }
+
+    // Update outbox with final token
+    outboxRepo.updateMintEntry(entry.id, {
+      status: "COMPLETED",
+      tokenJson: JSON.stringify(token.toJSON()),
+    });
+
+    // Save to storage based on mint type
+    if (entry.type === "MINT_NAMETAG" && entry.nametag) {
+      const nametagData: NametagData = {
+        name: entry.nametag,
+        token: token.toJSON(),
+        timestamp: Date.now(),
+        format: "txf",
+        version: "2.0",
+      };
+      const walletRepo = WalletRepository.getInstance();
+      walletRepo.setNametag(nametagData);
+      console.log(`📤 OutboxRecovery: Recovered nametag "${entry.nametag}" and saved to storage`);
+    }
+
+    console.log(`📤 OutboxRecovery: Mint entry ${entry.id.slice(0, 8)}... recovered and completed`);
   }
 }
 

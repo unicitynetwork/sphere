@@ -32,6 +32,13 @@ export type OutboxEntryType =
   | "SPLIT_MINT"         // Mint phase of token split (sender or recipient portion)
   | "SPLIT_TRANSFER";    // Transfer phase of split (recipient token to recipient)
 
+/**
+ * Type of mint operation
+ */
+export type MintOutboxEntryType =
+  | "MINT_NAMETAG"       // Minting a nametag token (Unicity ID)
+  | "MINT_TOKEN";        // Minting a generic token
+
 // ==========================================
 // Main Outbox Entry
 // ==========================================
@@ -155,6 +162,112 @@ export interface OutboxEntry {
    * Only set for SPLIT_* types
    */
   splitGroupIndex?: number;
+}
+
+// ==========================================
+// Mint Outbox Entry
+// ==========================================
+
+/**
+ * A single outbox entry representing a pending mint operation
+ *
+ * CRITICAL: This structure contains the salt and MintTransactionData which
+ * are required for recovery. Unlike TransferCommitment, MintCommitment
+ * does NOT have toJSON()/fromJSON() methods, so we store MintTransactionData
+ * and requestId separately for reconstruction.
+ *
+ * Flow:
+ * 1. Generate salt, create MintTransactionData, create MintCommitment
+ * 2. SAVE TO OUTBOX IMMEDIATELY (before any network calls)
+ * 3. Sync to IPFS and wait for success
+ * 4. Submit commitment to aggregator
+ * 5. Wait for inclusion proof
+ * 6. Create final token with proof
+ * 7. Save token to storage, mark complete
+ */
+export interface MintOutboxEntry {
+  /** Unique identifier for this outbox entry */
+  id: string;
+
+  /** Timestamp when entry was created */
+  createdAt: number;
+
+  /** Timestamp of last status update */
+  updatedAt: number;
+
+  /** Current status in the mint lifecycle */
+  status: OutboxEntryStatus;
+
+  /** Type of mint operation */
+  type: MintOutboxEntryType;
+
+  // ==========================================
+  // Mint Metadata
+  // ==========================================
+
+  /** Nametag being minted (for MINT_NAMETAG type) */
+  nametag?: string;
+
+  /** Token type hex string */
+  tokenTypeHex: string;
+
+  /** Serialized owner address (DirectAddress.toJSON() as string) */
+  ownerAddressJson: string;
+
+  // ==========================================
+  // CRITICAL: Non-Reproducible Data
+  // ==========================================
+
+  /**
+   * Hex-encoded 32-byte random salt used in commitment creation.
+   * THIS IS THE CRITICAL DATA - without it, the commitment cannot
+   * be recreated and the token cannot be recovered.
+   */
+  salt: string;
+
+  /**
+   * Request ID from the commitment (commitment.requestId.toString())
+   * Used for polling inclusion proof during recovery.
+   */
+  requestIdHex: string;
+
+  /**
+   * Serialized MintTransactionData (mintData.toJSON() as string)
+   * Used to reconstruct MintCommitment during recovery.
+   */
+  mintDataJson: string;
+
+  // ==========================================
+  // Post-Submission Data (filled during flow)
+  // ==========================================
+
+  /**
+   * Serialized inclusion proof (after aggregator response)
+   * Set during SUBMITTED → PROOF_RECEIVED transition
+   */
+  inclusionProofJson?: string;
+
+  /**
+   * Serialized mint transaction (commitment.toTransaction(proof))
+   * Set during SUBMITTED → PROOF_RECEIVED transition
+   */
+  mintTransactionJson?: string;
+
+  /**
+   * Serialized final token (Token.toJSON() as string)
+   * Set when token is fully created with proof
+   */
+  tokenJson?: string;
+
+  // ==========================================
+  // Error Tracking
+  // ==========================================
+
+  /** Last error message (for debugging/retry logic) */
+  lastError?: string;
+
+  /** Number of retry attempts */
+  retryCount: number;
 }
 
 // ==========================================
@@ -330,4 +443,76 @@ export function validateOutboxEntry(entry: OutboxEntry): { valid: boolean; error
   }
 
   return { valid: true };
+}
+
+// ==========================================
+// Mint Outbox Utility Functions
+// ==========================================
+
+/**
+ * Create a mint outbox entry with required fields
+ */
+export function createMintOutboxEntry(
+  type: MintOutboxEntryType,
+  tokenTypeHex: string,
+  ownerAddressJson: string,
+  salt: string,
+  requestIdHex: string,
+  mintDataJson: string,
+  nametag?: string
+): MintOutboxEntry {
+  const now = Date.now();
+  return {
+    id: crypto.randomUUID(),
+    createdAt: now,
+    updatedAt: now,
+    status: "PENDING_IPFS_SYNC",
+    type,
+    tokenTypeHex,
+    ownerAddressJson,
+    salt,
+    requestIdHex,
+    mintDataJson,
+    nametag,
+    retryCount: 0,
+  };
+}
+
+/**
+ * Validate that a mint outbox entry has all required fields for its current status
+ */
+export function validateMintOutboxEntry(entry: MintOutboxEntry): { valid: boolean; error?: string } {
+  // Basic required fields
+  if (!entry.id || !entry.salt || !entry.requestIdHex || !entry.mintDataJson) {
+    return { valid: false, error: "Missing required fields (id, salt, requestIdHex, or mintDataJson)" };
+  }
+
+  // Type-specific validation
+  if (entry.type === "MINT_NAMETAG" && !entry.nametag) {
+    return { valid: false, error: "Missing nametag for MINT_NAMETAG type" };
+  }
+
+  // Status-specific validation
+  switch (entry.status) {
+    case "PROOF_RECEIVED":
+    case "COMPLETED":
+      if (!entry.inclusionProofJson) {
+        return { valid: false, error: "Missing inclusionProofJson for status " + entry.status };
+      }
+      break;
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Check if a mint outbox entry is in a state that can be recovered
+ */
+export function isMintRecoverable(entry: MintOutboxEntry): boolean {
+  return (
+    entry.status === "PENDING_IPFS_SYNC" ||
+    entry.status === "READY_TO_SUBMIT" ||
+    entry.status === "SUBMITTED" ||
+    entry.status === "PROOF_RECEIVED"
+  );
 }

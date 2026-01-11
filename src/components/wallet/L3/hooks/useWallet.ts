@@ -6,7 +6,7 @@ import { Token as SdkToken } from "@unicitylabs/state-transition-sdk/lib/token/T
 import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
 import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment";
 import { ServiceProvider } from "../services/ServiceProvider";
-import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
+import { waitInclusionProofWithDevBypass } from "../../../../utils/devTools";
 import { ApiService } from "../services/api";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { NametagService } from "../services/NametagService";
@@ -21,6 +21,8 @@ import { useServices } from "../../../../contexts/useServices";
 import type { NostrService } from "../services/NostrService";
 import { OutboxRecoveryService } from "../services/OutboxRecoveryService";
 import { TokenRecoveryService } from "../services/TokenRecoveryService";
+import { L1_KEYS } from "../../L1/hooks/useL1Wallet";
+import { isNametagCorrupted } from "../../../../utils/tokenValidation";
 
 export const KEYS = {
   IDENTITY: ["wallet", "identity"],
@@ -45,8 +47,23 @@ export const useWallet = () => {
       queryClient.refetchQueries({ queryKey: KEYS.AGGREGATED });
     };
 
+    // Handle wallet-loaded event (triggered after wallet creation/restoration)
+    // This ensures identity, nametag, and L1 wallet queries are refreshed
+    const handleWalletLoaded = () => {
+      console.log("📢 useWallet: wallet-loaded event received, refreshing queries...");
+      queryClient.invalidateQueries({ queryKey: KEYS.IDENTITY });
+      queryClient.invalidateQueries({ queryKey: KEYS.NAMETAG });
+      queryClient.invalidateQueries({ queryKey: L1_KEYS.WALLET });
+      queryClient.refetchQueries({ queryKey: KEYS.TOKENS });
+      queryClient.refetchQueries({ queryKey: KEYS.AGGREGATED });
+    };
+
     window.addEventListener("wallet-updated", handleWalletUpdate);
-    return () => window.removeEventListener("wallet-updated", handleWalletUpdate);
+    window.addEventListener("wallet-loaded", handleWalletLoaded);
+    return () => {
+      window.removeEventListener("wallet-updated", handleWalletUpdate);
+      window.removeEventListener("wallet-loaded", handleWalletLoaded);
+    };
   }, [queryClient]);
 
   // Initialize IPFS storage service for automatic token sync (disabled by default)
@@ -82,7 +99,39 @@ export const useWallet = () => {
         }
       }
 
-      return nametagService.getActiveNametag();
+      // Get nametag from repository
+      const nametagData = walletRepo.getNametag();
+
+      // CRITICAL: Check for corrupted nametag and treat as "no nametag exists"
+      // This allows the user to create a new Unicity ID if their data is corrupted
+      if (isNametagCorrupted(nametagData)) {
+        console.warn("🚨 Corrupted nametag detected, clearing from local and IPFS", {
+          address: identity.address.slice(0, 20) + "...",
+          name: nametagData?.name,
+          corruption: "token is empty or missing required fields",
+        });
+
+        // Clear from both local and IPFS storage (breaks import loop)
+        // Note: This is a sync queryFn - IPFS clear happens in background
+        try {
+          walletRepo.clearNametag(); // Clear local immediately
+
+          // Trigger IPFS clear in background (don't await in queryFn)
+          // This publishes clean state to IPFS, overwriting the corrupted nametag
+          const storageService = IpfsStorageService.getInstance(identityManager);
+          storageService.clearCorruptedNametagAndSync().catch((err) => {
+            console.error("Background IPFS nametag clear failed:", err);
+          });
+
+          console.log("✅ Initiated nametag clear from local and IPFS");
+        } catch (error) {
+          console.error("Failed to clear corrupted nametag:", error);
+        }
+
+        return null; // Treat as "no nametag exists" - user can create new Unicity ID
+      }
+
+      return nametagData?.name || null;
     },
     enabled: !!identityQuery.data?.address,
   });
@@ -357,9 +406,7 @@ export const useWallet = () => {
         throw new Error(`Transfer failed: ${response.status}`);
       }
 
-      const inclusionProof = await waitInclusionProof(
-        ServiceProvider.getRootTrustBase(),
-        client,
+      const inclusionProof = await waitInclusionProofWithDevBypass(
         transferCommitment
       );
 
@@ -743,10 +790,8 @@ export const useWallet = () => {
     outboxRepo.updateEntry(outboxEntry.id, { status: "SUBMITTED" });
     console.log(`📤 Transfer submitted to aggregator (status: ${res.status})`);
 
-    // 9. Wait for inclusion proof
-    const proof = await waitInclusionProof(
-      ServiceProvider.getRootTrustBase(),
-      client,
+    // 9. Wait for inclusion proof (with dev mode bypass if enabled)
+    const proof = await waitInclusionProofWithDevBypass(
       transferCommitment
     );
 

@@ -1,3 +1,4 @@
+import { Loader2 } from "lucide-react";
 import type { TransactionPlan } from "../../sdk";
 
 interface TransactionConfirmationModalProps {
@@ -61,10 +62,17 @@ export function TransactionConfirmationModal({
           </button>
           <button
             onClick={onConfirm}
-            className="flex-1 px-4 py-3 rounded-xl bg-green-600 text-white font-semibold hover:bg-green-500 flex items-center justify-center gap-2 transition-colors"
+            className="flex-1 px-4 py-3 rounded-xl bg-green-600 text-white font-semibold hover:bg-green-500 flex items-center justify-center gap-2 transition-colors disabled:opacity-70"
             disabled={isSending}
           >
-            {isSending ? "Sending..." : "Confirm & Send"}
+            {isSending ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Sending...
+              </>
+            ) : (
+              "Confirm & Send"
+            )}
           </button>
         </div>
       </div>

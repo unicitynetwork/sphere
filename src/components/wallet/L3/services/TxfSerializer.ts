@@ -22,12 +22,13 @@ import {
   archivedKeyFromTokenId,
   forkedKeyFromTokenIdAndState,
 } from "./types/TxfTypes";
-import type { OutboxEntry } from "./types/OutboxTypes";
+import type { OutboxEntry, MintOutboxEntry } from "./types/OutboxTypes";
 import {
   safeParseTxfToken,
   safeParseTxfMeta,
   validateTokenEntry,
 } from "./types/TxfSchemas";
+import { validateNametagData } from "../../../../utils/tokenValidation";
 
 // ==========================================
 // Token → TXF Conversion
@@ -170,7 +171,8 @@ export function buildTxfStorageData(
   tombstones?: TombstoneEntry[],
   archivedTokens?: Map<string, TxfToken>,
   forkedTokens?: Map<string, TxfToken>,
-  outboxEntries?: OutboxEntry[]
+  outboxEntries?: OutboxEntry[],
+  mintOutboxEntries?: MintOutboxEntry[]
 ): TxfStorageData {
   const storageData: TxfStorageData = {
     _meta: {
@@ -179,8 +181,18 @@ export function buildTxfStorageData(
     },
   };
 
+  // Validate nametag before exporting to IPFS
   if (nametag) {
-    storageData._nametag = nametag;
+    const nametagValidation = validateNametagData(nametag, {
+      requireInclusionProof: false, // May have stripped proofs
+      context: "IPFS export",
+    });
+    if (nametagValidation.isValid) {
+      storageData._nametag = nametag;
+    } else {
+      // Log error but DO NOT export corrupted nametag data
+      console.error("❌ Skipping corrupted nametag during IPFS export:", nametagValidation.errors);
+    }
   }
 
   // Add tombstones for spent token states (prevents zombie token resurrection)
@@ -191,6 +203,11 @@ export function buildTxfStorageData(
   // Add outbox entries (CRITICAL for transfer recovery)
   if (outboxEntries && outboxEntries.length > 0) {
     storageData._outbox = outboxEntries;
+  }
+
+  // Add mint outbox entries (CRITICAL for mint recovery)
+  if (mintOutboxEntries && mintOutboxEntries.length > 0) {
+    storageData._mintOutbox = mintOutboxEntries;
   }
 
   // Add each active token with _<tokenId> key
@@ -235,6 +252,7 @@ export function parseTxfStorageData(data: unknown): {
   archivedTokens: Map<string, TxfToken>;
   forkedTokens: Map<string, TxfToken>;
   outboxEntries: OutboxEntry[];
+  mintOutboxEntries: MintOutboxEntry[];
   validationErrors: string[];
 } {
   const result: {
@@ -245,6 +263,7 @@ export function parseTxfStorageData(data: unknown): {
     archivedTokens: Map<string, TxfToken>;
     forkedTokens: Map<string, TxfToken>;
     outboxEntries: OutboxEntry[];
+    mintOutboxEntries: MintOutboxEntry[];
     validationErrors: string[];
   } = {
     tokens: [],
@@ -254,6 +273,7 @@ export function parseTxfStorageData(data: unknown): {
     archivedTokens: new Map(),
     forkedTokens: new Map(),
     outboxEntries: [],
+    mintOutboxEntries: [],
     validationErrors: [],
   };
 
@@ -278,9 +298,20 @@ export function parseTxfStorageData(data: unknown): {
     }
   }
 
-  // Extract nametag (less strict validation)
+  // Extract and validate nametag
   if (storageData._nametag && typeof storageData._nametag === "object") {
-    result.nametag = storageData._nametag as NametagData;
+    const nametagValidation = validateNametagData(storageData._nametag, {
+      requireInclusionProof: false, // IPFS data may have stripped proofs
+      context: "IPFS import",
+    });
+    if (nametagValidation.isValid) {
+      result.nametag = storageData._nametag as NametagData;
+    } else {
+      // Log warning but include validation errors
+      console.warn("Nametag validation failed during IPFS import:", nametagValidation.errors);
+      result.validationErrors.push(`Nametag validation: ${nametagValidation.errors.join(", ")}`);
+      // Do NOT import corrupted nametag - prevents token: {} bug
+    }
   }
 
   // Extract tombstones (state-hash-aware entries)
@@ -317,6 +348,27 @@ export function parseTxfStorageData(data: unknown): {
         result.outboxEntries.push(entry as OutboxEntry);
       } else {
         result.validationErrors.push("Invalid outbox entry structure");
+      }
+    }
+  }
+
+  // Extract mint outbox entries (CRITICAL for mint recovery)
+  if (storageData._mintOutbox && Array.isArray(storageData._mintOutbox)) {
+    for (const entry of storageData._mintOutbox) {
+      // Basic validation for MintOutboxEntry structure
+      if (
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as MintOutboxEntry).id === "string" &&
+        typeof (entry as MintOutboxEntry).status === "string" &&
+        typeof (entry as MintOutboxEntry).type === "string" &&
+        typeof (entry as MintOutboxEntry).salt === "string" &&
+        typeof (entry as MintOutboxEntry).requestIdHex === "string" &&
+        typeof (entry as MintOutboxEntry).mintDataJson === "string"
+      ) {
+        result.mintOutboxEntries.push(entry as MintOutboxEntry);
+      } else {
+        result.validationErrors.push("Invalid mint outbox entry structure");
       }
     }
   }

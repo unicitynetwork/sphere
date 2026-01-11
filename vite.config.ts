@@ -49,6 +49,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
           rewrite: (path) => path.replace(/^\/rpc/, ''),
+        },
+        '/dev-rpc': {
+          target: 'https://dev-aggregator.dyndns.org',
+          changeOrigin: true,
+          secure: false,
+          rewrite: (path) => path.replace(/^\/dev-rpc/, ''),
         }
       }
     },

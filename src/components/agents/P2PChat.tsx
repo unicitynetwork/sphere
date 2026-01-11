@@ -1,18 +1,10 @@
 import { useState } from 'react';
-import { Image as ImageIcon, ShoppingBag, MessageSquare, Wallet } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { X, MessageSquare, Wallet, CheckCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import type { AgentConfig } from '../../config/activities';
-import { v4 as uuidv4 } from 'uuid';
 import { p2pListings, type SellerInfo } from '../../data/agentsMockData';
-import { AgentChat, type SidebarItem, type AgentMessage } from './shared';
-
-// Trade item for sidebar
-interface TradeItem extends SidebarItem {
-  status: 'pending' | 'completed' | 'cancelled';
-  description?: string;
-  seller?: SellerInfo;
-}
+import { AgentChat, type AgentMessage } from './shared';
 
 // Card data for P2P items
 interface P2PCardData {
@@ -30,10 +22,10 @@ interface P2PChatProps {
 export function P2PChat({ agent }: P2PChatProps) {
   const navigate = useNavigate();
 
-  const [trades, setTrades] = useState<TradeItem[]>(() => {
-    const stored = localStorage.getItem('sphere_p2p_trades');
-    return stored ? JSON.parse(stored) : [];
-  });
+  // Purchase modal state
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [pendingPurchase, setPendingPurchase] = useState<P2PCardData | null>(null);
+  const [purchaseStep, setPurchaseStep] = useState<'confirm' | 'processing' | 'success'>('confirm');
 
   const handleChatWithSeller = (seller: SellerInfo, productTitle?: string, productImage?: string, productPrice?: number, purchased?: boolean) => {
     const params = new URLSearchParams({
@@ -93,33 +85,27 @@ export function P2PChat({ agent }: P2PChatProps) {
     }
   };
 
+  const handleBuyNow = (cardData: P2PCardData) => {
+    setPendingPurchase(cardData);
+    setPurchaseStep('confirm');
+    setShowPurchaseModal(true);
+  };
+
+  const handleConfirmPurchase = async () => {
+    if (!pendingPurchase) return;
+
+    setPurchaseStep('processing');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    setPurchaseStep('success');
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    setShowPurchaseModal(false);
+    setPendingPurchase(null);
+  };
+
   return (
-    <AgentChat<P2PCardData, TradeItem>
+    <AgentChat<P2PCardData>
       agent={agent}
-      sidebarConfig={{
-        title: 'My Trades',
-        emptyText: 'No trades yet',
-        emptyIcon: <ShoppingBag className="w-8 h-8 mx-auto opacity-50" />,
-        items: trades,
-        setItems: setTrades,
-        storageKey: 'sphere_p2p_trades',
-        renderItem: (trade) => (
-          <>
-            {trade.image ? (
-              <img src={trade.image} alt="" className="w-12 h-12 rounded-lg object-cover" />
-            ) : (
-              <div className={`w-12 h-12 rounded-lg bg-linear-to-br ${agent.color} flex items-center justify-center`}>
-                <ImageIcon className="w-5 h-5 text-white/70" />
-              </div>
-            )}
-            <div className="flex-1 min-w-0">
-              <p className="text-neutral-900 dark:text-white text-sm font-medium truncate">{trade.title}</p>
-              {trade.amount && <p className="text-orange-600 dark:text-orange-400 text-xs">${trade.amount}</p>}
-              <p className="text-neutral-500 text-xs">{new Date(trade.timestamp).toLocaleDateString()}</p>
-            </div>
-          </>
-        ),
-      }}
       getMockResponse={getMockResponse}
       renderMessageCard={(cardData) => (
         <div className="mt-4 rounded-xl overflow-hidden border border-neutral-300 dark:border-neutral-600/50">
@@ -141,105 +127,100 @@ export function P2PChat({ agent }: P2PChatProps) {
       )}
       actionConfig={{
         label: (cardData) => `Buy Now - $${cardData.price}`,
-        onAction: () => {},
-      }}
-      transactionConfig={{
-        confirmTitle: 'Confirm Purchase',
-        processingText: 'Contacting seller',
-        successText: 'Seller notified',
-        renderConfirmContent: (cardData, onConfirm) => (
-          <>
-            <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700 mb-4">
-              <img src={cardData.image} alt="" className="w-full h-32 object-cover" />
-              <div className="p-4 bg-neutral-100 dark:bg-neutral-800">
-                <p className="text-neutral-900 dark:text-white font-medium">{cardData.title}</p>
-                <p className="text-orange-600 dark:text-orange-400 text-lg font-bold mt-1">${cardData.price}</p>
-              </div>
-            </div>
-
-            <motion.button
-              onClick={onConfirm}
-              className={`w-full py-4 rounded-xl bg-linear-to-r ${agent.color} text-white font-bold flex items-center justify-center gap-2`}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Wallet className="w-5 h-5" />
-              Confirm & Pay
-            </motion.button>
-          </>
-        ),
-        onConfirm: async (cardData) => {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          return {
-            id: uuidv4(),
-            title: cardData.title,
-            image: cardData.image,
-            timestamp: Date.now(),
-            status: 'pending' as const,
-            amount: cardData.price,
-            description: cardData.description,
-            seller: cardData.seller,
-          };
-        },
-      }}
-      detailsConfig={{
-        title: 'Trade Details',
-        renderContent: (trade) => (
-          <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700">
-            {trade.image ? (
-              <img src={trade.image} alt="" className="w-full h-40 object-cover" />
-            ) : (
-              <div className={`w-full h-40 bg-linear-to-br ${agent.color} flex items-center justify-center`}>
-                <ImageIcon className="w-12 h-12 text-white/50" />
-              </div>
-            )}
-            <div className="p-4 bg-neutral-100 dark:bg-neutral-800">
-              <p className="text-neutral-900 dark:text-white font-medium text-lg">{trade.title}</p>
-              {trade.description && (
-                <p className="text-neutral-500 dark:text-neutral-400 text-sm mt-2">{trade.description}</p>
-              )}
-              {trade.seller && (
-                <div className="flex items-center gap-2 mt-3 p-2 bg-neutral-200 dark:bg-neutral-700/50 rounded-lg">
-                  <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-medium">
-                    {trade.seller.avatar}
-                  </div>
-                  <div>
-                    <p className="text-neutral-900 dark:text-white text-sm font-medium">{trade.seller.name}</p>
-                    <p className="text-neutral-500 dark:text-neutral-400 text-xs">Seller</p>
-                  </div>
-                </div>
-              )}
-              <div className="flex items-center justify-between mt-4">
-                <p className="text-orange-600 dark:text-orange-400 text-xl font-bold">${trade.amount}</p>
-                <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                  trade.status === 'completed' ? 'bg-green-500/20 text-green-400' :
-                  trade.status === 'cancelled' ? 'bg-red-500/20 text-red-400' :
-                  'bg-yellow-500/20 text-yellow-400'
-                }`}>
-                  {trade.status.charAt(0).toUpperCase() + trade.status.slice(1)}
-                </span>
-              </div>
-              <p className="text-neutral-500 text-sm mt-3">
-                {new Date(trade.timestamp).toLocaleString()}
-              </p>
-            </div>
-          </div>
-        ),
-        renderActions: (trade) => (
-          trade.seller ? (
-            <motion.button
-              onClick={() => handleChatWithSeller(trade.seller!, trade.title, trade.image, trade.amount, true)}
-              className="w-full py-3 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-medium flex items-center justify-center gap-2"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <MessageSquare className="w-5 h-5" />
-              Chat with {trade.seller.name}
-            </motion.button>
-          ) : null
-        ),
+        onAction: handleBuyNow,
       }}
       bgGradient={{ from: 'bg-orange-500/5', to: 'bg-red-500/5' }}
+      additionalContent={
+        <AnimatePresence>
+          {showPurchaseModal && pendingPurchase && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+              onClick={() => purchaseStep === 'confirm' && setShowPurchaseModal(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl p-6 max-w-md w-full shadow-2xl"
+                onClick={e => e.stopPropagation()}
+              >
+                {purchaseStep === 'confirm' && (
+                  <>
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-xl font-bold text-neutral-900 dark:text-white">Confirm Purchase</h3>
+                      <button onClick={() => setShowPurchaseModal(false)} className="text-neutral-400 hover:text-neutral-900 dark:hover:text-white">
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700 mb-4">
+                      <img src={pendingPurchase.image} alt="" className="w-full h-32 object-cover" />
+                      <div className="p-4 bg-neutral-100 dark:bg-neutral-800">
+                        <p className="text-neutral-900 dark:text-white font-medium">{pendingPurchase.title}</p>
+                        {pendingPurchase.description && (
+                          <p className="text-neutral-500 dark:text-neutral-400 text-sm mt-1">{pendingPurchase.description}</p>
+                        )}
+                        <div className="flex items-center gap-2 mt-3 p-2 bg-neutral-200 dark:bg-neutral-700/50 rounded-lg">
+                          <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-medium">
+                            {pendingPurchase.seller.avatar}
+                          </div>
+                          <div>
+                            <p className="text-neutral-900 dark:text-white text-sm font-medium">{pendingPurchase.seller.name}</p>
+                            <p className="text-neutral-500 dark:text-neutral-400 text-xs">Seller</p>
+                          </div>
+                        </div>
+                        <p className="text-orange-600 dark:text-orange-400 text-lg font-bold mt-3">${pendingPurchase.price}</p>
+                      </div>
+                    </div>
+
+                    <motion.button
+                      onClick={handleConfirmPurchase}
+                      className={`w-full py-4 rounded-xl bg-linear-to-r ${agent.color} text-white font-bold flex items-center justify-center gap-2`}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      <Wallet className="w-5 h-5" />
+                      Confirm & Pay
+                    </motion.button>
+                  </>
+                )}
+
+                {purchaseStep === 'processing' && (
+                  <div className="py-12 text-center">
+                    <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-orange-500/20 flex items-center justify-center">
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                      >
+                        <Wallet className="w-8 h-8 text-orange-600 dark:text-orange-500" />
+                      </motion.div>
+                    </div>
+                    <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">Processing</h3>
+                    <p className="text-neutral-500 dark:text-neutral-400">Contacting seller...</p>
+                  </div>
+                )}
+
+                {purchaseStep === 'success' && (
+                  <div className="py-12 text-center">
+                    <motion.div
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-500 flex items-center justify-center"
+                    >
+                      <CheckCircle className="w-8 h-8 text-white" />
+                    </motion.div>
+                    <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">Seller Notified!</h3>
+                    <p className="text-neutral-500 dark:text-neutral-400">They will contact you soon.</p>
+                  </div>
+                )}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      }
     />
   );
 }

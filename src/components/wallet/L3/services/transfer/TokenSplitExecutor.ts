@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { IAddress } from "@unicitylabs/state-transition-sdk/lib/address/IAddress";
 import { UnmaskedPredicateReference } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicateReference";
+import { waitInclusionProofWithDevBypass } from "../../../../../utils/devTools";
 import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
 import { ServiceProvider } from "../ServiceProvider";
 import type { SplitPlan } from "./TokenSplitCalculator";
@@ -325,11 +326,7 @@ export class TokenSplitExecutor {
 
     onTokenBurned(uiTokenId);
 
-    const burnInclusionProof = await waitInclusionProof(
-      this.trustBase,
-      this.client,
-      burnCommitment
-    );
+    const burnInclusionProof = await waitInclusionProofWithDevBypass(burnCommitment);
     const burnTransaction = burnCommitment.toTransaction(burnInclusionProof);
 
     // Update burn outbox entry with proof
@@ -611,11 +608,7 @@ export class TokenSplitExecutor {
       outboxRepo.updateStatus(transferEntryId, "SUBMITTED");
     }
 
-    const transferProof = await waitInclusionProof(
-      this.trustBase,
-      this.client,
-      transferCommitment
-    );
+    const transferProof = await waitInclusionProofWithDevBypass(transferCommitment);
 
     const transferTx = transferCommitment.toTransaction(transferProof);
 

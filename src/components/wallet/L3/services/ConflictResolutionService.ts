@@ -25,6 +25,7 @@ import {
 } from "./types/TxfTypes";
 import { getCurrentStateHash } from "./TxfSerializer";
 import type { NametagData } from "../../../../repositories/WalletRepository";
+import { isNametagCorrupted, sanitizeNametagForLogging } from "../../../../utils/tokenValidation";
 
 // ==========================================
 // ConflictResolutionService
@@ -342,17 +343,56 @@ export class ConflictResolutionService {
   }
 
   /**
-   * Merge nametag data, preferring local if both exist
+   * Merge nametag data, preferring valid data over corrupted data
+   *
+   * CRITICAL: Detects corrupted nametags (with empty token: {}) and
+   * prefers valid data over corrupted data. This fixes the bug where
+   * local corrupted data would overwrite valid remote data.
    */
   private mergeNametags(
     local: NametagData | undefined,
     remote: NametagData | undefined
   ): NametagData {
+    const localCorrupted = isNametagCorrupted(local);
+    const remoteCorrupted = isNametagCorrupted(remote);
+
     if (local && remote) {
-      // Both exist - use local (user's current choice)
+      // Both exist - check for corruption
+      if (localCorrupted && !remoteCorrupted) {
+        // Local is corrupted, remote is valid - use remote
+        console.warn("📦 Local nametag is corrupted, using remote:", {
+          local: sanitizeNametagForLogging(local),
+          remote: sanitizeNametagForLogging(remote),
+        });
+        return remote;
+      }
+      if (!localCorrupted && remoteCorrupted) {
+        // Local is valid, remote is corrupted - use local
+        console.warn("📦 Remote nametag is corrupted, using local:", {
+          local: sanitizeNametagForLogging(local),
+          remote: sanitizeNametagForLogging(remote),
+        });
+        return local;
+      }
+      if (localCorrupted && remoteCorrupted) {
+        // Both corrupted - prefer local but warn
+        console.error("📦 CRITICAL: Both local and remote nametags are corrupted!", {
+          local: sanitizeNametagForLogging(local),
+          remote: sanitizeNametagForLogging(remote),
+        });
+        return local;
+      }
+      // Both valid - use local (user's current choice)
       return local;
     }
-    return (local || remote)!;
+
+    // Only one exists
+    const result = (local || remote)!;
+    const resultCorrupted = isNametagCorrupted(result);
+    if (resultCorrupted) {
+      console.warn("📦 Warning: Only available nametag is corrupted:", sanitizeNametagForLogging(result));
+    }
+    return result;
   }
 
   // ==========================================

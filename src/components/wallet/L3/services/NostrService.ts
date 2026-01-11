@@ -46,14 +46,13 @@ import {
   type IncomingPaymentRequest,
 } from "../data/model";
 import { v4 as uuidv4 } from "uuid";
+import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 const UNICITY_RELAYS = [
   "wss://nostr-relay.testnet.unicity.network",
   // "ws://unicity-nostr-relay-20250927-alb-1919039002.me-central-1.elb.amazonaws.com:8080",
 ];
 
-const STORAGE_KEY_LAST_SYNC = "unicity_nostr_last_sync";
-const STORAGE_KEY_PROCESSED_EVENTS = "unicity_processed_events";
 const MAX_PROCESSED_EVENTS = 100; // Maximum number of processed event IDs to store
 
 export class NostrService {
@@ -102,6 +101,31 @@ export class NostrService {
       this.isConnecting = false;
       this.connectPromise = null;
     }
+  }
+
+  /**
+   * Reset the NostrService connection to reinitialize with current identity.
+   * Call this when wallet changes (new wallet created or restored) to ensure
+   * the correct keypair is used for encryption/decryption.
+   */
+  async reset(): Promise<void> {
+    console.log("🔄 Resetting NostrService connection...");
+
+    // Disconnect existing client
+    if (this.client) {
+      try {
+        await this.client.disconnect();
+      } catch (err) {
+        console.warn("Error disconnecting Nostr client:", err);
+      }
+      this.client = null;
+    }
+
+    this.isConnected = false;
+    this.isConnecting = false;
+    this.connectPromise = null;
+
+    console.log("✅ NostrService reset complete, ready for reconnection");
   }
 
   private async doConnect(): Promise<void> {
@@ -226,20 +250,22 @@ export class NostrService {
   }
 
   private getOrInitLastSync(): number {
-    const saved = localStorage.getItem(STORAGE_KEY_LAST_SYNC);
+    const saved = localStorage.getItem(STORAGE_KEYS.NOSTR_LAST_SYNC);
     if (saved) {
       return parseInt(saved);
     } else {
-      const now = Math.floor(Date.now() / 1000);
-      localStorage.setItem(STORAGE_KEY_LAST_SYNC, now.toString());
-      return now;
+      // For new wallets, set lastSync to 5 minutes ago to catch any tokens
+      // that were sent during wallet creation (e.g., from faucet)
+      const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 300;
+      localStorage.setItem(STORAGE_KEYS.NOSTR_LAST_SYNC, fiveMinutesAgo.toString());
+      return fiveMinutesAgo;
     }
   }
 
   private updateLastSync(timestamp: number) {
     const current = this.getOrInitLastSync();
     if (timestamp > current) {
-      localStorage.setItem(STORAGE_KEY_LAST_SYNC, timestamp.toString());
+      localStorage.setItem(STORAGE_KEYS.NOSTR_LAST_SYNC, timestamp.toString());
     }
   }
 
@@ -274,7 +300,7 @@ export class NostrService {
 
   private loadProcessedEvents() {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY_PROCESSED_EVENTS);
+      const saved = localStorage.getItem(STORAGE_KEYS.NOSTR_PROCESSED_EVENTS);
       if (saved) {
         const ids = JSON.parse(saved) as string[];
         this.processedEventIds = new Set(ids);
@@ -296,7 +322,7 @@ export class NostrService {
         this.processedEventIds = new Set(ids);
       }
 
-      localStorage.setItem(STORAGE_KEY_PROCESSED_EVENTS, JSON.stringify(ids));
+      localStorage.setItem(STORAGE_KEYS.NOSTR_PROCESSED_EVENTS, JSON.stringify(ids));
     } catch (error) {
       console.error("Failed to save processed events", error);
     }

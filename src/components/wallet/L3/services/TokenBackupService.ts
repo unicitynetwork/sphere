@@ -17,6 +17,7 @@
 
 import { Token as LocalToken, TokenStatus } from "../data/model";
 import type { TxfToken } from "./types/TxfTypes";
+import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 // ==========================================
 // Types
@@ -58,9 +59,6 @@ export interface BackupStatus {
 export class TokenBackupService {
   private static instance: TokenBackupService | null = null;
 
-  private readonly BACKUP_TIMESTAMP_KEY = "token_backup_timestamp";
-  private readonly SYNC_TIMESTAMP_KEY = "last_ipfs_sync_success";
-  private readonly LOCAL_BACKUP_KEY = "encrypted_token_backup";
   private readonly BACKUP_STALE_DAYS = 7;
   private readonly SYNC_WARNING_DAYS = 3;
 
@@ -212,7 +210,7 @@ export class TokenBackupService {
     const arrayBuffer = await blob.arrayBuffer();
     const base64 = this.arrayBufferToBase64(arrayBuffer);
 
-    localStorage.setItem(this.LOCAL_BACKUP_KEY, base64);
+    localStorage.setItem(STORAGE_KEYS.ENCRYPTED_TOKEN_BACKUP, base64);
     console.log(`📦 Local backup saved to localStorage`);
   }
 
@@ -226,7 +224,7 @@ export class TokenBackupService {
     metadata: BackupMetadata;
     warnings: string[];
   } | null> {
-    const base64 = localStorage.getItem(this.LOCAL_BACKUP_KEY);
+    const base64 = localStorage.getItem(STORAGE_KEYS.ENCRYPTED_TOKEN_BACKUP);
     if (!base64) {
       return null;
     }
@@ -240,12 +238,12 @@ export class TokenBackupService {
    * Call this on app startup to prompt user
    */
   checkBackupStatus(): BackupStatus {
-    const lastBackup = localStorage.getItem(this.BACKUP_TIMESTAMP_KEY);
-    const lastSync = localStorage.getItem(this.SYNC_TIMESTAMP_KEY);
+    const lastBackup = localStorage.getItem(STORAGE_KEYS.TOKEN_BACKUP_TIMESTAMP);
+    const lastSync = localStorage.getItem(STORAGE_KEYS.LAST_IPFS_SYNC_SUCCESS);
 
     const now = Date.now();
-    const lastBackupTime = lastBackup ? parseInt(lastBackup) : null;
-    const lastSyncTime = lastSync ? parseInt(lastSync) : null;
+    const lastBackupTime = lastBackup ? parseInt(lastBackup, 10) : null;
+    const lastSyncTime = lastSync ? parseInt(lastSync, 10) : null;
 
     const daysSinceBackup = lastBackupTime
       ? (now - lastBackupTime) / (1000 * 60 * 60 * 24)
@@ -287,14 +285,14 @@ export class TokenBackupService {
    * Update the backup timestamp (called after successful backup)
    */
   updateBackupTimestamp(): void {
-    localStorage.setItem(this.BACKUP_TIMESTAMP_KEY, Date.now().toString());
+    localStorage.setItem(STORAGE_KEYS.TOKEN_BACKUP_TIMESTAMP, Date.now().toString());
   }
 
   /**
    * Update the sync timestamp (call after successful IPFS sync)
    */
   updateSyncTimestamp(): void {
-    localStorage.setItem(this.SYNC_TIMESTAMP_KEY, Date.now().toString());
+    localStorage.setItem(STORAGE_KEYS.LAST_IPFS_SYNC_SUCCESS, Date.now().toString());
   }
 
   /**

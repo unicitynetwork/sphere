@@ -58,7 +58,7 @@ All routes except intro use `DashboardLayout` which provides header, navigation,
 
 **Layer 1 (L1) - ALPHA Blockchain:**
 - Location: `src/components/wallet/L1/`
-- Custom HD wallet implementation with BIP32-style derivation (see `SPHERE_DEVELOPER_GUIDE.md` for details)
+- Custom HD wallet implementation with BIP32-style derivation
 - Uses Fulcrum WebSocket for blockchain data (Electrum-style protocol)
 - Supports vesting classification (coins from blocks ≤280,000 are "vested")
 - SDK in `src/components/wallet/L1/sdk/` handles crypto, transactions, network calls
@@ -174,8 +174,14 @@ BASE_PATH=/                                # Base path for deployment (default: 
 Tests are located in `tests/` directory and run with Vitest:
 - Test files: `tests/**/*.test.ts`, `tests/**/*.test.tsx`
 - Environment: jsdom
-- Path alias: `@` maps to `/src`
+- Path alias: `@` maps to `/src` (only available in tests via vitest.config.ts)
 - Globals enabled: `describe`, `it`, `expect`, `vi` are available without imports
+
+## TypeScript Configuration
+
+- Strict mode enabled with `noUnusedLocals` and `noUnusedParameters`
+- Target: ES2022, Module: ESNext with bundler resolution
+- Type checking: `npx tsc --noEmit` (build runs tsc before vite build)
 
 ## Developer Notes
 
@@ -183,7 +189,7 @@ Tests are located in `tests/` directory and run with Vitest:
 The project uses node polyfills (`vite-plugin-node-polyfills`) for browser compatibility with crypto libraries like `elliptic`, `bip39`, and `crypto-js`. The `/rpc` endpoint is proxied to the Unicity aggregator in development.
 
 ### BIP32 Implementation
-The L1 wallet uses a custom derivation that differs from standard BIP32 (see `SPHERE_DEVELOPER_GUIDE.md` for migration details). Standard path would be `m/44'/0'/0'/0/{index}`.
+The L1 wallet uses a custom derivation that differs from standard BIP32. Standard path would be `m/44'/0'/0'/0/{index}`.
 
 ### Vesting System
 ALPHA coins are classified as "vested" or "unvested" based on coinbase block height (threshold: 280,000). The classifier traces each UTXO back to its coinbase origin and caches results in IndexedDB.
