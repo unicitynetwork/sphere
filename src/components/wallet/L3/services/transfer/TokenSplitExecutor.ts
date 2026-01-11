@@ -2,7 +2,6 @@
 import type { IAddress } from "@unicitylabs/state-transition-sdk/lib/address/IAddress";
 import { UnmaskedPredicateReference } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicateReference";
 import { waitInclusionProofWithDevBypass } from "../../../../../utils/devTools";
-import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
 import { ServiceProvider } from "../ServiceProvider";
 import type { SplitPlan } from "./TokenSplitCalculator";
 import { Buffer } from "buffer";
@@ -15,6 +14,8 @@ import { TokenSplitBuilder } from "@unicitylabs/state-transition-sdk/lib/transac
 import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
 import { TokenCoinData } from "@unicitylabs/state-transition-sdk/lib/token/fungible/TokenCoinData";
 import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment";
+import { MintCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/MintCommitment";
+import { MintTransactionData } from "@unicitylabs/state-transition-sdk/lib/transaction/MintTransactionData";
 import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
 import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenState";
 import { OutboxRepository } from "../../../../../repositories/OutboxRepository";
@@ -346,10 +347,54 @@ export class TokenSplitExecutor {
     // === STEP 2: MINT SPLIT TOKENS ===
     console.log("✨ Creating split mint commitments...");
 
-    const mintCommitments = await split.createSplitMintCommitments(
-      this.trustBase,
-      burnTransaction
-    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let mintCommitments: any[];
+
+    // Dev mode bypass: manually create mint commitments without SDK verification
+    // The SDK's createSplitMintCommitments() internally verifies the burn transaction
+    // against the trust base, which fails when using dev aggregators
+    if (ServiceProvider.isTrustBaseVerificationSkipped()) {
+      console.log("⚠️ Dev mode: bypassing SDK verification for split mint commitments");
+
+      // In dev mode, we create mint commitments without the complex SplitMintReason
+      // since the dev aggregator doesn't strictly validate the reason
+      // The SDK's SplitMintReason requires Merkle tree proofs we don't have access to
+
+      // Create mint transaction data for recipient token
+      const recipientMintData = await MintTransactionData.create(
+        recipientTokenId,
+        tokenToSplit.type,
+        null, // tokenData
+        coinDataA, // coin data for recipient amount
+        senderAddress,
+        Buffer.from(recipientSalt),
+        null, // recipientDataHash
+        null  // reason - dev mode skip
+      );
+      const recipientMintCommitment = await MintCommitment.create(recipientMintData);
+
+      // Create mint transaction data for sender (change) token
+      const senderMintData = await MintTransactionData.create(
+        senderTokenId,
+        tokenToSplit.type,
+        null, // tokenData
+        coinDataB, // coin data for remainder amount
+        senderAddress,
+        Buffer.from(senderSalt),
+        null, // recipientDataHash
+        null  // reason - dev mode skip
+      );
+      const senderMintCommitment = await MintCommitment.create(senderMintData);
+
+      mintCommitments = [senderMintCommitment, recipientMintCommitment];
+      console.log("✅ Dev mode: created split mint commitments manually");
+    } else {
+      // Normal mode: use SDK's createSplitMintCommitments with trust base verification
+      mintCommitments = await split.createSplitMintCommitments(
+        this.trustBase,
+        burnTransaction
+      );
+    }
 
     const mintedTokensInfo: MintedTokenInfo[] = [];
     const mintEntryIds: string[] = [];
@@ -430,12 +475,8 @@ export class TokenSplitExecutor {
         outboxRepo.updateStatus(mintEntryId, "SUBMITTED");
       }
 
-      // Wait for inclusion proof
-      const proof = await waitInclusionProof(
-        this.trustBase,
-        this.client,
-        commitment
-      );
+      // Wait for inclusion proof (use dev bypass when trust base verification is skipped)
+      const proof = await waitInclusionProofWithDevBypass(commitment);
 
       // Update outbox: proof received
       if (outboxRepo && mintEntryId) {
@@ -663,7 +704,22 @@ export class TokenSplitExecutor {
     // 2. Recreate State
     const state = new TokenState(predicate, null); // No data for fungible usually
 
-    // 3. Create Token
+    // 3. Create Token and Verify
+    // Dev mode bypass: use fromJSON instead of mint to avoid trust base verification
+    if (ServiceProvider.isTrustBaseVerificationSkipped()) {
+      console.log(`⚠️ Dev mode: creating ${label} token without verification`);
+      const genesisTransaction = info.commitment.toTransaction(info.inclusionProof);
+      const tokenJson = {
+        version: "2.0",
+        state: state.toJSON(),
+        genesis: genesisTransaction.toJSON(),
+        transactions: [],
+        nametags: [],
+      };
+      return await SdkToken.fromJSON(tokenJson);
+    }
+
+    // Normal mode: use SDK's mint with trust base verification
     const token = await SdkToken.mint(
       this.trustBase,
       state,
