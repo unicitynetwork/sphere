@@ -554,21 +554,119 @@ export class NostrService {
         const client = ServiceProvider.stateTransitionClient;
         const rootTrustBase = ServiceProvider.getRootTrustBase();
 
-        const finalizedToken = await client.finalizeTransaction(
-          rootTrustBase,
-          sourceToken,
-          recipientState,
-          transferTx,
-          [myNametagToken]
-        );
+        let finalizedToken: Token<any>;
+
+        // DEV MODE: Skip nametag token verification if trust base verification is disabled
+        if (ServiceProvider.isTrustBaseVerificationSkipped()) {
+          console.warn("⚠️ Finalizing transfer WITHOUT nametag verification (dev mode)");
+          // Create token directly without SDK verification
+          // Get the source token's JSON and modify it for the finalized state
+          const sourceTxf = sourceToken.toJSON();
+          const existingTransactions = sourceTxf.transactions || [];
+
+          // Calculate the new state hash (required for token chain validity)
+          const newStateHash = await recipientState.calculateHash();
+          const newStateHashStr = newStateHash.toJSON();
+
+          // Create the new transaction with the calculated state hash
+          const newTxJson = {
+            ...transferTx.toJSON(),
+            newStateHash: newStateHashStr,
+          };
+
+          const finalizedTxf = {
+            ...sourceTxf,
+            state: recipientState.toJSON(),
+            transactions: [...existingTransactions, newTxJson],
+            nametags: [myNametagToken.toJSON()],
+          };
+          finalizedToken = await Token.fromJSON(finalizedTxf);
+        } else {
+          finalizedToken = await client.finalizeTransaction(
+            rootTrustBase,
+            sourceToken,
+            recipientState,
+            transferTx,
+            [myNametagToken]
+          );
+        }
 
         console.log("Token finalized successfully!");
         return this.saveReceivedToken(finalizedToken, senderPubkey);
       } else {
         console.log(
-          "Transfer is to DIRECT address - saving without finalization"
+          "Transfer is to DIRECT address - finalizing with direct predicate"
         );
-        return this.saveReceivedToken(sourceToken, senderPubkey);
+
+        // For DIRECT addresses, we still need to finalize the transfer to update the token state
+        const identity = await this.identityManager.getCurrentIdentity();
+
+        if (identity === null) {
+          console.error(
+            "No wallet identity found, can't finalize the direct transfer!"
+          );
+          return false;
+        }
+
+        const secret = Buffer.from(identity.privateKey, "hex");
+        const signingService = await SigningService.createFromSecret(secret);
+
+        const transferSalt = transferTx.data.salt;
+
+        // Create the recipient predicate using UnmaskedPredicate (same as PROXY but no proxy token reveal)
+        const recipientPredicate = await UnmaskedPredicate.create(
+          sourceToken.id,
+          sourceToken.type,
+          signingService,
+          HashAlgorithm.SHA256,
+          transferSalt
+        );
+
+        const recipientState = new TokenState(recipientPredicate, null);
+
+        const client = ServiceProvider.stateTransitionClient;
+        const rootTrustBase = ServiceProvider.getRootTrustBase();
+
+        let finalizedToken: Token<any>;
+
+        // DEV MODE: Skip verification if trust base verification is disabled
+        if (ServiceProvider.isTrustBaseVerificationSkipped()) {
+          console.warn("⚠️ Finalizing DIRECT transfer WITHOUT verification (dev mode)");
+          // Create token directly without SDK verification
+          // Get the source token's JSON and modify it for the finalized state
+          const sourceTxf = sourceToken.toJSON();
+          const existingTransactions = sourceTxf.transactions || [];
+
+          // Calculate the new state hash (required for token chain validity)
+          const newStateHash = await recipientState.calculateHash();
+          const newStateHashStr = newStateHash.toJSON();
+
+          // Create the new transaction with the calculated state hash
+          const newTxJson = {
+            ...transferTx.toJSON(),
+            newStateHash: newStateHashStr,
+          };
+
+          const finalizedTxf = {
+            ...sourceTxf,
+            state: recipientState.toJSON(),
+            transactions: [...existingTransactions, newTxJson],
+            nametags: [], // No nametag tokens for DIRECT addresses
+          };
+          finalizedToken = await Token.fromJSON(finalizedTxf);
+        } else {
+          // Finalize with empty proxy tokens array for DIRECT addresses
+          finalizedToken = await client.finalizeTransaction(
+            rootTrustBase,
+            sourceToken,
+            recipientState,
+            transferTx,
+            [] // No proxy tokens for DIRECT addresses
+          );
+        }
+
+        console.log("Token finalized successfully (DIRECT address)!");
+        return this.saveReceivedToken(finalizedToken, senderPubkey);
       }
     } catch (error) {
       console.error("Error occured while finalizing transfer:", error);

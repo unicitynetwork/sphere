@@ -51,6 +51,7 @@ declare global {
     devRepairUnicityId: () => Promise<boolean>;
     devCheckNametag: (nametag: string) => Promise<string | null>;
     devRestoreNametag: (nametagName: string) => boolean;
+    devDumpNametagToken: () => Promise<unknown>;
   }
 }
 
@@ -1863,6 +1864,41 @@ export function registerDevTools(): void {
       return success;
     }
     return false;
+  };
+  window.devDumpNametagToken = async () => {
+    const walletRepo = WalletRepository.getInstance();
+    const nametagData = walletRepo.getNametag();
+    if (!nametagData) {
+      console.log("❌ No nametag found");
+      return null;
+    }
+    console.log("📋 Nametag data:", {
+      name: nametagData.name,
+      timestamp: nametagData.timestamp,
+      format: nametagData.format,
+      version: nametagData.version,
+    });
+    console.log("📋 Raw token:", nametagData.token);
+
+    try {
+      const { Token } = await import("@unicitylabs/state-transition-sdk/lib/token/Token");
+      const token = await Token.fromJSON(nametagData.token);
+      console.log("📋 Parsed token:");
+      console.log("   ID:", token.id);
+      console.log("   Type:", token.type?.toString?.() || "unknown");
+      console.log("   State:", token.state);
+      console.log("   Genesis:", token.genesis);
+      console.log("   Transactions:", token.transactions?.length || 0);
+      if (token.transactions?.length > 0) {
+        token.transactions.forEach((tx: unknown, i: number) => {
+          console.log(`   TX[${i}]:`, tx);
+        });
+      }
+      return { nametagData, token };
+    } catch (err) {
+      console.error("❌ Failed to parse token:", err);
+      return { nametagData, parseError: err };
+    }
   };
   console.log("🛠️ Dev tools registered. Type devHelp() for available commands.");
 }
