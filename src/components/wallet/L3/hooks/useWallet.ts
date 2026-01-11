@@ -137,7 +137,7 @@ export const useWallet = () => {
     return () => {
       recoveryService.stopPeriodicRetry();
     };
-  }, [identityQuery.data?.address, nostrService, identityManager, queryClient]);
+  }, [identityQuery.data, nostrService, identityManager, queryClient]);
 
   // Ensure registry is loaded before aggregating assets
   const registryQuery = useQuery({
