@@ -221,7 +221,7 @@ describe("buildTxfStorageData", () => {
     };
     const nametag = {
       name: "testuser",
-      token: {},
+      token: validTxfToken, // Must be a valid token, not empty object
       timestamp: Date.now(),
       format: "1.0",
       version: "1.0",
@@ -292,7 +292,7 @@ describe("parseTxfStorageData", () => {
       },
       _nametag: {
         name: "testuser",
-        token: {},
+        token: validTxfToken, // Must be a valid token, not empty object
         timestamp: Date.now(),
         format: "1.0",
         version: "1.0",
