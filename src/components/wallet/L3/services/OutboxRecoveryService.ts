@@ -356,8 +356,11 @@ export class OutboxRecoveryService {
 
         case "PROOF_RECEIVED":
           // SPLIT_MINT entries with proof are already complete - token is minted and saved
+          // SPLIT_BURN entries are also complete - the original token was destroyed, not sent
           if (entry.type === "SPLIT_MINT") {
             await this.finalizeSplitMint(entry, outboxRepo);
+          } else if (entry.type === "SPLIT_BURN") {
+            await this.finalizeSplitBurn(entry, outboxRepo);
           } else {
             await this.resumeFromProofReceived(entry, outboxRepo, nostrService);
           }
@@ -615,6 +618,25 @@ export class OutboxRecoveryService {
     outboxRepo.updateStatus(entry.id, "COMPLETED");
 
     console.log(`📤 SPLIT_MINT ${entry.id.slice(0, 8)}... finalized`);
+  }
+
+  /**
+   * Finalize a SPLIT_BURN entry.
+   * The original token was destroyed (burned) as part of the split operation.
+   * The burned token should NOT be sent via Nostr - it's gone.
+   * We just mark the entry as completed.
+   */
+  private async finalizeSplitBurn(
+    entry: OutboxEntry,
+    outboxRepo: OutboxRepository
+  ): Promise<void> {
+    console.log(`📤 OutboxRecovery: Finalizing SPLIT_BURN ${entry.id.slice(0, 8)}... (token destroyed, not sent)`);
+
+    // The original token was burned - it no longer exists and should not be sent anywhere
+    // Just mark the outbox entry as completed
+    outboxRepo.updateStatus(entry.id, "COMPLETED");
+
+    console.log(`📤 SPLIT_BURN ${entry.id.slice(0, 8)}... finalized`);
   }
 
   /**
