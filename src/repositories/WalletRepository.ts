@@ -1,5 +1,5 @@
 import { Token, Wallet, TokenStatus } from "../components/wallet/L3/data/model";
-import type { TombstoneEntry, TxfToken, TxfTransaction } from "../components/wallet/L3/services/types/TxfTypes";
+import type { TombstoneEntry, TxfToken, TxfTransaction, InvalidatedNametagEntry } from "../components/wallet/L3/services/types/TxfTypes";
 import { v4 as uuidv4 } from "uuid";
 import { STORAGE_KEYS, STORAGE_KEY_GENERATORS, STORAGE_KEY_PREFIXES } from "../config/storageKeys";
 import { assertValidNametagData, sanitizeNametagForLogging, validateTokenJson } from "../utils/tokenValidation";
@@ -42,6 +42,7 @@ interface StoredWallet {
   tombstones?: TombstoneEntry[] | string[];  // TombstoneEntry[] (new) or string[] (legacy, discarded on load)
   archivedTokens?: Record<string, TxfToken>;  // Archived spent tokens (keyed by tokenId)
   forkedTokens?: Record<string, TxfToken>;    // Forked tokens (keyed by tokenId_stateHash)
+  invalidatedNametags?: InvalidatedNametagEntry[];  // Nametags invalidated due to Nostr pubkey mismatch
 }
 
 export class WalletRepository {
@@ -55,6 +56,7 @@ export class WalletRepository {
   private _transactionHistory: TransactionHistoryEntry[] = [];
   private _archivedTokens: Map<string, TxfToken> = new Map();  // Archived spent tokens (keyed by tokenId)
   private _forkedTokens: Map<string, TxfToken> = new Map();    // Forked tokens (keyed by tokenId_stateHash)
+  private _invalidatedNametags: InvalidatedNametagEntry[] = []; // Nametags invalidated due to Nostr pubkey mismatch
 
   // Debounce timer for wallet refresh events
   private _refreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -334,6 +336,21 @@ export class WalletRepository {
           }
         }
 
+        // Load invalidated nametags
+        this._invalidatedNametags = [];
+        if (parsed.invalidatedNametags && Array.isArray(parsed.invalidatedNametags)) {
+          for (const entry of parsed.invalidatedNametags) {
+            if (
+              typeof entry === "object" &&
+              entry !== null &&
+              typeof (entry as InvalidatedNametagEntry).name === "string" &&
+              typeof (entry as InvalidatedNametagEntry).invalidatedAt === "number"
+            ) {
+              this._invalidatedNametags.push(entry as InvalidatedNametagEntry);
+            }
+          }
+        }
+
         // Don't call refreshWallet() here - loading is a read operation, not a write
         // refreshWallet() should only be called when data actually changes
 
@@ -443,7 +460,7 @@ export class WalletRepository {
     this._currentAddress = wallet.address;
     const storageKey = this.getStorageKey(wallet.address);
 
-    // Include nametag, tombstones, and archived/forked tokens in stored data
+    // Include nametag, tombstones, archived/forked tokens, and invalidated nametags in stored data
     const storedData: StoredWallet = {
       id: wallet.id,
       name: wallet.name,
@@ -453,6 +470,7 @@ export class WalletRepository {
       tombstones: this._tombstones.length > 0 ? this._tombstones : undefined,
       archivedTokens: this._archivedTokens.size > 0 ? Object.fromEntries(this._archivedTokens) : undefined,
       forkedTokens: this._forkedTokens.size > 0 ? Object.fromEntries(this._forkedTokens) : undefined,
+      invalidatedNametags: this._invalidatedNametags.length > 0 ? this._invalidatedNametags : undefined,
     };
 
     localStorage.setItem(storageKey, JSON.stringify(storedData));
@@ -749,6 +767,7 @@ export class WalletRepository {
     this._tombstones = [];
     this._archivedTokens = new Map();
     this._forkedTokens = new Map();
+    this._invalidatedNametags = [];
     this.refreshWallet();
   }
 
@@ -763,6 +782,7 @@ export class WalletRepository {
     this._tombstones = [];
     this._archivedTokens = new Map();
     this._forkedTokens = new Map();
+    this._invalidatedNametags = [];
     this.refreshWallet();
   }
 
@@ -868,6 +888,98 @@ export class WalletRepository {
    */
   hasNametag(): boolean {
     return this._nametag !== null;
+  }
+
+  // ==========================================
+  // Invalidated Nametag Methods
+  // ==========================================
+
+  /**
+   * Add a nametag to the invalidated list
+   * Called when Nostr pubkey mismatch is detected
+   */
+  addInvalidatedNametag(entry: InvalidatedNametagEntry): void {
+    // Avoid duplicates by name
+    const exists = this._invalidatedNametags.some(e => e.name === entry.name);
+    if (!exists) {
+      this._invalidatedNametags.push(entry);
+      if (this._wallet) {
+        this.saveWallet(this._wallet);
+      }
+      console.log(`💀 Nametag "${entry.name}" added to invalidated list: ${entry.invalidationReason}`);
+    }
+  }
+
+  /**
+   * Get all invalidated nametags for this identity
+   */
+  getInvalidatedNametags(): InvalidatedNametagEntry[] {
+    return [...this._invalidatedNametags];
+  }
+
+  /**
+   * Merge invalidated nametags from remote (IPFS sync)
+   * Returns number of nametags added
+   */
+  mergeInvalidatedNametags(remoteEntries: InvalidatedNametagEntry[]): number {
+    let mergedCount = 0;
+    for (const entry of remoteEntries) {
+      const exists = this._invalidatedNametags.some(e => e.name === entry.name);
+      if (!exists) {
+        this._invalidatedNametags.push(entry);
+        mergedCount++;
+      }
+    }
+    if (mergedCount > 0 && this._wallet) {
+      this.saveWallet(this._wallet);
+    }
+    return mergedCount;
+  }
+
+  /**
+   * Remove an invalidated nametag by name (for recovery from false positives)
+   * Returns the removed entry or null if not found
+   */
+  removeInvalidatedNametag(nametagName: string): InvalidatedNametagEntry | null {
+    const index = this._invalidatedNametags.findIndex(e => e.name === nametagName);
+    if (index === -1) {
+      return null;
+    }
+    const [removed] = this._invalidatedNametags.splice(index, 1);
+    if (this._wallet) {
+      this.saveWallet(this._wallet);
+    }
+    return removed;
+  }
+
+  /**
+   * Restore an invalidated nametag back to active status
+   * This removes it from invalidatedNametags and sets it as the current nametag
+   * Returns true if restored successfully, false if not found
+   */
+  restoreInvalidatedNametag(nametagName: string): boolean {
+    const entry = this.removeInvalidatedNametag(nametagName);
+    if (!entry) {
+      console.warn(`Cannot restore nametag "${nametagName}" - not found in invalidated list`);
+      return false;
+    }
+
+    // Restore as current nametag (without the invalidation metadata)
+    this._nametag = {
+      name: entry.name,
+      token: entry.token,
+      timestamp: entry.timestamp,
+      format: entry.format,
+      version: entry.version,
+    };
+
+    if (this._wallet) {
+      this.saveWallet(this._wallet);
+    }
+
+    console.log(`✅ Restored nametag "${nametagName}" from invalidated list`);
+    this.refreshWallet();
+    return true;
   }
 
   refreshWallet(): void {

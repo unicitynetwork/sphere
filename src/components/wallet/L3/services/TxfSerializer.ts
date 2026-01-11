@@ -12,6 +12,7 @@ import {
   type TxfGenesis,
   type TxfTransaction,
   type TombstoneEntry,
+  type InvalidatedNametagEntry,
   isTokenKey,
   isArchivedKey,
   isForkedKey,
@@ -172,7 +173,8 @@ export function buildTxfStorageData(
   archivedTokens?: Map<string, TxfToken>,
   forkedTokens?: Map<string, TxfToken>,
   outboxEntries?: OutboxEntry[],
-  mintOutboxEntries?: MintOutboxEntry[]
+  mintOutboxEntries?: MintOutboxEntry[],
+  invalidatedNametags?: InvalidatedNametagEntry[]
 ): TxfStorageData {
   const storageData: TxfStorageData = {
     _meta: {
@@ -208,6 +210,11 @@ export function buildTxfStorageData(
   // Add mint outbox entries (CRITICAL for mint recovery)
   if (mintOutboxEntries && mintOutboxEntries.length > 0) {
     storageData._mintOutbox = mintOutboxEntries;
+  }
+
+  // Add invalidated nametags (preserves history across devices)
+  if (invalidatedNametags && invalidatedNametags.length > 0) {
+    storageData._invalidatedNametags = invalidatedNametags;
   }
 
   // Add each active token with _<tokenId> key
@@ -253,6 +260,7 @@ export function parseTxfStorageData(data: unknown): {
   forkedTokens: Map<string, TxfToken>;
   outboxEntries: OutboxEntry[];
   mintOutboxEntries: MintOutboxEntry[];
+  invalidatedNametags: InvalidatedNametagEntry[];
   validationErrors: string[];
 } {
   const result: {
@@ -264,6 +272,7 @@ export function parseTxfStorageData(data: unknown): {
     forkedTokens: Map<string, TxfToken>;
     outboxEntries: OutboxEntry[];
     mintOutboxEntries: MintOutboxEntry[];
+    invalidatedNametags: InvalidatedNametagEntry[];
     validationErrors: string[];
   } = {
     tokens: [],
@@ -274,6 +283,7 @@ export function parseTxfStorageData(data: unknown): {
     forkedTokens: new Map(),
     outboxEntries: [],
     mintOutboxEntries: [],
+    invalidatedNametags: [],
     validationErrors: [],
   };
 
@@ -369,6 +379,24 @@ export function parseTxfStorageData(data: unknown): {
         result.mintOutboxEntries.push(entry as MintOutboxEntry);
       } else {
         result.validationErrors.push("Invalid mint outbox entry structure");
+      }
+    }
+  }
+
+  // Extract invalidated nametags (preserves history across devices)
+  if (storageData._invalidatedNametags && Array.isArray(storageData._invalidatedNametags)) {
+    for (const entry of storageData._invalidatedNametags) {
+      // Basic validation for InvalidatedNametagEntry structure
+      if (
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as InvalidatedNametagEntry).name === "string" &&
+        typeof (entry as InvalidatedNametagEntry).invalidatedAt === "number" &&
+        typeof (entry as InvalidatedNametagEntry).invalidationReason === "string"
+      ) {
+        result.invalidatedNametags.push(entry as InvalidatedNametagEntry);
+      } else {
+        result.validationErrors.push("Invalid invalidated nametag entry structure");
       }
     }
   }
@@ -536,14 +564,26 @@ export function getTokenId(token: Token): string {
  * Get the current state hash from a TXF token
  * - If no transactions: use genesis state hash
  * - If has transactions: use newStateHash from last transaction
+ * Returns undefined if the token data is malformed
  */
-export function getCurrentStateHash(txf: TxfToken): string {
-  if (txf.transactions.length === 0) {
+export function getCurrentStateHash(txf: TxfToken): string | undefined {
+  // Handle missing or empty transactions array
+  if (!txf.transactions || txf.transactions.length === 0) {
     // No transfers yet - use genesis state hash
-    return txf.genesis.inclusionProof.authenticator.stateHash;
+    const genesisHash = txf.genesis?.inclusionProof?.authenticator?.stateHash;
+    if (!genesisHash) {
+      console.warn(`getCurrentStateHash: missing genesis.inclusionProof.authenticator.stateHash`);
+      return undefined;
+    }
+    return genesisHash;
   }
   // Use newStateHash from the most recent transaction
-  return txf.transactions[txf.transactions.length - 1].newStateHash;
+  const lastTx = txf.transactions[txf.transactions.length - 1];
+  if (!lastTx?.newStateHash) {
+    console.warn(`getCurrentStateHash: missing newStateHash on last transaction`);
+    return undefined;
+  }
+  return lastTx.newStateHash;
 }
 
 /**
@@ -554,7 +594,7 @@ export function getCurrentStateHashFromToken(token: Token): string | null {
 
   try {
     const txf = JSON.parse(token.jsonData) as TxfToken;
-    return getCurrentStateHash(txf);
+    return getCurrentStateHash(txf) ?? null;
   } catch {
     return null;
   }

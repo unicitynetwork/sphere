@@ -287,7 +287,7 @@ export class TokenRecoveryService {
       return { isSpent: false, stateHash: "", error: "Invalid token structure" };
     }
 
-    const stateHash = getCurrentStateHash(txf);
+    const stateHash = getCurrentStateHash(txf) ?? "";
     const tokenId = txf.genesis?.data?.tokenId || token.id;
 
     try {

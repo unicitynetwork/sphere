@@ -31,6 +31,7 @@ import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/Signi
 import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
 import { IdentityManager } from "../components/wallet/L3/services/IdentityManager";
 import { IpfsStorageService } from "../components/wallet/L3/services/IpfsStorageService";
+import { unicityIdValidator, type UnicityIdValidationResult } from "./unicityIdValidator";
 
 // Type declarations for window extension
 declare global {
@@ -46,6 +47,10 @@ declare global {
     devReset: () => void;
     devRecoverCorruptedTokens: () => Promise<RecoverCorruptedTokensResult>;
     devDumpArchivedTokens: () => void;
+    devValidateUnicityId: () => Promise<UnicityIdValidationResult>;
+    devRepairUnicityId: () => Promise<boolean>;
+    devCheckNametag: (nametag: string) => Promise<string | null>;
+    devRestoreNametag: (nametagName: string) => boolean;
   }
 }
 
@@ -1618,6 +1623,21 @@ export function devHelp(): void {
   console.log("    Updates newStateHash and removes tombstones for recovered tokens");
   console.log("    Returns: { success, recovered, failed, details }");
   console.log("");
+  console.log("  devValidateUnicityId()");
+  console.log("    Validate your Unicity ID (nametag) configuration");
+  console.log("    Checks: identity exists, nametag token valid, Nostr binding correct");
+  console.log("    Returns: { isValid, identity, nametag, nostrBinding, errors, warnings }");
+  console.log("");
+  console.log("  devRepairUnicityId()");
+  console.log("    Attempt to repair a broken Unicity ID by re-publishing to Nostr");
+  console.log("    Only works if nametag is not already owned by someone else");
+  console.log("    Returns: true if successful, false otherwise");
+  console.log("");
+  console.log("  devCheckNametag(name)");
+  console.log("    Check who owns a nametag on Nostr relay");
+  console.log("    Returns: pubkey if owned, null if available");
+  console.log("    Example: devCheckNametag('eric')");
+  console.log("");
   console.log("═══════════════════════════════════════════════════════════════");
   console.log("");
 }
@@ -1828,5 +1848,21 @@ export function registerDevTools(): void {
   window.devRecoverCorruptedTokens = devRecoverCorruptedTokens;
   window.devDumpArchivedTokens = devDumpArchivedTokens;
   window.devFindTransferSalt = devFindTransferSalt;
+  window.devValidateUnicityId = unicityIdValidator.validate;
+  window.devRepairUnicityId = unicityIdValidator.repair;
+  window.devCheckNametag = unicityIdValidator.getNametagOwner;
+  window.devRestoreNametag = (nametagName: string) => {
+    const walletRepo = WalletRepository.getInstance();
+    const invalidated = walletRepo.getInvalidatedNametags();
+    console.log(`📋 Invalidated nametags: ${invalidated.map(e => e.name).join(", ") || "(none)"}`);
+    if (nametagName) {
+      const success = walletRepo.restoreInvalidatedNametag(nametagName);
+      if (success) {
+        console.log(`✅ Restored "${nametagName}" - reload the page to see the change`);
+      }
+      return success;
+    }
+    return false;
+  };
   console.log("🛠️ Dev tools registered. Type devHelp() for available commands.");
 }

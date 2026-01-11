@@ -47,6 +47,8 @@ export const useWallet = () => {
     const handleWalletUpdate = () => {
       queryClient.refetchQueries({ queryKey: KEYS.TOKENS });
       queryClient.refetchQueries({ queryKey: KEYS.AGGREGATED });
+      // Also invalidate nametag query - critical for Unicity ID invalidation flow
+      queryClient.invalidateQueries({ queryKey: KEYS.NAMETAG });
     };
 
     // Handle wallet-loaded event (triggered after wallet creation/restoration)

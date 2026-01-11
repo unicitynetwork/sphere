@@ -703,6 +703,8 @@ export class TokenValidationService {
    * Used for sanity check when importing remote tombstones/missing tokens
    * Requires full TxfToken data for SDK-based verification
    * Returns array of tokenIds that are still valid/unspent
+   *
+   * NOTE: This now uses checkSingleTokenSpent internally to respect dev mode bypass
    */
   async checkUnspentTokens(
     tokens: Map<string, TxfToken>,
@@ -712,7 +714,7 @@ export class TokenValidationService {
 
     const unspentTokenIds: string[] = [];
 
-    console.log(`📦 Sanity check: Verifying ${tokens.size} token(s) with aggregator...`);
+    console.log(`📦 Sanity check (checkUnspentTokens): Verifying ${tokens.size} token(s) with aggregator...`);
 
     // Get trust base and client
     const trustBase = await this.getTrustBase();
@@ -735,33 +737,29 @@ export class TokenValidationService {
       return [...tokens.keys()];
     }
 
+    // Use checkSingleTokenSpent which has dev mode bypass logic
     for (const [tokenId, txfToken] of tokens) {
       try {
-        // Parse SDK token from TXF data
-        const { Token } = await import(
-          "@unicitylabs/state-transition-sdk/lib/token/Token"
-        );
-        const sdkToken = await Token.fromJSON(txfToken);
+        // Create a LocalToken-like object for checkSingleTokenSpent
+        const localToken = {
+          id: tokenId,
+          jsonData: JSON.stringify(txfToken),
+        } as LocalToken;
 
-        // Convert public key to bytes for SDK
-        const pubKeyBytes = Buffer.from(publicKey, "hex");
+        const result = await this.checkSingleTokenSpent(localToken, publicKey, trustBase, client);
 
-        // Check if token state is spent using SDK
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const isSpent = await (client as any).isTokenStateSpent(
-          trustBase,
-          sdkToken,
-          pubKeyBytes
-        );
-
-        if (!isSpent) {
+        if (result.error) {
+          console.warn(`📦 Sanity check: Error checking token ${tokenId.slice(0, 8)}...: ${result.error}`);
+          // On error, assume unspent (safe fallback to avoid data loss)
           unspentTokenIds.push(tokenId);
-          console.log(`📦 Token ${tokenId.slice(0, 8)}... is NOT spent`);
+        } else if (!result.spent) {
+          unspentTokenIds.push(tokenId);
+          console.log(`📦 Token ${tokenId.slice(0, 8)}... is NOT spent (via checkSingleTokenSpent)`);
         } else {
-          console.log(`📦 Token ${tokenId.slice(0, 8)}... is SPENT`);
+          console.log(`📦 Token ${tokenId.slice(0, 8)}... is SPENT (via checkSingleTokenSpent)`);
         }
       } catch (err) {
-        console.warn(`📦 Sanity check: Error checking token ${tokenId.slice(0, 8)}...:`, err);
+        console.warn(`📦 Sanity check: Exception checking token ${tokenId.slice(0, 8)}...:`, err);
         // On error, assume unspent (safe fallback to avoid data loss)
         unspentTokenIds.push(tokenId);
       }
@@ -898,25 +896,28 @@ export class TokenValidationService {
 
     // Get SDK token ID and state hash
     const tokenId = txfToken.genesis?.data?.tokenId || token.id;
-    const stateHash = getCurrentStateHash(txfToken);
+    const localStateHash = getCurrentStateHash(txfToken);
 
-    // CHECK CACHE FIRST - avoid unnecessary SDK/aggregator calls
-    const cacheKey = this.getSpentStateCacheKey(tokenId, stateHash, publicKey);
-    const cachedResult = this.getSpentStateFromCache(cacheKey);
-    if (cachedResult !== null) {
-      console.log(`📦 [SpentCheck] Cache HIT for ${tokenId.slice(0, 16)}... state=${stateHash.slice(0, 8)}... -> ${cachedResult ? 'SPENT' : 'UNSPENT'}`);
-      return {
-        tokenId,
-        localId: token.id,
-        stateHash,
-        spent: cachedResult,
-      };
+    // Try cache lookup if we have a local stateHash
+    if (localStateHash) {
+      const cacheKey = this.getSpentStateCacheKey(tokenId, localStateHash, publicKey);
+      const cachedResult = this.getSpentStateFromCache(cacheKey);
+      if (cachedResult !== null) {
+        console.log(`📦 [SpentCheck] Cache HIT for ${tokenId.slice(0, 16)}... state=${localStateHash.slice(0, 8)}... -> ${cachedResult ? 'SPENT' : 'UNSPENT'}`);
+        return {
+          tokenId,
+          localId: token.id,
+          stateHash: localStateHash,
+          spent: cachedResult,
+        };
+      }
+      console.log(`📦 [SpentCheck] Cache MISS for ${tokenId.slice(0, 16)}... state=${localStateHash.slice(0, 8)}... - querying aggregator`);
+    } else {
+      console.warn(`📦 [SpentCheck] Token ${tokenId.slice(0, 16)}... has undefined local stateHash - will use SDK to calculate`);
     }
-
-    console.log(`📦 [SpentCheck] Cache MISS for ${tokenId.slice(0, 16)}... state=${stateHash.slice(0, 8)}... - querying aggregator`);
     console.log(`📦 [SpentCheck] FULL VALUES for debugging:`);
     console.log(`   - tokenId: ${tokenId}`);
-    console.log(`   - stateHash: ${stateHash}`);
+    console.log(`   - localStateHash: ${localStateHash ?? 'undefined (will use SDK)'}`);
     console.log(`   - publicKey: ${publicKey}`);
     console.log(`   - txf.transactions.length: ${txfToken.transactions?.length || 0}`);
     if (txfToken.transactions?.length > 0) {
@@ -965,11 +966,12 @@ export class TokenValidationService {
         // Create RequestId exactly as SDK does internally
         const requestId = await RequestId.create(pubKeyBytes, calculatedStateHash);
 
+        const calculatedStateHashStr = calculatedStateHash.toJSON();
         console.log(`📦 [SpentCheck] RequestId constructed via SDK:`);
         console.log(`   - pubKeyBytes.length: ${pubKeyBytes.length}`);
-        console.log(`   - calculatedStateHash: ${calculatedStateHash.toJSON()}`);
-        console.log(`   - stateHash from JSON: ${stateHash}`);
-        console.log(`   - hashes match: ${calculatedStateHash.toJSON() === stateHash}`);
+        console.log(`   - calculatedStateHash: ${calculatedStateHashStr}`);
+        console.log(`   - localStateHash from JSON: ${localStateHash ?? 'undefined'}`);
+        console.log(`   - hashes match: ${localStateHash ? calculatedStateHashStr === localStateHash : 'N/A'}`);
         console.log(`   - requestId: ${requestId.toString()}`);
 
         // Query aggregator for inclusion/exclusion proof
@@ -1020,6 +1022,16 @@ export class TokenValidationService {
             throw new Error("Invalid proof: authenticator present but path not included");
           }
         }
+        // Cache using SDK-calculated state hash
+        const sdkCacheKey = this.getSpentStateCacheKey(tokenId, calculatedStateHashStr, publicKey);
+        this.cacheSpentState(sdkCacheKey, spent);
+
+        return {
+          tokenId,
+          localId: token.id,
+          stateHash: calculatedStateHashStr,
+          spent,
+        };
       } else {
         // PRODUCTION MODE: Use SDK's isTokenStateSpent with full verification
         const { Token } = await import(
@@ -1027,6 +1039,10 @@ export class TokenValidationService {
         );
         const sdkToken = await Token.fromJSON(txfToken);
         const pubKeyBytes = Buffer.from(publicKey, "hex");
+
+        // Get state hash for caching/return
+        const prodStateHash = await sdkToken.state.calculateHash();
+        const prodStateHashStr = prodStateHash.toJSON();
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const isSpent = await (client as any).isTokenStateSpent(
@@ -1036,23 +1052,24 @@ export class TokenValidationService {
         );
 
         spent = isSpent === true;
+
+        // Cache using SDK-calculated state hash
+        const prodCacheKey = this.getSpentStateCacheKey(tokenId, prodStateHashStr, publicKey);
+        this.cacheSpentState(prodCacheKey, spent);
+
+        return {
+          tokenId,
+          localId: token.id,
+          stateHash: prodStateHashStr,
+          spent,
+        };
       }
-
-      // STORE IN CACHE - SPENT forever, UNSPENT with TTL
-      this.cacheSpentState(cacheKey, spent);
-
-      return {
-        tokenId,
-        localId: token.id,
-        stateHash,
-        spent,
-      };
     } catch (err) {
       // Don't cache errors - allow retry
       return {
         tokenId,
         localId: token.id,
-        stateHash,
+        stateHash: localStateHash || "",
         spent: false,
         error: err instanceof Error ? err.message : String(err),
       };

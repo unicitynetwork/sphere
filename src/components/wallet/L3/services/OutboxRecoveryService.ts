@@ -35,7 +35,8 @@ import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAl
 import { OutboxRepository } from "../../../../repositories/OutboxRepository";
 import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
 import { ServiceProvider } from "./ServiceProvider";
-import type { NostrService } from "./NostrService";
+import { NostrService } from "./NostrService";
+import { ProxyAddress } from "@unicitylabs/state-transition-sdk/lib/address/ProxyAddress";
 import type { IdentityManager } from "./IdentityManager";
 import type {
   OutboxEntry,
@@ -977,6 +978,30 @@ export class OutboxRecoveryService {
       const walletRepo = WalletRepository.getInstance();
       walletRepo.setNametag(nametagData);
       console.log(`📤 OutboxRecovery: Recovered nametag "${entry.nametag}" and saved to storage`);
+
+      // CRITICAL: Publish Nostr binding after recovery
+      // Without this, the nametag won't be found on Nostr and validation will fail
+      try {
+        const nostr = NostrService.getInstance(this.identityManager);
+        await nostr.start();
+
+        const proxyAddress = await ProxyAddress.fromNameTag(entry.nametag);
+        console.log(`📤 OutboxRecovery: Publishing Nostr binding: ${entry.nametag} -> ${proxyAddress.address}`);
+
+        const published = await nostr.publishNametagBinding(
+          entry.nametag,
+          proxyAddress.address
+        );
+
+        if (published) {
+          console.log(`📤 OutboxRecovery: Nostr binding published successfully for "${entry.nametag}"`);
+        } else {
+          console.warn(`📤 OutboxRecovery: Nostr binding publish returned false for "${entry.nametag}"`);
+        }
+      } catch (nostrError) {
+        // Don't fail the entire recovery if Nostr fails - token is already minted
+        console.warn(`📤 OutboxRecovery: Nostr binding publish failed for "${entry.nametag}":`, nostrError);
+      }
     }
 
     console.log(`📤 OutboxRecovery: Mint entry ${entry.id.slice(0, 8)}... recovered and completed`);

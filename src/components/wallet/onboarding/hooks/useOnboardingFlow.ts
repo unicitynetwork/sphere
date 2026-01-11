@@ -136,6 +136,18 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         if (result.nametag && result.nametagData) {
           console.log(`🔍 [Complete Setup] Found nametag: ${result.nametag}`);
 
+          // CRITICAL: Check if this nametag was invalidated (e.g., owned by someone else on Nostr)
+          // If so, DO NOT restore it - user must create a new nametag
+          const walletRepo = WalletRepository.getInstance();
+          const invalidatedNametags = walletRepo.getInvalidatedNametags();
+          const isInvalidated = invalidatedNametags.some(inv => inv.name === result.nametag);
+
+          if (isInvalidated) {
+            console.warn(`🚫 [Complete Setup] Nametag "${result.nametag}" was invalidated - NOT restoring from IPNS`);
+            setIpnsFetchingNametag(false);
+            return;
+          }
+
           try {
             WalletRepository.saveNametagForAddress(identity.address, {
               name: result.nametagData.name,

@@ -1884,6 +1884,11 @@ export class IpfsStorageService {
 
       const tokenId = txf.genesis.data.tokenId;
       const stateHash = getCurrentStateHash(txf);
+      if (!stateHash) {
+        console.warn(`⚠️ Integrity: Token ${tokenId.slice(0, 8)}... has undefined stateHash`);
+        issues++;
+        continue;
+      }
       const key = `${tokenId}:${stateHash}`;
 
       if (tombstoneKeySet.has(key)) {
@@ -2063,7 +2068,7 @@ export class IpfsStorageService {
     const rawTombstones = (remoteTxf as Record<string, unknown>)._tombstones;
     console.log(`📦 Raw remote _tombstones field:`, rawTombstones);
 
-    const { tokens: remoteTokens, nametag, tombstones: remoteTombstones, archivedTokens: remoteArchived, forkedTokens: remoteForked, outboxEntries: remoteOutbox, mintOutboxEntries: remoteMintOutbox } = parseTxfStorageData(remoteTxf);
+    const { tokens: remoteTokens, nametag, tombstones: remoteTombstones, archivedTokens: remoteArchived, forkedTokens: remoteForked, outboxEntries: remoteOutbox, mintOutboxEntries: remoteMintOutbox, invalidatedNametags: remoteInvalidatedNametags } = parseTxfStorageData(remoteTxf);
 
     // Import outbox entries from remote (CRITICAL for transfer recovery)
     if (remoteOutbox && remoteOutbox.length > 0) {
@@ -2077,6 +2082,14 @@ export class IpfsStorageService {
       const outboxRepo = OutboxRepository.getInstance();
       outboxRepo.importMintEntriesFromRemote(remoteMintOutbox);
       console.log(`📦 Imported ${remoteMintOutbox.length} mint outbox entries from remote`);
+    }
+
+    // Merge invalidated nametags from remote (preserves history across devices)
+    if (remoteInvalidatedNametags && remoteInvalidatedNametags.length > 0) {
+      const mergedCount = walletRepo.mergeInvalidatedNametags(remoteInvalidatedNametags);
+      if (mergedCount > 0) {
+        console.log(`📦 Merged ${mergedCount} invalidated nametag(s) from remote`);
+      }
     }
 
     // Debug: Log parsed tombstones (now TombstoneEntry[])
@@ -2192,6 +2205,12 @@ export class IpfsStorageService {
       const tokenId = remoteTxf.genesis.data.tokenId;
       const stateHash = getCurrentStateHash(remoteTxf);
 
+      // Skip if state hash is undefined (malformed token)
+      if (!stateHash) {
+        console.warn(`📦 Token ${tokenId.slice(0, 8)}... has undefined stateHash, skipping import`);
+        continue;
+      }
+
       // Skip if this specific state is tombstoned
       const tombstoneKey = `${tokenId}:${stateHash}`;
       if (allTombstoneKeys.has(tombstoneKey)) {
@@ -2221,7 +2240,7 @@ export class IpfsStorageService {
 
           // Archive local version before replacing (in case of fork)
           const localStateHash = getCurrentStateHash(localTxf);
-          if (localStateHash !== stateHash) {
+          if (localStateHash && localStateHash !== stateHash) {
             // Different state = fork, archive the losing local version
             walletRepo.storeForkedToken(tokenId, localStateHash, localTxf);
             console.log(`📦 Archived forked local version of ${tokenId.slice(0, 8)}... (state ${localStateHash.slice(0, 8)}...)`);
@@ -2234,7 +2253,7 @@ export class IpfsStorageService {
           // Local is better - keep local, but archive remote if it's a fork
           const remoteStateHash = getCurrentStateHash(remoteTxf);
           const localStateHash = getCurrentStateHash(localTxf);
-          if (remoteStateHash !== localStateHash) {
+          if (remoteStateHash && localStateHash && remoteStateHash !== localStateHash) {
             // Different state = fork, archive the remote version
             walletRepo.storeForkedToken(tokenId, remoteStateHash, remoteTxf);
             console.log(`📦 Archived forked remote version of ${tokenId.slice(0, 8)}... (state ${remoteStateHash.slice(0, 8)}...)`);
@@ -2254,8 +2273,16 @@ export class IpfsStorageService {
       if (isNametagCorrupted(nametag)) {
         console.warn("📦 Skipping corrupted nametag import from IPFS - will be cleared on next sync");
       } else {
-        walletRepo.setNametag(nametag);
-        console.log(`📦 Imported nametag "${nametag.name}" from remote`);
+        // Check if this nametag was invalidated (e.g., Nostr pubkey mismatch)
+        // If so, don't re-import it - user needs to create a new nametag
+        const invalidatedNametags = walletRepo.getInvalidatedNametags();
+        const isInvalidated = invalidatedNametags.some(inv => inv.name === nametag.name);
+        if (isInvalidated) {
+          console.warn(`📦 Skipping invalidated nametag "${nametag.name}" import from IPFS - user must create new nametag`);
+        } else {
+          walletRepo.setNametag(nametag);
+          console.log(`📦 Imported nametag "${nametag.name}" from remote`);
+        }
       }
     }
 
@@ -2757,8 +2784,8 @@ export class IpfsStorageService {
                 }
               }
 
-              // Merge archived, forked tokens, and outbox entries from remote
-              const { archivedTokens: remoteArchived, forkedTokens: remoteForked, outboxEntries: remoteOutbox, mintOutboxEntries: remoteMintOutbox } = parseTxfStorageData(remoteTxf);
+              // Merge archived, forked tokens, outbox entries, and invalidated nametags from remote
+              const { archivedTokens: remoteArchived, forkedTokens: remoteForked, outboxEntries: remoteOutbox, mintOutboxEntries: remoteMintOutbox, invalidatedNametags: remoteInvalidatedNametags } = parseTxfStorageData(remoteTxf);
               if (remoteArchived.size > 0) {
                 const archivedMergedCount = walletRepo.mergeArchivedTokens(remoteArchived);
                 if (archivedMergedCount > 0) {
@@ -2783,6 +2810,13 @@ export class IpfsStorageService {
                 outboxRepo.importMintEntriesFromRemote(remoteMintOutbox);
                 console.log(`📦 Imported ${remoteMintOutbox.length} mint outbox entries from remote during conflict resolution`);
               }
+              // Merge invalidated nametags from remote (preserves history across devices)
+              if (remoteInvalidatedNametags && remoteInvalidatedNametags.length > 0) {
+                const mergedCount = walletRepo.mergeInvalidatedNametags(remoteInvalidatedNametags);
+                if (mergedCount > 0) {
+                  console.log(`📦 Merged ${mergedCount} invalidated nametag(s) from remote during conflict resolution`);
+                }
+              }
 
               // Also sync nametag from remote if local doesn't have one
               if (!nametag && mergeResult.merged._nametag) {
@@ -2790,8 +2824,15 @@ export class IpfsStorageService {
                 if (isNametagCorrupted(mergeResult.merged._nametag)) {
                   console.warn("📦 Skipping corrupted nametag from conflict resolution - will be cleared on next sync");
                 } else {
-                  walletRepo.setNametag(mergeResult.merged._nametag);
-                  console.log(`📦 Synced nametag "${mergeResult.merged._nametag.name}" from IPFS to local`);
+                  // Check if this nametag was invalidated (e.g., Nostr pubkey mismatch)
+                  const invalidatedNametags = walletRepo.getInvalidatedNametags();
+                  const isInvalidated = invalidatedNametags.some(inv => inv.name === mergeResult.merged._nametag!.name);
+                  if (isInvalidated) {
+                    console.warn(`📦 Skipping invalidated nametag "${mergeResult.merged._nametag.name}" from conflict resolution - user must create new nametag`);
+                  } else {
+                    walletRepo.setNametag(mergeResult.merged._nametag);
+                    console.log(`📦 Synced nametag "${mergeResult.merged._nametag.name}" from IPFS to local`);
+                  }
                 }
               }
 
@@ -2860,6 +2901,9 @@ export class IpfsStorageService {
       const outboxEntries = outboxRepo.getAllForSync();
       const mintOutboxEntries = outboxRepo.getAllMintEntriesForSync();
 
+      // Get invalidated nametags (preserves history across devices)
+      const invalidatedNametags = walletRepo.getInvalidatedNametags();
+
       const meta: Omit<TxfMeta, "formatVersion"> = {
         version: newVersion,
         address: wallet.address,
@@ -2867,9 +2911,9 @@ export class IpfsStorageService {
         lastCid: this.getLastCid() || undefined,
       };
 
-      const txfStorageData = buildTxfStorageData(tokensToSync, meta, nametag || undefined, tombstones, archivedTokens, forkedTokens, outboxEntries, mintOutboxEntries);
-      if (tombstones.length > 0 || archivedTokens.size > 0 || forkedTokens.size > 0 || outboxEntries.length > 0 || mintOutboxEntries.length > 0) {
-        console.log(`📦 Including ${tombstones.length} tombstone(s), ${archivedTokens.size} archived, ${forkedTokens.size} forked, ${outboxEntries.length} outbox, ${mintOutboxEntries.length} mint outbox in sync`);
+      const txfStorageData = buildTxfStorageData(tokensToSync, meta, nametag || undefined, tombstones, archivedTokens, forkedTokens, outboxEntries, mintOutboxEntries, invalidatedNametags);
+      if (tombstones.length > 0 || archivedTokens.size > 0 || forkedTokens.size > 0 || outboxEntries.length > 0 || mintOutboxEntries.length > 0 || invalidatedNametags.length > 0) {
+        console.log(`📦 Including ${tombstones.length} tombstone(s), ${archivedTokens.size} archived, ${forkedTokens.size} forked, ${outboxEntries.length} outbox, ${mintOutboxEntries.length} mint outbox, ${invalidatedNametags.length} invalidated nametag(s) in sync`);
       }
 
       // 4. Ensure backend is connected before storing

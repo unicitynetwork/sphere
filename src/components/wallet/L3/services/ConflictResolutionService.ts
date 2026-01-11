@@ -166,6 +166,11 @@ export class ConflictResolutionService {
     for (const [tokenId, token] of mergedTokens) {
       // Get the token's current state hash
       const stateHash = getCurrentStateHash(token);
+      if (!stateHash) {
+        console.warn(`📦 Token ${tokenId.slice(0, 8)}... has undefined stateHash, skipping tombstone check`);
+        merged[keyFromTokenId(tokenId)] = token;
+        continue;
+      }
       const tombstoneKey = `${tokenId}:${stateHash}`;
 
       // Don't include tokens whose current state is tombstoned
