@@ -705,12 +705,21 @@ export class TokenValidationService {
    * Returns array of tokenIds that are still valid/unspent
    *
    * NOTE: This now uses checkSingleTokenSpent internally to respect dev mode bypass
+   *
+   * @param options.treatErrorsAsUnspent - If true (default), network errors assume token is unspent.
+   *   Use false for tombstone recovery where errors should NOT restore tokens.
+   *   - true: errors → assume unspent → for live tokens, safe (don't delete)
+   *   - false: errors → assume spent → for tombstones, safe (don't restore)
    */
   async checkUnspentTokens(
     tokens: Map<string, TxfToken>,
-    publicKey: string
+    publicKey: string,
+    options?: { treatErrorsAsUnspent?: boolean }
   ): Promise<string[]> {
     if (tokens.size === 0) return [];
+
+    // Default to true for backward compatibility (safe for live token sanity checks)
+    const treatErrorsAsUnspent = options?.treatErrorsAsUnspent ?? true;
 
     const unspentTokenIds: string[] = [];
 
@@ -750,8 +759,13 @@ export class TokenValidationService {
 
         if (result.error) {
           console.warn(`📦 Sanity check: Error checking token ${tokenId.slice(0, 8)}...: ${result.error}`);
-          // On error, assume unspent (safe fallback to avoid data loss)
-          unspentTokenIds.push(tokenId);
+          if (treatErrorsAsUnspent) {
+            // Safe fallback for live tokens: assume unspent → don't delete
+            unspentTokenIds.push(tokenId);
+          } else {
+            // Safe fallback for tombstones: assume spent → don't restore
+            console.log(`📦 Token ${tokenId.slice(0, 8)}... verification failed, treating as SPENT (safe for tombstone recovery)`);
+          }
         } else if (!result.spent) {
           unspentTokenIds.push(tokenId);
           console.log(`📦 Token ${tokenId.slice(0, 8)}... is NOT spent (via checkSingleTokenSpent)`);
@@ -760,12 +774,18 @@ export class TokenValidationService {
         }
       } catch (err) {
         console.warn(`📦 Sanity check: Exception checking token ${tokenId.slice(0, 8)}...:`, err);
-        // On error, assume unspent (safe fallback to avoid data loss)
-        unspentTokenIds.push(tokenId);
+        if (treatErrorsAsUnspent) {
+          // Safe fallback for live tokens: assume unspent → don't delete
+          unspentTokenIds.push(tokenId);
+        } else {
+          // Safe fallback for tombstones: assume spent → don't restore
+          console.log(`📦 Token ${tokenId.slice(0, 8)}... verification exception, treating as SPENT (safe for tombstone recovery)`);
+        }
       }
     }
 
-    console.log(`📦 Sanity check result: ${unspentTokenIds.length} unspent, ${tokens.size - unspentTokenIds.length} spent`);
+    const errorBehavior = treatErrorsAsUnspent ? "errors→unspent" : "errors→spent";
+    console.log(`📦 Sanity check result: ${unspentTokenIds.length} unspent, ${tokens.size - unspentTokenIds.length} spent/error (${errorBehavior})`);
     return unspentTokenIds;
   }
 

@@ -16,7 +16,7 @@ import { IdentityManager } from "./IdentityManager";
 import type { Token } from "../data/model";
 import type { TxfStorageData, TxfMeta, TxfToken, TombstoneEntry } from "./types/TxfTypes";
 import { isTokenKey, tokenIdFromKey } from "./types/TxfTypes";
-import { buildTxfStorageData, parseTxfStorageData, txfToToken, tokenToTxf, getCurrentStateHash } from "./TxfSerializer";
+import { buildTxfStorageData, parseTxfStorageData, txfToToken, tokenToTxf, getCurrentStateHash, hasMissingNewStateHash, repairMissingStateHash } from "./TxfSerializer";
 import { getTokenValidationService } from "./TokenValidationService";
 import { getConflictResolutionService } from "./ConflictResolutionService";
 import { getSyncCoordinator } from "./SyncCoordinator";
@@ -1750,9 +1750,16 @@ export class IpfsStorageService {
     }
 
     // Check which tokens are NOT spent (should not be deleted)
+    // CRITICAL: Use treatErrorsAsUnspent=false for tombstone recovery!
+    // When we can't verify, we should NOT restore tokens (keep tombstone intact)
+    // This prevents incorrectly restoring spent tokens when aggregator is down
     const validationService = getTokenValidationService();
     const publicKey = identity.publicKey;
-    const unspentTokenIds = await validationService.checkUnspentTokens(tokensToCheck, publicKey);
+    const unspentTokenIds = await validationService.checkUnspentTokens(
+      tokensToCheck,
+      publicKey,
+      { treatErrorsAsUnspent: false }  // Errors → assume spent → don't restore
+    );
     const unspentSet = new Set(unspentTokenIds);
 
     // Categorize tombstones
@@ -2199,15 +2206,34 @@ export class IpfsStorageService {
 
     for (const remoteToken of remoteTokens) {
       // Extract tokenId and stateHash from remote token
-      const remoteTxf = tokenToTxf(remoteToken);
+      let remoteTxf = tokenToTxf(remoteToken);
       if (!remoteTxf) continue;
 
       const tokenId = remoteTxf.genesis.data.tokenId;
-      const stateHash = getCurrentStateHash(remoteTxf);
+      let stateHash = getCurrentStateHash(remoteTxf);
 
-      // Skip if state hash is undefined (malformed token)
+      // Try to repair if state hash is undefined (token may be missing newStateHash from older version)
+      if (!stateHash && hasMissingNewStateHash(remoteTxf)) {
+        console.log(`📦 Token ${tokenId.slice(0, 8)}... has missing newStateHash, attempting repair...`);
+        try {
+          const repairedTxf = await repairMissingStateHash(remoteTxf);
+          if (repairedTxf) {
+            remoteTxf = repairedTxf;
+            stateHash = getCurrentStateHash(repairedTxf);
+            if (stateHash) {
+              console.log(`🔧 Token ${tokenId.slice(0, 8)}... repaired successfully`);
+              // Update the remoteToken with repaired data for import
+              remoteToken.jsonData = JSON.stringify(repairedTxf);
+            }
+          }
+        } catch (repairErr) {
+          console.warn(`📦 Failed to repair token ${tokenId.slice(0, 8)}...:`, repairErr);
+        }
+      }
+
+      // Skip if state hash is still undefined after repair attempt
       if (!stateHash) {
-        console.warn(`📦 Token ${tokenId.slice(0, 8)}... has undefined stateHash, skipping import`);
+        console.warn(`📦 Token ${tokenId.slice(0, 8)}... has undefined stateHash after repair attempt, skipping import`);
         continue;
       }
 
