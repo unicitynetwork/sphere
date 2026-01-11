@@ -43,6 +43,7 @@ declare global {
     devEnableTrustBaseVerification: () => void;
     devIsTrustBaseVerificationSkipped: () => boolean;
     devTopup: (coins?: string[]) => Promise<TopupResult>;
+    devReset: () => void;
   }
 }
 
@@ -1176,6 +1177,22 @@ export function devIsTrustBaseVerificationSkipped(): boolean {
 }
 
 /**
+ * Reset all dev settings to production defaults
+ * - Resets aggregator URL to default from environment variable
+ * - Enables trust base verification
+ * - Removes DEV banner from header
+ *
+ * Usage from browser console:
+ *   window.devReset()
+ */
+export function devReset(): void {
+  ServiceProvider.setAggregatorUrl(null);
+  ServiceProvider.setSkipTrustBaseVerification(false);
+  console.log("🔄 Dev settings reset to production defaults");
+  window.dispatchEvent(new Event("dev-config-changed"));
+}
+
+/**
  * Display help for all available dev commands
  *
  * Usage from browser console:
@@ -1208,6 +1225,10 @@ export function devHelp(): void {
   console.log("  devIsTrustBaseVerificationSkipped()");
   console.log("    Check if trust base verification is currently disabled");
   console.log("");
+  console.log("  devReset()");
+  console.log("    Reset all dev settings to production defaults");
+  console.log("    Resets aggregator URL and enables trust base verification");
+  console.log("");
   console.log("  devRefreshProofs()");
   console.log("    Re-fetch all Unicity proofs for tokens in the wallet");
   console.log("    Strips existing proofs and requests fresh ones from aggregator");
@@ -1236,6 +1257,7 @@ export function registerDevTools(): void {
   window.devSkipTrustBaseVerification = devSkipTrustBaseVerification;
   window.devEnableTrustBaseVerification = devEnableTrustBaseVerification;
   window.devIsTrustBaseVerificationSkipped = devIsTrustBaseVerificationSkipped;
+  window.devReset = devReset;
   window.devTopup = devTopup;
   console.log("🛠️ Dev tools registered. Type devHelp() for available commands.");
 }

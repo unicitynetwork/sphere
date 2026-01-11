@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { isMock } from '../../hooks/useAgentChat';
 import { ThemeToggle } from '../theme';
 import { ServiceProvider } from '../wallet/L3/services/ServiceProvider';
+import { devReset } from '../../utils/devTools';
 import logoUrl from '/Union.svg';
 
 const DiscordIcon = ({ className }: { className?: string }) => (
@@ -86,6 +87,13 @@ export function Header() {
               {devConfig.aggregatorUrl && devConfig.skipTrustBase && " | "}
               {devConfig.skipTrustBase && "TB:OFF"}
             </span>
+            <button
+              onClick={devReset}
+              className="ml-1 px-1.5 py-0.5 rounded bg-orange-500/20 hover:bg-orange-500/30 text-orange-500 font-semibold transition-colors"
+              title="Reset dev settings to production defaults"
+            >
+              RESET
+            </button>
           </div>
         )}
 
