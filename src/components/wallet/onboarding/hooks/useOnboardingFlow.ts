@@ -1,5 +1,8 @@
 /**
  * useOnboardingFlow - Manages onboarding flow state and navigation
+ *
+ * Uses WalletCore SDK for pure wallet operations (key generation, address derivation).
+ * UnifiedKeyManager handles storage, IdentityManager handles L3 identity.
  */
 import { useState, useCallback, useEffect } from "react";
 import { useWallet } from "../../L3/hooks/useWallet";
@@ -15,6 +18,10 @@ import {
   type Wallet as L1Wallet,
 } from "../../L1/sdk";
 import type { DerivedAddressInfo } from "../components/AddressSelectionScreen";
+import {
+  deriveUnifiedAddress,
+  getAddressPath,
+} from "../../core/WalletCore";
 
 export type OnboardingStep =
   | "start"
@@ -160,26 +167,36 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   }, [step, identity, nametag, ipnsFetchingNametag]);
 
   // Internal helper to derive next address
+  // Uses WalletCore for unified address derivation (L1 + L3)
   const deriveNextAddressInternal = useCallback(async () => {
     const nextIndex = derivedAddresses.length;
     const keyManager = getUnifiedKeyManager();
+    const masterKey = keyManager.getMasterKeyHex();
+    const chainCode = keyManager.getChainCodeHex();
     const basePath = keyManager.getBasePath();
-    const path = `${basePath}/0/${nextIndex}`;
-    const derived = keyManager.deriveAddressFromPath(path);
-    const l3Identity = await identityManager.deriveIdentityFromPath(path);
-    const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+    const mode = keyManager.getDerivationMode();
+
+    if (!masterKey) {
+      throw new Error("Wallet not initialized");
+    }
+
+    // Use WalletCore for unified address derivation
+    const path = getAddressPath(nextIndex, false, basePath);
+    const unified = await deriveUnifiedAddress(masterKey, chainCode, path, mode);
+
+    const existingNametag = WalletRepository.checkNametagForAddress(unified.l3Address);
     const hasLocalNametag = !!existingNametag;
 
     setDerivedAddresses((prev) => [
       ...prev,
       {
         index: nextIndex,
-        l1Address: derived.l1Address,
-        l3Address: l3Identity.address,
+        l1Address: unified.l1Address,
+        l3Address: unified.l3Address,
         path: path,
         hasNametag: hasLocalNametag,
         existingNametag: existingNametag?.name,
-        privateKey: hasLocalNametag ? undefined : l3Identity.privateKey,
+        privateKey: hasLocalNametag ? undefined : unified.privateKey,
         ipnsLoading: !hasLocalNametag,
         balanceLoading: true, // Always check balance for gap limit
       },
@@ -291,27 +308,37 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   }, [step, derivedAddresses, isCheckingIpns, firstFoundNametagPath, autoDeriveDuringIpnsCheck, deriveNextAddressInternal]);
 
   // Helper: derive addresses and check for existing nametags
+  // Uses WalletCore for unified address derivation (L1 + L3)
   const deriveAndCheckAddresses = useCallback(
     async (count: number): Promise<DerivedAddressInfo[]> => {
       const keyManager = getUnifiedKeyManager();
+      const masterKey = keyManager.getMasterKeyHex();
+      const chainCode = keyManager.getChainCodeHex();
       const basePath = keyManager.getBasePath();
+      const mode = keyManager.getDerivationMode();
+
+      if (!masterKey) {
+        throw new Error("Wallet not initialized");
+      }
+
       const results: DerivedAddressInfo[] = [];
 
       for (let i = 0; i < count; i++) {
-        const path = `${basePath}/0/${i}`;
-        const derived = keyManager.deriveAddressFromPath(path);
-        const l3Identity = await identityManager.deriveIdentityFromPath(path);
-        const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+        // Use WalletCore for unified address derivation
+        const path = getAddressPath(i, false, basePath);
+        const unified = await deriveUnifiedAddress(masterKey, chainCode, path, mode);
+
+        const existingNametag = WalletRepository.checkNametagForAddress(unified.l3Address);
         const hasLocalNametag = !!existingNametag;
 
         results.push({
           index: i,
-          l1Address: derived.l1Address,
-          l3Address: l3Identity.address,
+          l1Address: unified.l1Address,
+          l3Address: unified.l3Address,
           path: path,
           hasNametag: hasLocalNametag,
           existingNametag: existingNametag?.name,
-          privateKey: hasLocalNametag ? undefined : l3Identity.privateKey,
+          privateKey: hasLocalNametag ? undefined : unified.privateKey,
           ipnsLoading: !hasLocalNametag,
           balanceLoading: true, // Always check balance for gap limit
         });
@@ -505,28 +532,38 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   }, [nametagInput, checkNametagAvailability, mintNametag]);
 
   // Action: Derive new address
+  // Uses WalletCore for unified address derivation (L1 + L3)
   const handleDeriveNewAddress = useCallback(async () => {
     setIsBusy(true);
     try {
       const nextIndex = derivedAddresses.length;
       const keyManager = getUnifiedKeyManager();
+      const masterKey = keyManager.getMasterKeyHex();
+      const chainCode = keyManager.getChainCodeHex();
       const basePath = keyManager.getBasePath();
-      const path = `${basePath}/0/${nextIndex}`;
-      const derived = keyManager.deriveAddressFromPath(path);
-      const l3Identity = await identityManager.deriveIdentityFromPath(path);
-      const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+      const mode = keyManager.getDerivationMode();
+
+      if (!masterKey) {
+        throw new Error("Wallet not initialized");
+      }
+
+      // Use WalletCore for unified address derivation
+      const path = getAddressPath(nextIndex, false, basePath);
+      const unified = await deriveUnifiedAddress(masterKey, chainCode, path, mode);
+
+      const existingNametag = WalletRepository.checkNametagForAddress(unified.l3Address);
       const hasLocalNametag = !!existingNametag;
 
       setDerivedAddresses([
         ...derivedAddresses,
         {
           index: nextIndex,
-          l1Address: derived.l1Address,
-          l3Address: l3Identity.address,
+          l1Address: unified.l1Address,
+          l3Address: unified.l3Address,
           path: path,
           hasNametag: hasLocalNametag,
           existingNametag: existingNametag?.name,
-          privateKey: hasLocalNametag ? undefined : l3Identity.privateKey,
+          privateKey: hasLocalNametag ? undefined : unified.privateKey,
           ipnsLoading: !hasLocalNametag,
           balanceLoading: true, // Check balance for gap limit
         },

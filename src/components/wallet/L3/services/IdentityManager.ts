@@ -1,14 +1,16 @@
 import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
 import { TokenType } from "@unicitylabs/state-transition-sdk/lib/token/TokenType";
-import * as bip39 from "bip39";
 import CryptoJS from "crypto-js";
 import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
 import type { DirectAddress } from "@unicitylabs/state-transition-sdk/lib/address/DirectAddress";
 import { UnmaskedPredicateReference } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicateReference";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
-const UNICITY_TOKEN_TYPE_HEX =
-  "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9ef0efbe397867509";
+import {
+  deriveL3Address as coreDeriveL3Address,
+  validateMnemonic,
+} from "../../core/WalletCore";
+import { UNICITY_TOKEN_TYPE_HEX } from "../../core/types";
 const DEFAULT_SESSION_KEY = "user-pin-1234";
 
 /**
@@ -100,6 +102,7 @@ export class IdentityManager {
   /**
    * Derive L3 identity from a BIP32 path
    * This is the PREFERRED method - use path as the single identifier
+   * Delegates to WalletCore for L3 address derivation
    * @param path - Full BIP32 path like "m/84'/1'/0'/0/0"
    */
   async deriveIdentityFromPath(path: string): Promise<UserIdentity> {
@@ -109,13 +112,11 @@ export class IdentityManager {
       throw new Error("Unified wallet not initialized");
     }
 
+    // Get L1 address info from UnifiedKeyManager
     const derived = keyManager.deriveAddressFromPath(path);
-    const secret = Buffer.from(derived.privateKey, "hex");
 
-    const l3Address = await this.deriveL3Address(secret);
-
-    const signingService = await SigningService.createFromSecret(secret);
-    const publicKey = Buffer.from(signingService.publicKey).toString("hex");
+    // Use WalletCore for L3 address derivation
+    const l3 = await coreDeriveL3Address(derived.privateKey);
 
     // Parse path to get index for addressIndex field
     const match = path.match(/\/(\d+)$/);
@@ -123,8 +124,8 @@ export class IdentityManager {
 
     return {
       privateKey: derived.privateKey,
-      publicKey: publicKey,
-      address: l3Address,
+      publicKey: l3.publicKey,
+      address: l3.address,
       mnemonic: keyManager.getMnemonic() || undefined,
       l1Address: derived.l1Address,
       addressIndex: index,
@@ -134,30 +135,27 @@ export class IdentityManager {
   /**
    * Derive identity from a raw private key
    * Useful for external integrations
+   * Delegates to WalletCore for L3 address derivation
    */
   async deriveIdentityFromPrivateKey(privateKey: string): Promise<UserIdentity> {
-    const secret = Buffer.from(privateKey, "hex");
-
-    const l3Address = await this.deriveL3Address(secret);
-
-    const signingService = await SigningService.createFromSecret(secret);
-    const publicKey = Buffer.from(signingService.publicKey).toString("hex");
+    // Use WalletCore for L3 address derivation
+    const l3 = await coreDeriveL3Address(privateKey);
 
     return {
       privateKey,
-      publicKey,
-      address: l3Address,
+      publicKey: l3.publicKey,
+      address: l3.address,
     };
   }
 
   /**
    * Derive identity from mnemonic using UnifiedKeyManager
    * This always uses BIP32 derivation for consistency with L1
+   * Uses WalletCore for mnemonic validation
    */
   async deriveIdentityFromMnemonic(mnemonic: string): Promise<UserIdentity> {
-    // Validate mnemonic phrase
-    const isValid = bip39.validateMnemonic(mnemonic);
-    if (!isValid) {
+    // Use WalletCore for mnemonic validation
+    if (!validateMnemonic(mnemonic)) {
       throw new Error("Invalid recovery phrase. Please check your words and try again.");
     }
 
@@ -174,33 +172,6 @@ export class IdentityManager {
     this.saveSeed(mnemonic);
 
     return { ...identity, mnemonic };
-  }
-
-  /**
-   * Derive L3 Unicity address from secret
-   * Uses UnmaskedPredicateReference (no nonce) for a stable, reusable address
-   */
-  private async deriveL3Address(secret: Buffer): Promise<string> {
-    try {
-      const signingService = await SigningService.createFromSecret(secret);
-
-      const tokenTypeBytes = Buffer.from(UNICITY_TOKEN_TYPE_HEX, "hex");
-      const tokenType = new TokenType(tokenTypeBytes);
-
-      // Use UnmaskedPredicateReference for stable wallet address (no nonce)
-      // This matches getWalletAddress() and is the correct approach per SDK
-      const predicateRef = UnmaskedPredicateReference.create(
-        tokenType,
-        signingService.algorithm,
-        signingService.publicKey,
-        HashAlgorithm.SHA256
-      );
-
-      return (await (await predicateRef).toAddress()).toString();
-    } catch (error) {
-      console.error("Error deriving address", error);
-      throw error;
-    }
   }
 
   private saveSeed(mnemonic: string) {

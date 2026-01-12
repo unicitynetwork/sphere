@@ -10,14 +10,21 @@
  * - L3 Unicity identities (secp256k1)
  * - Nostr keypairs (secp256k1/schnorr)
  * - IPFS keys (HKDF-derived Ed25519)
+ *
+ * NOTE: This class now delegates to WalletCore for pure wallet operations.
+ * UnifiedKeyManager handles storage/encryption, WalletCore handles crypto.
  */
 
-import * as bip39 from "bip39";
 import CryptoJS from "crypto-js";
 import elliptic from "elliptic";
 import {
+  createWallet as coreCreateWallet,
+  restoreFromMnemonic as coreRestoreFromMnemonic,
+} from "../../core/WalletCore";
+import type { DerivationMode } from "../../core/types";
+import { DEFAULT_BASE_PATH } from "../../core/types";
+import {
   deriveKeyAtPath,
-  generateMasterKeyFromSeed,
   generateHDAddressBIP32,
   generateAddressFromMasterKey,
   generateHDAddress,
@@ -33,18 +40,10 @@ import { STORAGE_KEYS, clearAllSphereData } from "../../../../config/storageKeys
 
 const ec = new elliptic.ec("secp256k1");
 
-// Default base path for BIP32 derivation
-const DEFAULT_BASE_PATH = "m/44'/0'/0'";
-
 export type WalletSource = "mnemonic" | "file" | "unknown";
 
-/**
- * Derivation mode determines how child keys are derived:
- * - "bip32": Standard BIP32 with chain code (IL + parentKey) mod n
- * - "legacy_hmac": Legacy Sphere HMAC derivation with chain code (HMAC-SHA512(chainCode, masterKey || index))
- * - "wif_hmac": Simple HMAC derivation without chain code (HMAC-SHA512(pathString, masterKey))
- */
-export type DerivationMode = "bip32" | "legacy_hmac" | "wif_hmac";
+// Re-export types from core
+export type { DerivationMode } from "../../core/types";
 
 export interface DerivedAddress {
   privateKey: string;
@@ -185,40 +184,43 @@ export class UnifiedKeyManager {
 
   /**
    * Create a new wallet from a BIP39 mnemonic
+   * Delegates to WalletCore for pure crypto operations
    */
   async createFromMnemonic(mnemonic: string, save: boolean = true): Promise<void> {
-    // Validate mnemonic
-    if (!bip39.validateMnemonic(mnemonic)) {
-      throw new Error("Invalid mnemonic phrase");
-    }
-
-    // Convert mnemonic to seed (64 bytes)
-    const seed = await bip39.mnemonicToSeed(mnemonic);
-    const seedHex = Buffer.from(seed).toString("hex");
-
-    // Derive master key and chain code using BIP32 standard
-    const { masterPrivateKey, masterChainCode } = generateMasterKeyFromSeed(seedHex);
+    // Use WalletCore for validation and key derivation
+    const keys = coreRestoreFromMnemonic(mnemonic);
 
     this.mnemonic = mnemonic;
-    this.masterKey = masterPrivateKey;
-    this.chainCode = masterChainCode;
+    this.masterKey = keys.masterKey;
+    this.chainCode = keys.chainCode;
     this.source = "mnemonic";
+    this.derivationMode = "bip32";
 
     if (save) {
       this.saveToStorage();
     }
 
-    console.log("🔐 Unified wallet created from mnemonic");
+    console.log("🔐 Unified wallet created from mnemonic (via WalletCore)");
   }
 
   /**
    * Generate a new wallet with a fresh mnemonic
+   * Delegates to WalletCore for pure crypto operations
    */
   async generateNew(wordCount: 12 | 24 = 12): Promise<string> {
-    const strength = wordCount === 24 ? 256 : 128;
-    const mnemonic = bip39.generateMnemonic(strength);
-    await this.createFromMnemonic(mnemonic);
-    return mnemonic;
+    // Use WalletCore for wallet creation
+    const keys = coreCreateWallet(wordCount);
+
+    this.mnemonic = keys.mnemonic!;
+    this.masterKey = keys.masterKey;
+    this.chainCode = keys.chainCode;
+    this.source = "mnemonic";
+    this.derivationMode = "bip32";
+
+    this.saveToStorage();
+
+    console.log("🔐 New wallet generated (via WalletCore)");
+    return keys.mnemonic!;
   }
 
   /**
