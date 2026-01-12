@@ -129,19 +129,21 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const [autoDeriveDuringIpnsCheck, setAutoDeriveDuringIpnsCheck] = useState(true);
   const [ipnsFetchingNametag, setIpnsFetchingNametag] = useState(false);
 
-  // Effect: Fetch nametag from IPNS when identity exists but nametag doesn't
+  // Effect: Skip "start" screen if identity exists without nametag
+  // Go directly to nametag creation, but check IPNS in background
   useEffect(() => {
-    if (step !== "start" || !identity || nametag || ipnsFetchingNametag) return;
+    if (step !== "start" || !identity || nametag) return;
 
+    // Check IPNS in background for existing nametag
     const fetchNametag = async () => {
       setIpnsFetchingNametag(true);
-      console.log("🔍 [Complete Setup] Checking IPNS for existing nametag...");
+      console.log("🔍 [Auto-check] Checking IPNS for existing nametag...");
 
       try {
         const result = await fetchNametagFromIpns(identity.privateKey);
 
         if (result.nametag && result.nametagData) {
-          console.log(`🔍 [Complete Setup] Found nametag: ${result.nametag}`);
+          console.log(`🔍 [Auto-check] Found nametag: ${result.nametag}`);
 
           WalletRepository.saveNametagForAddress(identity.address, {
             name: result.nametagData.name,
@@ -151,20 +153,25 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
             version: "1.0",
           });
 
-          console.log("✅ [Complete Setup] Nametag found, proceeding to wallet...");
+          console.log("✅ [Auto-check] Nametag found, proceeding to wallet...");
           window.location.reload();
         } else {
-          console.log("🔍 [Complete Setup] No nametag found in IPNS");
+          console.log("🔍 [Auto-check] No nametag found in IPNS");
           setIpnsFetchingNametag(false);
         }
       } catch (error) {
-        console.warn("🔍 [Complete Setup] IPNS fetch error:", error);
+        console.warn("🔍 [Auto-check] IPNS fetch error:", error);
         setIpnsFetchingNametag(false);
       }
     };
 
+    // Start background check
     fetchNametag();
-  }, [step, identity, nametag, ipnsFetchingNametag]);
+
+    // Skip to nametag screen immediately (don't wait for IPNS)
+    console.log("⏩ Identity exists without nametag, skipping to nametag creation");
+    setStep("nametag");
+  }, [step, identity, nametag]);
 
   // Internal helper to derive next address
   // Uses WalletCore for unified address derivation (L1 + L3)
