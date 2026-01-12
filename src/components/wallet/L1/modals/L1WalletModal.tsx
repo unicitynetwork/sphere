@@ -15,18 +15,12 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  saveWalletToStorage,
   createTransactionPlan,
   createAndSignTransaction,
   broadcast,
   type TransactionPlan,
-  type Wallet,
 } from "../sdk";
-import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
-import {
-  deriveUnifiedAddress,
-  getAddressPath,
-} from "../../core/WalletCore";
+import { createNewAddressAndOnboard } from "../../shared/utils/createNewAddressAndOnboard";
 import { useL1Wallet, useConnectionStatus } from "../hooks";
 import { useAddressNametags } from "../hooks/useAddressNametags";
 import { ConnectionStatus } from "../components/ConnectionStatus";
@@ -84,7 +78,6 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     isLoadingTransactions,
     currentBlockHeight,
     analyzeTransaction,
-    invalidateWallet,
     vestingBalances,
     isClassifyingVesting,
   } = useL1Wallet(selectedAddress);
@@ -124,53 +117,16 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     }
   }, [isOpen]);
 
-  // Generate new address using WalletCore (creates both L1 and L3)
+  // Generate new address and open onboarding for nametag
   const onNewAddress = async () => {
     if (!wallet || isAnyAddressLoading) return;
     try {
-      const keyManager = UnifiedKeyManager.getInstance("user-pin-1234");
-      const masterKey = keyManager.getMasterKeyHex();
-      const chainCode = keyManager.getChainCodeHex();
-      const basePath = keyManager.getBasePath();
-      const mode = keyManager.getDerivationMode();
-
-      if (!masterKey) {
-        showMessage("error", "Error", "Wallet not initialized");
-        return;
+      // Use unified function - creates address, switches to it, and reloads for onboarding
+      const result = await createNewAddressAndOnboard();
+      if (!result.success) {
+        showMessage("error", "Error", result.error || "Failed to generate address");
       }
-
-      // Find next address index (count existing external addresses)
-      const nextIndex = wallet.addresses.filter(a => !a.isChange).length;
-
-      // Use WalletCore to derive unified address (L1 + L3)
-      const path = getAddressPath(nextIndex, false, basePath);
-      const unified = await deriveUnifiedAddress(masterKey, chainCode, path, mode);
-
-      // Add new address to wallet
-      const newAddress = {
-        index: nextIndex,
-        address: unified.l1Address,
-        privateKey: unified.privateKey,
-        publicKey: unified.publicKey,
-        path: path,
-        isChange: false,
-        createdAt: new Date().toISOString(),
-      };
-
-      const updatedWallet: Wallet = {
-        ...wallet,
-        addresses: [...wallet.addresses, newAddress],
-      };
-
-      // Save updated wallet
-      saveWalletToStorage("main", updatedWallet);
-
-      // Force refresh wallet query
-      invalidateWallet();
-      setSelectedAddress(unified.l1Address);
-
-      // Dispatch event so L3 wallet knows about new address
-      window.dispatchEvent(new Event("wallet-updated"));
+      // Page will reload automatically if successful
     } catch {
       showMessage("error", "Error", "Failed to generate address");
     }

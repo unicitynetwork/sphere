@@ -3,9 +3,9 @@ import { ChevronDown, Plus, Loader2, Check, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useL1Wallet } from '../../L1/hooks/useL1Wallet';
 import { useAddressNametags } from '../../L1/hooks/useAddressNametags';
-import { generateAddress, loadWalletFromStorage } from '../../L1/sdk';
 import { WalletRepository } from '../../../../repositories/WalletRepository';
 import { STORAGE_KEYS } from '../../../../config/storageKeys';
+import { createNewAddressAndOnboard } from '../utils/createNewAddressAndOnboard';
 
 interface AddressSelectorProps {
   /** Current nametag to display when collapsed */
@@ -19,7 +19,7 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
   const [copied, setCopied] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const { wallet, invalidateWallet } = useL1Wallet();
+  const { wallet } = useL1Wallet();
   const { nametagState, addressesWithNametags } = useAddressNametags(wallet?.addresses);
 
   // Check if any address is still loading nametag from IPNS
@@ -65,18 +65,15 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
   const handleNewAddress = async () => {
     if (!wallet || isGenerating || isAnyAddressLoading) return;
     setIsGenerating(true);
+    setShowDropdown(false);
 
     try {
-      const addr = generateAddress(wallet);
-      const updated = loadWalletFromStorage("main");
-
-      if (updated && addr.path) {
-        invalidateWallet();
-        localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, addr.path);
-        WalletRepository.getInstance().resetInMemoryState();
-        setShowDropdown(false);
-        window.location.reload();
+      // Use unified function - creates address, switches to it, and reloads for onboarding
+      const result = await createNewAddressAndOnboard();
+      if (!result.success) {
+        console.error('Failed to create address:', result.error);
       }
+      // Page will reload automatically if successful
     } catch (err) {
       console.error('Failed to generate address:', err);
     } finally {
