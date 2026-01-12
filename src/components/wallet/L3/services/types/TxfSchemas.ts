@@ -86,6 +86,7 @@ export const TxfTransactionSchema = z.object({
 
 export const TxfIntegritySchema = z.object({
   genesisDataJSONHash: z.string(),
+  currentStateHash: z.string().optional(),
 });
 
 // ==========================================

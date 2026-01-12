@@ -16,7 +16,7 @@ import { IdentityManager } from "./IdentityManager";
 import type { Token } from "../data/model";
 import type { TxfStorageData, TxfMeta, TxfToken, TombstoneEntry } from "./types/TxfTypes";
 import { isTokenKey, tokenIdFromKey } from "./types/TxfTypes";
-import { buildTxfStorageData, parseTxfStorageData, txfToToken, tokenToTxf, getCurrentStateHash, hasMissingNewStateHash, repairMissingStateHash } from "./TxfSerializer";
+import { buildTxfStorageData, parseTxfStorageData, txfToToken, tokenToTxf, getCurrentStateHash, hasMissingNewStateHash, repairMissingStateHash, computeAndPatchStateHash } from "./TxfSerializer";
 import { getTokenValidationService } from "./TokenValidationService";
 import { getConflictResolutionService } from "./ConflictResolutionService";
 import { getSyncCoordinator } from "./SyncCoordinator";
@@ -2407,8 +2407,21 @@ export class IpfsStorageService {
         continue;
       }
 
+      // For genesis-only tokens, compute and store the stateHash
       if (isGenesisOnly) {
         console.log(`📦 Token ${tokenId.slice(0, 8)}... is genesis-only (no transfers yet)`);
+
+        // Compute the stateHash using SDK and patch the token
+        try {
+          const patchedTxf = await computeAndPatchStateHash(remoteTxf);
+          if (patchedTxf !== remoteTxf && patchedTxf._integrity?.currentStateHash) {
+            remoteTxf = patchedTxf;
+            stateHash = patchedTxf._integrity.currentStateHash;
+            remoteToken.jsonData = JSON.stringify(patchedTxf);
+          }
+        } catch (err) {
+          console.warn(`📦 Failed to compute stateHash for genesis token ${tokenId.slice(0, 8)}...:`, err);
+        }
       }
 
       // Skip if this specific state is tombstoned

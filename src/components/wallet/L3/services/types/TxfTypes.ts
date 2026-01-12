@@ -160,6 +160,7 @@ export interface TxfMerkleStep {
  */
 export interface TxfIntegrity {
   genesisDataJSONHash: string; // SHA-256 hash with "0000" prefix
+  currentStateHash?: string;   // Current state hash (computed for genesis-only tokens)
 }
 
 // ==========================================

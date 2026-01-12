@@ -561,29 +561,29 @@ export function getTokenId(token: Token): string {
 }
 
 /**
- * Get the current state hash from a TXF token
- * - If no transactions: use genesis state hash
+ * Get the stored current state hash from a TXF token
  * - If has transactions: use newStateHash from last transaction
- * Returns undefined if the token data is malformed
+ * - If genesis-only: use _integrity.currentStateHash (if computed and stored)
+ * - Otherwise: returns undefined (SDK should calculate it)
  */
 export function getCurrentStateHash(txf: TxfToken): string | undefined {
-  // Handle missing or empty transactions array
-  if (!txf.transactions || txf.transactions.length === 0) {
-    // No transfers yet - use genesis state hash
-    const genesisHash = txf.genesis?.inclusionProof?.authenticator?.stateHash;
-    if (!genesisHash) {
-      console.warn(`getCurrentStateHash: missing genesis.inclusionProof.authenticator.stateHash`);
-      return undefined;
+  // Handle tokens with transactions - use newStateHash from last transaction
+  if (txf.transactions && txf.transactions.length > 0) {
+    const lastTx = txf.transactions[txf.transactions.length - 1];
+    if (lastTx?.newStateHash) {
+      return lastTx.newStateHash;
     }
-    return genesisHash;
-  }
-  // Use newStateHash from the most recent transaction
-  const lastTx = txf.transactions[txf.transactions.length - 1];
-  if (!lastTx?.newStateHash) {
     console.warn(`getCurrentStateHash: missing newStateHash on last transaction`);
     return undefined;
   }
-  return lastTx.newStateHash;
+
+  // Genesis-only tokens: check _integrity.currentStateHash (computed post-import)
+  if (txf._integrity?.currentStateHash) {
+    return txf._integrity.currentStateHash;
+  }
+
+  // No stored state hash available - SDK must calculate it
+  return undefined;
 }
 
 /**
@@ -653,5 +653,211 @@ export function hasUncommittedTransactions(token: Token): boolean {
     );
   } catch {
     return false;
+  }
+}
+
+/**
+ * Check if a TXF token has missing newStateHash on any transaction
+ * This can happen with tokens sent from older versions of the app
+ */
+export function hasMissingNewStateHash(txf: TxfToken): boolean {
+  if (!txf.transactions || txf.transactions.length === 0) {
+    return false;
+  }
+  return txf.transactions.some(tx => !tx.newStateHash);
+}
+
+/**
+ * Check if a TXF token needs its currentStateHash computed
+ * Returns true for genesis-only tokens without a stored currentStateHash
+ */
+export function needsStateHashComputation(txf: TxfToken): boolean {
+  // Tokens with transactions don't need this - they have newStateHash
+  if (txf.transactions && txf.transactions.length > 0) {
+    return false;
+  }
+  // Genesis-only tokens need computation if currentStateHash is missing
+  return !txf._integrity?.currentStateHash;
+}
+
+/**
+ * Compute and patch the currentStateHash for a genesis-only token.
+ *
+ * For genesis-only tokens (no transactions), the current state hash must be
+ * calculated from the SDK's Token.state.calculateHash(). This function:
+ * 1. Parses the TXF with the SDK
+ * 2. Calculates the current state hash
+ * 3. Stores it in _integrity.currentStateHash
+ *
+ * @param txf - The TXF token to patch
+ * @returns Patched TXF token, or original if no patch needed or computation failed
+ */
+export async function computeAndPatchStateHash(txf: TxfToken): Promise<TxfToken> {
+  // Only patch genesis-only tokens that don't have currentStateHash
+  if (!needsStateHashComputation(txf)) {
+    return txf;
+  }
+
+  try {
+    // Dynamic import to avoid bundling issues
+    const { Token } = await import(
+      "@unicitylabs/state-transition-sdk/lib/token/Token"
+    );
+
+    // Parse with SDK to access state.calculateHash()
+    const sdkToken = await Token.fromJSON(txf);
+
+    // Calculate the current state hash
+    const calculatedStateHash = await sdkToken.state.calculateHash();
+    const stateHashStr = calculatedStateHash.toJSON();
+
+    // Deep copy the TXF to avoid mutating the original
+    const patchedTxf = JSON.parse(JSON.stringify(txf)) as TxfToken;
+
+    // Ensure _integrity exists
+    if (!patchedTxf._integrity) {
+      patchedTxf._integrity = {
+        genesisDataJSONHash: "0000" + "0".repeat(60),
+      };
+    }
+
+    // Store the computed state hash
+    patchedTxf._integrity.currentStateHash = stateHashStr;
+
+    console.log(
+      `📦 Computed stateHash for genesis-only token ${txf.genesis.data.tokenId.slice(0, 8)}...: ${stateHashStr.slice(0, 16)}...`
+    );
+
+    return patchedTxf;
+  } catch (err) {
+    console.error(
+      `Failed to compute stateHash for token ${txf.genesis?.data?.tokenId?.slice(0, 8)}...:`,
+      err
+    );
+    return txf;
+  }
+}
+
+/**
+ * Compute and patch stateHash for a Token model (updates jsonData)
+ * @returns New Token with patched jsonData, or original if no patch needed
+ */
+export async function computeAndPatchTokenStateHash(token: Token): Promise<Token> {
+  if (!token.jsonData) return token;
+
+  try {
+    const txf = JSON.parse(token.jsonData) as TxfToken;
+
+    // Check if patch is needed
+    if (!needsStateHashComputation(txf)) {
+      return token;
+    }
+
+    // Patch the TXF
+    const patchedTxf = await computeAndPatchStateHash(txf);
+
+    // If unchanged, return original
+    if (patchedTxf === txf) {
+      return token;
+    }
+
+    // Return new Token with patched jsonData
+    return new Token({
+      ...token,
+      jsonData: JSON.stringify(patchedTxf),
+    });
+  } catch {
+    return token;
+  }
+}
+
+/**
+ * Repair a TXF token by calculating missing newStateHash values using the SDK.
+ *
+ * BACKGROUND: Tokens sent before a bug fix were missing the `newStateHash` field
+ * on their transfer transactions. The SDK's Token.fromJSON can still parse these
+ * tokens because it recalculates state hashes internally from the `state` field.
+ *
+ * This function:
+ * 1. Parses the TXF with the SDK (which calculates hashes internally)
+ * 2. Gets the calculated state hash from the SDK token
+ * 3. Patches the last transaction with the correct newStateHash
+ *
+ * @param txf - The TXF token to repair
+ * @returns Repaired TXF token, or null if repair failed
+ */
+export async function repairMissingStateHash(txf: TxfToken): Promise<TxfToken | null> {
+  if (!txf.transactions || txf.transactions.length === 0) {
+    // No transactions to repair
+    return txf;
+  }
+
+  // Check if repair is needed
+  const lastTx = txf.transactions[txf.transactions.length - 1];
+  if (lastTx.newStateHash) {
+    // Already has newStateHash, no repair needed
+    return txf;
+  }
+
+  try {
+    // Dynamic import to avoid bundling issues
+    const { Token } = await import(
+      "@unicitylabs/state-transition-sdk/lib/token/Token"
+    );
+
+    // Parse with SDK - this calculates state hashes internally
+    const sdkToken = await Token.fromJSON(txf);
+
+    // Get the calculated state hash from the SDK token's current state
+    const calculatedStateHash = await sdkToken.state.calculateHash();
+    const stateHashStr = calculatedStateHash.toJSON();
+
+    // Deep copy the TXF to avoid mutating the original
+    const repairedTxf = JSON.parse(JSON.stringify(txf)) as TxfToken;
+
+    // Patch the last transaction with the calculated state hash
+    const lastTxIndex = repairedTxf.transactions.length - 1;
+    repairedTxf.transactions[lastTxIndex] = {
+      ...repairedTxf.transactions[lastTxIndex],
+      newStateHash: stateHashStr,
+    };
+
+    console.log(`🔧 Repaired token ${txf.genesis.data.tokenId.slice(0, 8)}... - added missing newStateHash: ${stateHashStr.slice(0, 12)}...`);
+
+    return repairedTxf;
+  } catch (err) {
+    console.error(`Failed to repair token ${txf.genesis?.data?.tokenId?.slice(0, 8)}...:`, err);
+    return null;
+  }
+}
+
+/**
+ * Repair a Token model by calculating missing newStateHash values.
+ * Returns a new Token with repaired jsonData, or the original if no repair needed/possible.
+ */
+export async function repairTokenMissingStateHash(token: Token): Promise<Token> {
+  if (!token.jsonData) return token;
+
+  try {
+    const txf = JSON.parse(token.jsonData) as TxfToken;
+
+    // Check if repair is needed
+    if (!hasMissingNewStateHash(txf)) {
+      return token;
+    }
+
+    // Repair the TXF
+    const repairedTxf = await repairMissingStateHash(txf);
+    if (!repairedTxf) {
+      return token; // Repair failed, return original
+    }
+
+    // Return new Token with repaired jsonData
+    return new Token({
+      ...token,
+      jsonData: JSON.stringify(repairedTxf),
+    });
+  } catch {
+    return token;
   }
 }
