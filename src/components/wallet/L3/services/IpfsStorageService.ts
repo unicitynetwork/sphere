@@ -1361,6 +1361,14 @@ export class IpfsStorageService {
 
       // Trigger wallet refresh
       window.dispatchEvent(new Event("wallet-updated"));
+
+      // CRITICAL: Check if local has unique tokens that weren't in remote
+      // This handles case where local tokens were minted but remote was ahead
+      // Without this sync, local-only tokens would be lost on next restart
+      if (this.localDiffersFromRemote(remoteData)) {
+        console.log(`📦 Local has unique content after higher-sequence import - scheduling sync`);
+        this.scheduleSync();
+      }
     } else {
       // Local version is same or higher, BUT remote might have new tokens we don't have
       // (e.g., Browser 2 received token via Nostr while Browser 1 was offline)
@@ -2718,6 +2726,14 @@ export class IpfsStorageService {
         return this.syncNow({ forceIpnsPublish: true });
       }
 
+      // CRITICAL: Check if local has unique tokens that weren't in remote
+      // This handles the case where new tokens were minted locally but remote was ahead
+      // Without this, local-only tokens would never be synced to IPNS and could be lost
+      if (this.localDiffersFromRemote(remoteData)) {
+        console.log(`📦 Local has unique content after import - syncing merged state to IPNS`);
+        return this.syncNow({ forceIpnsPublish: false });
+      }
+
       // Run immediate sanity check after IPNS sync (don't wait for polling cycle)
       await this.runSpentTokenSanityCheck();
       await this.runTombstoneRecoveryCheck();
@@ -2959,7 +2975,7 @@ export class IpfsStorageService {
                 ipnsName: this.cachedIpnsName || "",
               };
               const localTombstones = walletRepo.getTombstones();
-              const localTxf = buildTxfStorageData(validTokens, localMeta, nametag || undefined, localTombstones);
+              const localTxf = await buildTxfStorageData(validTokens, localMeta, nametag || undefined, localTombstones);
 
               // Resolve conflicts
               const conflictService = getConflictResolutionService();
@@ -3128,7 +3144,7 @@ export class IpfsStorageService {
         lastCid: this.getLastCid() || undefined,
       };
 
-      const txfStorageData = buildTxfStorageData(tokensToSync, meta, nametag || undefined, tombstones, archivedTokens, forkedTokens, outboxEntries, mintOutboxEntries, invalidatedNametags);
+      const txfStorageData = await buildTxfStorageData(tokensToSync, meta, nametag || undefined, tombstones, archivedTokens, forkedTokens, outboxEntries, mintOutboxEntries, invalidatedNametags);
       if (tombstones.length > 0 || archivedTokens.size > 0 || forkedTokens.size > 0 || outboxEntries.length > 0 || mintOutboxEntries.length > 0 || invalidatedNametags.length > 0) {
         console.log(`📦 Including ${tombstones.length} tombstone(s), ${archivedTokens.size} archived, ${forkedTokens.size} forked, ${outboxEntries.length} outbox, ${mintOutboxEntries.length} mint outbox, ${invalidatedNametags.length} invalidated nametag(s) in sync`);
       }
