@@ -48,6 +48,8 @@ export function CreateWalletFlow() {
     nametagInput,
     setNametagInput,
     processingStatus,
+    isProcessingComplete,
+    handleCompleteOnboarding,
 
     // Address selection state
     derivedAddresses,
@@ -181,7 +183,13 @@ export function CreateWalletFlow() {
           />
         )}
 
-        {step === "processing" && <ProcessingScreen status={processingStatus} />}
+        {step === "processing" && (
+          <ProcessingScreen
+            status={processingStatus}
+            isComplete={isProcessingComplete}
+            onComplete={handleCompleteOnboarding}
+          />
+        )}
       </AnimatePresence>
 
       {/* Password Modal for encrypted files */}

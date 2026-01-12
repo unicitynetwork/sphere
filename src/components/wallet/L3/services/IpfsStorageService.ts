@@ -219,7 +219,13 @@ export class IpfsStorageService {
 
     // On startup, run IPNS-based sync to discover remote state
     // This resolves IPNS, verifies remote content, and merges if needed
-    this.syncFromIpns().catch(console.error);
+    // Skip during onboarding (new addresses have nothing to sync from IPNS yet)
+    const isOnboarding = localStorage.getItem('sphere-onboarding-in-progress') === 'true';
+    if (!isOnboarding) {
+      this.syncFromIpns().catch(console.error);
+    } else {
+      console.log('📦 Skipping initial IPNS sync during onboarding');
+    }
   }
 
   /**
@@ -2139,6 +2145,14 @@ export class IpfsStorageService {
    * If sync is currently running, marks pendingSync flag for execution after current sync completes
    */
   private scheduleSync(): void {
+    // Skip automatic sync during onboarding - onboarding flow handles sync explicitly
+    const isOnboarding = localStorage.getItem('sphere-onboarding-in-progress') === 'true';
+    console.log(`📦 scheduleSync() called, onboarding flag: ${isOnboarding}`);
+    if (isOnboarding) {
+      console.log(`📦 ✅ Skipping automatic sync during onboarding`);
+      return;
+    }
+
     // If a sync is already running, mark pending so it will run after completion
     if (this.isSyncing) {
       console.log(`📦 Sync in progress - marking pending sync for after completion`);
@@ -2401,7 +2415,9 @@ export class IpfsStorageService {
     });
 
     try {
+      console.log('📦 [syncNow] Step 1: Ensuring IPFS initialized...');
       const initialized = await this.ensureInitialized();
+      console.log('📦 [syncNow] IPFS initialized:', initialized);
       if (
         !initialized ||
         !this.helia ||
@@ -2412,6 +2428,7 @@ export class IpfsStorageService {
       }
 
       // 1. Get current tokens
+      console.log('📦 [syncNow] Step 2: Getting wallet...');
       const wallet = WalletRepository.getInstance().getWallet();
       if (!wallet) {
         throw new Error("No wallet found");
@@ -2440,9 +2457,11 @@ export class IpfsStorageService {
       console.log(`📦 Syncing ${validTokens.length} tokens${nametag ? ` + nametag "${nametag.name}"` : ""} to IPFS (TXF format)...`);
 
       // 3. Check for remote conflicts before syncing
+      console.log('📦 [syncNow] Step 3: Checking for remote conflicts...');
       let tokensToSync = validTokens;
       let conflictsResolved = 0;
       const lastCid = this.getLastCid();
+      console.log('📦 [syncNow] Last CID:', lastCid || 'none');
 
       if (lastCid) {
         try {
@@ -2596,6 +2615,7 @@ export class IpfsStorageService {
       }
 
       // 4. Build TXF storage data with incremented version (include tombstones, archives, forks, outbox)
+      console.log('📦 [syncNow] Step 4: Building TXF storage data...');
       const newVersion = this.incrementVersionCounter();
       const tombstones = walletRepo.getTombstones();
       const archivedTokens = walletRepo.getArchivedTokens();
@@ -2619,15 +2639,18 @@ export class IpfsStorageService {
       }
 
       // 4. Ensure backend is connected before storing
+      console.log('📦 [syncNow] Step 5: Ensuring backend connection...');
       const backendConnected = await this.ensureBackendConnected();
       if (backendConnected) {
         console.log(`📦 Backend connected - content will be available via bitswap`);
       }
 
       // 4.1. Store to IPFS
+      console.log('📦 [syncNow] Step 6: Storing to IPFS...');
       const j = json(this.helia);
       const cid = await j.add(txfStorageData);
       const cidString = cid.toString();
+      console.log('📦 [syncNow] Stored to IPFS, CID:', cidString);
 
       // 4.2. Wait briefly for bitswap to have a chance to exchange blocks
       // This gives the backend time to request blocks while we're connected
@@ -2677,6 +2700,7 @@ export class IpfsStorageService {
         console.log(`📦 Content uploaded to ${successful}/${gatewayUrls.length} nodes`);
       }
 
+      console.log('📦 [syncNow] Step 7: Announcing CID to DHT...');
       // 4.4. Announce content to connected peers (DHT provide)
       // This helps ensure our backend IPFS node can discover and fetch the content
       // Use timeout since DHT operations can be slow in browser
@@ -2695,16 +2719,19 @@ export class IpfsStorageService {
         console.warn(`📦 Could not announce to DHT (non-fatal):`, provideError);
       }
 
+      console.log('📦 [syncNow] Step 8: Publishing to IPNS...');
       // 4.5. Publish to IPNS only if CID changed (or forced for IPNS recovery)
       const previousCid = this.getLastCid();
       let ipnsPublished = false;
       let ipnsPublishPending = false;
       const shouldPublishIpns = cidString !== previousCid || forceIpnsPublish;
+      console.log('📦 [syncNow] Should publish IPNS:', shouldPublishIpns, '(previousCid:', previousCid || 'none', ')');
       if (shouldPublishIpns) {
         if (forceIpnsPublish && cidString === previousCid) {
           console.log(`📦 Forcing IPNS republish (CID unchanged but IPNS may be expired)`);
         }
         const ipnsResult = await this.publishToIpns(cid);
+        console.log('📦 [syncNow] IPNS publish result:', ipnsResult ? 'success' : 'failed');
         if (ipnsResult) {
           ipnsPublished = true;
           this.clearPendingIpnsPublish(); // Clear any previous pending
