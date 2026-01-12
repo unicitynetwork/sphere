@@ -238,53 +238,38 @@ export class IpfsHttpResolver {
     }
 
     try {
-      // Phase 1: Try gateway path on all nodes in parallel (fast)
-      const gatewayResult = await this.resolveViaGatewayPath(
-        ipnsName,
-        gateways
-      );
-
-      if (gatewayResult) {
-        const latencyMs = performance.now() - startTime;
-
-        // Store in cache
-        this.cache.setIpnsRecord(ipnsName, {
-          cid: gatewayResult.cid,
-          sequence: 0n, // Gateway path doesn't return sequence
-          _cachedContent: gatewayResult.content,
-        });
-
-        return {
-          success: true,
-          cid: gatewayResult.cid,
-          content: gatewayResult.content,
-          sequence: 0n,
-          source: "http-gateway",
-          latencyMs,
-        };
-      }
-
-      // Phase 2: Fallback to routing API on all nodes
-      const routingResult = await this.resolveViaRoutingApi(
-        ipnsName,
-        gateways
-      );
+      // Query BOTH gateway path (fast content) AND routing API (authoritative sequence) in parallel
+      // This ensures we get the correct sequence number for publishing
+      const [gatewayResult, routingResult] = await Promise.all([
+        this.resolveViaGatewayPath(ipnsName, gateways),
+        this.resolveViaRoutingApi(ipnsName, gateways),
+      ]);
 
       const latencyMs = performance.now() - startTime;
 
-      if (routingResult) {
-        // Store in cache
+      // Prefer routing API sequence (authoritative), gateway path content (fast)
+      const sequence = routingResult?.sequence ?? 0n;
+      const cid = routingResult?.cid ?? gatewayResult?.cid ?? "unknown";
+      const content = gatewayResult?.content ?? null;
+
+      if (gatewayResult || routingResult) {
+        // Store in cache with authoritative sequence
         this.cache.setIpnsRecord(ipnsName, {
-          cid: routingResult.cid,
-          sequence: routingResult.sequence,
+          cid,
+          sequence,
+          _cachedContent: content ?? undefined,
         });
+
+        console.log(
+          `📦 IPNS resolved: ${ipnsName.slice(0, 16)}... -> seq=${sequence}, cid=${cid.slice(0, 16)}...`
+        );
 
         return {
           success: true,
-          cid: routingResult.cid,
-          content: null,
-          sequence: routingResult.sequence,
-          source: "http-routing",
+          cid,
+          content,
+          sequence,
+          source: routingResult ? "http-routing" : "http-gateway",
           latencyMs,
         };
       }
@@ -436,6 +421,100 @@ export class IpfsHttpResolver {
       // All nodes failed or returned invalid content
       return null;
     }
+  }
+
+  /**
+   * Verify IPNS record was persisted by querying the node directly
+   * BYPASSES CACHE - used for post-publish verification
+   *
+   * @param ipnsName The IPNS name to verify
+   * @param expectedSeq The sequence number we expect to see
+   * @param expectedCid The CID we expect the record to point to
+   * @param retries Number of retries (with delay between)
+   * @returns Verification result with actual values from node
+   */
+  async verifyIpnsRecord(
+    ipnsName: string,
+    expectedSeq: bigint,
+    expectedCid: string,
+    retries: number = 3
+  ): Promise<{
+    verified: boolean;
+    actualSeq?: bigint;
+    actualCid?: string;
+    error?: string;
+  }> {
+    const gateways = getAllBackendGatewayUrls();
+    if (gateways.length === 0) {
+      return { verified: false, error: "No IPFS gateways configured" };
+    }
+
+    // Clear cache for this IPNS name to force fresh query
+    this.cache.clearIpnsRecords();
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      // Small delay before verification to allow node to persist
+      // Increase delay on retries
+      const delayMs = attempt === 1 ? 300 : 500 * attempt;
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+
+      console.log(`📦 [Verify] Attempt ${attempt}/${retries}: Verifying IPNS seq=${expectedSeq}...`);
+
+      // Use routing API for authoritative sequence number (bypass gateway path cache)
+      const routingResult = await this.resolveViaRoutingApi(ipnsName, gateways);
+
+      if (routingResult) {
+        const actualSeq = routingResult.sequence;
+        const actualCid = routingResult.cid;
+
+        console.log(`📦 [Verify] Node returned: seq=${actualSeq}, cid=${actualCid.slice(0, 16)}...`);
+
+        if (actualSeq === expectedSeq) {
+          // Sequence matches - verify CID too
+          if (actualCid === expectedCid) {
+            console.log(`✅ [Verify] IPNS record verified: seq=${actualSeq}, CID matches`);
+
+            // Update cache with verified record
+            this.cache.setIpnsRecord(ipnsName, {
+              cid: actualCid,
+              sequence: actualSeq,
+            });
+
+            return { verified: true, actualSeq, actualCid };
+          } else {
+            // Sequence matches but CID doesn't - this is unexpected
+            console.warn(`⚠️ [Verify] Sequence matches but CID differs: expected=${expectedCid.slice(0, 16)}..., actual=${actualCid.slice(0, 16)}...`);
+            return {
+              verified: false,
+              actualSeq,
+              actualCid,
+              error: `CID mismatch: expected ${expectedCid}, got ${actualCid}`
+            };
+          }
+        } else if (actualSeq > expectedSeq) {
+          // Node has higher sequence - another device published
+          console.warn(`⚠️ [Verify] Node has higher sequence: expected=${expectedSeq}, actual=${actualSeq}`);
+          return {
+            verified: false,
+            actualSeq,
+            actualCid,
+            error: `Node has higher sequence ${actualSeq} (expected ${expectedSeq})`
+          };
+        } else {
+          // Node has lower sequence - our publish didn't persist!
+          console.warn(`❌ [Verify] Attempt ${attempt}: Node still has old sequence: expected=${expectedSeq}, actual=${actualSeq}`);
+          // Continue retrying
+        }
+      } else {
+        console.warn(`❌ [Verify] Attempt ${attempt}: Failed to query IPNS record`);
+      }
+    }
+
+    // All retries exhausted
+    return {
+      verified: false,
+      error: `IPNS record not verified after ${retries} attempts - publish may not have persisted`
+    };
   }
 
   /**

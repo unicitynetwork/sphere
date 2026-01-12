@@ -53,6 +53,8 @@ export interface SyncOptions {
   callerContext?: string;
   /** For LOW priority: coalesce multiple requests into one (default: true) */
   coalesce?: boolean;
+  /** Internal: true when called from IPNS retry loop (prevents recursive retry) */
+  isRetryAttempt?: boolean;
 }
 
 /**
@@ -61,7 +63,7 @@ export interface SyncOptions {
 interface SyncQueueEntry {
   id: string;
   priority: SyncPriority;
-  options: { forceIpnsPublish?: boolean };
+  options: { forceIpnsPublish?: boolean; isRetryAttempt?: boolean };
   resolve: (result: StorageResult) => void;
   reject: (error: Error) => void;
   timeoutHandle: ReturnType<typeof setTimeout> | null;
@@ -82,7 +84,7 @@ export interface QueueStatus {
 /**
  * Executor function type - the actual sync implementation
  */
-type SyncExecutor = (options?: { forceIpnsPublish?: boolean }) => Promise<StorageResult>;
+type SyncExecutor = (options?: { forceIpnsPublish?: boolean; isRetryAttempt?: boolean }) => Promise<StorageResult>;
 
 // ==========================================
 // SyncQueue
@@ -124,6 +126,7 @@ export class SyncQueue {
       timeout = this.DEFAULT_TIMEOUT_MS,
       callerContext,
       coalesce = true,
+      isRetryAttempt = false,
     } = options;
 
     // Check queue size limit
@@ -140,7 +143,7 @@ export class SyncQueue {
       const entry: SyncQueueEntry = {
         id: `sync-${++this.idCounter}`,
         priority,
-        options: { forceIpnsPublish },
+        options: { forceIpnsPublish, isRetryAttempt },
         resolve,
         reject,
         timeoutHandle: null,
@@ -188,6 +191,10 @@ export class SyncQueue {
       // Merge forceIpnsPublish (if any request needs it, do it)
       if (entry.options.forceIpnsPublish) {
         this.pendingCoalesce.entry.options.forceIpnsPublish = true;
+      }
+      // Merge isRetryAttempt (if any request is a retry, treat batch as retry)
+      if (entry.options.isRetryAttempt) {
+        this.pendingCoalesce.entry.options.isRetryAttempt = true;
       }
       return;
     }

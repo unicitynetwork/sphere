@@ -178,6 +178,12 @@ export class IpfsStorageService {
   private isTabVisible: boolean = true; // Track tab visibility for adaptive polling
   private currentIdentityAddress: string | null = null; // Track current identity for key re-derivation on switch
 
+  // IPNS sync retry state - retries until verification succeeds
+  private ipnsSyncRetryActive: boolean = false;
+  private ipnsSyncRetryCount: number = 0;
+  private readonly MAX_IPNS_RETRY_DELAY_MS = 30000; // Max 30 seconds between retries
+  private readonly BASE_IPNS_RETRY_DELAY_MS = 1000; // Start with 1 second
+
   private constructor(identityManager: IdentityManager) {
     this.identityManager = identityManager;
   }
@@ -657,10 +663,10 @@ export class IpfsStorageService {
             "record"
           );
 
-          // allow-offline=true: Store record locally first, then propagate async
-          // This makes the HTTP call return quickly instead of waiting for DHT
+          // NOTE: Do NOT use allow-offline=true - it prevents DHT propagation!
+          // The call may take longer but ensures IPNS records reach the DHT
           const response = await fetch(
-            `${gatewayUrl}/api/v0/routing/put?arg=/ipns/${ipnsName}&allow-offline=true`,
+            `${gatewayUrl}/api/v0/routing/put?arg=/ipns/${ipnsName}`,
             {
               method: "POST",
               body: formData,
@@ -786,12 +792,51 @@ export class IpfsStorageService {
       this.publishIpnsViaDhtAsync(routingKey, marshalledRecord);
 
       if (httpSuccess) {
-        // Save sequence number on HTTP success
-        this.setIpnsSequenceNumber(this.ipnsSequenceNumber);
-        console.log(
-          `📦 IPNS record published successfully (seq: ${this.ipnsSequenceNumber})`
+        // CRITICAL: Verify the IPNS record was actually persisted
+        // HTTP 200 only means the node received the record, NOT that it persisted
+        const httpResolver = getIpfsHttpResolver();
+        const cidString = cid.toString();
+        const verification = await httpResolver.verifyIpnsRecord(
+          this.cachedIpnsName!,
+          this.ipnsSequenceNumber,
+          cidString,
+          3 // retries
         );
-        return this.cachedIpnsName;
+
+        if (verification.verified) {
+          // Save sequence number only after verification confirms persistence
+          this.setIpnsSequenceNumber(this.ipnsSequenceNumber);
+          console.log(
+            `✅ IPNS record published AND verified (seq: ${this.ipnsSequenceNumber})`
+          );
+          return this.cachedIpnsName;
+        } else {
+          // Verification failed - the record didn't persist!
+          console.error(
+            `❌ IPNS publish verification FAILED: ${verification.error}`
+          );
+          console.error(
+            `   Expected: seq=${this.ipnsSequenceNumber}, cid=${cidString.slice(0, 16)}...`
+          );
+          if (verification.actualSeq !== undefined) {
+            console.error(
+              `   Actual:   seq=${verification.actualSeq}, cid=${verification.actualCid?.slice(0, 16) ?? 'unknown'}...`
+            );
+          }
+
+          // If node has higher sequence, update our tracking to avoid republish loops
+          if (verification.actualSeq !== undefined && verification.actualSeq > this.ipnsSequenceNumber) {
+            this.lastKnownRemoteSequence = verification.actualSeq;
+            console.log(`📦 Updated lastKnownRemoteSequence to ${verification.actualSeq}`);
+          }
+
+          // Rollback our sequence since publish didn't persist
+          this.ipnsSequenceNumber--;
+          console.log(`📦 Rolled back local sequence to ${this.ipnsSequenceNumber}`);
+
+          // Return null to indicate publish failed
+          return null;
+        }
       }
 
       // HTTP failed - DHT is still trying in background
@@ -808,6 +853,126 @@ export class IpfsStorageService {
       // Non-fatal - content is still stored and announced
       console.warn(`📦 IPNS publish failed:`, error);
       return null;
+    }
+  }
+
+  /**
+   * Start the IPNS sync retry loop.
+   * This runs in the background, retrying until IPNS verification succeeds.
+   * Each retry: fetches latest IPNS, merges with local, republishes.
+   *
+   * Uses exponential backoff with jitter to avoid thundering herd.
+   */
+  private startIpnsSyncRetryLoop(): void {
+    if (this.ipnsSyncRetryActive) {
+      console.log(`📦 [RetryLoop] Already active, skipping start`);
+      return;
+    }
+
+    this.ipnsSyncRetryActive = true;
+    this.ipnsSyncRetryCount = 0;
+    console.log(`📦 [RetryLoop] Starting IPNS sync retry loop...`);
+
+    // Run the loop (fire and forget - it manages itself)
+    this.runIpnsSyncRetryIteration();
+  }
+
+  /**
+   * Single iteration of the IPNS sync retry loop.
+   * Schedules the next iteration if needed.
+   */
+  private async runIpnsSyncRetryIteration(): Promise<void> {
+    if (!this.ipnsSyncRetryActive) {
+      console.log(`📦 [RetryLoop] Stopped (active=false)`);
+      return;
+    }
+
+    this.ipnsSyncRetryCount++;
+    const attempt = this.ipnsSyncRetryCount;
+
+    // Calculate delay with exponential backoff + jitter
+    const baseDelay = Math.min(
+      this.BASE_IPNS_RETRY_DELAY_MS * Math.pow(1.5, attempt - 1),
+      this.MAX_IPNS_RETRY_DELAY_MS
+    );
+    // Add jitter: 50-150% of base delay
+    const jitter = 0.5 + Math.random();
+    const delayMs = Math.round(baseDelay * jitter);
+
+    console.log(`📦 [RetryLoop] Attempt ${attempt}: waiting ${delayMs}ms before retry...`);
+
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+
+    // Check if still active after delay
+    if (!this.ipnsSyncRetryActive) {
+      console.log(`📦 [RetryLoop] Stopped during delay`);
+      return;
+    }
+
+    try {
+      console.log(`📦 [RetryLoop] Attempt ${attempt}: Fetching latest IPNS and resyncing...`);
+
+      // Step 1: Fetch the latest IPNS record to get current sequence and content
+      const httpResolver = getIpfsHttpResolver();
+      httpResolver.invalidateIpnsCache(); // Force fresh fetch
+
+      const resolution = await this.resolveIpnsProgressively();
+
+      if (resolution.best) {
+        const remoteSeq = resolution.best.sequence;
+        const remoteCid = resolution.best.cid;
+
+        console.log(`📦 [RetryLoop] Remote state: seq=${remoteSeq}, cid=${remoteCid.slice(0, 16)}...`);
+
+        // Update our tracking of remote sequence
+        this.lastKnownRemoteSequence = remoteSeq;
+
+        // Step 2: Fetch remote content and merge with local
+        const remoteData = await this.fetchRemoteContent(remoteCid);
+        if (remoteData) {
+          console.log(`📦 [RetryLoop] Fetched remote content, importing...`);
+          await this.importRemoteData(remoteData);
+        }
+      }
+
+      // Step 3: Re-sync with merged data (this will publish with new sequence)
+      console.log(`📦 [RetryLoop] Re-syncing with merged data...`);
+      const result = await this.syncNow({ forceIpnsPublish: true, isRetryAttempt: true });
+
+      if (result.success && result.ipnsPublished) {
+        // Success! Stop the retry loop
+        console.log(`✅ [RetryLoop] IPNS sync succeeded after ${attempt} attempt(s)`);
+        this.ipnsSyncRetryActive = false;
+        this.ipnsSyncRetryCount = 0;
+        return;
+      }
+
+      // Still pending - continue retrying
+      if (result.ipnsPublishPending) {
+        console.log(`📦 [RetryLoop] Attempt ${attempt} still pending, will retry...`);
+      } else {
+        console.log(`📦 [RetryLoop] Attempt ${attempt} completed but IPNS not published, will retry...`);
+      }
+
+    } catch (error) {
+      console.error(`📦 [RetryLoop] Attempt ${attempt} failed with error:`, error);
+    }
+
+    // Schedule next iteration
+    if (this.ipnsSyncRetryActive) {
+      // Use setTimeout to avoid blocking and allow the event loop to process other events
+      setTimeout(() => this.runIpnsSyncRetryIteration(), 0);
+    }
+  }
+
+  /**
+   * Stop the IPNS sync retry loop (e.g., when component unmounts or on success)
+   */
+  stopIpnsSyncRetryLoop(): void {
+    if (this.ipnsSyncRetryActive) {
+      console.log(`📦 [RetryLoop] Stopping IPNS sync retry loop`);
+      this.ipnsSyncRetryActive = false;
+      this.ipnsSyncRetryCount = 0;
     }
   }
 
@@ -2212,6 +2377,9 @@ export class IpfsStorageService {
       const tokenId = remoteTxf.genesis.data.tokenId;
       let stateHash = getCurrentStateHash(remoteTxf);
 
+      // Check if this is a genesis-only token (no transactions yet)
+      const isGenesisOnly = !remoteTxf.transactions || remoteTxf.transactions.length === 0;
+
       // Try to repair if state hash is undefined (token may be missing newStateHash from older version)
       if (!stateHash && hasMissingNewStateHash(remoteTxf)) {
         console.log(`📦 Token ${tokenId.slice(0, 8)}... has missing newStateHash, attempting repair...`);
@@ -2231,17 +2399,27 @@ export class IpfsStorageService {
         }
       }
 
-      // Skip if state hash is still undefined after repair attempt
-      if (!stateHash) {
+      // Skip if state hash is undefined UNLESS it's a genesis-only token
+      // Genesis-only tokens (never transferred) don't have a stateHash from transactions
+      // and can't match any tombstone (tombstones are created on transfer)
+      if (!stateHash && !isGenesisOnly) {
         console.warn(`📦 Token ${tokenId.slice(0, 8)}... has undefined stateHash after repair attempt, skipping import`);
         continue;
       }
 
+      if (isGenesisOnly) {
+        console.log(`📦 Token ${tokenId.slice(0, 8)}... is genesis-only (no transfers yet)`);
+      }
+
       // Skip if this specific state is tombstoned
-      const tombstoneKey = `${tokenId}:${stateHash}`;
-      if (allTombstoneKeys.has(tombstoneKey)) {
-        console.log(`📦 Skipping tombstoned token ${tokenId.slice(0, 8)}... state ${stateHash.slice(0, 8)}... from remote`);
-        continue;
+      // Genesis-only tokens (stateHash undefined) can't be tombstoned since tombstones
+      // are created on transfer, and genesis-only tokens have never been transferred
+      if (stateHash) {
+        const tombstoneKey = `${tokenId}:${stateHash}`;
+        if (allTombstoneKeys.has(tombstoneKey)) {
+          console.log(`📦 Skipping tombstoned token ${tokenId.slice(0, 8)}... state ${stateHash.slice(0, 8)}... from remote`);
+          continue;
+        }
       }
 
       const localToken = localTokenMap.get(tokenId);
@@ -2642,8 +2820,8 @@ export class IpfsStorageService {
    * Internal sync implementation - called by SyncQueue
    * Uses SyncCoordinator for cross-tab coordination to prevent race conditions
    */
-  private async executeSyncInternal(options?: { forceIpnsPublish?: boolean }): Promise<StorageResult> {
-    const { forceIpnsPublish = false } = options || {};
+  private async executeSyncInternal(options?: { forceIpnsPublish?: boolean; isRetryAttempt?: boolean }): Promise<StorageResult> {
+    const { forceIpnsPublish = false, isRetryAttempt = false } = options || {};
     // Use SyncCoordinator to acquire distributed lock across browser tabs
     const coordinator = getSyncCoordinator();
 
@@ -3032,10 +3210,17 @@ export class IpfsStorageService {
         if (ipnsResult) {
           ipnsPublished = true;
           this.clearPendingIpnsPublish(); // Clear any previous pending
+          // Stop any active retry loop since we succeeded
+          this.stopIpnsSyncRetryLoop();
         } else {
           // IPNS publish failed - mark as pending for retry
           this.setPendingIpnsPublish(cidString);
           ipnsPublishPending = true;
+          // Start the infinite retry loop (unless this is already a retry attempt)
+          if (!isRetryAttempt) {
+            console.log(`📦 Starting IPNS sync retry loop due to publish failure...`);
+            this.startIpnsSyncRetryLoop();
+          }
         }
       } else {
         console.log(`📦 CID unchanged (${cidString.slice(0, 16)}...) - skipping IPNS publish`);
