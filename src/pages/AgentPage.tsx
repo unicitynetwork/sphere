@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
-import { MessageSquare, Wallet } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { MessageSquare, Wallet, ChevronDown, ChevronUp } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { AgentCard } from '../components/agents/AgentCard';
 import { ChatSection } from '../components/chat/ChatSection';
 import { SportChat } from '../components/agents/SportChat';
@@ -13,10 +13,44 @@ import { AIChat } from '../components/agents/AIChat';
 import { WalletPanel } from '../components/wallet/WalletPanel';
 import { agents, getAgentConfig } from '../config/activities';
 
+const DEFAULT_VISIBLE_AGENTS = 7;
+
 export function AgentPage() {
   const { agentId } = useParams<{ agentId: string }>();
   const sliderRef = useRef<HTMLDivElement>(null);
   const [activePanel, setActivePanel] = useState<'chat' | 'wallet'>('chat');
+  const [showAllAgents, setShowAllAgents] = useState(false);
+  const [recentAgentIds, setRecentAgentIds] = useState<string[]>([]);
+
+  const hasMoreAgents = agents.length > DEFAULT_VISIBLE_AGENTS;
+
+  // Track recently selected agents
+  useEffect(() => {
+    if (!agentId) return;
+
+    setRecentAgentIds(prev => {
+      if (prev[0] === agentId) return prev; // Already first, no change
+      const filtered = prev.filter(id => id !== agentId);
+      return [agentId, ...filtered].slice(0, DEFAULT_VISIBLE_AGENTS);
+    });
+  }, [agentId]);
+
+  // Calculate visible agents - prioritize recently selected agents
+  const visibleAgents = (() => {
+    if (showAllAgents) return agents;
+
+    // Get recent agents that exist in the agents list
+    const recentAgents = recentAgentIds
+      .map(id => agents.find(a => a.id === id))
+      .filter((a): a is typeof agents[0] => a !== undefined);
+
+    // Get remaining agents (not in recent list)
+    const remainingAgents = agents.filter(a => !recentAgentIds.includes(a.id));
+
+    // Combine: recent first, then fill with remaining up to DEFAULT_VISIBLE_AGENTS
+    const combined = [...recentAgents, ...remainingAgents];
+    return combined.slice(0, DEFAULT_VISIBLE_AGENTS);
+  })();
 
   const currentAgent = agentId ? getAgentConfig(agentId) : undefined;
 
@@ -106,24 +140,71 @@ export function AgentPage() {
   return (
     <div className="h-full flex flex-col">
       {/* Desktop agent grid - always visible */}
-      <div className="hidden lg:block mb-8 relative p-8 rounded-2xl dark:bg-linear-to-br dark:from-neutral-900/40 dark:to-neutral-800/20 backdrop-blur-sm border border-neutral-200 dark:border-neutral-800/50">
+      <div className="hidden lg:block mb-8 relative px-8 pt-8 pb-5 rounded-2xl dark:bg-linear-to-br dark:from-neutral-900/40 dark:to-neutral-800/20 backdrop-blur-sm border border-neutral-200 dark:border-neutral-800/50">
         <div className="absolute top-0 left-0 w-32 h-32 border-l-2 border-t-2 border-orange-500/50 rounded-tl-2xl" />
         <div className="absolute bottom-0 right-0 w-32 h-32 border-r-2 border-b-2 border-orange-500/50 rounded-br-2xl" />
 
         <div className="relative">
-            <div className="grid grid-cols-7 gap-4">
-              {agents.map((agent) => (
-                <AgentCard
+          <div className="grid grid-cols-7 gap-4">
+            {/* First 7 agents - no animation */}
+            {visibleAgents.slice(0, DEFAULT_VISIBLE_AGENTS).map((agent) => (
+              <AgentCard
+                key={agent.id}
+                id={agent.id}
+                name={agent.name}
+                Icon={agent.Icon}
+                category={agent.category}
+                color={agent.color}
+                isSelected={agentId === agent.id}
+              />
+            ))}
+            {/* Extra agents - with animation */}
+            <AnimatePresence initial={false} mode="sync">
+              {showAllAgents && visibleAgents.slice(DEFAULT_VISIBLE_AGENTS).map((agent, index) => (
+                <motion.div
                   key={agent.id}
-                  id={agent.id}
-                  name={agent.name}
-                  Icon={agent.Icon}
-                  category={agent.category}
-                  color={agent.color}
-                  isSelected={agentId === agent.id}
-                />
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.1 } }}
+                  transition={{
+                    duration: 0.15,
+                    delay: index * 0.02,
+                  }}
+                >
+                  <AgentCard
+                    id={agent.id}
+                    name={agent.name}
+                    Icon={agent.Icon}
+                    category={agent.category}
+                    color={agent.color}
+                    isSelected={agentId === agent.id}
+                  />
+                </motion.div>
               ))}
+            </AnimatePresence>
+          </div>
+
+          {/* View all / Hide all button */}
+          {hasMoreAgents && (
+            <div className="flex justify-center mt-2">
+              <button
+                onClick={() => setShowAllAgents(!showAllAgents)}
+                className="flex items-center gap-1.5 px-4 pt-2 text-sm font-medium text-neutral-600 dark:text-neutral-400 hover:text-orange-500 dark:hover:text-orange-400 transition-colors duration-200"
+              >
+                {showAllAgents ? (
+                  <>
+                    <span>Hide all</span>
+                    <ChevronUp className="w-4 h-4" />
+                  </>
+                ) : (
+                  <>
+                    <span>View all</span>
+                    <ChevronDown className="w-4 h-4" />
+                  </>
+                )}
+              </button>
             </div>
+          )}
         </div>
       </div>
       {/* Mobile tab switcher with sliding indicator */}
