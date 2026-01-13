@@ -348,13 +348,13 @@ export function parsePathComponents(path: string): {
 }
 
 // ============================================
-// Internal: BIP32 Key Derivation
+// BIP32 Key Derivation (exported for L1/sdk compatibility)
 // ============================================
 
 /**
  * Generate master key from seed (BIP32 standard)
  */
-function generateMasterKeyFromSeed(seedHex: string): {
+export function generateMasterKeyFromSeed(seedHex: string): {
   masterKey: string;
   chainCode: string;
 } {
@@ -380,7 +380,7 @@ function generateMasterKeyFromSeed(seedHex: string): {
 /**
  * Standard BIP32 child key derivation
  */
-function deriveChildKeyBIP32(
+export function deriveChildKeyBIP32(
   parentPrivKey: string,
   parentChainCode: string,
   index: number
@@ -430,7 +430,7 @@ function deriveChildKeyBIP32(
 /**
  * Derive key at full BIP32 path
  */
-function deriveKeyAtPath(
+export function deriveKeyAtPath(
   masterPrivKey: string,
   masterChainCode: string,
   path: string
@@ -462,8 +462,9 @@ function deriveKeyAtPath(
 
 /**
  * Legacy HMAC derivation (non-standard)
+ * @deprecated Use deriveChildKeyBIP32 for new wallets
  */
-function deriveChildKeyLegacy(
+export function deriveChildKeyLegacy(
   masterPriv: string,
   chainCode: string,
   index: number
@@ -483,8 +484,9 @@ function deriveChildKeyLegacy(
 
 /**
  * WIF HMAC derivation (without chain code)
+ * Used for simple wallets imported from webwallet without chain code
  */
-function deriveKeyWifHmac(masterKey: string, index: number): string {
+export function deriveKeyWifHmac(masterKey: string, index: number): string {
   const derivationPath = `m/44'/0'/${index}'`;
 
   const hmacOutput = CryptoJS.HmacSHA512(
@@ -496,13 +498,13 @@ function deriveKeyWifHmac(masterKey: string, index: number): string {
 }
 
 // ============================================
-// Internal: L1 Address Generation
+// L1 Address Generation (exported for L1/sdk compatibility)
 // ============================================
 
 /**
  * Convert private key to L1 (Alpha) address
  */
-function privateKeyToL1Address(privateKey: string): {
+export function privateKeyToL1Address(privateKey: string): {
   publicKey: string;
   address: string;
 } {
@@ -523,7 +525,7 @@ function privateKeyToL1Address(privateKey: string): {
 }
 
 // ============================================
-// Internal: Bech32 Encoding
+// Bech32 Encoding (internal, use L1/sdk/bech32 for full API)
 // ============================================
 
 const BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
