@@ -2,12 +2,12 @@
  * Transaction handling - Strict copy of index.html logic
  */
 import { getUtxo, broadcast } from "./network";
-import { decodeBech32 } from "../../sdk";
+import { decodeBech32, createScriptPubKey } from "../../sdk";
 import CryptoJS from "crypto-js";
 import elliptic from "elliptic";
 import type { Wallet, TransactionPlan, Transaction, UTXO } from "./types";
 import { vestingState } from "./vestingState";
-import { WalletAddressHelper } from "./addressHelpers";
+import { WalletAddressHelper } from "../../sdk";
 
 const ec = new elliptic.ec("secp256k1");
 
@@ -15,29 +15,6 @@ const ec = new elliptic.ec("secp256k1");
 const FEE = 10_000; // sats per transaction
 const DUST = 546; // dust threshold
 const SAT = 100_000_000; // sats in 1 ALPHA
-
-/**
- * Create scriptPubKey for address (P2WPKH for bech32)
- * Exact copy from index.html
- */
-export function createScriptPubKey(address: string): string {
-  if (!address || typeof address !== "string") {
-    throw new Error("Invalid address: must be a string");
-  }
-
-  const decoded = decodeBech32(address);
-  if (!decoded) {
-    throw new Error("Invalid bech32 address: " + address);
-  }
-
-  // Convert data array to hex string
-  const dataHex = Array.from(decoded.data)
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-
-  // P2WPKH scriptPubKey: OP_0 <20-byte-key-hash>
-  return "0014" + dataHex;
-}
 
 /**
  * Create signature hash for SegWit (BIP143)

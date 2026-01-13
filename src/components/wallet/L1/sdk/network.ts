@@ -1,6 +1,6 @@
 // sdk/l1/network.ts
 
-import { addressToScriptHash } from "./addressToScriptHash";
+import { addressToScriptHash } from "../../sdk";
 import type { UTXO } from "./types";
 
 const DEFAULT_ENDPOINT = "wss://fulcrum.unicity.network:50004";

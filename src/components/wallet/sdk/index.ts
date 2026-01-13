@@ -58,8 +58,33 @@ export {
 // Bech32 encoding
 export { createBech32, decodeBech32, convertBits, CHARSET } from './bech32';
 
+// Script utilities
+export { addressToScriptHash, createScriptPubKey } from './script';
+
+// Address helpers
+export { WalletAddressHelper } from './addressHelpers';
+
+// Transaction building
+export {
+  createSignatureHash,
+  createWitnessData,
+  buildSegWitTransaction,
+  signTransaction,
+  selectUtxos,
+  TX_FEE,
+  DUST_THRESHOLD,
+  SATS_PER_COIN,
+} from './transaction';
+
 // Crypto utilities
-export { hexToWIF } from './crypto';
+export {
+  hexToWIF,
+  encrypt,
+  decrypt,
+  generatePrivateKey,
+  encryptWallet,
+  decryptWallet,
+} from './crypto';
 
 // Common utilities
 export {
@@ -113,6 +138,26 @@ export {
 
 // Types
 export type {
+  // Base wallet types
+  BaseWallet,
+  BaseWalletAddress,
+  // L1 types
+  L1UTXO,
+  L1TxInput,
+  L1TxOutput,
+  L1PlannedTx,
+  L1TxPlanResult,
+  L1NetworkProvider,
+  // Legacy aliases (deprecated)
+  UTXO,
+  TxInput,
+  TxOutput,
+  PlannedTx,
+  TxPlanResult,
+  NetworkProvider,
+  // Storage provider
+  StorageProvider,
+  // Key derivation
   DerivationMode,
   WalletSource,
   WalletKeys,
@@ -127,6 +172,16 @@ export type {
   WalletJSONExportOptions,
   WalletJSONImportResult,
 } from './types';
+
+// Transaction types
+export type {
+  TxPlan,
+  BuiltTransaction,
+  UTXOInput,
+  TransactionOutput,
+  PlannedTransaction,
+  TransactionPlanResult,
+} from './transaction';
 
 // Wallet.dat types
 export type {

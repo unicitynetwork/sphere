@@ -6,10 +6,16 @@
  * - This indicates corruption, wrong derivation, or data integrity issue
  *
  * Performance: O(n) lookup is negligible for typical wallet sizes (5-100 addresses)
+ *
+ * Generic implementation: Works with any wallet/address type that extends Base types.
  */
 
-import type { Wallet, WalletAddress } from "./types";
+import type { BaseWalletAddress } from './types';
 
+/**
+ * Generic wallet address helper that works with any wallet type
+ * extending BaseWallet and BaseWalletAddress
+ */
 export class WalletAddressHelper {
   /**
    * Find address by BIP32 derivation path
@@ -17,7 +23,10 @@ export class WalletAddressHelper {
    * @param path - Full BIP32 path like "m/84'/1'/0'/0/5"
    * @returns The address if found, undefined otherwise
    */
-  static findByPath(wallet: Wallet, path: string): WalletAddress | undefined {
+  static findByPath<
+    A extends BaseWalletAddress,
+    W extends { addresses: A[] }
+  >(wallet: W, path: string): A | undefined {
     return wallet.addresses.find((a) => a.path === path);
   }
 
@@ -28,7 +37,10 @@ export class WalletAddressHelper {
    * @param wallet - The wallet
    * @returns First non-change address, or first address if all are change
    */
-  static getDefault(wallet: Wallet): WalletAddress {
+  static getDefault<
+    A extends BaseWalletAddress,
+    W extends { addresses: A[] }
+  >(wallet: W): A {
     return wallet.addresses.find((a) => !a.isChange) ?? wallet.addresses[0];
   }
 
@@ -36,7 +48,10 @@ export class WalletAddressHelper {
    * Get the default address, or undefined if wallet has no addresses
    * Safe version that doesn't throw on empty wallet
    */
-  static getDefaultOrNull(wallet: Wallet): WalletAddress | undefined {
+  static getDefaultOrNull<
+    A extends BaseWalletAddress,
+    W extends { addresses: A[] }
+  >(wallet: W): A | undefined {
     if (!wallet.addresses || wallet.addresses.length === 0) {
       return undefined;
     }
@@ -56,9 +71,12 @@ export class WalletAddressHelper {
    * @returns New wallet object with address added
    * @throws Error if path exists with different address (corruption indicator)
    */
-  static add(wallet: Wallet, newAddress: WalletAddress): Wallet {
+  static add<
+    A extends BaseWalletAddress,
+    W extends { addresses: A[] }
+  >(wallet: W, newAddress: A): W {
     if (!newAddress.path) {
-      throw new Error("Cannot add address without a path");
+      throw new Error('Cannot add address without a path');
     }
 
     const existing = this.findByPath(wallet, newAddress.path);
@@ -82,7 +100,7 @@ export class WalletAddressHelper {
     return {
       ...wallet,
       addresses: [...wallet.addresses, newAddress],
-    };
+    } as W;
   }
 
   /**
@@ -91,11 +109,14 @@ export class WalletAddressHelper {
    * @param path - The path of the address to remove
    * @returns New wallet object with address removed
    */
-  static removeByPath(wallet: Wallet, path: string): Wallet {
+  static removeByPath<
+    A extends BaseWalletAddress,
+    W extends { addresses: A[] }
+  >(wallet: W, path: string): W {
     return {
       ...wallet,
       addresses: wallet.addresses.filter((a) => a.path !== path),
-    };
+    } as W;
   }
 
   /**
@@ -103,7 +124,10 @@ export class WalletAddressHelper {
    * @param wallet - The wallet
    * @returns Array of external addresses
    */
-  static getExternal(wallet: Wallet): WalletAddress[] {
+  static getExternal<
+    A extends BaseWalletAddress,
+    W extends { addresses: A[] }
+  >(wallet: W): A[] {
     return wallet.addresses.filter((a) => !a.isChange);
   }
 
@@ -112,7 +136,10 @@ export class WalletAddressHelper {
    * @param wallet - The wallet
    * @returns Array of change addresses
    */
-  static getChange(wallet: Wallet): WalletAddress[] {
+  static getChange<
+    A extends BaseWalletAddress,
+    W extends { addresses: A[] }
+  >(wallet: W): A[] {
     return wallet.addresses.filter((a) => a.isChange);
   }
 
@@ -122,7 +149,10 @@ export class WalletAddressHelper {
    * @param path - The path to look for
    * @returns true if path exists
    */
-  static hasPath(wallet: Wallet, path: string): boolean {
+  static hasPath<W extends { addresses: BaseWalletAddress[] }>(
+    wallet: W,
+    path: string
+  ): boolean {
     return wallet.addresses.some((a) => a.path === path);
   }
 
@@ -133,7 +163,7 @@ export class WalletAddressHelper {
    * @param wallet - The wallet to validate
    * @throws Error if duplicate paths found
    */
-  static validate(wallet: Wallet): void {
+  static validate<W extends { addresses: BaseWalletAddress[] }>(wallet: W): void {
     const paths = wallet.addresses.map((a) => a.path).filter(Boolean);
     const uniquePaths = new Set(paths);
 
@@ -141,7 +171,7 @@ export class WalletAddressHelper {
       // Find duplicates for error message
       const duplicates = paths.filter((p, i) => paths.indexOf(p) !== i);
       throw new Error(
-        `CRITICAL: Wallet has duplicate paths: ${duplicates.join(", ")}\n` +
+        `CRITICAL: Wallet has duplicate paths: ${duplicates.join(', ')}\n` +
           `This indicates data corruption. Please restore from backup.`
       );
     }
@@ -154,7 +184,10 @@ export class WalletAddressHelper {
    * @param wallet - The wallet
    * @returns New wallet with sorted addresses
    */
-  static sortAddresses(wallet: Wallet): Wallet {
+  static sortAddresses<
+    A extends BaseWalletAddress,
+    W extends { addresses: A[] }
+  >(wallet: W): W {
     const sorted = [...wallet.addresses].sort((a, b) => {
       // External addresses first (isChange = false/undefined)
       const aIsChange = a.isChange ? 1 : 0;
@@ -167,6 +200,6 @@ export class WalletAddressHelper {
     return {
       ...wallet,
       addresses: sorted,
-    };
+    } as W;
   }
 }

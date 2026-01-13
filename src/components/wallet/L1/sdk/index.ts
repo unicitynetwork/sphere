@@ -12,11 +12,19 @@ export {
   generateHDAddress,
   deriveChildKey,
 } from '../../sdk'
+// Crypto functions re-exported from SDK
+export {
+  hexToWIF,
+  encrypt,
+  decrypt,
+  generatePrivateKey,
+  encryptWallet,
+  decryptWallet,
+} from '../../sdk'
 export * from './network'
 export * from './storage'
 export * from './types'
 export * from './tx'
-export * from './crypto'
 export * from './import-export'
 export * from './vesting'
 export * from './vestingState'
