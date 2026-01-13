@@ -2035,6 +2035,125 @@ export class IpfsStorageService {
   }
 
   /**
+   * Check if any archived tokens should be restored to active status
+   * This is a safety net for IPNS eventual consistency issues where
+   * tokens may have been incorrectly removed due to stale IPNS data.
+   *
+   * Returns the number of tokens restored.
+   */
+  private async checkArchivedTokensForRecovery(
+    walletRepo: WalletRepository
+  ): Promise<number> {
+    const archivedTokens = walletRepo.getArchivedTokens();
+    if (archivedTokens.size === 0) {
+      return 0;
+    }
+
+    // Get current active token IDs
+    const activeTokens = walletRepo.getTokens();
+    const activeTokenIds = new Set<string>();
+    for (const token of activeTokens) {
+      const txf = tokenToTxf(token);
+      if (txf) {
+        activeTokenIds.add(txf.genesis.data.tokenId);
+      }
+    }
+
+    // Get tombstone keys (tokenId:stateHash)
+    const tombstones = walletRepo.getTombstones();
+    const tombstoneKeys = new Set(
+      tombstones.map(t => `${t.tokenId}:${t.stateHash}`)
+    );
+    const tombstoneTokenIds = new Set(tombstones.map(t => t.tokenId));
+
+    // Find candidates: ALL archived tokens not in active set
+    // IMPORTANT: Include tombstoned tokens - tombstones may be invalid and need verification
+    const candidatesForRecovery = new Map<string, TxfToken>();
+    const tombstonedCandidates = new Map<string, TxfToken>(); // Track which are tombstoned
+
+    for (const [tokenId, txfToken] of archivedTokens) {
+      // Skip if already active
+      if (activeTokenIds.has(tokenId)) continue;
+
+      // Get current state hash from archived token
+      const stateHash = getCurrentStateHash(txfToken);
+
+      // Check if tombstoned with this exact state
+      const isTombstoned = stateHash && tombstoneKeys.has(`${tokenId}:${stateHash}`);
+
+      // Add ALL candidates (tombstoned or not) - we verify against Unicity
+      candidatesForRecovery.set(tokenId, txfToken);
+      if (isTombstoned) {
+        tombstonedCandidates.set(tokenId, txfToken);
+      }
+    }
+
+    if (candidatesForRecovery.size === 0) {
+      return 0;
+    }
+
+    // Log what we're checking
+    const tombstonedCount = tombstonedCandidates.size;
+    const nonTombstonedCount = candidatesForRecovery.size - tombstonedCount;
+    console.log(`📦 Checking ${candidatesForRecovery.size} archived token(s) for potential recovery...`);
+    console.log(`📦   - ${nonTombstonedCount} non-tombstoned, ${tombstonedCount} tombstoned (verifying against Unicity)`);
+
+    // Get identity for verification
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (!identity) {
+      console.warn("⚠️ No identity available, skipping archive recovery check");
+      return 0;
+    }
+
+    // Check which are unspent (should be restored)
+    // CRITICAL: Use treatErrorsAsUnspent=false for safety
+    // If we can't verify, don't restore (prevents incorrectly restoring spent tokens)
+    const validationService = getTokenValidationService();
+    const publicKey = identity.publicKey;
+    const unspentTokenIds = await validationService.checkUnspentTokens(
+      candidatesForRecovery,
+      publicKey,
+      { treatErrorsAsUnspent: false }  // Errors → assume spent → don't restore
+    );
+    const unspentSet = new Set(unspentTokenIds);
+
+    // Restore unspent tokens
+    let restoredCount = 0;
+    for (const [tokenId, txfToken] of candidatesForRecovery) {
+      const wasTombstoned = tombstonedCandidates.has(tokenId);
+
+      if (unspentSet.has(tokenId)) {
+        // Token is NOT spent - should be restored to active!
+        const tombstoneNote = wasTombstoned ? ' (was tombstoned - INVALID tombstone!)' : '';
+        console.log(`📦 Restoring archived token ${tokenId.slice(0, 8)}... - NOT spent on Unicity${tombstoneNote}`);
+
+        // Remove any tombstones for this token since it's unspent
+        if (tombstoneTokenIds.has(tokenId)) {
+          walletRepo.removeTombstonesForToken(tokenId);
+          console.log(`📦 Removed invalid tombstones for ${tokenId.slice(0, 8)}...`);
+        }
+
+        const restored = walletRepo.restoreTokenFromArchive(tokenId, txfToken);
+        if (restored) {
+          restoredCount++;
+        }
+      } else {
+        // Token is spent - valid to stay archived/tombstoned
+        const tombstoneNote = wasTombstoned ? ' (tombstone valid)' : '';
+        console.log(`📦 Archived token ${tokenId.slice(0, 8)}... is spent on Unicity - keeping archived${tombstoneNote}`);
+      }
+    }
+
+    if (restoredCount > 0) {
+      console.log(`📦 Archive recovery: restored ${restoredCount} token(s)`);
+      // Invalidate UNSPENT cache since inventory changed
+      getTokenValidationService().clearUnspentCacheEntries();
+    }
+
+    return restoredCount;
+  }
+
+  /**
    * Verify integrity invariants after sync operations
    * All spent tokens should have both tombstone and archive entry
    */
@@ -2558,6 +2677,18 @@ export class IpfsStorageService {
       } else {
         console.log(`📦 Post-import validation: all ${allTokens.length} token(s) are valid`);
       }
+    }
+
+    // ==========================================
+    // ARCHIVE RECOVERY CHECK
+    // ==========================================
+    // Safety net for IPNS eventual consistency: check if any archived tokens
+    // should be restored (not active, not tombstoned, and still unspent on Unicity)
+    const archivedRecoveryCount = await this.checkArchivedTokensForRecovery(walletRepo);
+    if (archivedRecoveryCount > 0) {
+      importedCount += archivedRecoveryCount;
+      // Emit wallet update after restoring archived tokens
+      window.dispatchEvent(new Event("wallet-updated"));
     }
 
     return importedCount;

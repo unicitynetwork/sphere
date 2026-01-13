@@ -37,6 +37,7 @@ import { unicityIdValidator, type UnicityIdValidationResult } from "./unicityIdV
 declare global {
   interface Window {
     devHelp: () => void;
+    devDumpLocalStorage: (filter?: string) => void;
     devRefreshProofs: () => Promise<RefreshProofsResult>;
     devSetAggregatorUrl: (url: string | null) => void;
     devGetAggregatorUrl: () => string;
@@ -47,6 +48,7 @@ declare global {
     devReset: () => void;
     devRecoverCorruptedTokens: () => Promise<RecoverCorruptedTokensResult>;
     devDumpArchivedTokens: () => void;
+    devIpfsSync: () => Promise<{ success: boolean; cid?: string; error?: string }>;
     devValidateUnicityId: () => Promise<UnicityIdValidationResult>;
     devRepairUnicityId: () => Promise<boolean>;
     devCheckNametag: (nametag: string) => Promise<string | null>;
@@ -562,6 +564,17 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
   console.group("🔄 Dev: Refreshing Unicity Proofs");
   console.log(`📡 Aggregator: ${ServiceProvider.getAggregatorUrl()}`);
   console.log(`🔐 Trust base verification: ${ServiceProvider.isTrustBaseVerificationSkipped() ? "SKIPPED" : "enabled"}`);
+
+  // Clear the spent state cache since we're regenerating proofs
+  // This ensures tokens will be re-verified against the aggregator
+  try {
+    const { getTokenValidationService } = await import("../components/wallet/L3/services/TokenValidationService");
+    const validationService = getTokenValidationService();
+    validationService.clearSpentStateCache();
+    console.log(`📦 Cleared spent state cache for proof refresh`);
+  } catch (err) {
+    console.warn("⚠️ Could not clear spent state cache:", err);
+  }
 
   const repo = WalletRepository.getInstance();
   const tokens = repo.getTokens();
@@ -1111,6 +1124,14 @@ export async function devTopup(
 
       if (result.success) {
         console.log(`   ✅ IPFS sync complete (CID: ${result.cid?.slice(0, 16)}...)`);
+        // Log IPNS publish status explicitly for diagnostics
+        if (result.ipnsPublished) {
+          console.log(`   ✅ IPNS record published (v${result.version})`);
+        } else if (result.ipnsPublishPending) {
+          console.warn(`   ⚠️ IPNS publish pending (will retry) - tokens may not persist in incognito!`);
+        } else {
+          console.log(`   ℹ️ IPNS unchanged (CID same as before)`);
+        }
       } else if (result.error === "Sync already in progress") {
         // Retry once after waiting
         console.log(`   ⏳ Sync still in progress, waiting and retrying...`);
@@ -1583,6 +1604,12 @@ export function devHelp(): void {
   console.log("  devHelp()");
   console.log("    Show this help message");
   console.log("");
+  console.log("  devDumpLocalStorage(filter?)");
+  console.log("    Dump all localStorage data with detailed wallet analysis");
+  console.log("    Shows tokens, tombstones, archived tokens, and state hashes");
+  console.log("    Example: devDumpLocalStorage()          // All keys");
+  console.log("    Example: devDumpLocalStorage('wallet')  // Filter by 'wallet'");
+  console.log("");
   console.log("  devGetAggregatorUrl()");
   console.log("    Get the current Unicity aggregator URL");
   console.log("");
@@ -1833,11 +1860,156 @@ export function devDumpArchivedTokens(): void {
 }
 
 /**
+ * Dump all localStorage data for debugging
+ * Parses JSON values and displays them in a structured format
+ *
+ * Usage from browser console:
+ *   devDumpLocalStorage()           // Dump all keys
+ *   devDumpLocalStorage('wallet')   // Filter keys containing 'wallet'
+ *   devDumpLocalStorage('unicity')  // Filter keys containing 'unicity'
+ */
+export function devDumpLocalStorage(filter?: string): void {
+  console.group("📦 LocalStorage Dump" + (filter ? ` (filter: "${filter}")` : ""));
+
+  const keys = Object.keys(localStorage).sort();
+  const filteredKeys = filter
+    ? keys.filter(k => k.toLowerCase().includes(filter.toLowerCase()))
+    : keys;
+
+  console.log(`Total keys: ${keys.length}, Showing: ${filteredKeys.length}`);
+  console.log("");
+
+  let totalSize = 0;
+
+  for (const key of filteredKeys) {
+    const value = localStorage.getItem(key);
+    if (!value) continue;
+
+    const sizeBytes = new Blob([value]).size;
+    totalSize += sizeBytes;
+    const sizeStr = sizeBytes > 1024
+      ? `${(sizeBytes / 1024).toFixed(1)} KB`
+      : `${sizeBytes} B`;
+
+    console.group(`🔑 ${key} (${sizeStr})`);
+
+    // Try to parse as JSON
+    try {
+      const parsed = JSON.parse(value);
+
+      // Special handling for wallet data
+      if (key.startsWith("unicity_wallet_")) {
+        const wallet = parsed;
+        console.log("📋 Wallet Summary:");
+        console.log(`   Address: ${wallet.address || "(none)"}`);
+        console.log(`   Tokens: ${wallet.tokens?.length || 0}`);
+        console.log(`   Tombstones: ${wallet.tombstones?.length || 0}`);
+        console.log(`   Archived: ${wallet.archivedTokens ? Object.keys(wallet.archivedTokens).length : 0}`);
+        console.log(`   Forked: ${wallet.forkedTokens ? Object.keys(wallet.forkedTokens).length : 0}`);
+        console.log(`   Invalidated Nametags: ${wallet.invalidatedNametags?.length || 0}`);
+
+        if (wallet.nametag) {
+          console.log(`   Nametag: @${wallet.nametag.name}`);
+        }
+
+        // Token details
+        if (wallet.tokens?.length > 0) {
+          console.group("   📦 Tokens:");
+          for (const token of wallet.tokens) {
+            let tokenId = token.id;
+            let stateInfo = "";
+            try {
+              const txf = JSON.parse(token.jsonData || "{}");
+              tokenId = txf.genesis?.data?.tokenId || token.id;
+              const txCount = txf.transactions?.length || 0;
+              const lastTx = txf.transactions?.[txCount - 1];
+              stateInfo = lastTx?.newStateHash
+                ? `state=${lastTx.newStateHash.slice(0, 12)}...`
+                : txf._integrity?.currentStateHash
+                  ? `genesis-state=${txf._integrity.currentStateHash.slice(0, 12)}...`
+                  : "(no state hash)";
+            } catch { /* ignore */ }
+            console.log(`   - ${tokenId.slice(0, 12)}... ${token.symbol || ""} ${token.amount || ""} ${stateInfo}`);
+          }
+          console.groupEnd();
+        }
+
+        // Tombstone details
+        if (wallet.tombstones?.length > 0) {
+          console.group("   💀 Tombstones:");
+          for (const t of wallet.tombstones) {
+            console.log(`   - ${t.tokenId.slice(0, 12)}... state=${t.stateHash.slice(0, 12)}... (${new Date(t.timestamp).toISOString()})`);
+          }
+          console.groupEnd();
+        }
+
+        // Archived token details
+        if (wallet.archivedTokens && Object.keys(wallet.archivedTokens).length > 0) {
+          console.group("   📁 Archived Tokens:");
+          for (const [id, txf] of Object.entries(wallet.archivedTokens)) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const t = txf as any;
+            const txCount = t.transactions?.length || 0;
+            console.log(`   - ${id.slice(0, 12)}... (${txCount} transactions)`);
+          }
+          console.groupEnd();
+        }
+
+        // Full raw data
+        console.log("📋 Raw data:", parsed);
+      }
+      // Special handling for outbox
+      else if (key === "transfer_outbox" || key === "mint_outbox") {
+        const entries = Array.isArray(parsed) ? parsed : [];
+        console.log(`Entries: ${entries.length}`);
+        for (const entry of entries) {
+          console.log(`   - ${entry.id?.slice(0, 8) || "?"} status=${entry.status} token=${entry.sourceTokenId?.slice(0, 12) || entry.tokenId?.slice(0, 12) || "?"}...`);
+        }
+        console.log("📋 Raw data:", parsed);
+      }
+      // Generic JSON
+      else {
+        // For large objects, show summary
+        if (typeof parsed === "object" && parsed !== null) {
+          const keys = Object.keys(parsed);
+          if (keys.length > 10) {
+            console.log(`Object with ${keys.length} keys:`, keys.slice(0, 10).join(", ") + "...");
+          }
+          if (Array.isArray(parsed)) {
+            console.log(`Array with ${parsed.length} elements`);
+          }
+        }
+        console.log("📋 Value:", parsed);
+      }
+    } catch {
+      // Not JSON, show as string (truncated if long)
+      if (value.length > 200) {
+        console.log(`📋 Value (truncated): ${value.slice(0, 200)}...`);
+      } else {
+        console.log(`📋 Value: ${value}`);
+      }
+    }
+
+    console.groupEnd();
+  }
+
+  console.log("");
+  const totalSizeStr = totalSize > 1024 * 1024
+    ? `${(totalSize / (1024 * 1024)).toFixed(2)} MB`
+    : totalSize > 1024
+      ? `${(totalSize / 1024).toFixed(1)} KB`
+      : `${totalSize} B`;
+  console.log(`📊 Total size: ${totalSizeStr}`);
+  console.groupEnd();
+}
+
+/**
  * Register developer tools on the window object
  * Call this during app initialization in development mode
  */
 export function registerDevTools(): void {
   window.devHelp = devHelp;
+  window.devDumpLocalStorage = devDumpLocalStorage;
   window.devRefreshProofs = devRefreshProofs;
   window.devSetAggregatorUrl = devSetAggregatorUrl;
   window.devGetAggregatorUrl = devGetAggregatorUrl;
@@ -1849,6 +2021,23 @@ export function registerDevTools(): void {
   window.devRecoverCorruptedTokens = devRecoverCorruptedTokens;
   window.devDumpArchivedTokens = devDumpArchivedTokens;
   window.devFindTransferSalt = devFindTransferSalt;
+  window.devIpfsSync = async () => {
+    const identityManager = IdentityManager.getInstance();
+    const identity = await identityManager.getCurrentIdentity();
+    if (!identity) {
+      console.error("❌ No wallet identity available");
+      return { success: false, error: "No identity" };
+    }
+    const ipfsService = IpfsStorageService.getInstance(identityManager);
+    console.log("☁️ Triggering IPFS sync...");
+    const result = await ipfsService.syncNow({ forceIpnsPublish: false, callerContext: "devIpfsSync" });
+    if (result.success) {
+      console.log(`✅ IPFS sync complete (CID: ${result.cid?.slice(0, 16)}...)`);
+    } else {
+      console.error(`❌ IPFS sync failed: ${result.error}`);
+    }
+    return result;
+  };
   window.devValidateUnicityId = unicityIdValidator.validate;
   window.devRepairUnicityId = unicityIdValidator.repair;
   window.devCheckNametag = unicityIdValidator.getNametagOwner;
