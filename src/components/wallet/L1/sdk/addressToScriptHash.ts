@@ -1,4 +1,4 @@
-import { decodeBech32 } from "./bech32";
+import { decodeBech32 } from "../../sdk";
 import CryptoJS from "crypto-js";
 
 /** Convert bytes to hex */

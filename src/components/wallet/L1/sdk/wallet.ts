@@ -2,7 +2,7 @@ import { saveWalletToStorage, loadWalletFromStorage } from "./storage";
 import {
   generateHDAddressBIP32,
   generateAddressFromMasterKey,
-} from "./address";
+} from "../../sdk";
 import type { Wallet } from "./types";
 import CryptoJS from "crypto-js";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";

@@ -20,15 +20,13 @@ import elliptic from "elliptic";
 import {
   createWallet as coreCreateWallet,
   restoreFromMnemonic as coreRestoreFromMnemonic,
-} from "../../core/WalletCore";
-import type { DerivationMode } from "../../core/types";
-import { DEFAULT_BASE_PATH } from "../../core/types";
-import {
   deriveKeyAtPath,
   generateHDAddressBIP32,
   generateAddressFromMasterKey,
   generateHDAddress,
-} from "../../L1/sdk/address";
+  type DerivationMode,
+  DEFAULT_BASE_PATH,
+} from "../../sdk";
 import {
   exportWalletToJSON,
   downloadWalletJSON,
@@ -42,8 +40,8 @@ const ec = new elliptic.ec("secp256k1");
 
 export type WalletSource = "mnemonic" | "file" | "unknown";
 
-// Re-export types from core
-export type { DerivationMode } from "../../core/types";
+// Re-export types from sdk
+export type { DerivationMode } from "../../sdk";
 
 export interface DerivedAddress {
   privateKey: string;

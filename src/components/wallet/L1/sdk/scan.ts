@@ -9,7 +9,7 @@
  * - Cached nametags from localStorage displayed immediately
  */
 
-import { deriveKeyAtPath } from "./address";
+import { deriveKeyAtPath } from "../../sdk";
 import { getBalance } from "./network";
 import type { Wallet } from "./types";
 // L3 inventory checking imports

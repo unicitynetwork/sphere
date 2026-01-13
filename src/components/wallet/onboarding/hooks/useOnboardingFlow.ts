@@ -21,7 +21,7 @@ import type { DerivedAddressInfo } from "../components/AddressSelectionScreen";
 import {
   deriveUnifiedAddress,
   getAddressPath,
-} from "../../core/WalletCore";
+} from "../../sdk";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 export type OnboardingStep =

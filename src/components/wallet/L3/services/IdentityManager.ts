@@ -9,8 +9,8 @@ import { STORAGE_KEYS } from "../../../../config/storageKeys";
 import {
   deriveL3Address as coreDeriveL3Address,
   validateMnemonic,
-} from "../../core/WalletCore";
-import { UNICITY_TOKEN_TYPE_HEX } from "../../core/types";
+  UNICITY_TOKEN_TYPE_HEX,
+} from "../../sdk";
 const DEFAULT_SESSION_KEY = "user-pin-1234";
 
 /**

@@ -2,7 +2,7 @@
  * Transaction handling - Strict copy of index.html logic
  */
 import { getUtxo, broadcast } from "./network";
-import { decodeBech32 } from "./bech32";
+import { decodeBech32 } from "../../sdk";
 import CryptoJS from "crypto-js";
 import elliptic from "elliptic";
 import type { Wallet, TransactionPlan, Transaction, UTXO } from "./types";

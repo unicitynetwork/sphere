@@ -77,99 +77,21 @@ export interface ExportOptions {
   filename?: string;
 }
 
-/**
- * JSON Wallet Export Format v1.0
- *
- * Supports multiple wallet sources:
- * - "mnemonic": Created from BIP39 mnemonic phrase (new standard)
- * - "file_bip32": Imported from file with chain code (BIP32 HD wallet)
- * - "file_standard": Imported from file without chain code (HMAC-based)
- * - "dat_descriptor": Imported from wallet.dat descriptor wallet
- * - "dat_hd": Imported from wallet.dat HD wallet
- * - "dat_legacy": Imported from wallet.dat legacy wallet
- */
-export type WalletJSONSource =
-  | "mnemonic"           // New standard - has mnemonic phrase
-  | "file_bip32"         // Imported from txt with chain code
-  | "file_standard"      // Imported from txt without chain code (HMAC)
-  | "dat_descriptor"     // Imported from wallet.dat (descriptor format)
-  | "dat_hd"             // Imported from wallet.dat (HD format)
-  | "dat_legacy";        // Imported from wallet.dat (legacy format)
+// Re-export JSON wallet types from common SDK
+export type {
+  WalletJSONSource,
+  WalletJSONDerivationMode,
+  WalletJSONAddress,
+  WalletJSON,
+  WalletJSONExportOptions,
+} from "../../sdk/types";
 
-export type WalletJSONDerivationMode = "bip32" | "wif_hmac" | "legacy_hmac";
-
-export interface WalletJSONAddress {
-  address: string;
-  publicKey: string;
-  path: string;
-  index?: number;
-  isChange?: boolean;
-}
-
-/**
- * JSON Wallet Export structure
- */
-export interface WalletJSON {
-  /** Format version */
-  version: "1.0";
-
-  /** Generation timestamp ISO 8601 */
-  generated: string;
-
-  /** Security warning */
-  warning: string;
-
-  /** Master private key (hex, 64 chars) */
-  masterPrivateKey: string;
-
-  /** Master chain code for BIP32 (hex, 64 chars) - optional for HMAC wallets */
-  chainCode?: string;
-
-  /** BIP39 mnemonic phrase - only present if source is "mnemonic" */
-  mnemonic?: string;
-
-  /** Derivation mode used */
-  derivationMode: WalletJSONDerivationMode;
-
-  /** Source of the wallet */
-  source: WalletJSONSource;
-
-  /** First address for verification */
-  firstAddress: WalletJSONAddress;
-
-  /** Descriptor path for BIP32 wallets (e.g., "84'/0'/0'") */
-  descriptorPath?: string;
-
-  /** Encrypted fields (when password protected) */
-  encrypted?: {
-    /** Encrypted master private key (AES-256) */
-    masterPrivateKey: string;
-    /** Encrypted mnemonic (AES-256) - only if source is "mnemonic" */
-    mnemonic?: string;
-    /** Salt used for key derivation */
-    salt: string;
-    /** Number of PBKDF2 iterations */
-    iterations: number;
-  };
-
-  /** Additional addresses beyond first (optional) */
-  addresses?: WalletJSONAddress[];
-}
-
-export interface WalletJSONExportOptions {
-  /** Password for encryption (optional) */
-  password?: string;
-  /** Include all addresses (default: only first address) */
-  includeAllAddresses?: boolean;
-  /** Number of addresses to include (if includeAllAddresses is false) */
-  addressCount?: number;
-}
-
+// L1-specific import result (includes Wallet object)
 export interface WalletJSONImportResult {
   success: boolean;
   wallet?: Wallet;
-  source?: WalletJSONSource;
-  derivationMode?: WalletJSONDerivationMode;
+  source?: import("../../sdk/types").WalletJSONSource;
+  derivationMode?: import("../../sdk/types").WalletJSONDerivationMode;
   /** Indicates if mnemonic was found in the JSON */
   hasMnemonic?: boolean;
   /** The decrypted mnemonic phrase (if available) */

@@ -24,7 +24,7 @@ import { STORAGE_KEYS } from '../../../../config/storageKeys';
 import {
   deriveUnifiedAddress,
   getAddressPath,
-} from '../../core/WalletCore';
+} from '../../sdk';
 import {
   saveWalletToStorage,
   loadWalletFromStorage,
