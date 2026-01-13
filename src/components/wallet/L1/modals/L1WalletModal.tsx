@@ -15,8 +15,6 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  connect,
-  isWebSocketConnected,
   generateAddress,
   loadWalletFromStorage,
   createTransactionPlan,
@@ -24,8 +22,9 @@ import {
   broadcast,
   type TransactionPlan,
 } from "../sdk";
-import { useL1Wallet } from "../hooks";
+import { useL1Wallet, useConnectionStatus } from "../hooks";
 import { useAddressNametags } from "../hooks/useAddressNametags";
+import { ConnectionStatus } from "../components/ConnectionStatus";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 import {
@@ -49,8 +48,10 @@ type ViewMode = "main" | "history";
 export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalProps) {
   const [selectedAddress, setSelectedAddress] = useState<string>("");
   const [viewMode, setViewMode] = useState<ViewMode>("main");
-  const [isConnecting, setIsConnecting] = useState(() => !isWebSocketConnected());
   const [txPlan, setTxPlan] = useState<TransactionPlan | null>(null);
+
+  // Connection status hook
+  const connection = useConnectionStatus();
   const [isSending, setIsSending] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -84,7 +85,10 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
   } = useL1Wallet(selectedAddress);
 
   const addresses = wallet?.addresses.map((a) => a.address) ?? [];
-  const { nametagState } = useAddressNametags(wallet?.addresses);
+  const { nametagState, addressesWithNametags } = useAddressNametags(wallet?.addresses);
+
+  // Check if any address is still loading nametag from IPNS
+  const isAnyAddressLoading = addressesWithNametags.some(addr => addr.ipnsLoading);
 
   const showMessage = useCallback((type: MessageType, title: string, message: string, txids?: string[]) => {
     setMessageModal({ show: true, type, title, message, txids });
@@ -93,23 +97,6 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
   const closeMessage = useCallback(() => {
     setMessageModal((prev) => ({ ...prev, show: false }));
   }, []);
-
-  // Connect on modal open
-  useEffect(() => {
-    if (!isOpen) return;
-    if (isWebSocketConnected()) {
-      setIsConnecting(false);
-      return;
-    }
-    (async () => {
-      try {
-        setIsConnecting(true);
-        await connect();
-      } finally {
-        setIsConnecting(false);
-      }
-    })();
-  }, [isOpen]);
 
   // Set initial selected address
   useEffect(() => {
@@ -133,7 +120,7 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
   }, [isOpen]);
 
   const onNewAddress = async () => {
-    if (!wallet) return;
+    if (!wallet || isAnyAddressLoading) return;
     try {
       const addr = generateAddress(wallet);
       const updated = loadWalletFromStorage("main");
@@ -276,7 +263,15 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto">
-              {isConnecting || isLoadingWallet ? (
+              {!connection.isConnected ? (
+                <ConnectionStatus
+                  state={connection.state}
+                  message={connection.message}
+                  error={connection.error}
+                  onRetry={connection.manualConnect}
+                  onCancel={connection.cancelConnect}
+                />
+              ) : isLoadingWallet ? (
                 <div className="flex items-center justify-center h-64">
                   <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
                 </div>
@@ -315,16 +310,44 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
 
                   {/* Active Address */}
                   <div className="bg-neutral-100 dark:bg-neutral-800/50 rounded-xl p-3">
-                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2">Active Address</p>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2 flex items-center gap-1.5">
+                      {isAnyAddressLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                      {isAnyAddressLoading ? 'Checking nametags...' : 'Active Address'}
+                    </p>
                     <div className="relative">
                       <button
                         onClick={() => setShowDropdown(prev => !prev)}
                         className="w-full flex items-center justify-between gap-2 p-2 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition-colors"
                       >
-                        <span className="text-xs font-mono text-neutral-700 dark:text-neutral-300 truncate">
-                          {selectedAddress.slice(0, 20)}...{selectedAddress.slice(-10)}
-                        </span>
-                        <ChevronDown className={`w-4 h-4 text-neutral-500 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
+                        {(() => {
+                          const currentNametagInfo = nametagState[selectedAddress];
+                          if (!currentNametagInfo || currentNametagInfo.ipnsLoading) {
+                            return (
+                              <span className="flex items-center gap-2 text-xs">
+                                <Loader2 className="w-3 h-3 animate-spin text-neutral-400" />
+                                <span className="font-mono text-neutral-700 dark:text-neutral-300 truncate">
+                                  {selectedAddress.slice(0, 16)}...{selectedAddress.slice(-8)}
+                                </span>
+                              </span>
+                            );
+                          }
+                          if (currentNametagInfo.nametag) {
+                            return (
+                              <span className="flex items-center gap-2 text-xs">
+                                <span className="font-mono text-neutral-700 dark:text-neutral-300">
+                                  {selectedAddress.slice(0, 12)}...{selectedAddress.slice(-6)}
+                                </span>
+                                <span className="font-medium text-blue-600 dark:text-blue-400">@{currentNametagInfo.nametag}</span>
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className="text-xs font-mono text-neutral-700 dark:text-neutral-300 truncate">
+                              {selectedAddress.slice(0, 16)}...{selectedAddress.slice(-8)}
+                            </span>
+                          );
+                        })()}
+                        <ChevronDown className={`w-4 h-4 text-neutral-500 transition-transform shrink-0 ${showDropdown ? 'rotate-180' : ''}`} />
                       </button>
 
                       <AnimatePresence>
@@ -346,6 +369,8 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
                               {addresses.map(addr => {
                                 const nametagInfo = nametagState[addr];
                                 const isSelected = addr === selectedAddress;
+                                const walletAddrInfo = wallet?.addresses.find(a => a.address === addr);
+                                const isChange = walletAddrInfo?.isChange;
                                 return (
                                   <button
                                     key={addr}
@@ -353,12 +378,31 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
                                       onSelectAddress(addr);
                                       setShowDropdown(false);
                                     }}
-                                    className={`w-full text-left px-3 py-2 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+                                    className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
                                   >
-                                    {nametagInfo?.nametag ? (
-                                      <span className="text-blue-600 dark:text-blue-400 font-medium">@{nametagInfo.nametag}</span>
-                                    ) : (
-                                      <span className="font-mono text-neutral-700 dark:text-neutral-300">{addr.slice(0, 16)}...{addr.slice(-8)}</span>
+                                    <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isSelected ? 'bg-blue-500' : 'bg-transparent'}`} />
+                                    <div className="flex-1 min-w-0">
+                                      {!nametagInfo || nametagInfo.ipnsLoading ? (
+                                        <span className="flex items-center gap-1.5">
+                                          <Loader2 className="w-3 h-3 animate-spin text-neutral-400" />
+                                          <span className="font-mono text-neutral-700 dark:text-neutral-300 truncate">{addr.slice(0, 12)}...{addr.slice(-6)}</span>
+                                        </span>
+                                      ) : nametagInfo.nametag ? (
+                                        <span className="flex items-center gap-2">
+                                          <span className="font-mono text-neutral-700 dark:text-neutral-300">{addr.slice(0, 12)}...{addr.slice(-6)}</span>
+                                          <span className="text-blue-600 dark:text-blue-400 font-medium">@{nametagInfo.nametag}</span>
+                                        </span>
+                                      ) : nametagInfo.hasL3Inventory ? (
+                                        <span className="flex items-center gap-1.5">
+                                          <span className="font-mono text-neutral-700 dark:text-neutral-300 truncate">{addr.slice(0, 12)}...{addr.slice(-6)}</span>
+                                          <span className="px-1 py-0.5 bg-purple-500/20 text-purple-600 dark:text-purple-400 text-[9px] font-bold rounded shrink-0">L3</span>
+                                        </span>
+                                      ) : (
+                                        <span className="font-mono text-neutral-700 dark:text-neutral-300 truncate">{addr.slice(0, 12)}...{addr.slice(-6)}</span>
+                                      )}
+                                    </div>
+                                    {isChange && (
+                                      <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[9px] font-bold rounded shrink-0">Change</span>
                                     )}
                                   </button>
                                 );
@@ -386,7 +430,9 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
                       </button>
                       <button
                         onClick={onNewAddress}
-                        className="p-1.5 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-500 transition-colors"
+                        disabled={isAnyAddressLoading}
+                        className="p-1.5 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={isAnyAddressLoading ? 'Wait for nametag check to complete' : 'Create new address'}
                       >
                         <Plus className="w-4 h-4" />
                       </button>

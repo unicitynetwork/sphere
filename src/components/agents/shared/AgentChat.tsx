@@ -125,6 +125,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
   const {
     sessions,
     currentSession: historySession, // Session created when saving messages
+    loadSession,
     deleteSession,
     clearAllHistory,
     resetCurrentSession,
@@ -446,11 +447,14 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
   // Load a previous chat session via URL navigation
   // TanStack Query handles the actual data loading
   const handleLoadSession = useCallback((sessionId: string) => {
-    // Navigate to session - TanStack Query will load the data
+    // IMPORTANT: Load session into useChatHistory first to set currentSessionRef
+    // This prevents saveCurrentMessages from creating a duplicate session
+    loadSession(sessionId);
+    // Navigate to session - TanStack Query will load the data for display
     navigateToSession(sessionId);
     // Close sidebar on mobile
     setSidebarOpen(false);
-  }, [navigateToSession]);
+  }, [loadSession, navigateToSession]);
 
   const handleDeleteSession = async (sessionId: string) => {
     const wasCurrentSession = currentSession?.id === sessionId;

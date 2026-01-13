@@ -1,19 +1,17 @@
 import { useEffect, useState, useCallback } from "react";
-import { Loader2 } from "lucide-react";
 import {
-  connect,
-  isWebSocketConnected,
   generateAddress,
   loadWalletFromStorage,
   createTransactionPlan,
   createAndSignTransaction,
   broadcast,
-  type VestingMode,
+  vestingState,
   type TransactionPlan,
 } from "../sdk";
-import { useL1Wallet } from "../hooks";
+import { useL1Wallet, useConnectionStatus } from "../hooks";
 import { HistoryView, MainWalletView } from ".";
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
+import { ConnectionStatus } from "../components/ConnectionStatus";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
@@ -23,7 +21,6 @@ type ViewMode = "main" | "history";
 export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const [selectedAddress, setSelectedAddress] = useState<string>("");
   const [viewMode, setViewMode] = useState<ViewMode>("main");
-  const [isConnecting, setIsConnecting] = useState(() => !isWebSocketConnected());
   const [txPlan, setTxPlan] = useState<TransactionPlan | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [messageModal, setMessageModal] = useState<{
@@ -33,6 +30,9 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     message: string;
     txids?: string[];
   }>({ show: false, type: "info", title: "", message: "" });
+
+  // Connection status hook
+  const connection = useConnectionStatus();
 
   // Use TanStack Query based hook
   const {
@@ -45,11 +45,12 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     isLoadingTransactions,
     currentBlockHeight,
     vestingBalances,
-    isLoadingVesting,
     deleteWallet,
     analyzeTransaction,
-    setVestingMode,
     invalidateWallet,
+    invalidateBalance,
+    invalidateTransactions,
+    invalidateVesting,
   } = useL1Wallet(selectedAddress);
 
   // Derive addresses from wallet
@@ -62,22 +63,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
   const closeMessage = useCallback(() => {
     setMessageModal((prev) => ({ ...prev, show: false }));
-  }, []);
-
-  // Connect on mount (skip if already connected)
-  useEffect(() => {
-    if (isWebSocketConnected()) {
-      setIsConnecting(false);
-      return;
-    }
-    (async () => {
-      try {
-        setIsConnecting(true);
-        await connect();
-      } finally {
-        setIsConnecting(false);
-      }
-    })();
   }, []);
 
   // Set initial selected address when wallet loads - sync with L3's stored path
@@ -99,16 +84,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       }
     }
   }, [selectedAddress, wallet]);
-
-  // Vesting progress for UI - show loading only on initial load, not on refetch
-  const vestingProgress = isLoadingVesting
-    ? { current: 0, total: 1 }
-    : null;
-
-  // Handle vesting mode change
-  const handleVestingModeChange = useCallback((mode: VestingMode) => {
-    setVestingMode(mode);
-  }, [setVestingMode]);
 
   // Delete wallet
   const onDeleteWallet = async () => {
@@ -211,6 +186,14 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
 
       setTxPlan(null);
 
+      // Invalidate queries to refresh data after sending
+      if (results.length > 0) {
+        vestingState.clearAddressCache(selectedAddress);
+        invalidateBalance();
+        invalidateTransactions();
+        invalidateVesting();
+      }
+
       if (errors.length > 0) {
         if (results.length > 0) {
           const txids = results.map((r) => r.txid);
@@ -267,17 +250,21 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     window.location.reload();
   };
 
-  // Show loading state while connecting
-  if (isConnecting || isLoadingWallet) {
+  // Show connection status while connecting or on error
+  if (!connection.isConnected) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="animate-spin text-neutral-400 dark:text-neutral-600" />
-      </div>
+      <ConnectionStatus
+        state={connection.state}
+        message={connection.message}
+        error={connection.error}
+        onRetry={connection.manualConnect}
+        onCancel={connection.cancelConnect}
+      />
     );
   }
 
   // No wallet - return null, WalletGate handles the onboarding flow
-  if (!wallet) {
+  if (!wallet || isLoadingWallet) {
     return null;
   }
 
@@ -333,8 +320,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         txPlan={txPlan}
         isSending={isSending}
         onConfirmSend={onConfirmSend}
-        vestingProgress={vestingProgress}
-        onVestingModeChange={handleVestingModeChange}
         vestingBalances={vestingBalances}
       />
       <MessageModal
