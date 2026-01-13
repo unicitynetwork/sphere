@@ -397,7 +397,13 @@ export class WalletRepository {
     });
   }
 
-  createWallet(address: string, name: string = "My Wallet"): Wallet {
+  /**
+   * Create a new wallet for the given address
+   * @param address - The wallet address
+   * @param name - Optional wallet name
+   * @param silent - If true, don't emit events (useful during address creation flow)
+   */
+  createWallet(address: string, name: string = "My Wallet", silent: boolean = false): Wallet {
     // Validate address format
     if (!this.validateAddress(address)) {
       throw new Error(`Cannot create wallet with invalid address: ${address}`);
@@ -410,12 +416,25 @@ export class WalletRepository {
       return existing;
     }
 
+    // CRITICAL: Clear nametag cache when creating NEW wallet
+    // loadWalletForAddress returns null but doesn't clear _nametag if no data found
+    // This ensures new wallets start with no nametag
+    this._nametag = null;
+    this._tombstones = [];
+    this._archivedTokens = new Map();
+    this._forkedTokens = new Map();
+
     const newWallet = new Wallet(uuidv4(), name, address, []);
     this._currentAddress = address;
     this.saveWallet(newWallet);
     console.log(`Created new wallet for address ${address}`);
-    this.refreshWallet(); // Trigger wallet-updated for UI updates
-    window.dispatchEvent(new Event("wallet-loaded")); // Signal wallet creation for Nostr initialization
+
+    // Only emit events if not silent - during address creation flow we don't want
+    // to trigger useWallet re-renders that could interfere with the process
+    if (!silent) {
+      this.refreshWallet(); // Trigger wallet-updated for UI updates
+      window.dispatchEvent(new Event("wallet-loaded")); // Signal wallet creation for Nostr initialization
+    }
     return newWallet;
   }
 
@@ -688,15 +707,18 @@ export class WalletRepository {
   /**
    * Reset in-memory state without touching localStorage
    * Used when switching wallets - preserves per-identity token/nametag storage
+   * @param silent - If true, don't emit wallet-updated event
    */
-  resetInMemoryState(): void {
+  resetInMemoryState(silent: boolean = false): void {
     this._wallet = null;
     this._currentAddress = null;
     this._nametag = null;
     this._tombstones = [];
     this._archivedTokens = new Map();
     this._forkedTokens = new Map();
-    this.refreshWallet();
+    if (!silent) {
+      this.refreshWallet();
+    }
   }
 
   /**

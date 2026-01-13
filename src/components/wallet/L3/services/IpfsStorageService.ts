@@ -23,7 +23,7 @@ import { getSyncCoordinator } from "./SyncCoordinator";
 import { getTokenBackupService } from "./TokenBackupService";
 // Note: retryWithBackoff was used for DHT publish, now handled by HTTP primary path
 import { getBootstrapPeers, getConfiguredCustomPeers, getBackendPeerId, getAllBackendGatewayUrls, IPNS_RESOLUTION_CONFIG, IPFS_CONFIG } from "../../../../config/ipfs.config";
-import { STORAGE_KEY_PREFIXES } from "../../../../config/storageKeys";
+import { STORAGE_KEY_PREFIXES, STORAGE_KEYS } from "../../../../config/storageKeys";
 
 // Configure @noble/ed25519 to use sync sha512 (required for getPublicKey without WebCrypto)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -219,12 +219,13 @@ export class IpfsStorageService {
 
     // On startup, run IPNS-based sync to discover remote state
     // This resolves IPNS, verifies remote content, and merges if needed
-    // Skip during onboarding (new addresses have nothing to sync from IPNS yet)
-    const isOnboarding = localStorage.getItem('sphere-onboarding-in-progress') === 'true';
-    if (!isOnboarding) {
+    // Skip during onboarding or address creation (new addresses have nothing to sync from IPNS yet)
+    const isOnboarding = localStorage.getItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS) === 'true';
+    const isCreatingAddress = localStorage.getItem(STORAGE_KEYS.ADDRESS_CREATION_IN_PROGRESS) === 'true';
+    if (!isOnboarding && !isCreatingAddress) {
       this.syncFromIpns().catch(console.error);
     } else {
-      console.log('📦 Skipping initial IPNS sync during onboarding');
+      console.log('📦 Skipping initial IPNS sync during onboarding/address creation');
     }
   }
 
@@ -2145,11 +2146,12 @@ export class IpfsStorageService {
    * If sync is currently running, marks pendingSync flag for execution after current sync completes
    */
   private scheduleSync(): void {
-    // Skip automatic sync during onboarding - onboarding flow handles sync explicitly
-    const isOnboarding = localStorage.getItem('sphere-onboarding-in-progress') === 'true';
-    console.log(`📦 scheduleSync() called, onboarding flag: ${isOnboarding}`);
-    if (isOnboarding) {
-      console.log(`📦 ✅ Skipping automatic sync during onboarding`);
+    // Skip automatic sync during onboarding or address creation - these flows handle sync explicitly
+    const isOnboarding = localStorage.getItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS) === 'true';
+    const isCreatingAddress = localStorage.getItem(STORAGE_KEYS.ADDRESS_CREATION_IN_PROGRESS) === 'true';
+    console.log(`📦 scheduleSync() called, onboarding: ${isOnboarding}, addressCreation: ${isCreatingAddress}`);
+    if (isOnboarding || isCreatingAddress) {
+      console.log(`📦 ✅ Skipping automatic sync during onboarding/address creation`);
       return;
     }
 

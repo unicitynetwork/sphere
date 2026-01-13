@@ -22,6 +22,7 @@ import {
   deriveUnifiedAddress,
   getAddressPath,
 } from "../../core/WalletCore";
+import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 export type OnboardingStep =
   | "start"
@@ -139,14 +140,14 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     // If user has both identity AND nametag, but onboarding flag is still set
     // Check if onboarding is actually complete (user clicked "Let's go!" or imported wallet)
     if (identity && nametag) {
-      const onboardingFlag = localStorage.getItem('sphere-onboarding-in-progress');
-      const onboardingComplete = localStorage.getItem('sphere-onboarding-complete');
+      const onboardingFlag = localStorage.getItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
+      const onboardingComplete = localStorage.getItem(STORAGE_KEYS.ONBOARDING_COMPLETE);
 
       if (onboardingFlag === 'true' && onboardingComplete === 'true') {
         // User completed onboarding but page was reloaded before flag was cleared
         console.log('🔍 [Auto-check] Onboarding complete flag set - clearing both flags');
-        localStorage.removeItem('sphere-onboarding-in-progress');
-        localStorage.removeItem('sphere-onboarding-complete');
+        localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
+        localStorage.removeItem(STORAGE_KEYS.ONBOARDING_COMPLETE);
         // Dispatch events to ensure services initialize
         window.dispatchEvent(new Event("wallet-loaded"));
         window.dispatchEvent(new Event("wallet-updated"));
@@ -180,8 +181,8 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
           console.log("✅ [Auto-check] Nametag found, proceeding to wallet...");
           // Clear onboarding flags if set
-          localStorage.removeItem('sphere-onboarding-in-progress');
-          localStorage.removeItem('sphere-onboarding-complete');
+          localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
+          localStorage.removeItem(STORAGE_KEYS.ONBOARDING_COMPLETE);
           // Dispatch events to initialize services - no reload needed
           window.dispatchEvent(new Event("wallet-loaded"));
           window.dispatchEvent(new Event("wallet-updated"));
@@ -203,7 +204,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
     // Mark that we're in onboarding flow - this prevents automatic IPNS sync
     // which would compete with our controlled sync during nametag creation
-    localStorage.setItem('sphere-onboarding-in-progress', 'true');
+    localStorage.setItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS, 'true');
     console.log('🎯 Onboarding flag set - IPFS will skip initial IPNS sync');
 
     setStep("nametag");
@@ -479,13 +480,14 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setIsBusy(true);
     setError(null);
 
-    // Mark that we're in onboarding flow FIRST - before clearing wallet
-    // This prevents automatic IPNS sync when old wallet data is cleared
-    localStorage.setItem('sphere-onboarding-in-progress', 'true');
+    // Mark onboarding flag BEFORE clearAll - it will be preserved
+    localStorage.setItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS, 'true');
     console.log('🎯 Onboarding flag set - IPFS will skip initial IPNS sync');
 
     try {
-      UnifiedKeyManager.clearAll();
+      // Pass false to preserve onboarding flags during cleanup
+      UnifiedKeyManager.clearAll(false);
+
       await createWallet();
 
       // Save L1 wallet to storage (same as import flow)
@@ -516,7 +518,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       const message = e instanceof Error ? e.message : "Failed to generate keys";
       setError(message);
       // Clear onboarding flag on error
-      localStorage.removeItem('sphere-onboarding-in-progress');
+      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
       console.log('🎯 Onboarding flag cleared after error');
     } finally {
       setIsBusy(false);
@@ -536,12 +538,14 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setIsBusy(true);
     setError(null);
 
-    // Mark that we're in onboarding flow FIRST - before clearing wallet
-    localStorage.setItem('sphere-onboarding-in-progress', 'true');
+    // Mark onboarding flag BEFORE clearAll - it will be preserved
+    localStorage.setItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS, 'true');
     console.log('🎯 Onboarding flag set for wallet restore');
 
     try {
-      UnifiedKeyManager.clearAll();
+      // Pass false to preserve onboarding flags during cleanup
+      UnifiedKeyManager.clearAll(false);
+
       const mnemonic = words.join(" ");
       const keyManager = getUnifiedKeyManager();
       await keyManager.createFromMnemonic(mnemonic);
@@ -552,7 +556,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       const message = e instanceof Error ? e.message : "Invalid recovery phrase";
       setError(message);
       // Clear onboarding flag on error
-      localStorage.removeItem('sphere-onboarding-in-progress');
+      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
       console.log('🎯 Onboarding flag cleared after restore error');
       setIsBusy(false);
     }
@@ -567,7 +571,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setError(null);
 
     // Verify onboarding flag is still set (should have been set in handleCreateKeys)
-    const onboardingFlag = localStorage.getItem('sphere-onboarding-in-progress');
+    const onboardingFlag = localStorage.getItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
     console.log('🎯 handleMintNametag: onboarding flag check:', onboardingFlag);
 
     // Add beforeunload handler to warn user about closing during sync
@@ -716,7 +720,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       // DON'T clear onboarding flag yet - we want to show "Let's go!" button first
       // The flag will be cleared in handleCompleteOnboarding when user clicks button
       // But set "complete" flag so if page reloads, we know to proceed to app
-      localStorage.setItem('sphere-onboarding-complete', 'true');
+      localStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETE, 'true');
       console.log('🎯 Onboarding complete flag set - ready for user to click "Let\'s go!"');
 
       console.log('🎯 About to set processing complete...');
@@ -733,7 +737,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       // Remove beforeunload handler on error
       window.removeEventListener("beforeunload", handleBeforeUnload);
       // Clear onboarding flag on error so IPFS sync resumes normally
-      localStorage.removeItem('sphere-onboarding-in-progress');
+      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
       console.log('🎯 Onboarding flag cleared after error');
     } finally {
       setIsBusy(false);
@@ -745,9 +749,14 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     console.log("🎉 User clicked 'Let's go!' - completing onboarding...");
 
     // Clear both onboarding flags
-    localStorage.removeItem('sphere-onboarding-in-progress');
-    localStorage.removeItem('sphere-onboarding-complete');
-    console.log('🎯 Onboarding flags cleared - user can now enter app');
+    localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
+    localStorage.removeItem(STORAGE_KEYS.ONBOARDING_COMPLETE);
+
+    // Set authenticated flag - user has completed initial onboarding
+    // This flag tells WalletGate to never show onboarding again for this user
+    // New addresses will be created via in-app modal instead
+    localStorage.setItem(STORAGE_KEYS.AUTHENTICATED, 'true');
+    console.log('🎯 Onboarding flags cleared, authenticated flag set - user can now enter app');
 
     // Signal wallet creation - this triggers Nostr service initialization and UI updates
     console.log('📢 Dispatching wallet-loaded event...');
@@ -960,8 +969,8 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         console.log("✅ Address has existing nametag, proceeding to main app");
 
         // Clear onboarding flags
-        localStorage.removeItem('sphere-onboarding-in-progress');
-        localStorage.removeItem('sphere-onboarding-complete');
+        localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
+        localStorage.removeItem(STORAGE_KEYS.ONBOARDING_COMPLETE);
         console.log('🎯 Onboarding flags cleared for imported wallet');
 
         // Dispatch events to initialize services (Nostr, etc.)
@@ -974,7 +983,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         console.log("📍 No nametag found, setting onboarding flag and going to nametag screen");
         // Mark that we're in onboarding flow - this prevents automatic IPNS sync
         // which would compete with our controlled sync during nametag creation
-        localStorage.setItem('sphere-onboarding-in-progress', 'true');
+        localStorage.setItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS, 'true');
         console.log('🎯 Onboarding flag set - IPFS will skip initial IPNS sync');
         setStep("nametag");
         console.log('📍 Step set to "nametag"');

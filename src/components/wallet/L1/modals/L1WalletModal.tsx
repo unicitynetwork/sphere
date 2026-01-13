@@ -20,7 +20,7 @@ import {
   broadcast,
   type TransactionPlan,
 } from "../sdk";
-import { createNewAddressAndOnboard } from "../../shared/utils/createNewAddressAndOnboard";
+import { CreateAddressModal } from "../../shared/modals/CreateAddressModal";
 import { useL1Wallet, useConnectionStatus } from "../hooks";
 import { useAddressNametags } from "../hooks/useAddressNametags";
 import { ConnectionStatus } from "../components/ConnectionStatus";
@@ -67,6 +67,7 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     message: string;
     txids?: string[];
   }>({ show: false, type: "info", title: "", message: "" });
+  const [showCreateAddressModal, setShowCreateAddressModal] = useState(false);
 
   const {
     wallet,
@@ -117,19 +118,10 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     }
   }, [isOpen]);
 
-  // Generate new address and open onboarding for nametag
-  const onNewAddress = async () => {
+  // Generate new address and open modal for nametag creation
+  const onNewAddress = () => {
     if (!wallet || isAnyAddressLoading) return;
-    try {
-      // Use unified function - creates address, switches to it, and reloads for onboarding
-      const result = await createNewAddressAndOnboard();
-      if (!result.success) {
-        showMessage("error", "Error", result.error || "Failed to generate address");
-      }
-      // Page will reload automatically if successful
-    } catch {
-      showMessage("error", "Error", "Failed to generate address");
-    }
+    setShowCreateAddressModal(true);
   };
 
   const onSendTransaction = async (destination: string, amount: string) => {
@@ -533,6 +525,11 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
               message={messageModal.message}
               txids={messageModal.txids}
               onClose={closeMessage}
+            />
+
+            <CreateAddressModal
+              isOpen={showCreateAddressModal}
+              onClose={() => setShowCreateAddressModal(false)}
             />
           </motion.div>
         </motion.div>

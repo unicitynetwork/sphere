@@ -5,7 +5,7 @@ import { useL1Wallet } from '../../L1/hooks/useL1Wallet';
 import { useAddressNametags } from '../../L1/hooks/useAddressNametags';
 import { WalletRepository } from '../../../../repositories/WalletRepository';
 import { STORAGE_KEYS } from '../../../../config/storageKeys';
-import { createNewAddressAndOnboard } from '../utils/createNewAddressAndOnboard';
+import { CreateAddressModal } from '../modals/CreateAddressModal';
 
 interface AddressSelectorProps {
   /** Current nametag to display when collapsed */
@@ -17,7 +17,7 @@ interface AddressSelectorProps {
 export function AddressSelector({ currentNametag, compact = true }: AddressSelectorProps) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   const { wallet } = useL1Wallet();
   const { nametagState, addressesWithNametags } = useAddressNametags(wallet?.addresses);
@@ -62,23 +62,10 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
     window.location.reload();
   };
 
-  const handleNewAddress = async () => {
-    if (!wallet || isGenerating || isAnyAddressLoading) return;
-    setIsGenerating(true);
+  const handleNewAddress = () => {
+    if (!wallet || isAnyAddressLoading) return;
     setShowDropdown(false);
-
-    try {
-      // Use unified function - creates address, switches to it, and reloads for onboarding
-      const result = await createNewAddressAndOnboard();
-      if (!result.success) {
-        console.error('Failed to create address:', result.error);
-      }
-      // Page will reload automatically if successful
-    } catch (err) {
-      console.error('Failed to generate address:', err);
-    } finally {
-      setIsGenerating(false);
-    }
+    setShowCreateModal(true);
   };
 
   const handleCopyNametag = async () => {
@@ -165,18 +152,14 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
                     {isAnyAddressLoading ? 'Checking nametags...' : `Addresses (${sortedAddresses.length})`}
                   </span>
                   <motion.button
-                    whileHover={{ scale: (isGenerating || isAnyAddressLoading) ? 1 : 1.05 }}
-                    whileTap={{ scale: (isGenerating || isAnyAddressLoading) ? 1 : 0.95 }}
+                    whileHover={{ scale: isAnyAddressLoading ? 1 : 1.05 }}
+                    whileTap={{ scale: isAnyAddressLoading ? 1 : 0.95 }}
                     onClick={handleNewAddress}
-                    disabled={isGenerating || isAnyAddressLoading}
+                    disabled={isAnyAddressLoading}
                     className="flex items-center gap-1 px-2 py-1 text-xs bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
                     title={isAnyAddressLoading ? 'Wait for nametag check to complete' : 'Create new address'}
                   >
-                    {isGenerating ? (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <Plus className="w-3 h-3" />
-                    )}
+                    <Plus className="w-3 h-3" />
                     <span>New</span>
                   </motion.button>
                 </div>
@@ -247,6 +230,12 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
             </>
           )}
         </AnimatePresence>
+
+        {/* Create Address Modal */}
+        <CreateAddressModal
+          isOpen={showCreateModal}
+          onClose={() => setShowCreateModal(false)}
+        />
       </div>
     );
   }
@@ -296,14 +285,10 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={handleNewAddress}
-                  disabled={isGenerating}
+                  disabled={isAnyAddressLoading}
                   className="flex items-center gap-1 px-2 py-1 text-xs bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-lg transition-colors disabled:opacity-50"
                 >
-                  {isGenerating ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  ) : (
-                    <Plus className="w-3 h-3" />
-                  )}
+                  <Plus className="w-3 h-3" />
                   <span>New Address</span>
                 </motion.button>
               </div>
@@ -346,6 +331,12 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
           </>
         )}
       </AnimatePresence>
+
+      {/* Create Address Modal */}
+      <CreateAddressModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+      />
     </div>
   );
 }
