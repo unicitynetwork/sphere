@@ -42,8 +42,9 @@ export interface TransactionDetail {
   version: number;
   locktime: number;
   vin: Array<{
-    txid: string;
-    vout: number;
+    txid?: string; // undefined for coinbase transactions
+    vout?: number;
+    coinbase?: string; // present for coinbase transactions
     scriptSig?: {
       hex: string;
     };

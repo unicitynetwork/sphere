@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023"],
+    "lib": ["ES2023", "DOM"],
     "module": "ESNext",
     "types": ["node", "vitest/globals"],
     "skipLibCheck": true,
@@ -12,7 +12,11 @@
     "noEmit": true,
     "strict": true,
     "esModuleInterop": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
   },
-  "include": ["tests/**/*.ts", "tests/**/*.tsx"]
+  "include": ["tests/**/*.ts", "tests/**/*.tsx", "src/**/*.ts", "src/**/*.tsx"]
 }

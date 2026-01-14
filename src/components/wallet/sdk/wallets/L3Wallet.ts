@@ -88,8 +88,9 @@ export class L3Wallet {
    * @returns L3 identity with signing capability
    */
   async createIdentity(privateKeyHex: string): Promise<L3Identity> {
-    // Create secret buffer from hex
-    const secret = Buffer.from(privateKeyHex, 'hex');
+    // Create secret as Uint8Array for SDK compatibility
+    const secretBuffer = Buffer.from(privateKeyHex, 'hex');
+    const secret = new Uint8Array(secretBuffer.buffer, secretBuffer.byteOffset, secretBuffer.byteLength);
 
     // Create signing service
     const signingService = await SigningService.createFromSecret(secret);

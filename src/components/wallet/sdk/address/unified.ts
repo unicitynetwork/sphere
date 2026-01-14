@@ -82,7 +82,9 @@ export function getAddressPath(
  * console.log(l3.address); // 0x...
  */
 export async function deriveL3Address(privateKey: string): Promise<L3Address> {
-  const secret = Buffer.from(privateKey, 'hex');
+  // Use Uint8Array directly instead of Buffer for SDK compatibility
+  const secretBuffer = Buffer.from(privateKey, 'hex');
+  const secret = new Uint8Array(secretBuffer.buffer, secretBuffer.byteOffset, secretBuffer.byteLength);
 
   const signingService = await SigningService.createFromSecret(secret);
   const publicKey = Buffer.from(signingService.publicKey).toString('hex');

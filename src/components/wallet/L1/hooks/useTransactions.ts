@@ -204,8 +204,8 @@ export function useTransactions() {
 
       if (detail.vin) {
         for (const input of detail.vin) {
-          // Skip coinbase transactions (mining/generation) - they have no txid
-          if (!input.txid) {
+          // Skip coinbase transactions (mining/generation) - they have no txid or vout
+          if (!input.txid || input.vout === undefined) {
             // This is a coinbase input (newly mined coins) - we're receiving, not spending
             continue;
           }
@@ -224,8 +224,8 @@ export function useTransactions() {
             // Check if input is from the CURRENT selected address (if specified)
             // or from any wallet address (if no specific address selected)
             const isFromCurrentAddress = currentAddress
-              ? addresses.some((addr) => addr.toLowerCase() === currentAddress)
-              : addresses.some((addr) => walletAddresses.has(addr.toLowerCase()));
+              ? addresses.some((addr: string) => addr.toLowerCase() === currentAddress)
+              : addresses.some((addr: string) => walletAddresses.has(addr.toLowerCase()));
 
             if (isFromCurrentAddress) {
               isOurInput = true;

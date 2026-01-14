@@ -25,3 +25,6 @@ agentic-chatbot-main
 *.sw?
 .env
 .env.production
+
+# TypeScript build info
+*.tsbuildinfo

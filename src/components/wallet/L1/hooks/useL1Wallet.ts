@@ -465,7 +465,7 @@ export function useL1Wallet(selectedAddressProp?: string) {
 
     if (detail.vin) {
       for (const input of detail.vin) {
-        if (!input.txid) continue;
+        if (!input.txid || input.vout === undefined) continue;
 
         const prevTx = cachedDetails[input.txid];
         if (prevTx && prevTx.vout && prevTx.vout[input.vout]) {
@@ -479,8 +479,8 @@ export function useL1Wallet(selectedAddressProp?: string) {
           allInputAddresses.push(...addresses);
 
           const isFromCurrentAddress = selectedAddr
-            ? addresses.some((addr) => addr.toLowerCase() === selectedAddr)
-            : addresses.some((addr) => walletAddresses.has(addr.toLowerCase()));
+            ? addresses.some((addr: string) => addr.toLowerCase() === selectedAddr)
+            : addresses.some((addr: string) => walletAddresses.has(addr.toLowerCase()));
 
           if (isFromCurrentAddress) {
             isOurInput = true;

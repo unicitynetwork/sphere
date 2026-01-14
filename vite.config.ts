@@ -29,6 +29,11 @@ export default defineConfig(({ mode }) => {
         protocolImports: true,
       }),
     ],
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, 'src'),
+      },
+    },
     base: env.BASE_PATH || '/',
     server: {
       // Enable HTTPS if certificates are available
