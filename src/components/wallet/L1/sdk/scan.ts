@@ -18,7 +18,7 @@ import {
   type ScannedAddress,
   type ScanProgress,
   type ScanResult,
-} from "../../sdk/scan";
+} from "../../sdk/serialization/scan";
 // L3 inventory checking imports (browser-specific)
 import { IdentityManager } from "../../L3/services/IdentityManager";
 import { WalletRepository } from "../../../../repositories/WalletRepository";

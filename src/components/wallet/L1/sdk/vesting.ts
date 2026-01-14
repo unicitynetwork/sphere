@@ -15,7 +15,7 @@ import {
   type ClassificationResult,
   type ClassifiedUTXO,
   type ClassifyUtxosResult,
-} from '../../sdk/vesting';
+} from '../../sdk/transaction/vesting';
 import type { UTXO } from './types';
 
 // Re-export SDK constants and types for backwards compatibility

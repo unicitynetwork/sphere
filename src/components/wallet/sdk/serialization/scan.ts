@@ -5,8 +5,8 @@
  * Browser-specific scan logic (IPFS, localStorage) stays in L1/sdk/scan.ts
  */
 
-import { deriveKeyAtPath } from './derivation';
-import { publicKeyToAddress, ec } from '../shared/utils/cryptoUtils';
+import { deriveKeyAtPath } from '../core/derivation';
+import { publicKeyToAddress, ec } from '../address/address';
 
 /**
  * Result of address generation at a specific path

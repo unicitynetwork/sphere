@@ -9,7 +9,7 @@
  */
 
 import CryptoJS from 'crypto-js';
-import { extractFromText } from './utils';
+import { extractFromText } from '../core/utils';
 
 // ==========================================
 // Types

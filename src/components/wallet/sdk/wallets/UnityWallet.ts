@@ -35,10 +35,10 @@ import { L1Wallet } from './L1Wallet';
 import type { L1WalletConfig } from './L1Wallet';
 import { L3Wallet } from './L3Wallet';
 import type { L3WalletConfig } from './L3Wallet';
-import { createWallet, restoreFromMnemonic, validateMnemonic } from './wallet';
-import { deriveDefaultUnifiedAddress, deriveUnifiedAddress } from './unified';
-import type { WebSocketAdapter } from './websocket';
-import type { VestingCacheProvider, WalletKeys, UnifiedAddress, BaseWallet } from './types';
+import { createWallet, restoreFromMnemonic, validateMnemonic } from '../core/wallet';
+import { deriveDefaultUnifiedAddress, deriveUnifiedAddress } from '../address/unified';
+import type { WebSocketAdapter } from '../network/websocket';
+import type { VestingCacheProvider, WalletKeys, UnifiedAddress, BaseWallet } from '../types';
 
 // ==========================================
 // Configuration

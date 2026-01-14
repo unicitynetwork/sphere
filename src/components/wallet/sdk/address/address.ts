@@ -8,7 +8,7 @@
 import CryptoJS from 'crypto-js';
 import elliptic from 'elliptic';
 import { createBech32 } from './bech32';
-import { deriveKeyAtPath, deriveChildKeyLegacy, deriveKeyWifHmac } from './derivation';
+import { deriveKeyAtPath, deriveChildKeyLegacy, deriveKeyWifHmac } from '../core/derivation';
 
 const ec = new elliptic.ec('secp256k1');
 

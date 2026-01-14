@@ -12,23 +12,23 @@
  * - VestingCacheProvider (for caching, optional)
  */
 
-import type { WebSocketAdapter } from './websocket';
+import type { WebSocketAdapter } from '../network/websocket';
 import type {
   L1UTXO,
   VestingCacheProvider,
   BaseWallet,
-} from './types';
-import type { BlockHeader, TransactionDetail, TransactionHistoryItem } from './network';
-import { addressToScriptHash } from './script';
-import { signTransaction, selectUtxos, SATS_PER_COIN } from './transaction';
-import { decodeBech32 } from './bech32';
-import { WalletAddressHelper } from './addressHelpers';
+} from '../types';
+import type { BlockHeader, TransactionDetail, TransactionHistoryItem } from '../network/network';
+import { addressToScriptHash } from '../address/script';
+import { signTransaction, selectUtxos, SATS_PER_COIN } from '../transaction/transaction';
+import { decodeBech32 } from '../address/bech32';
+import { WalletAddressHelper } from '../address/addressHelpers';
 import {
   VestingClassifier,
   InMemoryCacheProvider,
   VESTING_THRESHOLD,
   type ClassifyUtxosResult,
-} from './vesting';
+} from '../transaction/vesting';
 
 // ==========================================
 // Configuration

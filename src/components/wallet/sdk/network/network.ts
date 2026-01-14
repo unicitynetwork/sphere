@@ -10,7 +10,7 @@
  * - Pure utility functions that work with any provider
  */
 
-import type { L1UTXO } from './types';
+import type { L1UTXO } from '../types';
 
 // ==========================================
 // Network Response Types

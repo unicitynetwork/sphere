@@ -24,7 +24,7 @@ export {
 // Network exports - only the provider and class
 export { browserProvider, BrowserNetworkProvider } from './network'
 // Re-export types from SDK network
-export type { BlockHeader, TransactionHistoryItem, TransactionDetail } from '../../sdk/network'
+export type { BlockHeader, TransactionHistoryItem, TransactionDetail } from '../../sdk/network/network'
 export * from './storage'
 export * from './types'
 export * from './tx'

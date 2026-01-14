@@ -10,7 +10,7 @@
  */
 
 // Wallet creation
-export { createWallet, restoreFromMnemonic, validateMnemonic } from './wallet';
+export { createWallet, restoreFromMnemonic, validateMnemonic } from './core/wallet';
 
 // Key derivation
 export {
@@ -19,7 +19,8 @@ export {
   deriveKeyAtPath,
   deriveChildKeyLegacy,
   deriveKeyWifHmac,
-} from './derivation';
+  extractBasePathFromFullPath,
+} from './core/derivation';
 
 // Address generation (L1)
 export {
@@ -37,10 +38,10 @@ export {
   recoverKeyWifHmac,
   recoverKeyBIP32AtPath,
   recoverKeyBIP32Scan,
-} from './address';
+} from './address/address';
 
 // Address key recovery types
-export type { RecoveredAddressKey, RecoverKeyResult } from './address';
+export type { RecoveredAddressKey, RecoverKeyResult } from './address/address';
 
 // Unified address derivation (L1 + L3)
 export {
@@ -53,16 +54,16 @@ export {
   deriveNextUnifiedAddress,
   parsePathComponents,
   getAddressPath,
-} from './unified';
+} from './address/unified';
 
 // Bech32 encoding
-export { createBech32, decodeBech32, convertBits, CHARSET } from './bech32';
+export { createBech32, decodeBech32, convertBits, CHARSET } from './address/bech32';
 
 // Script utilities
-export { addressToScriptHash, createScriptPubKey } from './script';
+export { addressToScriptHash, createScriptPubKey } from './address/script';
 
 // Address helpers
-export { WalletAddressHelper } from './addressHelpers';
+export { WalletAddressHelper } from './address/addressHelpers';
 
 // Transaction building
 export {
@@ -74,7 +75,7 @@ export {
   TX_FEE,
   DUST_THRESHOLD,
   SATS_PER_COIN,
-} from './transaction';
+} from './transaction/transaction';
 
 // Crypto utilities
 export {
@@ -84,7 +85,7 @@ export {
   generatePrivateKey,
   encryptWallet,
   decryptWallet,
-} from './crypto';
+} from './core/crypto';
 
 // Common utilities
 export {
@@ -95,7 +96,7 @@ export {
   base58Encode,
   base58Decode,
   extractFromText,
-} from './utils';
+} from './core/utils';
 
 // Wallet JSON serialization
 export {
@@ -106,7 +107,7 @@ export {
   generateAddressForJSON,
   determineDerivationMode,
   determineSource,
-} from './wallet-json';
+} from './serialization/wallet-json';
 
 // Wallet Text serialization
 export {
@@ -116,7 +117,7 @@ export {
   isWalletTextFormat,
   encryptForTextFormat,
   decryptFromTextFormat,
-} from './wallet-text';
+} from './serialization/wallet-text';
 
 // Wallet.dat parsing and decryption
 export {
@@ -134,7 +135,7 @@ export {
   decryptCMasterKey,
   decryptPrivateKey,
   decryptWalletDat,
-} from './wallet-dat';
+} from './serialization/wallet-dat';
 
 // Types
 export type {
@@ -181,7 +182,7 @@ export type {
   TransactionOutput,
   PlannedTransaction,
   TransactionPlanResult,
-} from './transaction';
+} from './transaction/transaction';
 
 // Wallet.dat types
 export type {
@@ -190,7 +191,7 @@ export type {
   WalletDatParseResult,
   DecryptionProgressCallback,
   DecryptWalletDatResult,
-} from './wallet-dat';
+} from './serialization/wallet-dat';
 
 // Wallet Text types
 export type {
@@ -198,7 +199,7 @@ export type {
   WalletTextExportOptions,
   WalletTextExportParams,
   WalletTextParseResult,
-} from './wallet-text';
+} from './serialization/wallet-text';
 
 // Universal import/export
 export {
@@ -206,7 +207,7 @@ export {
   exportWallet,
   exportWalletToText,
   exportWalletToJSON,
-} from './import-export';
+} from './serialization/import-export';
 
 // Import/export types
 export type {
@@ -214,14 +215,14 @@ export type {
   ImportWalletOptions,
   ExportWalletOptions,
   ExportWalletParams,
-} from './import-export';
+} from './serialization/import-export';
 
 // Network provider interface and utilities
 export {
   getTotalBalance,
   getAllUtxos,
   waitForConfirmation,
-} from './network';
+} from './network/network';
 
 // Network types
 export type {
@@ -229,7 +230,7 @@ export type {
   BlockHeader,
   TransactionHistoryItem,
   TransactionDetail,
-} from './network';
+} from './network/network';
 
 export {
   DEFAULT_BASE_PATH,
@@ -243,28 +244,28 @@ export {
   generateAddresses,
   ACTIVE_SYNC_LIMIT,
   DEFAULT_BASE_PATH_SCAN,
-} from './scan';
+} from './serialization/scan';
 
 export type {
   GeneratedAddressInfo,
   ScannedAddress,
   ScanProgress,
   ScanResult,
-} from './scan';
+} from './serialization/scan';
 
 // Vesting classification
 export {
   VestingClassifier,
   InMemoryCacheProvider,
   VESTING_THRESHOLD,
-} from './vesting';
+} from './transaction/vesting';
 
 export type {
   ClassificationResult,
   ClassifiedUTXO,
   ClassifyUtxosResult,
   ClassificationProgressCallback,
-} from './vesting';
+} from './transaction/vesting';
 
 // Vesting cache types (from types.ts)
 export type {
@@ -273,8 +274,8 @@ export type {
 } from './types';
 
 // L1 Wallet
-export { L1Wallet } from './L1Wallet';
-export type { L1WalletConfig, SendResult } from './L1Wallet';
+export { L1Wallet } from './wallets/L1Wallet';
+export type { L1WalletConfig, SendResult } from './wallets/L1Wallet';
 
 // WebSocket adapter interface
 export type {
@@ -283,12 +284,12 @@ export type {
   MessageHandler,
   CloseHandler,
   ErrorHandler,
-} from './websocket';
+} from './network/websocket';
 
 // L3 Wallet
-export { L3Wallet } from './L3Wallet';
-export type { L3WalletConfig, L3Identity } from './L3Wallet';
+export { L3Wallet } from './wallets/L3Wallet';
+export type { L3WalletConfig, L3Identity } from './wallets/L3Wallet';
 
 // Unified L1 + L3 Wallet
-export { UnityWallet } from './UnityWallet';
-export type { UnityWalletConfig } from './UnityWallet';
+export { UnityWallet } from './wallets/UnityWallet';
+export type { UnityWalletConfig } from './wallets/UnityWallet';

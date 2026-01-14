@@ -10,7 +10,7 @@ import type {
   MessageHandler,
   CloseHandler,
   ErrorHandler,
-} from '../websocket';
+} from '../network/websocket';
 
 /**
  * Browser implementation of WebSocketAdapter

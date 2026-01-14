@@ -10,7 +10,7 @@
  * Generic implementation: Works with any wallet/address type that extends Base types.
  */
 
-import type { BaseWalletAddress } from './types';
+import type { BaseWalletAddress } from '../types';
 
 /**
  * Generic wallet address helper that works with any wallet type

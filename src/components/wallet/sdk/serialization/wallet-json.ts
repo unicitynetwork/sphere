@@ -7,9 +7,9 @@
 
 import CryptoJS from 'crypto-js';
 import elliptic from 'elliptic';
-import { deriveKeyAtPath } from './derivation';
-import { publicKeyToAddress } from './address';
-import { bytesToHex, isValidPrivateKey } from './utils';
+import { deriveKeyAtPath } from '../core/derivation';
+import { publicKeyToAddress } from '../address/address';
+import { bytesToHex, isValidPrivateKey } from '../core/utils';
 import type {
   WalletJSON,
   WalletJSONAddress,
@@ -17,7 +17,7 @@ import type {
   WalletJSONSource,
   WalletJSONExportOptions,
   WalletJSONImportResult,
-} from './types';
+} from '../types';
 
 const ec = new elliptic.ec('secp256k1');
 

@@ -7,13 +7,13 @@
 
 import CryptoJS from 'crypto-js';
 import elliptic from 'elliptic';
-import { createScriptPubKey } from './script';
+import { createScriptPubKey } from '../address/script';
 import type {
   L1UTXO,
   L1TxOutput,
   L1PlannedTx,
   L1TxPlanResult,
-} from './types';
+} from '../types';
 
 const ec = new elliptic.ec('secp256k1');
 

@@ -9,7 +9,7 @@
  */
 
 import CryptoJS from 'crypto-js';
-import { bytesToHex, findPattern, base58Decode, isValidPrivateKey } from './utils';
+import { bytesToHex, findPattern, base58Decode, isValidPrivateKey } from '../core/utils';
 
 // ==========================================
 // Types

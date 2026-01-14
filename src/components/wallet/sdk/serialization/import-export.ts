@@ -29,15 +29,15 @@ import {
   recoverKeyWifHmac,
   recoverKeyBIP32AtPath,
   recoverKeyBIP32Scan,
-} from './address';
-import { hexToWIF } from './crypto';
-import { extractBasePathFromFullPath } from './derivation';
+} from '../address/address';
+import { hexToWIF } from '../core/crypto';
+import { extractBasePathFromFullPath } from '../core/derivation';
 import type {
   BaseWallet,
   BaseWalletAddress,
   WalletJSONSource,
   WalletJSONDerivationMode,
-} from './types';
+} from '../types';
 
 // ==========================================
 // Types

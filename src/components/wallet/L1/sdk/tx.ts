@@ -11,7 +11,7 @@ import {
   selectUtxos,
   broadcastTransactions,
   SATS_PER_COIN,
-} from "../../sdk/transaction";
+} from "../../sdk/transaction/transaction";
 import type { Wallet, TransactionPlan, Transaction, UTXO } from "./types";
 import { vestingState } from "./vestingState";
 
@@ -23,7 +23,7 @@ export {
   TX_FEE,
   DUST_THRESHOLD,
   SATS_PER_COIN,
-} from "../../sdk/transaction";
+} from "../../sdk/transaction/transaction";
 
 
 /**

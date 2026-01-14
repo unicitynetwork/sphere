@@ -13,8 +13,8 @@ import type {
   L1UTXO,
   VestingCacheProvider,
   VestingCacheEntry,
-} from './types';
-import type { L1NetworkProviderFull, TransactionDetail } from './network';
+} from '../types';
+import type { L1NetworkProviderFull, TransactionDetail } from '../network/network';
 
 // ==========================================
 // Constants

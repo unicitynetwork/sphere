@@ -9,9 +9,9 @@ import { TokenType } from '@unicitylabs/state-transition-sdk/lib/token/TokenType
 import { HashAlgorithm } from '@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm';
 import { UnmaskedPredicateReference } from '@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicateReference';
 
-import type { L3Address, UnifiedAddress, DerivationMode, WalletConfig } from './types';
-import { DEFAULT_BASE_PATH, DEFAULT_DERIVATION_MODE, UNICITY_TOKEN_TYPE_HEX } from './types';
-import { deriveKeyAtPath, deriveChildKeyLegacy, deriveKeyWifHmac } from './derivation';
+import type { L3Address, UnifiedAddress, DerivationMode, WalletConfig } from '../types';
+import { DEFAULT_BASE_PATH, DEFAULT_DERIVATION_MODE, UNICITY_TOKEN_TYPE_HEX } from '../types';
+import { deriveKeyAtPath, deriveChildKeyLegacy, deriveKeyWifHmac } from '../core/derivation';
 import { privateKeyToAddressInfo } from './address';
 
 // ============================================
@@ -111,7 +111,7 @@ export async function deriveL3Address(privateKey: string): Promise<L3Address> {
 // L1 Address Derivation (Alpha blockchain)
 // ============================================
 
-import type { L1Address } from './types';
+import type { L1Address } from '../types';
 
 /**
  * Derive L1 address from master key at specific path

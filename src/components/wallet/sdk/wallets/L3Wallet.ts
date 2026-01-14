@@ -14,8 +14,8 @@ import { SigningService } from '@unicitylabs/state-transition-sdk/lib/sign/Signi
 import { TokenType } from '@unicitylabs/state-transition-sdk/lib/token/TokenType';
 import { StateTransitionClient } from '@unicitylabs/state-transition-sdk/lib/StateTransitionClient';
 import { AggregatorClient } from '@unicitylabs/state-transition-sdk/lib/api/AggregatorClient';
-import { UNICITY_TOKEN_TYPE_HEX } from './types';
-import { deriveL3Address } from './unified';
+import { UNICITY_TOKEN_TYPE_HEX } from '../types';
+import { deriveL3Address } from '../address/unified';
 
 // ==========================================
 // Configuration

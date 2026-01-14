@@ -14,7 +14,7 @@ import type {
   BlockHeader,
   TransactionHistoryItem,
   TransactionDetail,
-} from "../../sdk/network";
+} from "../../sdk/network/network";
 import type { L1UTXO } from "../../sdk/types";
 
 const DEFAULT_ENDPOINT = "wss://fulcrum.unicity.network:50004";

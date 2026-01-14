@@ -7,7 +7,7 @@
 
 import * as bip39 from 'bip39';
 import { generateMasterKeyFromSeed } from './derivation';
-import type { WalletKeys } from './types';
+import type { WalletKeys } from '../types';
 
 /**
  * Create a new wallet with fresh mnemonic

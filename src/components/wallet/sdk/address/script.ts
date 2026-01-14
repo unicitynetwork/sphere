@@ -6,7 +6,7 @@
  */
 
 import { decodeBech32 } from './bech32';
-import { bytesToHex } from './utils';
+import { bytesToHex } from '../core/utils';
 import CryptoJS from 'crypto-js';
 
 /**
