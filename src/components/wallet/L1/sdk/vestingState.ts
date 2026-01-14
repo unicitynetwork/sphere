@@ -1,10 +1,5 @@
-import { vestingClassifier } from "./vesting";
-import type {
-  UTXO,
-  ClassifiedUTXO,
-  VestingMode,
-  VestingBalances,
-} from "./types";
+import { vestingClassifier, type ClassifiedUTXO } from "./vesting";
+import type { UTXO, VestingMode, VestingBalances } from "./types";
 
 interface AddressVestingCache {
   classifiedUtxos: {
@@ -47,8 +42,7 @@ class VestingStateManager {
     this.classificationInProgress = true;
 
     try {
-      await vestingClassifier.initDB();
-
+      // vestingClassifier auto-initializes on first use
       const result = await vestingClassifier.classifyUtxos(utxos, onProgress);
 
       // Calculate balances
@@ -159,9 +153,9 @@ class VestingStateManager {
   /**
    * Clear all caches
    */
-  clearAllCaches(): void {
+  async clearAllCaches(): Promise<void> {
     this.addressCache.clear();
-    vestingClassifier.clearCaches();
+    await vestingClassifier.clearCaches();
   }
 }
 

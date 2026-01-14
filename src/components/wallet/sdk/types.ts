@@ -166,6 +166,44 @@ export interface StorageProvider {
 }
 
 // ==========================================
+// Vesting Cache Provider Interface
+// ==========================================
+
+/**
+ * Cache entry for vesting classification
+ */
+export interface VestingCacheEntry {
+  /** Coinbase block height (null if not yet computed) */
+  blockHeight: number | null;
+  /** Whether this is a coinbase transaction */
+  isCoinbase: boolean;
+  /** Input transaction ID (for non-coinbase txs) */
+  inputTxId: string | null;
+}
+
+/**
+ * Cache provider interface for vesting classification.
+ * Implementations provide platform-specific caching.
+ *
+ * Browser: IndexedDB
+ * Node.js: SQLite or LevelDB
+ * React Native: AsyncStorage or SQLite
+ */
+export interface VestingCacheProvider {
+  /** Initialize the cache (create tables, etc.) */
+  init(): Promise<void>;
+
+  /** Get cached entry for transaction */
+  get(txHash: string): Promise<VestingCacheEntry | null>;
+
+  /** Save entry to cache */
+  set(txHash: string, entry: VestingCacheEntry): Promise<void>;
+
+  /** Clear all cached entries */
+  clear(): Promise<void>;
+}
+
+// ==========================================
 // Key Derivation Types
 // ==========================================
 

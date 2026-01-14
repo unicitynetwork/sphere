@@ -97,20 +97,12 @@ export interface WalletJSONImportResult {
 // Vesting types
 export type VestingMode = "all" | "vested" | "unvested";
 
-export interface ClassifiedUTXO extends UTXO {
-  vestingStatus?: "vested" | "unvested" | "error";
-  coinbaseHeight?: number | null;
-}
-
 export interface VestingBalances {
   vested: bigint;
   unvested: bigint;
   all: bigint;
 }
 
-export interface ClassificationResult {
-  isVested: boolean;
-  coinbaseHeight: number | null;
-  error?: string;
-}
+// ClassifiedUTXO and ClassificationResult are now in SDK vesting.ts
+// Re-exported from ./vesting.ts for backwards compatibility
 

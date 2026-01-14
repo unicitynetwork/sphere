@@ -251,3 +251,23 @@ export type {
   ScanProgress,
   ScanResult,
 } from './scan';
+
+// Vesting classification
+export {
+  VestingClassifier,
+  InMemoryCacheProvider,
+  VESTING_THRESHOLD,
+} from './vesting';
+
+export type {
+  ClassificationResult,
+  ClassifiedUTXO,
+  ClassifyUtxosResult,
+  ClassificationProgressCallback,
+} from './vesting';
+
+// Vesting cache types (from types.ts)
+export type {
+  VestingCacheEntry,
+  VestingCacheProvider,
+} from './types';
