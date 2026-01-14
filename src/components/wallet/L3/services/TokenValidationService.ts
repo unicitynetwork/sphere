@@ -421,7 +421,7 @@ export class TokenValidationService {
     // Try to fetch proofs for each uncommitted transaction
     for (let i = 0; i < transactions.length; i++) {
       const tx = transactions[i];
-      if (tx.inclusionProof === null) {
+      if (tx.inclusionProof === null && tx.newStateHash) {
         try {
           const proof = await this.fetchProofFromAggregator(tx.newStateHash);
           if (proof) {
@@ -489,6 +489,10 @@ export class TokenValidationService {
       const prevTx = txf.transactions[pendingTxIndex - 1];
       if (!prevTx) {
         return { submittable: false, reason: "Previous transaction not found", action: "DISCARD_FORK" };
+      }
+      if (!prevTx.newStateHash) {
+        // Old token format without newStateHash - can't verify, assume submittable
+        return { submittable: true, reason: "Cannot verify - missing newStateHash on previous tx", action: "RETRY_LATER" };
       }
       prevStateHash = prevTx.newStateHash;
     }

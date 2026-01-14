@@ -78,7 +78,9 @@ export const TxfStateSchema = z.object({
 
 export const TxfTransactionSchema = z.object({
   previousStateHash: z.string(),
-  newStateHash: z.string(),
+  // newStateHash is optional for backwards compatibility with older tokens
+  // that were created before this field was added to transfers
+  newStateHash: z.string().optional(),
   predicate: z.string(),
   inclusionProof: TxfInclusionProofSchema.nullable(),
   data: z.record(z.string(), z.unknown()).optional(),
@@ -98,8 +100,10 @@ export const TxfTokenSchema = z.object({
   genesis: TxfGenesisSchema,
   state: TxfStateSchema,
   transactions: z.array(TxfTransactionSchema),
-  nametags: z.array(z.string()),
-  _integrity: TxfIntegritySchema,
+  // nametags is optional for backwards compatibility (defaults to empty array)
+  nametags: z.array(z.string()).optional().default([]),
+  // _integrity is optional for backwards compatibility with older token formats
+  _integrity: TxfIntegritySchema.optional(),
 });
 
 // ==========================================
@@ -146,18 +150,18 @@ export function parseTxfToken(data: unknown): z.infer<typeof TxfTokenSchema> {
 
 /**
  * Safely parse TXF token, returning null on failure
+ * Logs validation errors once (concise format) for debugging
  */
 export function safeParseTxfToken(data: unknown): z.infer<typeof TxfTokenSchema> | null {
   const result = TxfTokenSchema.safeParse(data);
   if (result.success) {
     return result.data;
   }
-  // Log detailed errors for debugging
-  console.warn("TxfToken validation failed:", result.error.format());
-  // Show specific field errors
+  // Log concise error summary (detailed format available via result.error.format())
   const flatErrors = result.error.flatten();
-  if (Object.keys(flatErrors.fieldErrors).length > 0) {
-    console.warn("Field errors:", flatErrors.fieldErrors);
+  const fieldKeys = Object.keys(flatErrors.fieldErrors);
+  if (fieldKeys.length > 0) {
+    console.debug("TxfToken validation failed, fields:", fieldKeys.join(", "));
   }
   return null;
 }

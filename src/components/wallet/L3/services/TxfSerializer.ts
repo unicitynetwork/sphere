@@ -89,7 +89,7 @@ export function tokenToTxf(token: Token): TxfToken | null {
     }
 
     // Fallback: return without strict validation (for backwards compatibility)
-    console.warn(`Token ${token.id}: Zod validation failed, using unvalidated data`);
+    // Note: safeParseTxfToken already logs validation errors
     return txfData as TxfToken;
   } catch (err) {
     console.error(`Failed to parse token ${token.id} jsonData:`, err);
@@ -164,8 +164,9 @@ export function txfToToken(tokenId: string, txf: TxfToken): Token {
 
 /**
  * Build complete TXF storage data from tokens and metadata
+ * Now async to support stateHash computation for genesis-only tokens
  */
-export function buildTxfStorageData(
+export async function buildTxfStorageData(
   tokens: Token[],
   meta: Omit<TxfMeta, "formatVersion">,
   nametag?: NametagData,
@@ -175,7 +176,7 @@ export function buildTxfStorageData(
   outboxEntries?: OutboxEntry[],
   mintOutboxEntries?: MintOutboxEntry[],
   invalidatedNametags?: InvalidatedNametagEntry[]
-): TxfStorageData {
+): Promise<TxfStorageData> {
   const storageData: TxfStorageData = {
     _meta: {
       ...meta,
@@ -219,8 +220,16 @@ export function buildTxfStorageData(
 
   // Add each active token with _<tokenId> key
   for (const token of tokens) {
-    const txf = tokenToTxf(token);
+    let txf = tokenToTxf(token);
     if (txf) {
+      // Compute stateHash for genesis-only tokens that don't have it
+      if (needsStateHashComputation(txf)) {
+        try {
+          txf = await computeAndPatchStateHash(txf);
+        } catch (err) {
+          console.warn(`Failed to compute stateHash for token ${token.id.slice(0, 8)}...:`, err);
+        }
+      }
       // Use the token's actual ID from genesis data
       const actualTokenId = txf.genesis.data.tokenId;
       storageData[keyFromTokenId(actualTokenId)] = txf;
@@ -573,7 +582,7 @@ export function getCurrentStateHash(txf: TxfToken): string | undefined {
     if (lastTx?.newStateHash) {
       return lastTx.newStateHash;
     }
-    console.warn(`getCurrentStateHash: missing newStateHash on last transaction`);
+    // Missing newStateHash is expected for older tokens - SDK will calculate it
     return undefined;
   }
 

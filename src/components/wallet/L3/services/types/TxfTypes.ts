@@ -74,8 +74,8 @@ export interface TxfToken {
   genesis: TxfGenesis;
   state: TxfState;
   transactions: TxfTransaction[];
-  nametags: string[];
-  _integrity: TxfIntegrity;
+  nametags?: string[];           // Optional for backwards compatibility
+  _integrity?: TxfIntegrity;     // Optional for backwards compatibility
 }
 
 /**
@@ -113,7 +113,7 @@ export interface TxfState {
  */
 export interface TxfTransaction {
   previousStateHash: string;
-  newStateHash: string;
+  newStateHash?: string;     // Optional for backwards compatibility with older tokens
   predicate: string;         // New owner's predicate
   inclusionProof: TxfInclusionProof | null; // null = uncommitted
   data?: Record<string, unknown>; // Optional transfer metadata

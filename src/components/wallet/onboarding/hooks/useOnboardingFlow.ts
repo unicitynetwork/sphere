@@ -390,6 +390,11 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setIsBusy(true);
     setError(null);
     try {
+      // Mark that we're in an active wallet creation flow
+      // This allows wallet creation even though credentials will exist after generateNewIdentity()
+      // (because generateNewIdentity saves mnemonic BEFORE walletRepo.createWallet is called)
+      WalletRepository.setImportInProgress();
+
       UnifiedKeyManager.clearAll();
       await createWallet();
 
@@ -417,7 +422,12 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       console.log("💾 Saved L1 wallet for new wallet");
 
       setStep("nametag");
+
+      // Clear import flag - wallet creation complete
+      WalletRepository.clearImportInProgress();
     } catch (e) {
+      // Clear import flag on error
+      WalletRepository.clearImportInProgress();
       const message = e instanceof Error ? e.message : "Failed to generate keys";
       setError(message);
     } finally {
@@ -439,6 +449,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setError(null);
 
     try {
+      // Mark that we're in an active import flow
+      // This allows wallet creation even though credentials exist
+      WalletRepository.setImportInProgress();
+
       UnifiedKeyManager.clearAll();
       const mnemonic = words.join(" ");
       const keyManager = getUnifiedKeyManager();
@@ -447,6 +461,8 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       // Go to address selection
       await goToAddressSelection();
     } catch (e) {
+      // Clear import flag on error
+      WalletRepository.clearImportInProgress();
       const message = e instanceof Error ? e.message : "Invalid recovery phrase";
       setError(message);
       setIsBusy(false);
@@ -730,6 +746,8 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       const message = e instanceof Error ? e.message : "Failed to select address";
       setError(message);
     } finally {
+      // Clear import flag - import is complete (success or failure)
+      WalletRepository.clearImportInProgress();
       setIsBusy(false);
     }
   }, [derivedAddresses, selectedAddressPath, getUnifiedKeyManager]);
