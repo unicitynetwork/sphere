@@ -236,8 +236,10 @@ export interface WalletConfig {
 
 /**
  * Default configuration values
+ * Note: DEFAULT_BASE_PATH uses BIP84 testnet (84'/1'/0') to match webwallet
+ * for compatibility with wallet.dat imports from Alpha Core
  */
-export const DEFAULT_BASE_PATH = "m/44'/0'/0'";
+export const DEFAULT_BASE_PATH = "m/84'/1'/0'";
 export const DEFAULT_DERIVATION_MODE: DerivationMode = 'bip32';
 
 /**

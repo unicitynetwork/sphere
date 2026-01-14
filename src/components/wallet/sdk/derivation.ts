@@ -161,3 +161,20 @@ export function deriveKeyWifHmac(masterKey: string, index: number): string {
 
   return hmacOutput.substring(0, 64);
 }
+
+// ==========================================
+// Path Parsing Helpers
+// ==========================================
+
+/**
+ * Extract base path (descriptor path) from a full BIP32 address path
+ * e.g., "m/84'/1'/0'/0/0" → "84'/1'/0'"
+ *
+ * @param fullPath - Full BIP32 path like "m/84'/1'/0'/0/5"
+ * @returns Base path without 'm/' prefix and without chain/index, or null if invalid
+ */
+export function extractBasePathFromFullPath(fullPath: string): string | null {
+  // Match standard 5-level BIP32 paths: m/purpose'/coinType'/account'/chain/index
+  const match = fullPath.match(/^m\/(\d+'\/\d+'\/\d+')\/\d+\/\d+$/);
+  return match?.[1] ?? null;
+}

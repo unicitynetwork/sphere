@@ -31,6 +31,7 @@ import {
   recoverKeyBIP32Scan,
 } from './address';
 import { hexToWIF } from './crypto';
+import { extractBasePathFromFullPath } from './derivation';
 import type {
   BaseWallet,
   BaseWalletAddress,
@@ -236,13 +237,21 @@ async function importFromText(
     isBIP32: data.isBIP32,
   });
 
+  // Infer descriptorPath from recovered address path if not explicitly set
+  // This is needed because webwallet doesn't include DESCRIPTOR PATH in TXT exports
+  // e.g., "m/84'/1'/0'/0/0" → "84'/1'/0'"
+  let inferredDescriptorPath = data.descriptorPath ?? null;
+  if (!inferredDescriptorPath && isBIP32 && addresses.length > 0 && addresses[0].path) {
+    inferredDescriptorPath = extractBasePathFromFullPath(addresses[0].path);
+  }
+
   const wallet: BaseWallet = {
     masterPrivateKey: masterKey,
     addresses,
     chainCode: data.chainCode,
     masterChainCode: data.chainCode,
     isBIP32,
-    descriptorPath: data.descriptorPath ?? null,
+    descriptorPath: inferredDescriptorPath,
     childPrivateKey: addresses[0]?.privateKey ?? null,
   };
 

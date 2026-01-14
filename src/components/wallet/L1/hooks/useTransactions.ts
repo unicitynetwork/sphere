@@ -2,10 +2,7 @@ import { useState, useCallback } from "react";
 import {
   createTransactionPlan,
   createAndSignTransaction,
-  broadcast,
-  getTransactionHistory,
-  getTransaction,
-  getCurrentBlockHeight,
+  browserProvider,
   generateHDAddress,
   type Wallet,
   type TransactionPlan,
@@ -65,7 +62,7 @@ export function useTransactions() {
         for (const tx of plan.transactions) {
           try {
             const signed = createAndSignTransaction(wallet, tx);
-            const result = await broadcast(signed.raw);
+            const result = await browserProvider.broadcast(signed.raw);
             results.push({ txid: signed.txid, raw: signed.raw, result });
           } catch (e: unknown) {
             console.error("Broadcast failed for tx", e);
@@ -101,10 +98,10 @@ export function useTransactions() {
 
     setLoadingTransactions(true);
     try {
-      const height = await getCurrentBlockHeight();
+      const height = await browserProvider.getCurrentBlockHeight();
       setCurrentBlockHeight(height);
 
-      const history = await getTransactionHistory(address);
+      const history = await browserProvider.getTransactionHistory(address);
       const sorted = [...history].sort((a, b) => {
         if (a.height === 0 && b.height === 0) return 0;
         if (a.height === 0) return -1;
@@ -116,7 +113,7 @@ export function useTransactions() {
       const details: Record<string, TransactionDetail> = {};
       for (const tx of sorted) {
         try {
-          const detail = (await getTransaction(tx.tx_hash)) as TransactionDetail;
+          const detail = (await browserProvider.getTransaction(tx.tx_hash)) as TransactionDetail;
           details[tx.tx_hash] = detail;
         } catch (err) {
           console.error(`Error loading transaction ${tx.tx_hash}:`, err);
@@ -143,7 +140,7 @@ export function useTransactions() {
 
       for (const txid of requiredPrevTxIds) {
         try {
-          const prevTxDetail = (await getTransaction(txid)) as TransactionDetail;
+          const prevTxDetail = (await browserProvider.getTransaction(txid)) as TransactionDetail;
           newCache[txid] = prevTxDetail;
         } catch (err) {
           console.error(`Failed to fetch prev tx ${txid}:`, err);

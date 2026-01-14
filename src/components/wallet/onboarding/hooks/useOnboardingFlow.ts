@@ -14,7 +14,7 @@ import { IpfsStorageService } from "../../L3/services/IpfsStorageService";
 import {
   saveWalletToStorage,
   loadWalletFromStorage,
-  getBalance,
+  browserProvider,
   type Wallet as L1Wallet,
 } from "../../L1/sdk";
 import type { DerivedAddressInfo } from "../components/AddressSelectionScreen";
@@ -294,7 +294,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       // Fetch L1 balance
       if (addr.balanceLoading) {
         try {
-          l1Balance = await getBalance(addr.l1Address);
+          l1Balance = await browserProvider.getBalance(addr.l1Address);
           console.log(`💰 L1 balance for ${chainLabel} #${addr.index}: ${l1Balance} ALPHA`);
         } catch (error) {
           console.warn(`💰 Balance fetch error for ${chainLabel} #${addr.index}:`, error);

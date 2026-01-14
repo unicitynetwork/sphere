@@ -17,7 +17,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   createTransactionPlan,
   createAndSignTransaction,
-  broadcast,
+  browserProvider,
   type TransactionPlan,
 } from "../sdk";
 import { CreateAddressModal } from "../../shared/modals/CreateAddressModal";
@@ -159,7 +159,7 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
       for (const tx of txPlan.transactions) {
         try {
           const signed = createAndSignTransaction(wallet, tx);
-          const result = await broadcast(signed.raw);
+          const result = await browserProvider.broadcast(signed.raw);
           results.push({ txid: signed.txid, raw: signed.raw, result });
         } catch (e: unknown) {
           errors.push(e instanceof Error ? e.message : String(e));
