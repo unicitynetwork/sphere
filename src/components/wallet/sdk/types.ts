@@ -19,6 +19,7 @@ export interface BaseWalletAddress {
   path: string | null;
   index: number;
   isChange?: boolean;
+  createdAt?: string;
 }
 
 /**
@@ -33,6 +34,9 @@ export interface BaseWallet {
   childPrivateKey?: string | null;
   isBIP32?: boolean;
   descriptorPath?: string | null;
+  createdAt?: number;
+  /** Wallet was imported from Alpha wallet.dat or backup file */
+  isImportedAlphaWallet?: boolean;
 }
 
 // ==========================================

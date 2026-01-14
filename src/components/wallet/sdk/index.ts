@@ -200,6 +200,22 @@ export type {
   WalletTextParseResult,
 } from './wallet-text';
 
+// Universal import/export
+export {
+  importWalletFromContent,
+  exportWallet,
+  exportWalletToText,
+  exportWalletToJSON,
+} from './import-export';
+
+// Import/export types
+export type {
+  ImportWalletResult,
+  ImportWalletOptions,
+  ExportWalletOptions,
+  ExportWalletParams,
+} from './import-export';
+
 export {
   DEFAULT_BASE_PATH,
   DEFAULT_DERIVATION_MODE,

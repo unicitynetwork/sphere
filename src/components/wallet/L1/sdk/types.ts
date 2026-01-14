@@ -1,25 +1,19 @@
-export interface Wallet {
-  masterPrivateKey: string;
-  chainCode?: string;
-  addresses: WalletAddress[];
-  createdAt?: number;
-  isEncrypted?: boolean;
-  encryptedMasterKey?: string;
-  childPrivateKey?: string | null;
-  isImportedAlphaWallet?: boolean;
-  masterChainCode?: string | null;
-  isBIP32?: boolean;
-  descriptorPath?: string | null;
-}
+import type { BaseWallet, BaseWalletAddress } from "../../sdk";
 
-export interface WalletAddress {
-  address: string;
-  publicKey?: string;
-  privateKey?: string;
-  path: string | null;
-  index: number;
-  createdAt?: string;
-  isChange?: boolean; // true for change addresses (BIP32 chain 1)
+/**
+ * L1 WalletAddress - alias for BaseWalletAddress
+ */
+export type WalletAddress = BaseWalletAddress;
+
+/**
+ * L1 Wallet extends BaseWallet with browser-specific fields
+ */
+export interface Wallet extends BaseWallet {
+  addresses: WalletAddress[];  // Override with L1-specific WalletAddress
+  /** Browser-specific: wallet is encrypted in localStorage */
+  isEncrypted?: boolean;
+  /** Browser-specific: encrypted master key for localStorage */
+  encryptedMasterKey?: string;
 }
 
 export interface StoredWallet {
