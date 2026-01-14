@@ -437,3 +437,44 @@ export function selectUtxos(
     transactions,
   };
 }
+
+// ==========================================
+// Broadcast utilities
+// ==========================================
+
+/**
+ * Result of broadcasting a signed transaction
+ */
+export interface BroadcastResult {
+  txid: string;
+  raw: string;
+  broadcastResult: string;
+}
+
+/**
+ * Broadcast signed transactions
+ *
+ * Pure function - takes broadcast function as parameter.
+ * Platform implementations provide the actual broadcast method.
+ *
+ * @param signedTxs - Array of signed transactions (hex and txid)
+ * @param broadcast - Broadcast function from network provider
+ * @returns Array of broadcast results
+ */
+export async function broadcastTransactions(
+  signedTxs: Array<{ raw: string; txid: string }>,
+  broadcast: (rawHex: string) => Promise<string>
+): Promise<BroadcastResult[]> {
+  const results: BroadcastResult[] = [];
+
+  for (const tx of signedTxs) {
+    const result = await broadcast(tx.raw);
+    results.push({
+      txid: tx.txid,
+      raw: tx.raw,
+      broadcastResult: result,
+    });
+  }
+
+  return results;
+}

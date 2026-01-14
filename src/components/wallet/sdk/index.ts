@@ -236,3 +236,18 @@ export {
   DEFAULT_DERIVATION_MODE,
   UNICITY_TOKEN_TYPE_HEX,
 } from './types';
+
+// Scan utilities
+export {
+  generateAddressAtPath,
+  generateAddresses,
+  ACTIVE_SYNC_LIMIT,
+  DEFAULT_BASE_PATH_SCAN,
+} from './scan';
+
+export type {
+  GeneratedAddressInfo,
+  ScannedAddress,
+  ScanProgress,
+  ScanResult,
+} from './scan';

@@ -9,54 +9,24 @@
  * - Cached nametags from localStorage displayed immediately
  */
 
-import { deriveKeyAtPath } from "../../sdk";
 import { browserProvider } from "./network";
 import type { Wallet } from "./types";
-// L3 inventory checking imports
+// SDK imports - pure functions
+import {
+  generateAddressAtPath,
+  ACTIVE_SYNC_LIMIT,
+  type ScannedAddress,
+  type ScanProgress,
+  type ScanResult,
+} from "../../sdk/scan";
+// L3 inventory checking imports (browser-specific)
 import { IdentityManager } from "../../L3/services/IdentityManager";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { fetchNametagFromIpns } from "../../L3/services/IpnsNametagFetcher";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
-import { publicKeyToAddress, ec } from "../../shared/utils/cryptoUtils";
 
-/**
- * Generate address at specific BIP32 path (supports both external and change chains)
- */
-function generateAddressAtPath(
-  masterPrivKey: string,
-  chainCode: string,
-  path: string
-) {
-  const derived = deriveKeyAtPath(masterPrivKey, chainCode, path);
-
-  const keyPair = ec.keyFromPrivate(derived.privateKey);
-  const publicKey = keyPair.getPublic(true, "hex");
-  const address = publicKeyToAddress(publicKey);
-
-  return {
-    address,
-    privateKey: derived.privateKey,
-    publicKey,
-    path,
-  };
-}
-
-export interface ScannedAddress {
-  index: number;
-  address: string;
-  path: string;
-  balance: number;
-  privateKey: string;
-  publicKey: string;
-  isChange?: boolean;
-  // L3 inventory fields
-  l3Nametag?: string;       // Nametag (Unicity ID) if found
-  hasL3Inventory?: boolean; // True if has L3 inventory
-  l3Synced?: boolean;       // True if IPFS sync completed for this address
-}
-
-// Number of addresses to actively sync IPFS in parallel
-const ACTIVE_SYNC_LIMIT = 10;
+// Re-export SDK types
+export type { ScannedAddress, ScanProgress, ScanResult };
 
 /**
  * Get cached L3 info from localStorage (instant, no network)
@@ -95,21 +65,6 @@ async function getCachedL3Info(
     console.warn("Error getting cached L3 info:", error);
     return { hasInventory: false };
   }
-}
-
-export interface ScanProgress {
-  current: number;
-  total: number;
-  found: number;
-  totalBalance: number;
-  foundAddresses: ScannedAddress[];
-  l1ScanComplete?: boolean;  // True when L1 balance scan is done (IPNS may still be running)
-}
-
-export interface ScanResult {
-  addresses: ScannedAddress[];
-  totalBalance: number;
-  scannedCount: number;
 }
 
 /**
