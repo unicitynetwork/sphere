@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { connect, isWebSocketConnected, disconnect } from "../sdk/network";
+import { browserProvider } from "../sdk/network";
 
 export type ConnectionState =
   | "disconnected"
@@ -15,8 +15,8 @@ export interface ConnectionStatus {
 
 export function useConnectionStatus() {
   const [status, setStatus] = useState<ConnectionStatus>(() => ({
-    state: isWebSocketConnected() ? "connected" : "disconnected",
-    message: isWebSocketConnected() ? "Connected to Fulcrum" : "Not connected",
+    state: browserProvider.isConnected() ? "connected" : "disconnected",
+    message: browserProvider.isConnected() ? "Connected to Fulcrum" : "Not connected",
   }));
 
   const isMountedRef = useRef(true);
@@ -35,7 +35,7 @@ export function useConnectionStatus() {
     try {
       // network.ts connect() has its own reconnection logic with exponential backoff
       // MAX_RECONNECT_ATTEMPTS = 10, BASE_DELAY = 2000ms, MAX_DELAY = 60000ms
-      await connect();
+      await browserProvider.connect();
 
       if (!isMountedRef.current) return;
 
@@ -63,7 +63,7 @@ export function useConnectionStatus() {
   }, [attemptConnect]);
 
   const cancelConnect = useCallback(() => {
-    disconnect();
+    browserProvider.disconnect();
     setStatus({
       state: "disconnected",
       message: "Connection cancelled",
@@ -74,7 +74,7 @@ export function useConnectionStatus() {
   useEffect(() => {
     isMountedRef.current = true;
 
-    if (!isWebSocketConnected()) {
+    if (!browserProvider.isConnected()) {
       attemptConnect();
     }
 
@@ -88,7 +88,7 @@ export function useConnectionStatus() {
     const checkConnection = () => {
       if (!isMountedRef.current) return;
 
-      const connected = isWebSocketConnected();
+      const connected = browserProvider.isConnected();
 
       if (connected && status.state !== "connected") {
         setStatus({

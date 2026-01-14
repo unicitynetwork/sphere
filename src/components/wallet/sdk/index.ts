@@ -216,6 +216,21 @@ export type {
   ExportWalletParams,
 } from './import-export';
 
+// Network provider interface and utilities
+export {
+  getTotalBalance,
+  getAllUtxos,
+  waitForConfirmation,
+} from './network';
+
+// Network types
+export type {
+  L1NetworkProviderFull,
+  BlockHeader,
+  TransactionHistoryItem,
+  TransactionDetail,
+} from './network';
+
 export {
   DEFAULT_BASE_PATH,
   DEFAULT_DERIVATION_MODE,

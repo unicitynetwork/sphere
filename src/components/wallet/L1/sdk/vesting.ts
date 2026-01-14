@@ -5,7 +5,7 @@
  *
  * Direct port from index.html VestingClassifier
  */
-import { getTransaction, getCurrentBlockHeight } from "./network";
+import { browserProvider } from "./network";
 import type { UTXO, ClassifiedUTXO, ClassificationResult } from "./types";
 
 export const VESTING_THRESHOLD = 280000;
@@ -163,7 +163,7 @@ class VestingClassifier {
       }
 
       // Fetch from network
-      const txData = await getTransaction(currentTxHash) as TransactionData;
+      const txData = await browserProvider.getTransaction(currentTxHash) as TransactionData;
       if (!txData || !txData.txid) {
         return { coinbaseHeight: null, error: `Failed to fetch tx ${currentTxHash}` };
       }
@@ -246,7 +246,7 @@ class VestingClassifier {
     errors: Array<{ utxo: UTXO; error: string }>;
   }> {
     // Get current block height before classification
-    currentBlockHeight = await getCurrentBlockHeight();
+    currentBlockHeight = await browserProvider.getCurrentBlockHeight();
     console.log(`VestingClassifier: blockHeight=${currentBlockHeight}, threshold=${VESTING_THRESHOLD}, utxos=${utxos.length}`);
 
     // Clear memory cache to force re-fetch with current block height

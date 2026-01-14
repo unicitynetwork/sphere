@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { getBalance } from "../sdk";
-import { subscribeBlocks } from "../sdk/network";
+import { browserProvider } from "../sdk/network";
 
 interface UseBalanceOptions {
   onNewBlock?: (address: string) => void;
@@ -18,7 +17,7 @@ export function useBalance(initialAddress?: string, options?: UseBalanceOptions)
 
   const refreshBalance = useCallback(async (addr: string) => {
     if (!addr) return;
-    const bal = await getBalance(addr);
+    const bal = await browserProvider.getBalance(addr);
     setBalance(bal);
   }, []);
 
@@ -32,7 +31,7 @@ export function useBalance(initialAddress?: string, options?: UseBalanceOptions)
 
     (async () => {
       try {
-        const unsub = (await subscribeBlocks(() => {
+        const unsub = (await browserProvider.subscribeBlocks(() => {
           if (mounted && selectedAddressRef.current) {
             refreshBalance(selectedAddressRef.current);
             // Call onNewBlock callback if provided

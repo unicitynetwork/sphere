@@ -1,7 +1,7 @@
 /**
  * Transaction handling - Strict copy of index.html logic
  */
-import { getUtxo, broadcast } from "./network";
+import { browserProvider } from "./network";
 import { decodeBech32, createScriptPubKey } from "../../sdk";
 import CryptoJS from "crypto-js";
 import elliptic from "elliptic";
@@ -429,7 +429,7 @@ export async function createTransactionPlan(
     console.log(`Using ${utxos.length} ${currentMode} UTXOs`);
   } else {
     // Fall back to all UTXOs if not yet classified
-    utxos = await getUtxo(senderAddress);
+    utxos = await browserProvider.getUtxos(senderAddress);
     console.log(`Using ${utxos.length} UTXOs (vesting not classified yet)`);
   }
 
@@ -464,7 +464,7 @@ export async function sendAlpha(
 
   for (const tx of plan.transactions) {
     const signed = createAndSignTransaction(wallet, tx);
-    const result = await broadcast(signed.raw);
+    const result = await browserProvider.broadcast(signed.raw);
     results.push({
       txid: signed.txid,
       raw: signed.raw,

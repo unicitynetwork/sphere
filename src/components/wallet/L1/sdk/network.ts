@@ -1,50 +1,44 @@
-// sdk/l1/network.ts
+/**
+ * Browser Network Provider - WebSocket implementation for Fulcrum
+ *
+ * Browser-specific implementation of L1NetworkProviderFull.
+ * Uses WebSocket API and includes HMR cleanup for Vite.
+ *
+ * For other platforms (Node.js, React Native), create separate implementations
+ * of the L1NetworkProviderFull interface.
+ */
 
 import { addressToScriptHash } from "../../sdk";
-import type { UTXO } from "./types";
+import type {
+  L1NetworkProviderFull,
+  BlockHeader,
+  TransactionHistoryItem,
+  TransactionDetail,
+} from "../../sdk/network";
+import type { L1UTXO } from "../../sdk/types";
 
 const DEFAULT_ENDPOINT = "wss://fulcrum.unicity.network:50004";
+
+// ==========================================
+// Browser Network Provider Class
+// ==========================================
 
 interface PendingRequest {
   resolve: (result: unknown) => void;
   reject: (err: unknown) => void;
+  timeoutId?: ReturnType<typeof setTimeout>;
 }
 
-export interface BlockHeader {
-  height: number;
-  hex: string;
-  [key: string]: unknown;
+interface ConnectionCallback {
+  resolve: () => void;
+  reject: (err: Error) => void;
+  timeoutId?: ReturnType<typeof setTimeout>;
 }
 
 interface BalanceResult {
   confirmed: number;
   unconfirmed: number;
 }
-
-let ws: WebSocket | null = null;
-let isConnected = false;
-let isConnecting = false;
-let requestId = 0;
-let intentionalClose = false;
-let reconnectAttempts = 0;
-let isBlockSubscribed = false;
-let lastBlockHeader: BlockHeader | null = null;
-
-// Store timeout IDs for pending requests
-interface PendingRequestWithTimeout extends PendingRequest {
-  timeoutId?: ReturnType<typeof setTimeout>;
-}
-
-const pending: Record<number, PendingRequestWithTimeout> = {};
-const blockSubscribers: ((header: BlockHeader) => void)[] = [];
-
-// Connection state callbacks with cleanup support
-interface ConnectionCallback {
-  resolve: () => void;
-  reject: (err: Error) => void;
-  timeoutId?: ReturnType<typeof setTimeout>;
-}
-const connectionCallbacks: ConnectionCallback[] = [];
 
 // Reconnect configuration
 const MAX_RECONNECT_ATTEMPTS = 10;
@@ -55,439 +49,434 @@ const MAX_DELAY = 60000; // 1 minute
 const RPC_TIMEOUT = 30000; // 30 seconds
 const CONNECTION_TIMEOUT = 30000; // 30 seconds
 
-// ----------------------------------------
-// HMR CLEANUP
-// ----------------------------------------
-if (import.meta.hot) {
-  import.meta.hot.dispose(() => {
-    console.log('[L1] Disposing WebSocket before HMR');
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.close();
+/**
+ * Browser WebSocket implementation of L1NetworkProviderFull
+ */
+export class BrowserNetworkProvider implements L1NetworkProviderFull {
+  private ws: WebSocket | null = null;
+  private _isConnected = false;
+  private isConnecting = false;
+  private requestId = 0;
+  private intentionalClose = false;
+  private reconnectAttempts = 0;
+  private isBlockSubscribed = false;
+  private lastBlockHeader: BlockHeader | null = null;
+
+  private pending: Record<number, PendingRequest> = {};
+  private blockSubscribers: ((header: BlockHeader) => void)[] = [];
+  private connectionCallbacks: ConnectionCallback[] = [];
+
+  // ----------------------------------------
+  // Connection Management
+  // ----------------------------------------
+
+  isConnected(): boolean {
+    return this._isConnected && this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  waitForConnection(): Promise<void> {
+    if (this.isConnected()) {
+      return Promise.resolve();
     }
-    ws = null;
-    isConnected = false;
-    isConnecting = false;
-    intentionalClose = false;
-    reconnectAttempts = 0;
-    isBlockSubscribed = false;
-    lastBlockHeader = null;
-    // Clear pending request timeouts
-    Object.values(pending).forEach(req => {
+
+    return new Promise((resolve, reject) => {
+      const callback: ConnectionCallback = {
+        resolve: () => {
+          if (callback.timeoutId) clearTimeout(callback.timeoutId);
+          resolve();
+        },
+        reject: (err: Error) => {
+          if (callback.timeoutId) clearTimeout(callback.timeoutId);
+          reject(err);
+        },
+      };
+
+      callback.timeoutId = setTimeout(() => {
+        const idx = this.connectionCallbacks.indexOf(callback);
+        if (idx > -1) this.connectionCallbacks.splice(idx, 1);
+        reject(new Error("Connection timeout"));
+      }, CONNECTION_TIMEOUT);
+
+      this.connectionCallbacks.push(callback);
+    });
+  }
+
+  connect(endpoint: string = DEFAULT_ENDPOINT): Promise<void> {
+    console.log("[L1] connect() called, endpoint:", endpoint);
+    console.log("[L1] connect() state - isConnected:", this._isConnected, "isConnecting:", this.isConnecting);
+
+    if (this._isConnected) {
+      console.log("[L1] Already connected, returning immediately");
+      return Promise.resolve();
+    }
+
+    if (this.isConnecting) {
+      console.log("[L1] Already connecting, waiting for connection...");
+      return this.waitForConnection();
+    }
+
+    this.isConnecting = true;
+    console.log("[L1] Starting new connection to:", endpoint);
+
+    return new Promise((resolve, reject) => {
+      let hasResolved = false;
+
+      console.log("[L1] Creating WebSocket object...");
+      try {
+        this.ws = new WebSocket(endpoint);
+        console.log("[L1] WebSocket object created, readyState:", this.ws.readyState);
+      } catch (err) {
+        console.error("[L1] WebSocket constructor threw exception:", err);
+        this.isConnecting = false;
+        reject(err);
+        return;
+      }
+
+      this.ws.onopen = () => {
+        console.log("[L1] WebSocket connected:", endpoint);
+        this._isConnected = true;
+        this.isConnecting = false;
+        this.reconnectAttempts = 0;
+        hasResolved = true;
+        resolve();
+
+        // Notify all waiting callbacks
+        this.connectionCallbacks.forEach((cb) => {
+          if (cb.timeoutId) clearTimeout(cb.timeoutId);
+          cb.resolve();
+        });
+        this.connectionCallbacks.length = 0;
+      };
+
+      this.ws.onclose = () => {
+        this._isConnected = false;
+        this.isBlockSubscribed = false;
+
+        // Reject all pending requests
+        Object.values(this.pending).forEach(req => {
+          if (req.timeoutId) clearTimeout(req.timeoutId);
+          req.reject(new Error('WebSocket connection closed'));
+        });
+        this.pending = {};
+
+        // Don't reconnect if intentional close
+        if (this.intentionalClose) {
+          console.log("[L1] WebSocket closed intentionally");
+          this.intentionalClose = false;
+          this.isConnecting = false;
+          this.reconnectAttempts = 0;
+
+          if (!hasResolved) {
+            hasResolved = true;
+            reject(new Error("WebSocket connection closed intentionally"));
+          }
+          return;
+        }
+
+        // Check max reconnect attempts
+        if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+          console.error('[L1] Max reconnect attempts reached. Giving up.');
+          this.isConnecting = false;
+
+          const error = new Error("Max reconnect attempts reached");
+          this.connectionCallbacks.forEach(cb => {
+            if (cb.timeoutId) clearTimeout(cb.timeoutId);
+            cb.reject(error);
+          });
+          this.connectionCallbacks.length = 0;
+
+          if (!hasResolved) {
+            hasResolved = true;
+            reject(error);
+          }
+          return;
+        }
+
+        // Exponential backoff
+        const delay = Math.min(
+          BASE_DELAY * Math.pow(2, this.reconnectAttempts),
+          MAX_DELAY
+        );
+
+        this.reconnectAttempts++;
+        console.warn(`[L1] WebSocket closed unexpectedly. Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+
+        setTimeout(() => {
+          this.connect(endpoint)
+            .then(() => {
+              if (!hasResolved) {
+                hasResolved = true;
+                resolve();
+              }
+            })
+            .catch((err) => {
+              if (!hasResolved) {
+                hasResolved = true;
+                reject(err);
+              }
+            });
+        }, delay);
+      };
+
+      this.ws.onerror = (err: Event) => {
+        console.error("[L1] WebSocket error:", err);
+        console.error("[L1] WebSocket error - readyState:", this.ws?.readyState);
+        console.error("[L1] WebSocket error - url:", endpoint);
+        // Note: Browser WebSocket errors don't provide detailed error info for security reasons
+        // The actual connection error details are only visible in browser DevTools Network tab
+        // Error alone doesn't mean connection failed - onclose will be called
+      };
+
+      this.ws.onmessage = (msg) => this.handleMessage(msg);
+    });
+  }
+
+  disconnect(): void {
+    if (this.ws) {
+      this.intentionalClose = true;
+      this.ws.close();
+      this.ws = null;
+    }
+    this._isConnected = false;
+    this.isConnecting = false;
+    this.reconnectAttempts = 0;
+    this.isBlockSubscribed = false;
+
+    // Clear all pending request timeouts
+    Object.values(this.pending).forEach(req => {
       if (req.timeoutId) clearTimeout(req.timeoutId);
     });
-    Object.keys(pending).forEach(key => delete pending[Number(key)]);
+    this.pending = {};
+
     // Clear connection callback timeouts
-    connectionCallbacks.forEach(cb => {
+    this.connectionCallbacks.forEach(cb => {
       if (cb.timeoutId) clearTimeout(cb.timeoutId);
     });
-    blockSubscribers.length = 0;
-    connectionCallbacks.length = 0;
-  });
-}
-
-// ----------------------------------------
-// CONNECTION STATE
-// ----------------------------------------
-export function isWebSocketConnected(): boolean {
-  return isConnected && ws !== null && ws.readyState === WebSocket.OPEN;
-}
-
-export function waitForConnection(): Promise<void> {
-  if (isWebSocketConnected()) {
-    return Promise.resolve();
+    this.connectionCallbacks.length = 0;
   }
 
-  return new Promise((resolve, reject) => {
-    const callback: ConnectionCallback = {
-      resolve: () => {
-        if (callback.timeoutId) clearTimeout(callback.timeoutId);
-        resolve();
-      },
-      reject: (err: Error) => {
-        if (callback.timeoutId) clearTimeout(callback.timeoutId);
-        reject(err);
-      },
-    };
+  /**
+   * Cleanup resources (for HMR)
+   */
+  dispose(): void {
+    console.log('[L1] Disposing WebSocket');
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.close();
+    }
+    this.ws = null;
+    this._isConnected = false;
+    this.isConnecting = false;
+    this.intentionalClose = false;
+    this.reconnectAttempts = 0;
+    this.isBlockSubscribed = false;
+    this.lastBlockHeader = null;
 
-    callback.timeoutId = setTimeout(() => {
-      // Remove from callbacks array
-      const idx = connectionCallbacks.indexOf(callback);
-      if (idx > -1) connectionCallbacks.splice(idx, 1);
-      reject(new Error("Connection timeout"));
-    }, CONNECTION_TIMEOUT);
+    Object.values(this.pending).forEach(req => {
+      if (req.timeoutId) clearTimeout(req.timeoutId);
+    });
+    this.pending = {};
 
-    connectionCallbacks.push(callback);
-  });
-}
-
-// ----------------------------------------
-// SINGLETON CONNECT — prevents double connect
-// ----------------------------------------
-export function connect(endpoint: string = DEFAULT_ENDPOINT): Promise<void> {
-  console.log("[L1] connect() called, endpoint:", endpoint);
-  console.log("[L1] connect() state - isConnected:", isConnected, "isConnecting:", isConnecting);
-
-  if (isConnected) {
-    console.log("[L1] Already connected, returning immediately");
-    return Promise.resolve();
+    this.connectionCallbacks.forEach(cb => {
+      if (cb.timeoutId) clearTimeout(cb.timeoutId);
+    });
+    this.blockSubscribers.length = 0;
+    this.connectionCallbacks.length = 0;
   }
 
-  if (isConnecting) {
-    console.log("[L1] Already connecting, waiting for connection...");
-    return waitForConnection();
+  // ----------------------------------------
+  // RPC
+  // ----------------------------------------
+
+  private handleMessage(event: MessageEvent): void {
+    const data = JSON.parse(event.data);
+
+    if (data.id && this.pending[data.id]) {
+      const request = this.pending[data.id];
+      delete this.pending[data.id];
+      if (request.timeoutId) clearTimeout(request.timeoutId);
+
+      if (data.error) {
+        request.reject(data.error);
+      } else {
+        request.resolve(data.result);
+      }
+    }
+
+    if (data.method === "blockchain.headers.subscribe") {
+      const header = data.params[0] as BlockHeader;
+      this.lastBlockHeader = header;
+      this.blockSubscribers.forEach((cb) => cb(header));
+    }
   }
 
-  isConnecting = true;
-  console.log("[L1] Starting new connection to:", endpoint);
+  private async rpc(method: string, params: unknown[] = []): Promise<unknown> {
+    // Auto-connect if not connected
+    if (!this._isConnected && !this.isConnecting) {
+      console.log("[L1] RPC: Auto-connecting to WebSocket...");
+      await this.connect();
+    }
 
-  return new Promise((resolve, reject) => {
-    let hasResolved = false;
+    // Wait for connection
+    if (!this.isConnected()) {
+      console.log("[L1] RPC: Waiting for WebSocket connection...");
+      await this.waitForConnection();
+    }
 
-    console.log("[L1] Creating WebSocket object...");
+    return new Promise((resolve, reject) => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        return reject(new Error("WebSocket not connected (OPEN)"));
+      }
+
+      const id = ++this.requestId;
+
+      const timeoutId = setTimeout(() => {
+        if (this.pending[id]) {
+          delete this.pending[id];
+          reject(new Error(`RPC timeout: ${method}`));
+        }
+      }, RPC_TIMEOUT);
+
+      this.pending[id] = {
+        resolve: (result) => {
+          clearTimeout(timeoutId);
+          resolve(result);
+        },
+        reject: (err) => {
+          clearTimeout(timeoutId);
+          reject(err);
+        },
+        timeoutId,
+      };
+
+      this.ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+    });
+  }
+
+  // ----------------------------------------
+  // Core Methods
+  // ----------------------------------------
+
+  async getBalance(address: string): Promise<number> {
+    const scriptHash = addressToScriptHash(address);
+    const result = await this.rpc("blockchain.scripthash.get_balance", [scriptHash]) as BalanceResult;
+
+    const confirmed = result.confirmed || 0;
+    const unconfirmed = result.unconfirmed || 0;
+    const totalSats = confirmed + unconfirmed;
+
+    // Convert sats → ALPHA
+    return totalSats / 100_000_000;
+  }
+
+  async getUtxos(address: string): Promise<L1UTXO[]> {
+    const scripthash = addressToScriptHash(address);
+    const result = await this.rpc("blockchain.scripthash.listunspent", [scripthash]);
+
+    if (!Array.isArray(result)) {
+      console.warn("listunspent returned non-array:", result);
+      return [];
+    }
+
+    return result.map((u: { tx_hash: string; tx_pos: number; value: number; height?: number }) => ({
+      tx_hash: u.tx_hash,
+      tx_pos: u.tx_pos,
+      value: u.value,
+      height: u.height,
+      address,
+    }));
+  }
+
+  async broadcast(rawHex: string): Promise<string> {
+    return await this.rpc("blockchain.transaction.broadcast", [rawHex]) as string;
+  }
+
+  // ----------------------------------------
+  // Transaction Methods
+  // ----------------------------------------
+
+  async getTransaction(txid: string): Promise<TransactionDetail> {
+    return await this.rpc("blockchain.transaction.get", [txid, true]) as TransactionDetail;
+  }
+
+  async getTransactionHistory(address: string): Promise<TransactionHistoryItem[]> {
+    const scriptHash = addressToScriptHash(address);
+    const result = await this.rpc("blockchain.scripthash.get_history", [scriptHash]);
+
+    if (!Array.isArray(result)) {
+      console.warn("get_history returned non-array:", result);
+      return [];
+    }
+
+    return result as TransactionHistoryItem[];
+  }
+
+  // ----------------------------------------
+  // Block Methods
+  // ----------------------------------------
+
+  async getCurrentBlockHeight(): Promise<number> {
     try {
-      ws = new WebSocket(endpoint);
-      console.log("[L1] WebSocket object created, readyState:", ws.readyState);
+      const header = await this.rpc("blockchain.headers.subscribe", []) as BlockHeader;
+      return header?.height || 0;
     } catch (err) {
-      console.error("[L1] WebSocket constructor threw exception:", err);
-      isConnecting = false;
-      reject(err);
-      return;
+      console.error("Error getting current block height:", err);
+      return 0;
+    }
+  }
+
+  async getBlockHeader(height: number): Promise<unknown> {
+    return await this.rpc("blockchain.block.header", [height, height]);
+  }
+
+  async subscribeBlocks(cb: (header: BlockHeader) => void): Promise<() => void> {
+    // Auto-connect if not connected
+    if (!this._isConnected && !this.isConnecting) {
+      await this.connect();
     }
 
-    ws.onopen = () => {
-      console.log("[L1] WebSocket connected:", endpoint);
-      isConnected = true;
-      isConnecting = false;
-      reconnectAttempts = 0; // Reset reconnect counter on successful connection
-      hasResolved = true;
-      resolve();
+    // Wait for connection
+    if (!this.isConnected()) {
+      await this.waitForConnection();
+    }
 
-      // Notify all waiting callbacks (clear their timeouts first)
-      connectionCallbacks.forEach((cb) => {
-        if (cb.timeoutId) clearTimeout(cb.timeoutId);
-        cb.resolve();
-      });
-      connectionCallbacks.length = 0;
-    };
+    this.blockSubscribers.push(cb);
 
-    ws.onclose = () => {
-      isConnected = false;
-      isBlockSubscribed = false; // Reset block subscription on disconnect
-
-      // Reject all pending requests and clear their timeouts
-      Object.values(pending).forEach(req => {
-        if (req.timeoutId) clearTimeout(req.timeoutId);
-        req.reject(new Error('WebSocket connection closed'));
-      });
-      Object.keys(pending).forEach(key => delete pending[Number(key)]);
-
-      // Don't reconnect if this was an intentional close
-      if (intentionalClose) {
-        console.log("[L1] WebSocket closed intentionally");
-        intentionalClose = false;
-        isConnecting = false;
-        reconnectAttempts = 0;
-
-        // Reject if we haven't resolved yet
-        if (!hasResolved) {
-          hasResolved = true;
-          reject(new Error("WebSocket connection closed intentionally"));
-        }
-        return;
+    // Only send RPC subscription if not already subscribed
+    if (!this.isBlockSubscribed) {
+      this.isBlockSubscribed = true;
+      const header = await this.rpc("blockchain.headers.subscribe", []) as BlockHeader;
+      if (header) {
+        this.lastBlockHeader = header;
+        // Notify ALL current subscribers with the initial header
+        this.blockSubscribers.forEach(subscriber => subscriber(header));
       }
+    } else if (this.lastBlockHeader) {
+      // For late subscribers, immediately notify with cached header
+      cb(this.lastBlockHeader);
+    }
 
-      // Check if we've exceeded max reconnect attempts
-      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        console.error('[L1] Max reconnect attempts reached. Giving up.');
-        isConnecting = false;
-
-        // Reject all waiting callbacks
-        const error = new Error("Max reconnect attempts reached");
-        connectionCallbacks.forEach(cb => {
-          if (cb.timeoutId) clearTimeout(cb.timeoutId);
-          cb.reject(error);
-        });
-        connectionCallbacks.length = 0;
-
-        // Reject if we haven't resolved yet
-        if (!hasResolved) {
-          hasResolved = true;
-          reject(error);
-        }
-        return;
+    // Return unsubscribe function
+    return () => {
+      const index = this.blockSubscribers.indexOf(cb);
+      if (index > -1) {
+        this.blockSubscribers.splice(index, 1);
       }
-
-      // Calculate exponential backoff delay
-      const delay = Math.min(
-        BASE_DELAY * Math.pow(2, reconnectAttempts),
-        MAX_DELAY
-      );
-
-      reconnectAttempts++;
-      console.warn(`[L1] WebSocket closed unexpectedly. Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
-
-      // Keep isConnecting true so callers know reconnection is in progress
-      // The resolve/reject will happen when reconnection succeeds or fails
-      setTimeout(() => {
-        connect(endpoint)
-          .then(() => {
-            if (!hasResolved) {
-              hasResolved = true;
-              resolve();
-            }
-          })
-          .catch((err) => {
-            if (!hasResolved) {
-              hasResolved = true;
-              reject(err);
-            }
-          });
-      }, delay);
     };
+  }
+}
 
-    ws.onerror = (err: Event) => {
-      console.error("[L1] WebSocket error:", err);
-      console.error("[L1] WebSocket error - readyState:", ws?.readyState);
-      console.error("[L1] WebSocket error - url:", endpoint);
-      // Note: Browser WebSocket errors don't provide detailed error info for security reasons
-      // The actual connection error details are only visible in browser DevTools Network tab
-      // Error alone doesn't mean connection failed - onclose will be called
-    };
+// ==========================================
+// Singleton Instance (for backwards compatibility)
+// ==========================================
 
-    ws.onmessage = (msg) => handleMessage(msg);
+const browserProvider = new BrowserNetworkProvider();
+
+// HMR cleanup
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    browserProvider.dispose();
   });
 }
 
-function handleMessage(event: MessageEvent) {
-  const data = JSON.parse(event.data);
-
-  if (data.id && pending[data.id]) {
-    const request = pending[data.id];
-    delete pending[data.id];
-    if (data.error) {
-      request.reject(data.error);
-    } else {
-      request.resolve(data.result);
-    }
-  }
-
-  if (data.method === "blockchain.headers.subscribe") {
-    const header = data.params[0] as BlockHeader;
-    lastBlockHeader = header; // Cache for late subscribers
-    blockSubscribers.forEach((cb) => cb(header));
-  }
-}
-
-// ----------------------------------------
-// SAFE RPC - Auto-connects and waits if needed
-// ----------------------------------------
-export async function rpc(method: string, params: unknown[] = []): Promise<unknown> {
-  // Auto-connect if not connected
-  if (!isConnected && !isConnecting) {
-    console.log("[L1] RPC: Auto-connecting to WebSocket...");
-    await connect();
-  }
-
-  // Wait for connection if connecting
-  if (!isWebSocketConnected()) {
-    console.log("[L1] RPC: Waiting for WebSocket connection...");
-    await waitForConnection();
-  }
-
-  return new Promise((resolve, reject) => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      return reject(new Error("WebSocket not connected (OPEN)"));
-    }
-
-    const id = ++requestId;
-
-    // Set up timeout for this request
-    const timeoutId = setTimeout(() => {
-      if (pending[id]) {
-        delete pending[id];
-        reject(new Error(`RPC timeout: ${method}`));
-      }
-    }, RPC_TIMEOUT);
-
-    pending[id] = {
-      resolve: (result) => {
-        clearTimeout(timeoutId);
-        resolve(result);
-      },
-      reject: (err) => {
-        clearTimeout(timeoutId);
-        reject(err);
-      },
-      timeoutId,
-    };
-
-    ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
-  });
-}
-
-// ----------------------------------------
-// API METHODS
-// ----------------------------------------
-
-export async function getUtxo(address: string) {
-  const scripthash = addressToScriptHash(address);
-
-  const result = await rpc("blockchain.scripthash.listunspent", [scripthash]);
-
-  if (!Array.isArray(result)) {
-    console.warn("listunspent returned non-array:", result);
-    return [];
-  }
-
-  return result.map((u: UTXO) => ({
-    tx_hash: u.tx_hash,
-    tx_pos: u.tx_pos,
-    value: u.value,
-    height: u.height,
-    address,
-  }));
-}
-
-export async function getBalance(address: string) {
-  const scriptHash = addressToScriptHash(address);
-  const result = await rpc("blockchain.scripthash.get_balance", [scriptHash]) as BalanceResult;
-
-  const confirmed = result.confirmed || 0;
-  const unconfirmed = result.unconfirmed || 0;
-
-  const totalSats = confirmed + unconfirmed;
-
-  // Convert sats → ALPHA
-  const alpha = totalSats / 100_000_000;
-
-  return alpha;
-}
-
-export async function broadcast(rawHex: string) {
-  return await rpc("blockchain.transaction.broadcast", [rawHex]);
-}
-
-export async function subscribeBlocks(cb: (header: BlockHeader) => void): Promise<() => void> {
-  // Auto-connect if not connected (same as rpc())
-  if (!isConnected && !isConnecting) {
-    await connect();
-  }
-
-  // Wait for connection to be established
-  if (!isWebSocketConnected()) {
-    await waitForConnection();
-  }
-
-  blockSubscribers.push(cb);
-
-  // Only send RPC subscription if not already subscribed
-  // This prevents duplicate server-side subscriptions
-  if (!isBlockSubscribed) {
-    isBlockSubscribed = true;
-    const header = await rpc("blockchain.headers.subscribe", []) as BlockHeader;
-    if (header) {
-      lastBlockHeader = header;
-      // Notify ALL current subscribers with the initial header
-      blockSubscribers.forEach(subscriber => subscriber(header));
-    }
-  } else if (lastBlockHeader) {
-    // For late subscribers, immediately notify with cached header
-    cb(lastBlockHeader);
-  }
-
-  // Return unsubscribe function
-  return () => {
-    const index = blockSubscribers.indexOf(cb);
-    if (index > -1) {
-      blockSubscribers.splice(index, 1);
-    }
-  };
-}
-
-export interface TransactionHistoryItem {
-  tx_hash: string;
-  height: number;
-  fee?: number;
-}
-
-export interface TransactionDetail {
-  txid: string;
-  version: number;
-  locktime: number;
-  vin: Array<{
-    txid: string;
-    vout: number;
-    scriptSig?: {
-      hex: string;
-    };
-    sequence: number;
-  }>;
-  vout: Array<{
-    value: number;
-    n: number;
-    scriptPubKey: {
-      hex: string;
-      type: string;
-      addresses?: string[];
-      address?: string;
-    };
-  }>;
-  blockhash?: string;
-  confirmations?: number;
-  time?: number;
-  blocktime?: number;
-}
-
-export async function getTransactionHistory(address: string): Promise<TransactionHistoryItem[]> {
-  const scriptHash = addressToScriptHash(address);
-  const result = await rpc("blockchain.scripthash.get_history", [scriptHash]);
-
-  if (!Array.isArray(result)) {
-    console.warn("get_history returned non-array:", result);
-    return [];
-  }
-
-  return result as TransactionHistoryItem[];
-}
-
-export async function getTransaction(txid: string) {
-  return await rpc("blockchain.transaction.get", [txid, true]);
-}
-
-export async function getBlockHeader(height: number) {
-  return await rpc("blockchain.block.header", [height, height]);
-}
-
-export async function getCurrentBlockHeight(): Promise<number> {
-  try {
-    const header = await rpc("blockchain.headers.subscribe", []) as BlockHeader;
-    return header?.height || 0;
-  } catch (err) {
-    console.error("Error getting current block height:", err);
-    return 0;
-  }
-}
-
-export function disconnect() {
-  if (ws) {
-    intentionalClose = true;
-    ws.close();
-    ws = null;
-  }
-  isConnected = false;
-  isConnecting = false;
-  reconnectAttempts = 0;
-  isBlockSubscribed = false;
-
-  // Clear all pending request timeouts
-  Object.values(pending).forEach(req => {
-    if (req.timeoutId) clearTimeout(req.timeoutId);
-  });
-  Object.keys(pending).forEach(key => delete pending[Number(key)]);
-
-  // Clear connection callback timeouts
-  connectionCallbacks.forEach(cb => {
-    if (cb.timeoutId) clearTimeout(cb.timeoutId);
-  });
-  connectionCallbacks.length = 0;
-}
+// Export the singleton and class
+export { browserProvider };

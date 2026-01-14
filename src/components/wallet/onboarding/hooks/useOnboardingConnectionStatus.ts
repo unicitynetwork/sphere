@@ -3,7 +3,7 @@
  * Similar to L1's useConnectionStatus but simplified for onboarding needs
  */
 import { useState, useEffect, useCallback, useRef } from "react";
-import { connect, isWebSocketConnected, disconnect } from "../../L1/sdk/network";
+import { browserProvider } from "../../L1/sdk/network";
 
 export type ConnectionState =
   | "disconnected"
@@ -19,8 +19,8 @@ export interface ConnectionStatus {
 
 export function useOnboardingConnectionStatus() {
   const [status, setStatus] = useState<ConnectionStatus>(() => ({
-    state: isWebSocketConnected() ? "connected" : "disconnected",
-    message: isWebSocketConnected() ? "Connected to Fulcrum" : "Not connected",
+    state: browserProvider.isConnected() ? "connected" : "disconnected",
+    message: browserProvider.isConnected() ? "Connected to Fulcrum" : "Not connected",
   }));
 
   const isMountedRef = useRef(true);
@@ -37,7 +37,7 @@ export function useOnboardingConnectionStatus() {
     });
 
     try {
-      await connect();
+      await browserProvider.connect();
 
       if (!isMountedRef.current) return;
 
@@ -66,7 +66,7 @@ export function useOnboardingConnectionStatus() {
 
   const cancelConnect = useCallback(() => {
     isConnectingRef.current = false;
-    disconnect();
+    browserProvider.disconnect();
     setStatus({
       state: "disconnected",
       message: "Connection cancelled",
@@ -77,7 +77,7 @@ export function useOnboardingConnectionStatus() {
   useEffect(() => {
     isMountedRef.current = true;
 
-    if (!isWebSocketConnected()) {
+    if (!browserProvider.isConnected()) {
       attemptConnect();
     }
 
@@ -91,7 +91,7 @@ export function useOnboardingConnectionStatus() {
     const checkConnection = () => {
       if (!isMountedRef.current) return;
 
-      const connected = isWebSocketConnected();
+      const connected = browserProvider.isConnected();
 
       if (connected && status.state !== "connected") {
         setStatus({

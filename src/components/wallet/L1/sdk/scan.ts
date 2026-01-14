@@ -10,7 +10,7 @@
  */
 
 import { deriveKeyAtPath } from "../../sdk";
-import { getBalance } from "./network";
+import { browserProvider } from "./network";
 import type { Wallet } from "./types";
 // L3 inventory checking imports
 import { IdentityManager } from "../../L3/services/IdentityManager";
@@ -300,7 +300,7 @@ export async function scanWalletAddresses(
           );
 
           // Check balance
-          const balance = await getBalance(addrInfo.address);
+          const balance = await browserProvider.getBalance(addrInfo.address);
 
           // Get cached L3 info (from localStorage, instant)
           // Uses path-based derivation for unambiguous L3 identity

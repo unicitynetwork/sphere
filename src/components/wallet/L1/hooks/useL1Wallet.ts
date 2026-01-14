@@ -6,14 +6,8 @@ import {
   downloadWalletFile,
   generateHDAddress,
   generateHDAddressBIP32,
-  getBalance,
-  getTransactionHistory,
-  getTransaction,
-  getCurrentBlockHeight,
   createTransactionPlan,
   createAndSignTransaction,
-  broadcast,
-  getUtxo,
   vestingState,
   type Wallet,
   type TransactionHistoryItem,
@@ -21,7 +15,7 @@ import {
   type VestingMode,
   type VestingBalances,
 } from "../sdk";
-import { subscribeBlocks } from "../sdk/network";
+import { browserProvider } from "../sdk/network";
 import { loadWalletFromUnifiedKeyManager, getUnifiedKeyManager } from "../sdk/unifiedWalletBridge";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
@@ -83,7 +77,7 @@ export function useL1Wallet(selectedAddressProp?: string) {
 
     (async () => {
       try {
-        const unsub = (await subscribeBlocks(() => {
+        const unsub = (await browserProvider.subscribeBlocks(() => {
           if (mounted && selectedAddressRef.current) {
             // Invalidate balance, transactions and vesting on new block
             queryClient.invalidateQueries({
@@ -125,7 +119,7 @@ export function useL1Wallet(selectedAddressProp?: string) {
   // Query: Balance for selected address
   const balanceQuery = useQuery({
     queryKey: L1_KEYS.BALANCE(selectedAddress || ""),
-    queryFn: () => getBalance(selectedAddress!),
+    queryFn: () => browserProvider.getBalance(selectedAddress!),
     enabled: !!selectedAddress,
     staleTime: 30000, // 30 seconds
   });
@@ -138,9 +132,9 @@ export function useL1Wallet(selectedAddressProp?: string) {
       if (!wallet || wallet.addresses.length === 0) return 0;
 
       const balances = await Promise.all(
-        wallet.addresses.map(addr => getBalance(addr.address))
+        wallet.addresses.map(addr => browserProvider.getBalance(addr.address))
       );
-      return balances.reduce((sum, bal) => sum + bal, 0);
+      return balances.reduce((sum: number, bal: number) => sum + bal, 0);
     },
     enabled: !!walletQuery.data && walletQuery.data.addresses.length > 0,
     staleTime: 30000, // 30 seconds
@@ -149,7 +143,7 @@ export function useL1Wallet(selectedAddressProp?: string) {
   // Query: Current block height
   const blockHeightQuery = useQuery({
     queryKey: L1_KEYS.BLOCK_HEIGHT,
-    queryFn: getCurrentBlockHeight,
+    queryFn: () => browserProvider.getCurrentBlockHeight(),
     staleTime: 60000, // 1 minute
   });
 
@@ -159,7 +153,7 @@ export function useL1Wallet(selectedAddressProp?: string) {
     queryFn: async () => {
       if (!selectedAddress) return { transactions: [], details: {} };
 
-      const history = await getTransactionHistory(selectedAddress);
+      const history = await browserProvider.getTransactionHistory(selectedAddress);
       const sorted = [...history].sort((a, b) => {
         if (a.height === 0 && b.height === 0) return 0;
         if (a.height === 0) return -1;
@@ -171,7 +165,7 @@ export function useL1Wallet(selectedAddressProp?: string) {
       const details: Record<string, TransactionDetail> = {};
       for (const tx of sorted) {
         try {
-          const detail = (await getTransaction(tx.tx_hash)) as TransactionDetail;
+          const detail = (await browserProvider.getTransaction(tx.tx_hash)) as TransactionDetail;
           details[tx.tx_hash] = detail;
         } catch (err) {
           console.error(`Error loading transaction ${tx.tx_hash}:`, err);
@@ -201,7 +195,7 @@ export function useL1Wallet(selectedAddressProp?: string) {
       }
 
       // Get UTXOs and classify them
-      const utxos = await getUtxo(selectedAddress);
+      const utxos = await browserProvider.getUtxos(selectedAddress);
 
       if (utxos.length > 0) {
         await vestingState.classifyAddressUtxos(selectedAddress, utxos);
@@ -351,7 +345,7 @@ export function useL1Wallet(selectedAddressProp?: string) {
       for (const tx of plan.transactions) {
         try {
           const signed = createAndSignTransaction(wallet, tx);
-          const result = await broadcast(signed.raw);
+          const result = await browserProvider.broadcast(signed.raw);
           results.push({ txid: signed.txid, raw: signed.raw, result });
         } catch (e: unknown) {
           console.error("Broadcast failed for tx", e);
