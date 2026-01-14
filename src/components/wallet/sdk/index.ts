@@ -271,3 +271,24 @@ export type {
   VestingCacheEntry,
   VestingCacheProvider,
 } from './types';
+
+// L1 Wallet
+export { L1Wallet } from './L1Wallet';
+export type { L1WalletConfig, SendResult } from './L1Wallet';
+
+// WebSocket adapter interface
+export type {
+  WebSocketAdapter,
+  WebSocketState,
+  MessageHandler,
+  CloseHandler,
+  ErrorHandler,
+} from './websocket';
+
+// L3 Wallet
+export { L3Wallet } from './L3Wallet';
+export type { L3WalletConfig, L3Identity } from './L3Wallet';
+
+// Unified L1 + L3 Wallet
+export { UnityWallet } from './UnityWallet';
+export type { UnityWalletConfig } from './UnityWallet';
