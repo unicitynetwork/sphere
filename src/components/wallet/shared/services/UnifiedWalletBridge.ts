@@ -5,9 +5,9 @@
  * This enables L1 and L3 wallets to use the same keys.
  */
 
-import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
-import type { Wallet, WalletAddress } from "./types";
-import { loadWalletFromStorage } from "./storage";
+import { UnifiedKeyManager } from "./UnifiedKeyManager";
+import type { Wallet, WalletAddress } from "../../L1/sdk/types";
+import { loadWalletFromStorage } from "../../L1/sdk/storage";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 // Same session key as L3 (from useWallet.ts)

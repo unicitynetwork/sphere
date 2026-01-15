@@ -21,6 +21,9 @@ import {
   determineDerivationMode,
   determineSource,
 } from './wallet-json';
+
+// Re-export isJSONWalletFormat for convenience
+export { isJSONWalletFormat } from './wallet-json';
 import {
   parseWalletDat,
   decryptWalletDat,

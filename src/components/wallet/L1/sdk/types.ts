@@ -94,15 +94,11 @@ export interface WalletJSONImportResult {
   error?: string;
 }
 
-// Vesting types
-export type VestingMode = "all" | "vested" | "unvested";
+// Re-export vesting types from SDK browser module
+export type {
+  VestingMode,
+  VestingBalances,
+} from "../../sdk/browser";
 
-export interface VestingBalances {
-  vested: bigint;
-  unvested: bigint;
-  all: bigint;
-}
-
-// ClassifiedUTXO and ClassificationResult are now in SDK vesting.ts
+// ClassifiedUTXO and ClassificationResult are in SDK vesting.ts
 // Re-exported from ./vesting.ts for backwards compatibility
-

@@ -1,28 +1,28 @@
 /**
- * Wallet Import/Export - Browser-specific wrappers
+ * Wallet Import/Export - L1-specific wrappers
  *
- * This file contains browser-specific code (FileReader, document.createElement, setTimeout).
- * Core import/export logic is in ../../sdk/import-export.ts
+ * Uses SDK browser import/export with L1-specific type conversions.
+ * Core implementation is in ../../sdk/browser/import-export.ts
  */
 import {
-  // SDK universal import/export
-  importWalletFromContent,
+  importWalletFromFile as sdkImportWalletFromFile,
+  importWalletFromJSON as sdkImportWalletFromJSON,
   exportWalletToText as sdkExportWalletToText,
   exportWalletToJSON as sdkExportWalletToJSON,
-  // Types
-  type ImportWalletResult,
-  type WalletJSON,
-  type WalletJSONSource,
-  type WalletJSONDerivationMode,
-  type WalletJSONAddress,
-  type WalletJSONExportOptions,
-  // For backwards compatibility
+  downloadTextFile,
+  downloadJSON,
   isJSONWalletFormat as sdkIsJSONWalletFormat,
-} from "../../sdk";
+  type ImportWalletResult,
+} from "../../sdk/browser/import-export";
 import type {
   Wallet,
   RestoreWalletResult,
   ExportOptions,
+  WalletJSON,
+  WalletJSONSource,
+  WalletJSONDerivationMode,
+  WalletJSONAddress,
+  WalletJSONExportOptions,
   WalletJSONImportResult,
 } from "./types";
 
@@ -37,29 +37,6 @@ export type {
   WalletJSONExportOptions,
   WalletJSONImportResult,
 };
-
-// ==========================================
-// Browser-specific helpers
-// ==========================================
-
-/**
- * Read binary file as Uint8Array (browser-specific: FileReader)
- */
-function readBinaryFile(file: File): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = e => resolve(new Uint8Array(e.target?.result as ArrayBuffer));
-    reader.onerror = reject;
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-/**
- * Yield to the event loop to prevent UI freeze (browser-specific)
- */
-function yieldToMain(): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, 0));
-}
 
 // ==========================================
 // Conversion helpers
@@ -78,7 +55,6 @@ function toRestoreWalletResult(sdkResult: ImportWalletResult): RestoreWalletResu
     };
   }
 
-  // Convert BaseWallet to L1 Wallet
   const wallet: Wallet = {
     masterPrivateKey: sdkResult.wallet.masterPrivateKey,
     addresses: sdkResult.wallet.addresses.map((addr) => ({
@@ -108,33 +84,18 @@ function toRestoreWalletResult(sdkResult: ImportWalletResult): RestoreWalletResu
 }
 
 // ==========================================
-// Import Functions (Browser wrappers)
+// Import Functions
 // ==========================================
 
 /**
  * Import wallet from backup file
- *
- * Browser-specific wrapper around SDK importWalletFromContent.
- * Handles File object reading and UI responsiveness.
  */
 export async function importWallet(
   file: File,
   password?: string
 ): Promise<RestoreWalletResult> {
   try {
-    // Determine content type and read file
-    const isDat = file.name.endsWith(".dat");
-    const content = isDat
-      ? await readBinaryFile(file)
-      : await file.text();
-
-    // Use SDK function
-    const sdkResult = await importWalletFromContent(content, {
-      password,
-      yieldCallback: yieldToMain,
-      contentType: isDat ? 'dat' : undefined,
-    });
-
+    const sdkResult = await sdkImportWalletFromFile(file, password);
     return toRestoreWalletResult(sdkResult);
   } catch (e) {
     console.error("Error restoring wallet:", e);
@@ -147,13 +108,11 @@ export async function importWallet(
 }
 
 // ==========================================
-// Export Functions (Browser wrappers)
+// Export Functions
 // ==========================================
 
 /**
  * Export wallet to text format
- *
- * Browser-specific wrapper around SDK exportWalletToText.
  */
 export function exportWallet(wallet: Wallet, options: ExportOptions = {}): string {
   const { password } = options;
@@ -188,20 +147,8 @@ export function downloadWalletFile(
   content: string,
   filename: string = "alpha_wallet_backup.txt"
 ): void {
-  const blob = new Blob([content], { type: "text/plain" });
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
-  a.href = url;
   const finalFilename = filename.endsWith(".txt") ? filename : filename + ".txt";
-  a.download = finalFilename;
-  document.body.appendChild(a);
-  a.click();
-
-  setTimeout(() => {
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, 100);
+  downloadTextFile(content, finalFilename);
 }
 
 // ==========================================
@@ -209,20 +156,14 @@ export function downloadWalletFile(
 // ==========================================
 
 export interface ExportToJSONParams {
-  /** The wallet to export */
   wallet: Wallet;
-  /** BIP39 mnemonic phrase (if available) */
   mnemonic?: string;
-  /** Source of import: "dat" for wallet.dat, "file" for txt file */
   importSource?: "dat" | "file";
-  /** Export options */
   options?: WalletJSONExportOptions;
 }
 
 /**
  * Export wallet to JSON format
- *
- * Browser-specific wrapper around SDK exportWalletToJSON.
  */
 export function exportWalletToJSON(params: ExportToJSONParams): WalletJSON {
   const { wallet, mnemonic, importSource, options = {} } = params;
@@ -245,8 +186,6 @@ export function exportWalletToJSON(params: ExportToJSONParams): WalletJSON {
       chainCode: wallet.chainCode ?? wallet.masterChainCode ?? undefined,
       descriptorPath: wallet.descriptorPath ?? undefined,
       isBIP32: wallet.isBIP32 ?? (wallet.isImportedAlphaWallet && !!wallet.masterChainCode),
-      mnemonic,
-      importSource,
     },
     {
       password: options.password,
@@ -258,17 +197,12 @@ export function exportWalletToJSON(params: ExportToJSONParams): WalletJSON {
 
 /**
  * Import wallet from JSON format
- *
- * Browser-specific wrapper around SDK importWalletFromContent.
  */
 export async function importWalletFromJSON(
   jsonContent: string,
   password?: string
 ): Promise<WalletJSONImportResult> {
-  const sdkResult = await importWalletFromContent(jsonContent, {
-    password,
-    contentType: 'json',
-  });
+  const sdkResult = await sdkImportWalletFromJSON(jsonContent, password);
 
   if (!sdkResult.success || !sdkResult.wallet) {
     return {
@@ -277,7 +211,6 @@ export async function importWalletFromJSON(
     };
   }
 
-  // Convert to L1 Wallet
   const wallet: Wallet = {
     masterPrivateKey: sdkResult.wallet.masterPrivateKey,
     addresses: sdkResult.wallet.addresses.map(addr => ({
@@ -316,26 +249,11 @@ export function downloadWalletJSON(
   json: WalletJSON,
   filename: string = "alpha_wallet_backup.json"
 ): void {
-  const content = JSON.stringify(json, null, 2);
-  const blob = new Blob([content], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
-  a.href = url;
-  const finalFilename = filename.endsWith(".json") ? filename : filename + ".json";
-  a.download = finalFilename;
-  document.body.appendChild(a);
-  a.click();
-
-  setTimeout(() => {
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, 100);
+  downloadJSON(json, filename);
 }
 
 /**
  * Check if file content is JSON wallet format
- * Re-exports SDK function for backwards compatibility
  */
 export function isJSONWalletFormat(content: string): boolean {
   return sdkIsJSONWalletFormat(content);

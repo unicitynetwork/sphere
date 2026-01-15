@@ -1,10 +1,12 @@
 /**
  * Transaction handling for L1 wallet
  *
- * Uses pure transaction functions from SDK.
- * Only browser-specific parts (browserProvider, vestingState) remain here.
+ * Re-exports from SDK browser module with L1-specific types.
+ * Core implementation is in ../../sdk/browser/tx.ts
  */
+
 import { browserProvider } from "./network";
+import { vestingState } from "./vestingState";
 import { decodeBech32, WalletAddressHelper } from "../../sdk";
 import {
   signTransaction,
@@ -13,7 +15,6 @@ import {
   SATS_PER_COIN,
 } from "../../sdk/transaction/transaction";
 import type { Wallet, TransactionPlan, Transaction, UTXO } from "./types";
-import { vestingState } from "./vestingState";
 
 // Re-export SDK transaction building functions for backwards compatibility
 export {
@@ -25,6 +26,11 @@ export {
   SATS_PER_COIN,
 } from "../../sdk/transaction/transaction";
 
+// Re-export browser tx types (excluding TransactionInput/TransactionOutput which are in ./types)
+export type {
+  SignedTransaction,
+  SendResult,
+} from "../../sdk/browser/tx";
 
 /**
  * Create and sign a transaction
@@ -34,21 +40,16 @@ export function createAndSignTransaction(
   wallet: Wallet,
   txPlan: Transaction
 ): { raw: string; txid: string } {
-  // Find the address entry that matches the input address
   const fromAddress = txPlan.input.address;
   const addressEntry = wallet.addresses.find(a => a.address === fromAddress);
 
-  // Use the private key from the address entry, or fall back to childPrivateKey/masterPrivateKey
   let privateKeyHex: string | undefined;
 
   if (addressEntry?.privateKey) {
-    // Use the specific private key for this address
     privateKeyHex = addressEntry.privateKey;
   } else if (wallet.childPrivateKey) {
-    // Fall back to childPrivateKey (first address)
     privateKeyHex = wallet.childPrivateKey;
   } else {
-    // Last resort: use master key
     privateKeyHex = wallet.masterPrivateKey;
   }
 
@@ -56,7 +57,6 @@ export function createAndSignTransaction(
     throw new Error("No private key available for address: " + fromAddress);
   }
 
-  // Convert Transaction to the format expected by SDK signTransaction
   const txPlanForSign = {
     input: {
       tx_hash: txPlan.input.txid,
@@ -66,7 +66,6 @@ export function createAndSignTransaction(
     outputs: txPlan.outputs,
   };
 
-  // Use SDK signTransaction
   const tx = signTransaction(txPlanForSign, privateKeyHex);
 
   return {
@@ -78,8 +77,6 @@ export function createAndSignTransaction(
 /**
  * Collect UTXOs for required amount
  * @deprecated Use selectUtxos from SDK instead
- *
- * Wrapper around SDK selectUtxos for backwards compatibility.
  */
 export function collectUtxosForAmount(
   utxoList: UTXO[],
@@ -87,16 +84,11 @@ export function collectUtxosForAmount(
   recipientAddress: string,
   senderAddress: string
 ): TransactionPlan {
-  // Use SDK selectUtxos - types are compatible
   return selectUtxos(utxoList, amountSats, recipientAddress, senderAddress) as TransactionPlan;
 }
 
 /**
  * Create transaction plan from wallet
- * @param wallet - The wallet
- * @param toAddress - Recipient address
- * @param amountAlpha - Amount in ALPHA
- * @param fromAddress - Optional: specific address to send from (defaults to first address)
  */
 export async function createTransactionPlan(
   wallet: Wallet,
@@ -108,21 +100,17 @@ export async function createTransactionPlan(
     throw new Error("Invalid recipient address");
   }
 
-  // Use specified fromAddress or default to first external address
   const defaultAddr = WalletAddressHelper.getDefault(wallet);
   const senderAddress = fromAddress || defaultAddr.address;
   const amountSats = Math.floor(amountAlpha * SATS_PER_COIN);
 
-  // Get UTXOs filtered by current vesting mode (set in SendModal)
   let utxos: UTXO[];
   const currentMode = vestingState.getMode();
 
   if (vestingState.hasClassifiedData(senderAddress)) {
-    // Use vesting-filtered UTXOs based on selected mode
     utxos = vestingState.getFilteredUtxos(senderAddress);
     console.log(`Using ${utxos.length} ${currentMode} UTXOs`);
   } else {
-    // Fall back to all UTXOs if not yet classified
     utxos = await browserProvider.getUtxos(senderAddress);
     console.log(`Using ${utxos.length} UTXOs (vesting not classified yet)`);
   }
@@ -137,10 +125,6 @@ export async function createTransactionPlan(
 
 /**
  * Send ALPHA to address
- * @param wallet - The wallet
- * @param toAddress - Recipient address
- * @param amountAlpha - Amount in ALPHA
- * @param fromAddress - Optional: specific address to send from
  */
 export async function sendAlpha(
   wallet: Wallet,
@@ -154,9 +138,7 @@ export async function sendAlpha(
     throw new Error(plan.error || "Transaction planning failed");
   }
 
-  // Sign all transactions
   const signedTxs = plan.transactions.map(tx => createAndSignTransaction(wallet, tx));
 
-  // Broadcast using SDK function with browser provider
   return broadcastTransactions(signedTxs, (rawHex) => browserProvider.broadcast(rawHex));
 }

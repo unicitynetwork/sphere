@@ -9,8 +9,8 @@
  * - Cached nametags from localStorage displayed immediately
  */
 
-import { browserProvider } from "./network";
-import type { Wallet } from "./types";
+import { browserProvider } from "../sdk/network";
+import type { Wallet } from "../sdk/types";
 // SDK imports - pure functions
 import {
   generateAddressAtPath,
