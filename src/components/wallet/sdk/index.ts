@@ -485,3 +485,107 @@ export {
   ConflictResolutionService,
   createConflictResolutionService,
 } from './storage/conflict-resolution';
+
+// ============================================================================
+// IPNS UTILITIES
+// ============================================================================
+
+// IPNS name derivation from wallet keys
+export {
+  // Constants
+  IPNS_HKDF_INFO,
+  // IPNS derivation
+  deriveEd25519KeyMaterial,
+  deriveIpnsNameFromPrivateKey,
+  deriveEd25519KeyPair,
+  derivePeerIdFromPrivateKey,
+} from './ipns';
+
+// ============================================================================
+// API SERVICES
+// ============================================================================
+
+// HTTP Client abstraction
+export {
+  createFetchHttpClient,
+  createAxiosHttpClient,
+  getDefaultHttpClient,
+  setDefaultHttpClient,
+} from './api';
+
+export type {
+  HttpClient,
+  HttpResponse,
+  HttpRequestOptions,
+} from './api';
+
+// Price API
+export {
+  COINGECKO_API_URL,
+  DEFAULT_PRICES,
+  fetchPrices,
+  getPrice,
+  calculateUsdValue,
+  formatPrice,
+} from './api';
+
+export type {
+  CryptoPriceData,
+  PriceMap,
+} from './api';
+
+// Token Registry API
+export {
+  UNICITY_REGISTRY_URL,
+  fetchRegistry,
+  getBestIconUrl,
+  findTokenByCoinId,
+  findTokenBySymbol,
+  filterByNetwork,
+  filterByAssetKind,
+} from './api';
+
+export type {
+  TokenDefinition,
+  ApiServiceConfig,
+} from './api';
+
+// ============================================================================
+// TOKEN VALIDATION
+// ============================================================================
+
+// Validation types
+export type {
+  ValidationAction,
+  TokenValidationResult,
+  ValidationIssue,
+  ValidationResult,
+  SpentTokenInfo,
+  SpentTokenResult,
+  PendingTransactionCheckResult,
+  PendingTransactionsSummary,
+  BatchValidationOptions,
+  ProofProvider,
+  TokenStateProvider,
+} from './validation';
+
+// TXF validation functions
+export {
+  // Structure validation
+  hasValidTxfStructure,
+  hasValidGenesis,
+  hasValidState,
+  // Transaction validation
+  getUncommittedTransactions,
+  getCommittedTransactions,
+  hasUncommittedTxs,
+  getTransactionAtIndex,
+  // State hash utilities
+  getPreviousStateHash,
+  getCurrentState,
+  // Split token detection
+  isSplitToken,
+  extractBurnTxHash,
+  // Validation summary
+  getValidationSummary,
+} from './validation';

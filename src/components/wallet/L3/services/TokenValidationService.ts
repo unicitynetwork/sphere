@@ -5,9 +5,6 @@
 
 import { Token as LocalToken, TokenStatus } from "../data/model";
 import type {
-  ValidationResult,
-  ValidationIssue,
-  TokenValidationResult,
   TxfTransaction,
   TxfInclusionProof,
   TxfToken,
@@ -15,38 +12,38 @@ import type {
 import { getCurrentStateHash, tokenToTxf } from "./TxfSerializer";
 import { Token as SdkToken } from "../sdk";
 
-// ==========================================
-// Validation Action Types
-// ==========================================
+// Re-export SDK validation types for backwards compatibility
+export type {
+  ValidationAction,
+  TokenValidationResult,
+  ValidationIssue,
+  ValidationResult,
+  SpentTokenInfo,
+  SpentTokenResult,
+} from "../../sdk/validation";
 
-/**
- * Describes what action should be taken based on validation result
- * - ACCEPT: Token is valid, can be used
- * - RETRY_LATER: Proof not available yet, retry submission later
- * - DISCARD_FORK: Transaction can NEVER succeed (source state spent), should be discarded
- */
-export type ValidationAction = "ACCEPT" | "RETRY_LATER" | "DISCARD_FORK";
+// Import SDK validation functions
+import {
+  hasValidTxfStructure as sdkHasValidTxfStructure,
+  getUncommittedTransactions as sdkGetUncommittedTransactions,
+  isSplitToken as sdkIsSplitToken,
+  extractBurnTxHash as sdkExtractBurnTxHash,
+} from "../../sdk/validation";
+
+import type {
+  ValidationAction,
+  TokenValidationResult,
+  ValidationIssue,
+  ValidationResult,
+  SpentTokenInfo,
+  SpentTokenResult,
+} from "../../sdk/validation";
 
 /**
  * Extended validation result with action guidance
  */
-export interface ExtendedValidationResult extends TokenValidationResult {
+export interface ExtendedValidationResult extends TokenValidationResult<LocalToken> {
   action?: ValidationAction;
-}
-
-// ==========================================
-// Spent Token Detection Types
-// ==========================================
-
-export interface SpentTokenInfo {
-  tokenId: string;     // SDK token ID from genesis
-  localId: string;     // Local Token.id for repository removal
-  stateHash: string;   // Current state hash being checked
-}
-
-export interface SpentTokenResult {
-  spentTokens: SpentTokenInfo[];
-  errors: string[];
 }
 
 // ==========================================
@@ -441,40 +438,15 @@ export class TokenValidationService {
         continue;
       }
 
-      // Check if this is a split token by examining genesis.data.reason
-      // Split tokens typically have a reason field referencing the parent burn
-      const genesisData = txf.genesis?.data;
-      const reason = genesisData?.reason;
-
-      // If no reason field, not a split token - assume valid
-      if (!reason) {
+      // Use SDK function to check if it's a split token and extract burn hash
+      if (!sdkIsSplitToken(txf)) {
+        // Not a split token - assume valid
         valid.push(token);
         continue;
       }
 
-      // Parse the reason to check if it's a split mint
-      // Common patterns: "SPLIT_MINT:<burnTxHash>" or JSON with splitMintReason
-      let burnTxHash: string | null = null;
-
-      if (typeof reason === "string") {
-        // Check for SPLIT_MINT prefix
-        if (reason.startsWith("SPLIT_MINT:")) {
-          burnTxHash = reason.substring("SPLIT_MINT:".length);
-        }
-        // Check for JSON format
-        else if (reason.startsWith("{")) {
-          try {
-            const reasonObj = JSON.parse(reason);
-            if (reasonObj.splitMintReason?.burnTransactionHash) {
-              burnTxHash = reasonObj.splitMintReason.burnTransactionHash;
-            } else if (reasonObj.burnTransactionHash) {
-              burnTxHash = reasonObj.burnTransactionHash;
-            }
-          } catch {
-            // Not JSON, continue checking other formats
-          }
-        }
-      }
+      // Extract burn transaction hash using SDK function
+      const burnTxHash = sdkExtractBurnTxHash(txf);
 
       // If no burn transaction reference found, not a split token - assume valid
       if (!burnTxHash) {
@@ -545,6 +517,7 @@ export class TokenValidationService {
   /**
    * Identify which tokens in a list are split tokens
    * Useful for filtering before validation
+   * Uses SDK validation function
    */
   identifySplitTokens(tokens: LocalToken[]): {
     splitTokens: LocalToken[];
@@ -560,15 +533,8 @@ export class TokenValidationService {
         continue;
       }
 
-      const reason = txf.genesis?.data?.reason;
-
-      // Check if reason indicates a split token
-      const isSplit = reason && (
-        (typeof reason === "string" && reason.startsWith("SPLIT_MINT:")) ||
-        (typeof reason === "string" && reason.includes("burnTransactionHash"))
-      );
-
-      if (isSplit) {
+      // Use SDK function to check if it's a split token
+      if (sdkIsSplitToken(txf)) {
         splitTokens.push(token);
       } else {
         regularTokens.push(token);
@@ -811,31 +777,18 @@ export class TokenValidationService {
 
   /**
    * Check if object has valid TXF structure
+   * Uses SDK validation function
    */
   private hasValidTxfStructure(obj: unknown): boolean {
-    if (!obj || typeof obj !== "object") return false;
-
-    const txf = obj as Record<string, unknown>;
-    return !!(
-      txf.genesis &&
-      typeof txf.genesis === "object" &&
-      txf.state &&
-      typeof txf.state === "object"
-    );
+    return sdkHasValidTxfStructure(obj);
   }
 
   /**
    * Get list of uncommitted transactions
+   * Uses SDK validation function
    */
   private getUncommittedTransactions(txfToken: unknown): TxfTransaction[] {
-    const txf = txfToken as Record<string, unknown>;
-    const transactions = txf.transactions as TxfTransaction[] | undefined;
-
-    if (!transactions || !Array.isArray(transactions)) {
-      return [];
-    }
-
-    return transactions.filter((tx) => tx.inclusionProof === null);
+    return sdkGetUncommittedTransactions(txfToken) as TxfTransaction[];
   }
 
   /**
