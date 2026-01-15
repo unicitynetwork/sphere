@@ -238,3 +238,24 @@ export {
   BrowserWalletStatePersistence,
   createBrowserWalletStatePersistence,
 } from './wallet-state-persistence-browser';
+
+// ==========================================
+// Tab Coordination
+// ==========================================
+
+export {
+  SyncCoordinator,
+  getSyncCoordinator,
+  type SyncCoordinatorConfig,
+} from './sync-coordinator';
+
+// ==========================================
+// IPNS Nametag Fetcher
+// ==========================================
+
+export {
+  fetchNametagFromIpns,
+  fetchNametagsForKeys,
+  type IpnsNametagResult,
+  type IpnsNametagConfig,
+} from './ipns-nametag-fetcher';
