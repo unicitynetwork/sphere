@@ -34,6 +34,60 @@ export {
   createConflictResolutionService,
 } from './conflict-resolution';
 
+// Token Comparison
+export {
+  compareTokenVersions,
+  compareTokenVersionsSimple,
+  isLocalBetter,
+  isRemoteBetter,
+  areTokensEqual,
+  countCommittedTransactions,
+  countPendingTransactions,
+  hasPendingTransactions,
+  getTokenTransactionStats,
+} from './token-comparison';
+
+export type {
+  TokenComparisonResult,
+  TokenTransactionStats,
+} from './token-comparison';
+
+// Tombstone Utilities
+export {
+  buildTombstoneKeySet,
+  buildTombstoneMap,
+  isTombstoned,
+  isTokenTombstoned,
+  createTombstone,
+  createTombstoneFromToken,
+  mergeTombstones,
+  filterTombstonesByTokenIds,
+  getTombstonesForToken,
+  findNewTombstones,
+  removeExpiredTombstones,
+  extractTombstonedTokenIds,
+  findMatchingTombstone,
+  validateTombstones,
+} from './tombstone-utils';
+
+export type {
+  TombstoneValidationResult,
+  TombstoneCheckResult,
+} from './tombstone-utils';
+
+// Sync Orchestrator
+export {
+  SyncOrchestrator,
+  createSyncOrchestrator,
+} from './sync-orchestrator';
+
+export type {
+  SyncAction,
+  SyncDecision,
+  DiffResult,
+  SyncOrchestratorOptions,
+} from './sync-orchestrator';
+
 // In-Memory Storage (browser & Node.js)
 export {
   InMemoryStorageProvider,

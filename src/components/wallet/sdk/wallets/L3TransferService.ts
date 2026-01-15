@@ -30,6 +30,12 @@ import {
   type SplitPlan,
 } from '../transaction/token-split';
 
+import {
+  TokenSplitExecutor,
+  type SplitOutboxProvider,
+  type SplitOutboxContext,
+} from '../transaction/split-executor';
+
 // ==========================================
 // Provider Interfaces
 // ==========================================
@@ -135,6 +141,8 @@ export interface L3TransferServiceConfig {
   nostr: L3NostrProvider;
   /** Random bytes provider (optional, defaults to crypto) */
   randomBytes?: L3RandomBytesProvider;
+  /** Outbox provider for split recovery (optional) */
+  outboxProvider?: SplitOutboxProvider;
 }
 
 /**
@@ -153,6 +161,8 @@ export class L3TransferService {
   private nostr: L3NostrProvider;
   private randomBytes: L3RandomBytesProvider;
   private splitCalculator: TokenSplitCalculator;
+  private splitExecutor: TokenSplitExecutor;
+  private outboxProvider: SplitOutboxProvider | undefined;
 
   constructor(config: L3TransferServiceConfig) {
     this.client = config.stateTransitionClient;
@@ -161,6 +171,12 @@ export class L3TransferService {
     this.nostr = config.nostr;
     this.randomBytes = config.randomBytes ?? new DefaultL3RandomBytesProvider();
     this.splitCalculator = new TokenSplitCalculator();
+    this.outboxProvider = config.outboxProvider;
+    this.splitExecutor = new TokenSplitExecutor({
+      stateTransitionClient: config.stateTransitionClient,
+      trustBase: config.trustBase,
+      outboxProvider: config.outboxProvider,
+    });
   }
 
   /**
@@ -305,17 +321,14 @@ export class L3TransferService {
   }
 
   /**
-   * Execute split transfer
-   *
-   * NOTE: Split transfers require the full TokenSplitBuilder flow which is complex.
-   * For now, this is a placeholder. Full implementation available in app-layer TokenSplitExecutor.
+   * Execute split transfer using TokenSplitExecutor
    */
   private async executeSplitTransfer(
     plan: SplitPlan<SplittableToken>,
-    _recipientAddress: IAddress,
-    _recipientPubkey: string,
-    _signingService: SigningService,
-    _coinId: string
+    recipientAddress: IAddress,
+    recipientPubkey: string,
+    signingService: SigningService,
+    _coinId: string // eslint-disable-line @typescript-eslint/no-unused-vars
   ): Promise<{ success: boolean; txIds: string[] }> {
     if (!plan.tokenToSplit || !plan.splitAmount || !plan.remainderAmount) {
       throw new Error('Invalid split plan');
@@ -323,19 +336,75 @@ export class L3TransferService {
 
     console.log(`✂️ Split transfer: ${plan.splitAmount} to recipient, ${plan.remainderAmount} back`);
 
-    // TODO: Implement full split logic using TokenSplitBuilder
-    // The full implementation requires:
-    // 1. Create TokenSplitBuilder
-    // 2. Create two new tokens (recipient + change)
-    // 3. Build split object
-    // 4. Burn original token
-    // 5. Mint split tokens
-    // 6. Transfer recipient token
-    // 7. Keep change token
-    //
-    // For now, use app-layer TokenSplitExecutor for splits
+    // Build outbox context if outbox provider is available
+    const outboxContext: SplitOutboxContext | undefined = this.outboxProvider
+      ? {
+          walletAddress: '', // Caller should set this via extended config
+          recipientNametag: '', // Not available here, would need extended request
+          recipientPubkey: recipientPubkey,
+        }
+      : undefined;
 
-    throw new Error('Split transfer not yet implemented in SDK - use app-layer TokenSplitExecutor');
+    // Execute the split using the SDK executor
+    const result = await this.splitExecutor.executeSplitPlan(
+      plan,
+      recipientAddress,
+      signingService,
+      (tokenId) => {
+        // Remove burned token from storage
+        this.tokenStorage.removeToken(tokenId);
+        console.log(`🔥 Token ${tokenId.slice(0, 8)}... burned and removed`);
+      },
+      outboxContext
+    );
+
+    // Save the change token to storage
+    if (result.tokensKeptBySender.length > 0) {
+      for (const changeToken of result.tokensKeptBySender) {
+        const tokenIdHex = Buffer.from(changeToken.id.bytes).toString('hex');
+        const amount = this.extractAmount(changeToken);
+        this.tokenStorage.saveToken({
+          id: tokenIdHex,
+          coinId: plan.coinId,
+          amount: amount.toString(),
+          jsonData: JSON.stringify(changeToken.toJSON()),
+          status: 'CONFIRMED',
+        });
+        console.log(`💰 Change token ${tokenIdHex.slice(0, 8)}... saved (${amount})`);
+      }
+    }
+
+    // Send recipient tokens via Nostr
+    for (let i = 0; i < result.tokensForRecipient.length; i++) {
+      const token = result.tokensForRecipient[i];
+      const transferTx = result.recipientTransferTxs[i];
+
+      const payload = JSON.stringify({
+        sourceToken: JSON.stringify(token.toJSON()),
+        transferTx: JSON.stringify(transferTx.toJSON()),
+      });
+
+      const sent = await this.nostr.sendTokenTransfer(recipientPubkey, payload);
+      if (!sent) {
+        console.warn('Nostr delivery failed for split token, but on-chain transfer succeeded');
+      }
+    }
+
+    // Build txIds from transfer transactions (use transaction hash or index)
+    const txIds: string[] = result.recipientTransferTxs.map((tx, index) => {
+      try {
+        // TransferTransaction doesn't have requestId, use JSON to extract hash
+        const txJson = tx.toJSON();
+        if (txJson && typeof txJson === 'object' && 'transactionHash' in txJson) {
+          return String(txJson.transactionHash);
+        }
+        return `split-transfer-${index}`;
+      } catch {
+        return `split-transfer-${index}`;
+      }
+    });
+
+    return { success: true, txIds };
   }
 
   /**

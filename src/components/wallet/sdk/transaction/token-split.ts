@@ -191,8 +191,7 @@ export class TokenSplitCalculator {
 
       if (coinData && coinData.coins) {
         const rawCoins = coinData.coins;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let val: any = null;
+        let val: unknown = null;
 
         const firstItem = rawCoins[0];
         if (Array.isArray(firstItem) && firstItem.length === 2) {

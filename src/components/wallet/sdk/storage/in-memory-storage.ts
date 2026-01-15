@@ -328,7 +328,7 @@ export class InMemoryStorageProvider<
     return true;
   }
 
-  async exists(_identifier?: string): Promise<boolean> {
+  async exists(_identifier?: string): Promise<boolean> { // eslint-disable-line @typescript-eslint/no-unused-vars
     return this.data !== null;
   }
 
