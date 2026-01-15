@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
 import { vestingState } from "../sdk";
-import type { VestingMode, VestingBalances } from "../sdk/types";
+import type { VestingMode, VestingBalances } from "../sdk";
 
 // Skeleton shimmer component
 function BalanceSkeleton() {

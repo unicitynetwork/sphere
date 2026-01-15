@@ -64,7 +64,6 @@ export function useWalletOperations() {
       try {
         const content = exportWallet(wallet, {
           password: password || undefined,
-          filename: filename,
         });
 
         downloadWalletFile(content, filename);

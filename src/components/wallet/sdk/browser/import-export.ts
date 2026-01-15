@@ -22,6 +22,7 @@ import type {
 
 // Re-export SDK types
 export type { ImportWalletResult, ImportWalletOptions };
+export type { WalletJSON, WalletJSONExportOptions } from '../types';
 
 // ==========================================
 // Browser-specific helpers

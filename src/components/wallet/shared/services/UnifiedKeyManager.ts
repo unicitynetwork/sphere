@@ -29,11 +29,11 @@ import {
 } from "../../sdk";
 import {
   exportWalletToJSON,
-  downloadWalletJSON,
+  downloadJSON,
   importWalletFromJSON,
   type WalletJSON,
   type WalletJSONExportOptions,
-} from "../../L1/sdk/import-export";
+} from "../../sdk/browser/import-export";
 import { STORAGE_KEYS, clearAllSphereData } from "../../../../config/storageKeys";
 
 const ec = new elliptic.ec("secp256k1");
@@ -625,11 +625,10 @@ export class UnifiedKeyManager {
       descriptorPath: this.derivationMode === "bip32" ? this.basePath.replace(/^m\//, '') : null,
     };
 
-    return exportWalletToJSON({
-      wallet,
+    return exportWalletToJSON(wallet, {
+      ...options,
       mnemonic: this.mnemonic || undefined,
       importSource: this.source === "file" ? "file" : undefined,
-      options,
     });
   }
 
@@ -641,7 +640,7 @@ export class UnifiedKeyManager {
     const defaultFilename = this.mnemonic
       ? "alpha_wallet_mnemonic_backup.json"
       : "alpha_wallet_backup.json";
-    downloadWalletJSON(json, filename || defaultFilename);
+    downloadJSON(json, filename || defaultFilename);
   }
 
   /**

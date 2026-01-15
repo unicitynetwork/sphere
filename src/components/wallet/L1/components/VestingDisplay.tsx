@@ -1,5 +1,5 @@
 import { Loader2 } from "lucide-react";
-import type { VestingBalances } from "../sdk/types";
+import type { VestingBalances } from "../sdk";
 
 interface VestingDisplayProps {
   showBalances?: boolean;

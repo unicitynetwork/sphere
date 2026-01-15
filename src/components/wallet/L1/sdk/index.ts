@@ -3,14 +3,6 @@
  *
  * This module provides backwards-compatible exports from the portable SDK.
  * All implementation is in ../../sdk/browser/
- *
- * Exports:
- * - Wallet operations (create, load, delete, generateAddress)
- * - Storage utilities
- * - Transaction functions
- * - Vesting classification
- * - Network provider
- * - Import/Export functions
  */
 
 // ============================================================================
@@ -78,10 +70,12 @@ export {
   type ClassificationResult,
   type ClassifiedUTXO,
   type ClassifyUtxosResult,
+  type VestingMode,
+  type VestingBalances,
 } from '../../sdk/browser';
 
 // Backwards-compatible singleton
-import { getVestingClassifier } from '../../sdk/browser';
+import { getVestingClassifier, getVestingState } from '../../sdk/browser';
 
 /** @deprecated Use getVestingClassifier() instead */
 export const vestingClassifier = getVestingClassifier();
@@ -93,12 +87,7 @@ export const vestingClassifier = getVestingClassifier();
 export {
   VestingStateManager,
   getVestingState,
-  type VestingMode,
-  type VestingBalances,
 } from '../../sdk/browser';
-
-// Backwards-compatible singleton
-import { getVestingState } from '../../sdk/browser';
 
 /** @deprecated Use getVestingState() instead */
 export const vestingState = getVestingState();
@@ -171,16 +160,46 @@ export {
 } from '../../sdk/browser/tx';
 
 // ============================================================================
-// L1-SPECIFIC TYPES
+// IMPORT/EXPORT
 // ============================================================================
 
-export * from './types';
+export {
+  // File operations
+  importWalletFromFile as importWallet,
+  importWalletFromJSON,
+  exportWalletToText as exportWallet,
+  exportWalletToJSON,
+  downloadTextFile as downloadWalletFile,
+  downloadJSON as downloadWalletJSON,
+  downloadWalletText,
+  // Detection
+  isJSONWalletFormat,
+  detectWalletFileFormat,
+  // Types
+  type ImportWalletResult,
+  type ImportWalletOptions,
+  type ExportToTextOptions as ExportOptions,
+  type ExportToJSONOptions,
+} from '../../sdk/browser/import-export';
 
 // ============================================================================
-// IMPORT/EXPORT (L1-specific type conversions)
+// TYPES (backwards-compatible aliases)
 // ============================================================================
 
-export * from './import-export';
+// Wallet types
+export type {
+  BaseWallet as Wallet,
+  BaseWalletAddress as WalletAddress,
+  L1UTXO as UTXO,
+  WalletJSONSource,
+  WalletJSONDerivationMode,
+  WalletJSONAddress,
+  WalletJSON,
+  WalletJSONExportOptions,
+} from '../../sdk/types';
+
+// StoredWallet alias
+export type { StoredWalletEntry as StoredWallet } from '../../sdk/browser';
 
 // ============================================================================
 // SCAN (has L3 dependencies, located in L1/services)

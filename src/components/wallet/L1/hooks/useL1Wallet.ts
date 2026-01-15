@@ -387,7 +387,6 @@ export function useL1Wallet(selectedAddressProp?: string) {
     try {
       const content = exportWallet(wallet, {
         password: password || undefined,
-        filename: filename,
       });
       downloadWalletFile(content, filename);
       return { success: true };

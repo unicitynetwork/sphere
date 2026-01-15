@@ -10,7 +10,7 @@
  */
 
 import { browserProvider } from "../sdk";
-import type { Wallet } from "../sdk/types";
+import type { Wallet } from "../sdk";
 // SDK imports - pure functions
 import {
   generateAddressAtPath,

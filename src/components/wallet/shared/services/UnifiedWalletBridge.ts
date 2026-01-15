@@ -6,7 +6,7 @@
  */
 
 import { UnifiedKeyManager } from "./UnifiedKeyManager";
-import type { Wallet, WalletAddress } from "../../L1/sdk/types";
+import type { Wallet, WalletAddress } from "../../L1/sdk";
 import { loadWalletFromStorage } from "../../L1/sdk";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
