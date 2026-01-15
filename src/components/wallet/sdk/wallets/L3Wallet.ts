@@ -1,21 +1,31 @@
 /**
  * L3Wallet - Unicity Token Network SDK
  *
- * Basic L3 wallet operations:
+ * Full L3 wallet functionality:
  * - Identity creation from private key
  * - Address derivation
  * - Token queries via aggregator
+ * - Token transfers (via L3TransferService)
+ * - Balance queries
  *
- * Note: Full transfer functionality requires Nostr P2P layer
- * which is implemented in the Sphere application.
+ * Platform implementations need to provide:
+ * - L3TokenStorageProvider for token persistence
+ * - L3NostrProvider for P2P messaging
  */
 
 import { SigningService } from '@unicitylabs/state-transition-sdk/lib/sign/SigningService';
 import { TokenType } from '@unicitylabs/state-transition-sdk/lib/token/TokenType';
 import { StateTransitionClient } from '@unicitylabs/state-transition-sdk/lib/StateTransitionClient';
 import { AggregatorClient } from '@unicitylabs/state-transition-sdk/lib/api/AggregatorClient';
+import { RootTrustBase } from '@unicitylabs/state-transition-sdk/lib/bft/RootTrustBase';
 import { UNICITY_TOKEN_TYPE_HEX } from '../types';
 import { deriveL3Address } from '../address/unified';
+import {
+  L3TransferService,
+  type L3TokenStorageProvider,
+  type L3NostrProvider,
+  type L3TransferResult,
+} from './L3TransferService';
 
 // ==========================================
 // Configuration
@@ -33,6 +43,12 @@ export interface L3WalletConfig {
   aggregatorUrl?: string;
   /** API key for aggregator */
   apiKey?: string;
+  /** Trust base JSON for verification */
+  trustBaseJson?: object;
+  /** Token storage provider (required for transfers) */
+  tokenStorage?: L3TokenStorageProvider;
+  /** Nostr provider (required for transfers) */
+  nostrProvider?: L3NostrProvider;
 }
 
 export interface L3Identity {
@@ -55,10 +71,27 @@ export interface L3Identity {
  *
  * Usage:
  * ```typescript
+ * // Basic usage (queries only)
  * const l3 = new L3Wallet({ aggregatorUrl: '...' });
  * const identity = await l3.createIdentity(privateKeyHex);
  *
- * // For full transfer functionality, use Sphere's transfer services
+ * // Full usage with transfers
+ * const l3 = new L3Wallet({
+ *   tokenStorage: myStorageProvider,
+ *   nostrProvider: myNostrProvider,
+ *   trustBaseJson: trustBaseData,
+ * });
+ *
+ * // Send tokens
+ * const result = await l3.send({
+ *   recipientNametag: 'alice',
+ *   amount: '1000000',
+ *   coinId: 'abc123...',
+ *   privateKey: identity.privateKey,
+ * });
+ *
+ * // Get balance
+ * const balance = await l3.getBalance('abc123...');
  * ```
  */
 export class L3Wallet {
@@ -66,6 +99,8 @@ export class L3Wallet {
   private stateTransitionClient: StateTransitionClient;
   private tokenType: TokenType;
   private config: L3WalletConfig;
+  private trustBase: RootTrustBase | null = null;
+  private transferService: L3TransferService | null = null;
 
   constructor(config: L3WalletConfig = {}) {
     this.config = config;
@@ -75,6 +110,21 @@ export class L3Wallet {
     this.aggregatorClient = new AggregatorClient(aggregatorUrl, apiKey);
     this.stateTransitionClient = new StateTransitionClient(this.aggregatorClient);
     this.tokenType = new TokenType(Buffer.from(UNICITY_TOKEN_TYPE_HEX, 'hex'));
+
+    // Initialize trust base if provided
+    if (config.trustBaseJson) {
+      this.trustBase = RootTrustBase.fromJSON(config.trustBaseJson);
+    }
+
+    // Initialize transfer service if providers are available
+    if (config.tokenStorage && config.nostrProvider && this.trustBase) {
+      this.transferService = new L3TransferService({
+        stateTransitionClient: this.stateTransitionClient,
+        trustBase: this.trustBase,
+        tokenStorage: config.tokenStorage,
+        nostr: config.nostrProvider,
+      });
+    }
   }
 
   // ==========================================
@@ -118,6 +168,54 @@ export class L3Wallet {
   }
 
   // ==========================================
+  // Token Operations
+  // ==========================================
+
+  /**
+   * Send tokens to a recipient
+   *
+   * Requires tokenStorage and nostrProvider in config.
+   *
+   * @param params - Transfer parameters
+   * @returns Transfer result
+   */
+  async send(params: {
+    recipientNametag: string;
+    amount: string;
+    coinId: string;
+    privateKey: string;
+  }): Promise<L3TransferResult> {
+    if (!this.transferService) {
+      return {
+        success: false,
+        txIds: [],
+        error: 'Transfer service not configured. Provide tokenStorage, nostrProvider, and trustBaseJson.',
+      };
+    }
+
+    return this.transferService.send(params);
+  }
+
+  /**
+   * Get balance for a coin ID
+   *
+   * Requires tokenStorage in config.
+   */
+  async getBalance(coinId: string): Promise<bigint> {
+    if (!this.transferService) {
+      throw new Error('Token storage not configured');
+    }
+    return this.transferService.getBalance(coinId);
+  }
+
+  /**
+   * Check if transfer functionality is available
+   */
+  isTransferEnabled(): boolean {
+    return this.transferService !== null;
+  }
+
+  // ==========================================
   // Aggregator Access
   // ==========================================
 
@@ -147,5 +245,50 @@ export class L3Wallet {
    */
   getAggregatorUrl(): string {
     return this.config.aggregatorUrl ?? DEFAULT_AGGREGATOR_URL;
+  }
+
+  /**
+   * Get trust base (if configured)
+   */
+  getTrustBase(): RootTrustBase | null {
+    return this.trustBase;
+  }
+
+  /**
+   * Set trust base after construction
+   */
+  setTrustBase(trustBaseJson: object): void {
+    this.trustBase = RootTrustBase.fromJSON(trustBaseJson);
+
+    // Re-initialize transfer service if storage providers are available
+    if (this.config.tokenStorage && this.config.nostrProvider) {
+      this.transferService = new L3TransferService({
+        stateTransitionClient: this.stateTransitionClient,
+        trustBase: this.trustBase,
+        tokenStorage: this.config.tokenStorage,
+        nostr: this.config.nostrProvider,
+      });
+    }
+  }
+
+  /**
+   * Configure storage providers after construction
+   */
+  configureProviders(
+    tokenStorage: L3TokenStorageProvider,
+    nostrProvider: L3NostrProvider
+  ): void {
+    this.config.tokenStorage = tokenStorage;
+    this.config.nostrProvider = nostrProvider;
+
+    // Re-initialize transfer service if trust base is available
+    if (this.trustBase) {
+      this.transferService = new L3TransferService({
+        stateTransitionClient: this.stateTransitionClient,
+        trustBase: this.trustBase,
+        tokenStorage,
+        nostr: nostrProvider,
+      });
+    }
   }
 }

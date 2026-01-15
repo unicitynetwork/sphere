@@ -8,7 +8,9 @@ import {
   validateMnemonic,
   deriveL3Address,
   type DirectAddress,
+  type WalletStatePersistence,
 } from "../../sdk";
+import { BrowserWalletStatePersistence } from "../../sdk/browser/wallet-state-persistence-browser";
 
 // Re-export UserIdentity type from SDK for consumers
 export type { UserIdentity } from "../../sdk";
@@ -19,9 +21,12 @@ const DEFAULT_SESSION_KEY = "user-pin-1234";
 export class IdentityManager {
   private static instance: IdentityManager;
   private sessionKey: string;
+  private statePersistence: WalletStatePersistence;
 
-  private constructor(sessionKey: string) {
+  private constructor(sessionKey: string, statePersistence?: WalletStatePersistence) {
     this.sessionKey = sessionKey;
+    // Use provided persistence or default to browser localStorage
+    this.statePersistence = statePersistence ?? new BrowserWalletStatePersistence();
   }
 
   static getInstance(sessionKey: string = DEFAULT_SESSION_KEY): IdentityManager {
@@ -46,7 +51,7 @@ export class IdentityManager {
    * Returns null if not set (caller should use default first address)
    */
   getSelectedAddressPath(): string | null {
-    return localStorage.getItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
+    return this.statePersistence.getString(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
   }
 
   /**
@@ -54,17 +59,17 @@ export class IdentityManager {
    * @param path - Full BIP32 path like "m/84'/1'/0'/0/0"
    */
   setSelectedAddressPath(path: string): void {
-    localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, path);
+    this.statePersistence.setString(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, path);
     // Clean up legacy index key
-    localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_INDEX_LEGACY);
+    this.statePersistence.remove(STORAGE_KEYS.L3_SELECTED_ADDRESS_INDEX_LEGACY);
   }
 
   /**
    * Clear the selected address path (for wallet reset)
    */
   clearSelectedAddressPath(): void {
-    localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
-    localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_INDEX_LEGACY);
+    this.statePersistence.remove(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
+    this.statePersistence.remove(STORAGE_KEYS.L3_SELECTED_ADDRESS_INDEX_LEGACY);
   }
 
   /**
@@ -159,7 +164,7 @@ export class IdentityManager {
       mnemonic,
       this.sessionKey
     ).toString();
-    localStorage.setItem(STORAGE_KEYS.ENCRYPTED_SEED, encrypted);
+    this.statePersistence.setString(STORAGE_KEYS.ENCRYPTED_SEED, encrypted);
   }
 
   async getCurrentIdentity(): Promise<UserIdentity | null> {

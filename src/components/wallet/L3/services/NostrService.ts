@@ -49,6 +49,8 @@ import {
 } from "../data/model";
 import { v4 as uuidv4 } from "uuid";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
+import type { WalletStatePersistence } from "../../sdk";
+import { BrowserWalletStatePersistence } from "../../sdk/browser/wallet-state-persistence-browser";
 
 const UNICITY_RELAYS = [
   "wss://nostr-relay.testnet.unicity.network",
@@ -67,12 +69,14 @@ export class NostrService {
   private paymentRequests: IncomingPaymentRequest[] = [];
   private chatRepository: ChatRepository;
   private dmListeners: ((message: ChatMessage) => void)[] = [];
+  private statePersistence: WalletStatePersistence;
 
   private processedEventIds: Set<string> = new Set(); // Persistent storage for all processed events
 
-  private constructor(identityManager: IdentityManager) {
+  private constructor(identityManager: IdentityManager, statePersistence?: WalletStatePersistence) {
     this.identityManager = identityManager;
     this.chatRepository = ChatRepository.getInstance();
+    this.statePersistence = statePersistence ?? new BrowserWalletStatePersistence();
     this.loadProcessedEvents();
   }
 
@@ -251,14 +255,14 @@ export class NostrService {
   }
 
   private getOrInitLastSync(): number {
-    const saved = localStorage.getItem(STORAGE_KEYS.NOSTR_LAST_SYNC);
+    const saved = this.statePersistence.getString(STORAGE_KEYS.NOSTR_LAST_SYNC);
     if (saved) {
       return parseInt(saved);
     } else {
       // For new wallets, set lastSync to 5 minutes ago to catch any tokens
       // that were sent during wallet creation (e.g., from faucet)
       const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 300;
-      localStorage.setItem(STORAGE_KEYS.NOSTR_LAST_SYNC, fiveMinutesAgo.toString());
+      this.statePersistence.setString(STORAGE_KEYS.NOSTR_LAST_SYNC, fiveMinutesAgo.toString());
       return fiveMinutesAgo;
     }
   }
@@ -266,7 +270,7 @@ export class NostrService {
   private updateLastSync(timestamp: number) {
     const current = this.getOrInitLastSync();
     if (timestamp > current) {
-      localStorage.setItem(STORAGE_KEYS.NOSTR_LAST_SYNC, timestamp.toString());
+      this.statePersistence.setString(STORAGE_KEYS.NOSTR_LAST_SYNC, timestamp.toString());
     }
   }
 
@@ -301,9 +305,8 @@ export class NostrService {
 
   private loadProcessedEvents() {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.NOSTR_PROCESSED_EVENTS);
-      if (saved) {
-        const ids = JSON.parse(saved) as string[];
+      const ids = this.statePersistence.getJSON<string[]>(STORAGE_KEYS.NOSTR_PROCESSED_EVENTS);
+      if (ids) {
         this.processedEventIds = new Set(ids);
         console.log(`📋 Loaded ${ids.length} processed event IDs from persistent storage`);
       }
@@ -323,7 +326,7 @@ export class NostrService {
         this.processedEventIds = new Set(ids);
       }
 
-      localStorage.setItem(STORAGE_KEYS.NOSTR_PROCESSED_EVENTS, JSON.stringify(ids));
+      this.statePersistence.setJSON(STORAGE_KEYS.NOSTR_PROCESSED_EVENTS, ids);
     } catch (error) {
       console.error("Failed to save processed events", error);
     }

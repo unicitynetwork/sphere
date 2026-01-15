@@ -77,7 +77,7 @@ export { addressToScriptHash, createScriptPubKey } from './address/script';
 // Address helpers
 export { WalletAddressHelper } from './address/addressHelpers';
 
-// Transaction building
+// Transaction building (L1)
 export {
   createSignatureHash,
   createWitnessData,
@@ -88,6 +88,18 @@ export {
   DUST_THRESHOLD,
   SATS_PER_COIN,
 } from './transaction/transaction';
+
+// Token split calculator (L3)
+export {
+  TokenSplitCalculator,
+  createTokenSplitCalculator,
+} from './transaction/token-split';
+
+export type {
+  SplittableToken,
+  TokenWithAmount,
+  SplitPlan,
+} from './transaction/token-split';
 
 // Crypto utilities
 export {
@@ -301,6 +313,21 @@ export type {
 // L3 Wallet
 export { L3Wallet } from './wallets/L3Wallet';
 export type { L3WalletConfig, L3Identity } from './wallets/L3Wallet';
+
+// L3 Transfer Service
+export {
+  L3TransferService,
+  DefaultL3RandomBytesProvider,
+  createL3TransferService,
+} from './wallets/L3TransferService';
+export type {
+  L3TokenStorageProvider,
+  L3NostrProvider,
+  L3RandomBytesProvider,
+  L3TransferResult,
+  L3TransferRequest,
+  L3TransferServiceConfig,
+} from './wallets/L3TransferService';
 
 // Unified L1 + L3 Wallet
 export { UnityWallet } from './wallets/UnityWallet';
@@ -549,13 +576,24 @@ export {
   createInMemoryIpfsStatePersistence,
 } from './storage';
 
+// Wallet State Persistence Interface (platform-independent)
+export type {
+  WalletStatePersistence,
+} from './storage';
+
+export {
+  WALLET_STATE_KEYS,
+  InMemoryWalletStatePersistence,
+  createInMemoryWalletStatePersistence,
+} from './storage';
+
 // NOTE: FileStorageProvider uses Node.js fs/path modules and is NOT exported here.
 // For Node.js/CLI usage, import directly:
 // import { FileStorageProvider, createFileStorageProvider } from './sdk/storage/file-storage';
 //
-// NOTE: BrowserIpfsStatePersistence uses localStorage and is NOT exported here.
-// For browser usage, import from browser module:
-// import { BrowserIpfsStatePersistence } from './sdk/browser';
+// NOTE: BrowserIpfsStatePersistence and BrowserWalletStatePersistence use localStorage
+// and are NOT exported here. For browser usage, import from browser module:
+// import { BrowserIpfsStatePersistence, BrowserWalletStatePersistence } from './sdk/browser';
 
 // ============================================================================
 // IPNS UTILITIES

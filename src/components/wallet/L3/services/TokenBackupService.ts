@@ -18,6 +18,8 @@
 import { Token as LocalToken, TokenStatus } from "../data/model";
 import type { TxfToken } from "./types/TxfTypes";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
+import type { WalletStatePersistence } from "../../sdk";
+import { BrowserWalletStatePersistence } from "../../sdk/browser/wallet-state-persistence-browser";
 
 // ==========================================
 // Types
@@ -61,10 +63,15 @@ export class TokenBackupService {
 
   private readonly BACKUP_STALE_DAYS = 7;
   private readonly SYNC_WARNING_DAYS = 3;
+  private statePersistence: WalletStatePersistence;
 
   // ==========================================
   // Singleton
   // ==========================================
+
+  private constructor(statePersistence?: WalletStatePersistence) {
+    this.statePersistence = statePersistence ?? new BrowserWalletStatePersistence();
+  }
 
   static getInstance(): TokenBackupService {
     if (!TokenBackupService.instance) {
@@ -210,7 +217,7 @@ export class TokenBackupService {
     const arrayBuffer = await blob.arrayBuffer();
     const base64 = this.arrayBufferToBase64(arrayBuffer);
 
-    localStorage.setItem(STORAGE_KEYS.ENCRYPTED_TOKEN_BACKUP, base64);
+    this.statePersistence.setString(STORAGE_KEYS.ENCRYPTED_TOKEN_BACKUP, base64);
     console.log(`📦 Local backup saved to localStorage`);
   }
 
@@ -224,7 +231,7 @@ export class TokenBackupService {
     metadata: BackupMetadata;
     warnings: string[];
   } | null> {
-    const base64 = localStorage.getItem(STORAGE_KEYS.ENCRYPTED_TOKEN_BACKUP);
+    const base64 = this.statePersistence.getString(STORAGE_KEYS.ENCRYPTED_TOKEN_BACKUP);
     if (!base64) {
       return null;
     }
@@ -238,8 +245,8 @@ export class TokenBackupService {
    * Call this on app startup to prompt user
    */
   checkBackupStatus(): BackupStatus {
-    const lastBackup = localStorage.getItem(STORAGE_KEYS.TOKEN_BACKUP_TIMESTAMP);
-    const lastSync = localStorage.getItem(STORAGE_KEYS.LAST_IPFS_SYNC_SUCCESS);
+    const lastBackup = this.statePersistence.getString(STORAGE_KEYS.TOKEN_BACKUP_TIMESTAMP);
+    const lastSync = this.statePersistence.getString(STORAGE_KEYS.LAST_IPFS_SYNC_SUCCESS);
 
     const now = Date.now();
     const lastBackupTime = lastBackup ? parseInt(lastBackup, 10) : null;
@@ -285,14 +292,14 @@ export class TokenBackupService {
    * Update the backup timestamp (called after successful backup)
    */
   updateBackupTimestamp(): void {
-    localStorage.setItem(STORAGE_KEYS.TOKEN_BACKUP_TIMESTAMP, Date.now().toString());
+    this.statePersistence.setString(STORAGE_KEYS.TOKEN_BACKUP_TIMESTAMP, Date.now().toString());
   }
 
   /**
    * Update the sync timestamp (call after successful IPFS sync)
    */
   updateSyncTimestamp(): void {
-    localStorage.setItem(STORAGE_KEYS.LAST_IPFS_SYNC_SUCCESS, Date.now().toString());
+    this.statePersistence.setString(STORAGE_KEYS.LAST_IPFS_SYNC_SUCCESS, Date.now().toString());
   }
 
   /**

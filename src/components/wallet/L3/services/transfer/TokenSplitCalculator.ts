@@ -1,13 +1,38 @@
+/**
+ * Token Split Calculator - App Layer Adapter
+ *
+ * Thin wrapper around the SDK TokenSplitCalculator that adapts
+ * app-layer Token types to the SDK's generic interface.
+ */
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Token } from "../../data/model";
-import { Token as SdkToken } from "../../sdk";
+import {
+  TokenSplitCalculator as SdkTokenSplitCalculator,
+  type SplitPlan as SdkSplitPlan,
+  type TokenWithAmount as SdkTokenWithAmount,
+  Token as SdkToken,
+} from "../../sdk";
 
+// ==========================================
+// App-Layer Types (for backwards compatibility)
+// ==========================================
+
+/**
+ * Token with amount - app-layer version
+ * Maps SDK's generic type to use UI Token
+ */
 export interface TokenWithAmount {
   sdkToken: SdkToken<any>;
   amount: bigint;
+  /** @deprecated Use sourceToken from SDK. Kept for backwards compatibility */
   uiToken: Token;
 }
 
+/**
+ * Split plan - app-layer version
+ * Maps SDK's generic type to use UI Token
+ */
 export interface SplitPlan {
   tokensToTransferDirectly: TokenWithAmount[];
   tokenToSplit: TokenWithAmount | null;
@@ -18,183 +43,84 @@ export interface SplitPlan {
   requiresSplit: boolean;
 }
 
+// ==========================================
+// App-Layer Calculator
+// ==========================================
+
+/**
+ * Token Split Calculator for L3 wallet
+ *
+ * This is a thin adapter that:
+ * 1. Uses the SDK TokenSplitCalculator for all logic
+ * 2. Maps app-layer Token to SDK's SplittableToken interface
+ * 3. Maps SDK results back to app-layer types
+ */
 export class TokenSplitCalculator {
+  private sdkCalculator: SdkTokenSplitCalculator;
+
+  constructor() {
+    this.sdkCalculator = new SdkTokenSplitCalculator();
+  }
+
+  /**
+   * Calculate optimal split for a transfer
+   *
+   * @param availableTokens - App-layer Token array
+   * @param targetAmount - Amount to transfer
+   * @param targetCoinIdHex - Coin ID (hex string)
+   * @returns Split plan with app-layer Token references
+   */
   async calculateOptimalSplit(
     availableTokens: Token[],
     targetAmount: bigint,
     targetCoinIdHex: string
   ): Promise<SplitPlan | null> {
-    console.log(
-      `🧮 Calculating split for ${targetAmount} of ${targetCoinIdHex}`
+    // The Token class already has the fields that match SplittableToken:
+    // - id: string
+    // - coinId?: string
+    // - status: string
+    // - jsonData?: string
+    const sdkResult = await this.sdkCalculator.calculateOptimalSplit(
+      availableTokens,
+      targetAmount,
+      targetCoinIdHex
     );
 
-    const candidates: TokenWithAmount[] = [];
-
-    for (const t of availableTokens) {
-      if (t.coinId !== targetCoinIdHex) continue;
-      if (t.status !== "CONFIRMED") continue;
-      if (!t.jsonData) continue;
-
-      try {
-        const parsed = JSON.parse(t.jsonData);
-        const sdkToken = await SdkToken.fromJSON(parsed);
-        const realAmount = this.getRealAmountFromSdk(sdkToken);
-
-        if (realAmount <= 0n) {
-          console.warn(`Token ${t.id} has 0 balance in SDK structure.`);
-          continue;
-        }
-
-        console.log(realAmount)
-
-        candidates.push({
-          sdkToken: sdkToken,
-          amount: realAmount,
-          uiToken: t,
-        });
-      } catch (e) {
-        console.warn("Failed to parse candidate token", t.id, e);
-      }
-    }
-
-    candidates.sort((a, b) => (a.amount < b.amount ? -1 : 1));
-
-    const totalAvailable = candidates.reduce((sum, t) => sum + t.amount, 0n);
-    if (totalAvailable < targetAmount) {
-      console.error(
-        `Insufficient funds. Available: ${totalAvailable}, Required: ${targetAmount}`
-      );
+    if (!sdkResult) {
       return null;
     }
 
-    const exactMatch = candidates.find((t) => t.amount === targetAmount);
-    if (exactMatch) {
-      console.log("🎯 Found exact match token");
-      return this.createDirectPlan([exactMatch], targetAmount, targetCoinIdHex);
-    }
-
-    const maxCombinationSize = Math.min(5, candidates.length);
-
-    for (let size = 2; size <= maxCombinationSize; size++) {
-      const combo = this.findCombinationOfSize(candidates, targetAmount, size);
-      if (combo) {
-        console.log(`🎯 Found exact combination of ${size} tokens`);
-        return this.createDirectPlan(combo, targetAmount, targetCoinIdHex);
-      }
-    }
-
-    const toTransfer: TokenWithAmount[] = [];
-    let currentSum = 0n;
-
-    for (const candidate of candidates) {
-      const newSum = currentSum + candidate.amount;
-
-      if (newSum === targetAmount) {
-        toTransfer.push(candidate);
-        return this.createDirectPlan(toTransfer, targetAmount, targetCoinIdHex);
-      } else if (newSum < targetAmount) {
-        toTransfer.push(candidate);
-        currentSum = newSum;
-      } else {
-        const neededFromThisToken = targetAmount - currentSum;
-        const remainderForMe = candidate.amount - neededFromThisToken;
-
-        console.log(`✂️ Splitting required. Remainder: ${remainderForMe}`);
-
-        return {
-          tokensToTransferDirectly: toTransfer,
-          tokenToSplit: candidate,
-          splitAmount: neededFromThisToken,
-          remainderAmount: remainderForMe,
-          totalTransferAmount: targetAmount,
-          coinId: targetCoinIdHex,
-          requiresSplit: true,
-        };
-      }
-    }
-
-    return null;
+    // Map SDK result back to app-layer types
+    return this.mapToAppLayerPlan(sdkResult);
   }
 
-  private getRealAmountFromSdk(sdkToken: SdkToken<any>): bigint {
-    try {
-      const coinsOpt = sdkToken.coins;
-      const coinData = coinsOpt;
-
-      if (coinData && coinData.coins) {
-        const rawCoins = coinData.coins;
-        let val: any = null;
-
-        const firstItem = rawCoins[0];
-        if (Array.isArray(firstItem) && firstItem.length === 2) {
-          val = firstItem[1];
-        }
-
-        if (Array.isArray(val)) {
-          return BigInt(val[1]?.toString() || "0");
-        } else if (val) {
-          return BigInt(val.toString());
-        }
-      }
-    } catch (e) {
-      console.error("Error extracting amount from SDK token", e);
-    }
-    return 0n;
-  }
-
-  // === PRIVATE HELPERS ===
-
-  private createDirectPlan(
-    tokens: TokenWithAmount[],
-    total: bigint,
-    coinId: string
-  ): SplitPlan {
+  /**
+   * Map SDK split plan to app-layer split plan
+   */
+  private mapToAppLayerPlan(sdkPlan: SdkSplitPlan<Token>): SplitPlan {
     return {
-      tokensToTransferDirectly: tokens,
-      tokenToSplit: null,
-      splitAmount: null,
-      remainderAmount: null,
-      totalTransferAmount: total,
-      coinId: coinId,
-      requiresSplit: false,
+      tokensToTransferDirectly: sdkPlan.tokensToTransferDirectly.map(
+        this.mapToAppLayerToken
+      ),
+      tokenToSplit: sdkPlan.tokenToSplit
+        ? this.mapToAppLayerToken(sdkPlan.tokenToSplit)
+        : null,
+      splitAmount: sdkPlan.splitAmount,
+      remainderAmount: sdkPlan.remainderAmount,
+      totalTransferAmount: sdkPlan.totalTransferAmount,
+      coinId: sdkPlan.coinId,
+      requiresSplit: sdkPlan.requiresSplit,
     };
   }
 
-  private findCombinationOfSize(
-    tokens: TokenWithAmount[],
-    targetAmount: bigint,
-    size: Int
-  ): TokenWithAmount[] | null {
-    const generator = this.generateCombinations(tokens, size);
-
-    for (const combo of generator) {
-      const sum = combo.reduce((acc, t) => acc + t.amount, 0n);
-      if (sum === targetAmount) {
-        return combo;
-      }
-    }
-    return null;
-  }
-
-  private *generateCombinations(
-    tokens: TokenWithAmount[],
-    k: number,
-    start: number = 0,
-    current: TokenWithAmount[] = []
-  ): Generator<TokenWithAmount[]> {
-    if (k === 0) {
-      yield current;
-      return;
-    }
-
-    for (let i = start; i < tokens.length; i++) {
-      yield* this.generateCombinations(tokens, k - 1, i + 1, [
-        ...current,
-        tokens[i],
-      ]);
-    }
+  /**
+   * Map SDK token with amount to app-layer version
+   */
+  private mapToAppLayerToken(sdkToken: SdkTokenWithAmount<Token>): TokenWithAmount {
+    return {
+      sdkToken: sdkToken.sdkToken,
+      amount: sdkToken.amount,
+      uiToken: sdkToken.sourceToken, // sourceToken is the original Token
+    };
   }
 }
-
-// TypeScript alias for Integer to match intent
-type Int = number;

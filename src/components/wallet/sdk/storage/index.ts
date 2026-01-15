@@ -51,5 +51,16 @@ export {
   createInMemoryIpfsStatePersistence,
 } from './ipfs-state-persistence';
 
+// Wallet State Persistence Interface
+export type {
+  WalletStatePersistence,
+} from './wallet-state-persistence';
+
+export {
+  WALLET_STATE_KEYS,
+  InMemoryWalletStatePersistence,
+  createInMemoryWalletStatePersistence,
+} from './wallet-state-persistence';
+
 // NOTE: FileStorageProvider is available for Node.js only:
 // import { FileStorageProvider, createFileStorageProvider } from './sdk/storage/file-storage';

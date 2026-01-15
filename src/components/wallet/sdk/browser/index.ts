@@ -232,3 +232,9 @@ export {
   BrowserIpfsStatePersistence,
   createBrowserIpfsStatePersistence,
 } from './ipfs-state-persistence-browser';
+
+// Browser Wallet State Persistence (localStorage)
+export {
+  BrowserWalletStatePersistence,
+  createBrowserWalletStatePersistence,
+} from './wallet-state-persistence-browser';

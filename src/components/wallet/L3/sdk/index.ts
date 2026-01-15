@@ -90,6 +90,15 @@ export {
   // Crypto
   encrypt,
   decrypt,
+  // Token split calculator
+  TokenSplitCalculator,
+  createTokenSplitCalculator,
+} from '../../sdk';
+
+export type {
+  SplittableToken,
+  TokenWithAmount,
+  SplitPlan,
 } from '../../sdk';
 
 // ============================================================================

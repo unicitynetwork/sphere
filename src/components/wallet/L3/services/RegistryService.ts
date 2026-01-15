@@ -1,6 +1,8 @@
 import axios from 'axios';
 import bundledRegistry from '../../../../assets/unicity-ids.testnet.json';
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
+import type { WalletStatePersistence } from "../../sdk";
+import { BrowserWalletStatePersistence } from "../../sdk/browser/wallet-state-persistence-browser";
 
 
 export interface IconEntry {
@@ -29,8 +31,10 @@ export class RegistryService {
     private definitionsById: Map<string, TokenDefinition> = new Map();
     private isInitialized = false;
     private initPromise: Promise<void> | null = null;
+    private statePersistence: WalletStatePersistence;
 
-    private constructor() {
+    private constructor(statePersistence?: WalletStatePersistence) {
+        this.statePersistence = statePersistence ?? new BrowserWalletStatePersistence();
         this.loadFromBundled();
         this.initPromise = this.init();
     }
@@ -45,8 +49,8 @@ export class RegistryService {
     private async init() {
         if (this.isInitialized) return;
 
-        const cachedData = localStorage.getItem(STORAGE_KEYS.UNICITY_IDS_CACHE);
-        const timestampStr = localStorage.getItem(STORAGE_KEYS.UNICITY_IDS_TIMESTAMP);
+        const cachedData = this.statePersistence.getString(STORAGE_KEYS.UNICITY_IDS_CACHE);
+        const timestampStr = this.statePersistence.getString(STORAGE_KEYS.UNICITY_IDS_TIMESTAMP);
         const timestamp = timestampStr ? parseInt(timestampStr, 10) : 0;
         const isStale = (Date.now() - timestamp) > CACHE_VALIDITY_MS;
 
@@ -102,8 +106,8 @@ export class RegistryService {
                 this.updateMap(response.data);
                 
                 // Update Storage
-                localStorage.setItem(STORAGE_KEYS.UNICITY_IDS_CACHE, JSON.stringify(response.data));
-                localStorage.setItem(STORAGE_KEYS.UNICITY_IDS_TIMESTAMP, Date.now().toString());
+                this.statePersistence.setJSON(STORAGE_KEYS.UNICITY_IDS_CACHE, response.data);
+                this.statePersistence.setString(STORAGE_KEYS.UNICITY_IDS_TIMESTAMP, Date.now().toString());
             }
         } catch (e) {
             console.error("Registry: Failed to fetch from GitHub", e);
