@@ -1,16 +1,17 @@
-import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
-import { TokenType } from "@unicitylabs/state-transition-sdk/lib/token/TokenType";
 import CryptoJS from "crypto-js";
-import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
-import type { DirectAddress } from "@unicitylabs/state-transition-sdk/lib/address/DirectAddress";
-import { UnmaskedPredicateReference } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicateReference";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 import {
   deriveL3Address as coreDeriveL3Address,
   validateMnemonic,
   UNICITY_TOKEN_TYPE_HEX,
-} from "../../sdk";
+  // Unicity SDK types
+  SigningService,
+  TokenType,
+  HashAlgorithm,
+  UnmaskedPredicateReference,
+  type DirectAddress,
+} from "../sdk";
 const DEFAULT_SESSION_KEY = "user-pin-1234";
 
 /**

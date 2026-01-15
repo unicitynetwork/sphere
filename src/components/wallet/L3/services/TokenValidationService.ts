@@ -13,6 +13,7 @@ import type {
   TxfToken,
 } from "./types/TxfTypes";
 import { getCurrentStateHash, tokenToTxf } from "./TxfSerializer";
+import { Token as SdkToken } from "../sdk";
 
 // ==========================================
 // Validation Action Types
@@ -327,8 +328,7 @@ export class TokenValidationService {
 
     try {
       // Use SDK to check if source state is spent
-      const { Token } = await import("@unicitylabs/state-transition-sdk/lib/token/Token");
-      const sdkToken = await Token.fromJSON(txf);
+      const sdkToken = await SdkToken.fromJSON(txf);
 
       // Get token owner public key from IdentityManager
       const { IdentityManager } = await import("./IdentityManager");
@@ -622,10 +622,7 @@ export class TokenValidationService {
     for (const [tokenId, txfToken] of tokens) {
       try {
         // Parse SDK token from TXF data
-        const { Token } = await import(
-          "@unicitylabs/state-transition-sdk/lib/token/Token"
-        );
-        const sdkToken = await Token.fromJSON(txfToken);
+        const sdkToken = await SdkToken.fromJSON(txfToken);
 
         // Convert public key to bytes for SDK
         const pubKeyBytes = Buffer.from(publicKey, "hex");
@@ -778,10 +775,7 @@ export class TokenValidationService {
 
     try {
       // Parse SDK token
-      const { Token } = await import(
-        "@unicitylabs/state-transition-sdk/lib/token/Token"
-      );
-      const sdkToken = await Token.fromJSON(txfToken);
+      const sdkToken = await SdkToken.fromJSON(txfToken);
 
       // Convert public key to bytes for SDK
       const pubKeyBytes = Buffer.from(publicKey, "hex");
@@ -887,13 +881,8 @@ export class TokenValidationService {
     txfToken: unknown
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      // Dynamic import to avoid bundling issues
-      const { Token } = await import(
-        "@unicitylabs/state-transition-sdk/lib/token/Token"
-      );
-
       // Parse token from JSON
-      const sdkToken = await Token.fromJSON(txfToken);
+      const sdkToken = await SdkToken.fromJSON(txfToken);
 
       // Get trust base
       const trustBase = await this.getTrustBase();

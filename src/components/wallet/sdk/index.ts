@@ -293,3 +293,195 @@ export type { L3WalletConfig, L3Identity } from './wallets/L3Wallet';
 // Unified L1 + L3 Wallet
 export { UnityWallet } from './wallets/UnityWallet';
 export type { UnityWalletConfig } from './wallets/UnityWallet';
+
+// ============================================================================
+// UNICITY SDK RE-EXPORTS
+// ============================================================================
+
+// Re-export commonly used types/classes from @unicitylabs/state-transition-sdk
+// This centralizes external SDK dependencies for easier management
+export {
+  // Signing
+  SigningService,
+  // Addresses
+  AddressScheme,
+  ProxyAddress,
+  // Tokens
+  Token,
+  TokenId,
+  TokenType,
+  TokenState,
+  CoinId,
+  TokenCoinData,
+  // Transactions
+  TransferCommitment,
+  TransferTransaction,
+  MintCommitment,
+  MintTransactionData,
+  TokenSplitBuilder,
+  // Predicates
+  UnmaskedPredicate,
+  UnmaskedPredicateReference,
+  // Hashing
+  HashAlgorithm,
+  // Clients
+  StateTransitionClient,
+  AggregatorClient,
+  RootTrustBase,
+  // Utilities
+  waitInclusionProof,
+} from './unicity-sdk';
+
+export type {
+  DirectAddress,
+  IAddress,
+} from './unicity-sdk';
+
+// Nostr SDK re-exports
+export {
+  NostrClient,
+  NostrKeyManager,
+  EventKinds,
+  TokenTransferProtocol,
+  PaymentRequestProtocol,
+} from './unicity-sdk';
+
+export type {
+  NostrFilter,
+  NostrEvent,
+} from './unicity-sdk';
+
+// ============================================================================
+// TXF (TOKEN EXCHANGE FORMAT) TYPES
+// ============================================================================
+
+// TXF types and utilities for token serialization
+export {
+  // Key utility functions
+  isArchivedKey,
+  isForkedKey,
+  isActiveTokenKey,
+  isTokenKey,
+  tokenIdFromKey,
+  keyFromTokenId,
+  archivedKeyFromTokenId,
+  tokenIdFromArchivedKey,
+  forkedKeyFromTokenIdAndState,
+  parseForkedKey,
+  isValidTokenId,
+  getCurrentStateHash,
+  countProofs,
+} from './types/txf';
+
+export type {
+  // Base types (generic, platform-independent)
+  NametagDataBase,
+  TombstoneEntry,
+  OutboxStatus,      // Re-exported from outbox.ts via txf.ts (alias for OutboxEntryStatus)
+  OutboxEntryBase,   // Re-exported from outbox.ts via txf.ts
+  TxfMeta,
+  TxfStorageDataBase,
+  // Token structure
+  TxfToken,
+  TxfGenesis,
+  TxfGenesisData,
+  TxfState,
+  TxfTransaction,
+  TxfInclusionProof,
+  TxfAuthenticator,
+  TxfMerkleTreePath,
+  TxfMerkleStep,
+  TxfIntegrity,
+  // Conflict resolution
+  TokenConflict,
+  MergeResult,
+} from './types/txf';
+
+// TXF Zod schemas for runtime validation
+export {
+  // Schemas
+  TxfMerkleStepSchema,
+  TxfMerkleTreePathSchema,
+  TxfAuthenticatorSchema,
+  TxfInclusionProofSchema,
+  TxfGenesisDataSchema,
+  TxfGenesisSchema,
+  TxfStateSchema,
+  TxfTransactionSchema,
+  TxfIntegritySchema,
+  TxfTokenSchema,
+  TxfMetaSchema,
+  NametagDataBaseSchema,
+  TombstoneEntrySchema,
+  OutboxEntryBaseSchema,
+  TxfStorageDataBaseSchema,
+  // Validation functions
+  parseTxfToken,
+  safeParseTxfToken,
+  parseTxfStorageData,
+  safeParseTxfStorageData,
+  parseTxfMeta,
+  safeParseTxfMeta,
+  validateTokenEntry,
+} from './types/txf-schemas';
+
+export type {
+  ValidatedTxfToken,
+  ValidatedTxfMeta,
+  ValidatedTxfStorageData,
+  ValidatedTxfGenesis,
+  ValidatedTxfTransaction,
+  ValidatedTxfInclusionProof,
+  ValidatedNametagDataBase,
+  ValidatedTombstoneEntry,
+  ValidatedOutboxEntryBase,
+} from './types/txf-schemas';
+
+// Outbox types for transfer recovery
+export {
+  // Utility functions
+  isTerminalStatus,
+  isPendingStatus,
+  isRetryableStatus,
+  getNextStatus,
+  validateOutboxEntryBase,
+} from './types/outbox';
+
+export type {
+  OutboxEntryStatus,
+  OutboxEntryType,
+  // OutboxEntryBase is re-exported from ./types/txf for backwards compatibility
+  OutboxSplitGroup,
+  RecoveryResult,
+  RecoveryDetail,
+} from './types/outbox';
+
+// TXF Serializer (platform-independent)
+export {
+  // Storage data building
+  buildTxfStorageData as buildTxfStorageDataGeneric,
+  // Storage data parsing
+  parseTxfStorageDataGeneric,
+  // File export/import
+  buildTxfExportFile as buildTxfExportFileGeneric,
+  parseTxfFile as parseTxfFileGeneric,
+  // Utility functions
+  isValidTxfToken,
+  countCommittedTransactions,
+  hasUncommittedTransactions,
+  getTotalAmount,
+  getPrimaryCoinId,
+  computeGenesisHash,
+  normalizeTxfToken,
+} from './serialization/txf-serializer';
+
+export type {
+  ParseTxfStorageResult,
+  BuildTxfStorageOptions,
+} from './serialization/txf-serializer';
+
+// Conflict Resolution Service
+export {
+  ConflictResolutionService,
+  createConflictResolutionService,
+} from './storage/conflict-resolution';

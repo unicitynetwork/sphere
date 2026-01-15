@@ -1,7 +1,9 @@
 import trustBaseJson from "../../../../assets/trustbase-testnet.json";
-import { StateTransitionClient } from "@unicitylabs/state-transition-sdk/lib/StateTransitionClient";
-import { AggregatorClient } from "@unicitylabs/state-transition-sdk/lib/api/AggregatorClient";
-import { RootTrustBase } from "@unicitylabs/state-transition-sdk/lib/bft/RootTrustBase";
+import {
+  StateTransitionClient,
+  AggregatorClient,
+  RootTrustBase,
+} from "../sdk";
 
 const UNICITY_AGGREGATOR_URL = import.meta.env.VITE_AGGREGATOR_URL || "https://goggregator-test.unicity.network";
 const API_KEY = "sk_06365a9c44654841a366068bcfc68986";

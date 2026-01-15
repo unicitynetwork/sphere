@@ -1,13 +1,34 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { Buffer } from "buffer";
+import { ChatRepository } from "../../../chat/data/ChatRepository";
 import {
+  ChatMessage,
+  MessageStatus,
+  MessageType,
+} from "../../../chat/data/models";
+import { IdentityManager } from "./IdentityManager";
+import { NametagService } from "./NametagService";
+import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { ServiceProvider } from "./ServiceProvider";
+import {
+  // Nostr SDK
   NostrClient,
   NostrKeyManager,
   EventKinds,
-  Filter,
   TokenTransferProtocol,
-  Event,
   PaymentRequestProtocol,
-} from "@unicitylabs/nostr-js-sdk";
+  type NostrFilter as Filter,
+  type NostrEvent as Event,
+  // Unicity SDK
+  Token,
+  TransferTransaction,
+  AddressScheme,
+  ProxyAddress,
+  SigningService,
+  UnmaskedPredicate,
+  HashAlgorithm,
+  TokenState,
+} from "../sdk";
 
 // NIP-17 Private Message interface (from SDK)
 interface PrivateMessage {
@@ -19,25 +40,6 @@ interface PrivateMessage {
   kind: number;
   replyToEventId?: string;
 }
-import { ChatRepository } from "../../../chat/data/ChatRepository";
-import {
-  ChatMessage,
-  MessageStatus,
-  MessageType,
-} from "../../../chat/data/models";
-import { IdentityManager } from "./IdentityManager";
-import { Buffer } from "buffer";
-import { Token } from "@unicitylabs/state-transition-sdk/lib/token/Token";
-import { TransferTransaction } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferTransaction";
-import { AddressScheme } from "@unicitylabs/state-transition-sdk/lib/address/AddressScheme";
-import { NametagService } from "./NametagService";
-import { ProxyAddress } from "@unicitylabs/state-transition-sdk/lib/address/ProxyAddress";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
-import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
-import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
-import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
-import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenState";
-import { ServiceProvider } from "./ServiceProvider";
 import { RegistryService } from "./RegistryService";
 import {
   PaymentRequestStatus,

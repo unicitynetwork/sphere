@@ -21,9 +21,8 @@
  * - Only 10 consecutive failures mark entry as FAILED
  */
 
-import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment";
-import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
 import { OutboxRepository } from "../../../../repositories/OutboxRepository";
+import { TransferCommitment, waitInclusionProof } from "../sdk";
 import { ServiceProvider } from "./ServiceProvider";
 import type { NostrService } from "./NostrService";
 import type { IdentityManager } from "./IdentityManager";

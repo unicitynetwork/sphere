@@ -1,23 +1,23 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Token } from "@unicitylabs/state-transition-sdk/lib/token/Token";
 import { IdentityManager } from "./IdentityManager";
-import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
-import { TokenType } from "@unicitylabs/state-transition-sdk/lib/token/TokenType";
 import { NostrService } from "./NostrService";
-import { ProxyAddress } from "@unicitylabs/state-transition-sdk/lib/address/ProxyAddress";
 import { ServiceProvider } from "./ServiceProvider";
-import { TokenId } from "@unicitylabs/state-transition-sdk/lib/token/TokenId";
-import { MintCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/MintCommitment";
-import type { DirectAddress } from "@unicitylabs/state-transition-sdk/lib/address/DirectAddress";
-import { MintTransactionData } from "@unicitylabs/state-transition-sdk/lib/transaction/MintTransactionData";
-import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
-import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
-import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
-import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenState";
 import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
-
-const UNICITY_TOKEN_TYPE_HEX =
-  "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9ef0efbe397867509";
+import {
+  Token,
+  SigningService,
+  TokenType,
+  ProxyAddress,
+  TokenId,
+  MintCommitment,
+  MintTransactionData,
+  waitInclusionProof,
+  UnmaskedPredicate,
+  HashAlgorithm,
+  TokenState,
+  UNICITY_TOKEN_TYPE_HEX,
+  type DirectAddress,
+} from "../sdk";
 
 export type MintResult =
   | { status: "success"; token: Token<any> }

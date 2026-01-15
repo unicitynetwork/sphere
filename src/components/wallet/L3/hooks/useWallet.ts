@@ -1,22 +1,24 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { v4 as uuidv4 } from "uuid";
 import { AggregatedAsset, Token, TokenStatus } from "../data/model";
-import { ProxyAddress } from "@unicitylabs/state-transition-sdk/lib/address/ProxyAddress";
-import { Token as SdkToken } from "@unicitylabs/state-transition-sdk/lib/token/Token";
-import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
-import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment";
 import { ServiceProvider } from "../services/ServiceProvider";
-import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
 import { ApiService } from "../services/api";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { NametagService } from "../services/NametagService";
 import { RegistryService } from "../services/RegistryService";
-import { useEffect } from "react";
-import { v4 as uuidv4 } from "uuid";
 import { TokenSplitExecutor } from "../services/transfer/TokenSplitExecutor";
 import { TokenSplitCalculator } from "../services/transfer/TokenSplitCalculator";
-import { TokenId } from "@unicitylabs/state-transition-sdk/lib/token/TokenId";
 import { IpfsStorageService } from "../services/IpfsStorageService";
+import {
+  ProxyAddress,
+  Token as SdkToken,
+  SigningService,
+  TransferCommitment,
+  waitInclusionProof,
+  TokenId,
+} from "../sdk";
 import { useServices } from "../../../../contexts/useServices";
 import type { NostrService } from "../services/NostrService";
 import { OutboxRecoveryService } from "../services/OutboxRecoveryService";

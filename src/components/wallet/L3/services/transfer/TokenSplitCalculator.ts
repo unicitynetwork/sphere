@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Token } from "../../data/model";
-import { Token as SdkToken } from "@unicitylabs/state-transition-sdk/lib/token/Token";
+import { Token as SdkToken } from "../../sdk";
 
 export interface TokenWithAmount {
   sdkToken: SdkToken<any>;

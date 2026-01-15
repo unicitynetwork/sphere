@@ -1,22 +1,24 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import type { IAddress } from "@unicitylabs/state-transition-sdk/lib/address/IAddress";
-import { UnmaskedPredicateReference } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicateReference";
-import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/InclusionProofUtils";
+import { Buffer } from "buffer";
 import { ServiceProvider } from "../ServiceProvider";
 import type { SplitPlan } from "./TokenSplitCalculator";
-import { Buffer } from "buffer";
-import { Token as SdkToken } from "@unicitylabs/state-transition-sdk/lib/token/Token";
-import { TokenId } from "@unicitylabs/state-transition-sdk/lib/token/TokenId";
-import type { TransferTransaction } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferTransaction";
-import type { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
-import { CoinId } from "@unicitylabs/state-transition-sdk/lib/token/fungible/CoinId";
-import { TokenSplitBuilder } from "@unicitylabs/state-transition-sdk/lib/transaction/split/TokenSplitBuilder";
-import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
-import { TokenCoinData } from "@unicitylabs/state-transition-sdk/lib/token/fungible/TokenCoinData";
-import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment";
-import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
-import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenState";
 import { OutboxRepository } from "../../../../../repositories/OutboxRepository";
+import {
+  UnmaskedPredicateReference,
+  waitInclusionProof,
+  Token as SdkToken,
+  TokenId,
+  CoinId,
+  TokenSplitBuilder,
+  HashAlgorithm,
+  TokenCoinData,
+  TransferCommitment,
+  UnmaskedPredicate,
+  TokenState,
+  type IAddress,
+  type TransferTransaction,
+  type SigningService,
+} from "../../sdk";
 import type { OutboxSplitGroup } from "../types/OutboxTypes";
 import { createOutboxEntry } from "../types/OutboxTypes";
 
