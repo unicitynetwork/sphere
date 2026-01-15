@@ -10,7 +10,6 @@ import {
   safeParseTxfToken,
   parseTxfMeta,
   safeParseTxfMeta,
-  parseTxfStorageData,
   safeParseTxfStorageData,
   validateTokenEntry,
   TxfTokenSchema,
@@ -80,7 +79,8 @@ describe('TXF Schemas', () => {
     });
 
     it('should reject missing genesis', () => {
-      const { genesis, ...invalid } = validTxfToken;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { genesis: _genesis, ...invalid } = validTxfToken;
       const result = TxfTokenSchema.safeParse(invalid);
       expect(result.success).toBe(false);
     });

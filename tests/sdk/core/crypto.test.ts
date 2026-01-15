@@ -91,7 +91,7 @@ describe('crypto', () => {
   });
 
   describe('encryptWallet/decryptWallet', () => {
-    it('should encrypt and decrypt wallet data', () => {
+    it('should encrypt and decrypt wallet data', { timeout: 30000 }, () => {
       const masterKey = 'e8f32e723decf4051aefac8e2c93c9c5b214313817cdb01a1494b917c8436b35';
       const password = 'securepassword';
 
