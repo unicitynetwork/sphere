@@ -226,3 +226,9 @@ export {
   IpfsStorageProvider,
   createIpfsStorageProvider,
 } from './ipfs-storage-provider';
+
+// Browser IPFS State Persistence (localStorage)
+export {
+  BrowserIpfsStatePersistence,
+  createBrowserIpfsStatePersistence,
+} from './ipfs-state-persistence-browser';

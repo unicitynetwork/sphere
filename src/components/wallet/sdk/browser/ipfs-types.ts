@@ -5,6 +5,7 @@
  */
 
 import type { TxfStorageDataBase } from '../types/txf';
+import type { IpfsStatePersistence } from '../storage/ipfs-state-persistence';
 
 // ==========================================
 // IPNS Types
@@ -79,6 +80,8 @@ export interface IpfsStorageConfig {
   ipnsTtlSeconds?: number;
   /** Timeout for gateway requests in ms */
   gatewayTimeoutMs?: number;
+  /** State persistence provider (optional - uses in-memory if not provided) */
+  statePersistence?: IpfsStatePersistence;
 }
 
 /**

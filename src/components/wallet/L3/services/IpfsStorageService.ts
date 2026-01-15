@@ -3,11 +3,25 @@ import { json } from "@helia/json";
 import { bootstrap } from "@libp2p/bootstrap";
 import { generateKeyPairFromSeed } from "@libp2p/crypto/keys";
 import { peerIdFromPrivateKey } from "@libp2p/peer-id";
-import { createIPNSRecord, marshalIPNSRecord, unmarshalIPNSRecord, multihashToIPNSRoutingKey } from "ipns";
-import { hkdf } from "@noble/hashes/hkdf";
-import { sha256 } from "@noble/hashes/sha256";
+import { createIPNSRecord, marshalIPNSRecord, multihashToIPNSRoutingKey } from "ipns";
 import { sha512 } from "@noble/hashes/sha512";
 import * as ed from "@noble/ed25519";
+
+// SDK IPNS utilities (replaces direct hkdf/sha256 usage)
+import {
+  deriveEd25519KeyMaterial,
+  IPNS_HKDF_INFO,
+} from "../../sdk/ipns";
+// SDK IPNS client functions for HTTP gateway operations
+import {
+  publishIpnsToGateways as sdkPublishIpnsToGateways,
+  resolveIpnsFromGateway as sdkResolveIpnsFromGateway,
+} from "../../sdk/browser/ipns-client";
+// SDK State Persistence for IPFS (localStorage abstraction)
+import {
+  BrowserIpfsStatePersistence,
+} from "../../sdk/browser/ipfs-state-persistence-browser";
+import type { IpfsStatePersistence } from "../../sdk/storage/ipfs-state-persistence";
 import type { CID } from "multiformats/cid";
 import type { PrivateKey, ConnectionGater, PeerId } from "@libp2p/interface";
 import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
@@ -134,7 +148,7 @@ interface IpnsProgressiveResult {
 // Constants
 // ==========================================
 
-const HKDF_INFO = "ipfs-storage-ed25519-v1";
+// HKDF_INFO is now imported from SDK as IPNS_HKDF_INFO
 const SYNC_DEBOUNCE_MS = 5000;
 
 // ==========================================
@@ -171,8 +185,18 @@ export class IpfsStorageService {
   private isTabVisible: boolean = true; // Track tab visibility for adaptive polling
   private currentIdentityAddress: string | null = null; // Track current identity for key re-derivation on switch
 
+  // SDK State Persistence (abstracts localStorage for CLI compatibility)
+  private statePersistence: IpfsStatePersistence;
+
   private constructor(identityManager: IdentityManager) {
     this.identityManager = identityManager;
+    // Initialize state persistence with app-specific key prefixes
+    this.statePersistence = new BrowserIpfsStatePersistence({
+      keyPrefixVersion: STORAGE_KEY_PREFIXES.IPFS_VERSION,
+      keyPrefixSequence: STORAGE_KEY_PREFIXES.IPNS_SEQ,
+      keyPrefixLastCid: STORAGE_KEY_PREFIXES.IPFS_LAST_CID,
+      keyPrefixPendingIpns: STORAGE_KEY_PREFIXES.IPFS_PENDING_IPNS,
+    });
   }
 
   static getInstance(identityManager: IdentityManager): IpfsStorageService {
@@ -381,15 +405,8 @@ export class IpfsStorageService {
 
       // Identity already fetched above, no need to fetch again
 
-      // 2. Derive Ed25519 key from secp256k1 private key using HKDF
-      const walletSecret = this.hexToBytes(identity.privateKey);
-      const derivedKey = hkdf(
-        sha256,
-        walletSecret,
-        undefined, // no salt for deterministic derivation
-        HKDF_INFO,
-        32
-      );
+      // 2. Derive Ed25519 key from secp256k1 private key using HKDF (via SDK)
+      const derivedKey = deriveEd25519KeyMaterial(identity.privateKey, IPNS_HKDF_INFO);
       this.ed25519PrivateKey = derivedKey;
       this.ed25519PublicKey = ed.getPublicKey(derivedKey);
 
@@ -490,14 +507,6 @@ export class IpfsStorageService {
   // Key Derivation Utilities
   // ==========================================
 
-  private hexToBytes(hex: string): Uint8Array {
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < bytes.length; i++) {
-      bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-    }
-    return bytes;
-  }
-
   private bytesToHex(bytes: Uint8Array): string {
     return Array.from(bytes)
       .map((b) => b.toString(16).padStart(2, "0"))
@@ -506,28 +515,14 @@ export class IpfsStorageService {
 
   /**
    * Migrate local storage keys from old IPNS name format to new PeerId format
+   * Uses SDK State Persistence for migration
    */
   private migrateStorageKeys(oldIpnsName: string, newIpnsName: string): void {
     if (oldIpnsName === newIpnsName) return;
 
-    // Migrate version counter
-    const oldVersionKey = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${oldIpnsName}`;
-    const newVersionKey = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${newIpnsName}`;
-    const version = localStorage.getItem(oldVersionKey);
-    if (version && !localStorage.getItem(newVersionKey)) {
-      localStorage.setItem(newVersionKey, version);
-      localStorage.removeItem(oldVersionKey);
-      console.log(`📦 Migrated version key: ${oldIpnsName} -> ${newIpnsName}`);
-    }
-
-    // Migrate last CID
-    const oldCidKey = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${oldIpnsName}`;
-    const newCidKey = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${newIpnsName}`;
-    const lastCid = localStorage.getItem(oldCidKey);
-    if (lastCid && !localStorage.getItem(newCidKey)) {
-      localStorage.setItem(newCidKey, lastCid);
-      localStorage.removeItem(oldCidKey);
-      console.log(`📦 Migrated CID key: ${oldIpnsName} -> ${newIpnsName}`);
+    // Use SDK persistence migrate method if available
+    if (this.statePersistence.migrate) {
+      this.statePersistence.migrate(oldIpnsName, newIpnsName);
     }
   }
 
@@ -594,27 +589,30 @@ export class IpfsStorageService {
   // ==========================================
 
   /**
-   * Get the last IPNS sequence number from storage
+   * Get the last IPNS sequence number from storage (via SDK State Persistence)
    */
   private getIpnsSequenceNumber(): bigint {
     if (!this.cachedIpnsName) return 0n;
-    const key = `${STORAGE_KEY_PREFIXES.IPNS_SEQ}${this.cachedIpnsName}`;
-    const stored = localStorage.getItem(key);
-    return stored ? BigInt(stored) : 0n;
+    const state = this.statePersistence.load(this.cachedIpnsName);
+    return state?.sequenceNumber ? BigInt(state.sequenceNumber) : 0n;
   }
 
   /**
-   * Save the IPNS sequence number to storage
+   * Save the IPNS sequence number to storage (via SDK State Persistence)
    */
   private setIpnsSequenceNumber(seq: bigint): void {
     if (!this.cachedIpnsName) return;
-    const key = `${STORAGE_KEY_PREFIXES.IPNS_SEQ}${this.cachedIpnsName}`;
-    localStorage.setItem(key, seq.toString());
+    const state = this.statePersistence.load(this.cachedIpnsName);
+    this.statePersistence.save(this.cachedIpnsName, {
+      version: state?.version ?? 0,
+      sequenceNumber: seq.toString(),
+      lastCid: state?.lastCid ?? null,
+    });
   }
 
   /**
    * Publish pre-signed IPNS record via Kubo HTTP API
-   * Much faster than browser DHT - server has better connectivity
+   * Uses SDK function for the actual HTTP publishing
    * @param marshalledRecord The signed, marshalled IPNS record bytes
    * @returns true if at least one backend accepted the record
    */
@@ -627,7 +625,6 @@ export class IpfsStorageService {
       return false;
     }
 
-    // For Kubo API, we pass the IPNS name (peer ID) as the first arg
     const ipnsName = this.cachedIpnsName;
     if (!ipnsName) {
       console.warn("📦 No IPNS name cached - cannot publish via HTTP");
@@ -636,52 +633,17 @@ export class IpfsStorageService {
 
     console.log(`📦 Publishing IPNS via HTTP to ${gatewayUrls.length} backend(s)...`);
 
-    // Try all configured gateways in parallel
-    const results = await Promise.allSettled(
-      gatewayUrls.map(async (gatewayUrl) => {
-        try {
-          // Kubo /api/v0/routing/put expects:
-          // - arg: the routing key path (e.g., "/ipns/12D3KooW...")
-          // - body: the marshalled record bytes as multipart form
-          const formData = new FormData();
-          // Create Blob from Uint8Array (spread to array for type compatibility)
-          formData.append(
-            "file",
-            new Blob([new Uint8Array(marshalledRecord)]),
-            "record"
-          );
-
-          // allow-offline=true: Store record locally first, then propagate async
-          // This makes the HTTP call return quickly instead of waiting for DHT
-          const response = await fetch(
-            `${gatewayUrl}/api/v0/routing/put?arg=/ipns/${ipnsName}&allow-offline=true`,
-            {
-              method: "POST",
-              body: formData,
-              signal: AbortSignal.timeout(30000), // 30s timeout
-            }
-          );
-
-          if (!response.ok) {
-            const errorText = await response.text().catch(() => "");
-            throw new Error(`HTTP ${response.status}: ${errorText.slice(0, 100)}`);
-          }
-
-          const hostname = new URL(gatewayUrl).hostname;
-          console.log(`📦 IPNS record accepted by ${hostname}`);
-          return gatewayUrl;
-        } catch (error) {
-          const hostname = new URL(gatewayUrl).hostname;
-          console.warn(`📦 HTTP IPNS publish to ${hostname} failed:`, error);
-          throw error;
-        }
-      })
+    // Use SDK function for HTTP publishing
+    const result = await sdkPublishIpnsToGateways(
+      gatewayUrls,
+      ipnsName,
+      marshalledRecord,
+      30000 // 30s timeout
     );
 
-    const successful = results.filter((r) => r.status === "fulfilled");
-    if (successful.length > 0) {
+    if (result.success) {
       console.log(
-        `📦 IPNS record published via HTTP to ${successful.length}/${gatewayUrls.length} backends`
+        `📦 IPNS record published via HTTP to ${result.successfulGateways?.length ?? 0}/${gatewayUrls.length} backends`
       );
       return true;
     }
@@ -811,6 +773,7 @@ export class IpfsStorageService {
 
   /**
    * Fetch IPNS record from a single HTTP gateway
+   * Uses SDK function for the actual resolution
    * Returns the CID and sequence number, or null if failed
    */
   private async resolveIpnsFromGateway(gatewayUrl: string): Promise<IpnsGatewayResult | null> {
@@ -818,64 +781,15 @@ export class IpfsStorageService {
       return null;
     }
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(
-        () => controller.abort(),
-        IPNS_RESOLUTION_CONFIG.perGatewayTimeoutMs
-      );
+    // Use SDK function with app-specific timeout config
+    const result = await sdkResolveIpnsFromGateway(
+      gatewayUrl,
+      this.cachedIpnsName,
+      IPNS_RESOLUTION_CONFIG.perGatewayTimeoutMs
+    );
 
-      // Use Kubo's routing/get API to fetch the raw IPNS record
-      const response = await fetch(
-        `${gatewayUrl}/api/v0/routing/get?arg=/ipns/${this.cachedIpnsName}`,
-        {
-          method: "POST",
-          signal: controller.signal,
-        }
-      );
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        console.debug(`📦 Gateway ${new URL(gatewayUrl).hostname} returned ${response.status}`);
-        return null;
-      }
-
-      // Kubo returns JSON with base64-encoded record in "Extra" field:
-      // {"ID":"","Type":5,"Responses":null,"Extra":"<base64-encoded-ipns-record>"}
-      const json = await response.json() as { Extra?: string; Type?: number };
-
-      if (!json.Extra) {
-        console.debug(`📦 Gateway ${new URL(gatewayUrl).hostname} returned no Extra field`);
-        return null;
-      }
-
-      // Decode base64 Extra field to get raw IPNS record
-      const recordData = Uint8Array.from(atob(json.Extra), c => c.charCodeAt(0));
-      const record = unmarshalIPNSRecord(recordData);
-
-      // Extract CID from value path
-      const cidMatch = record.value.match(/^\/ipfs\/(.+)$/);
-      if (!cidMatch) {
-        console.debug(`📦 Gateway ${new URL(gatewayUrl).hostname} returned invalid IPNS value: ${record.value}`);
-        return null;
-      }
-
-      return {
-        cid: cidMatch[1],
-        sequence: record.sequence,
-        gateway: gatewayUrl,
-        recordData,
-      };
-    } catch (error) {
-      const hostname = new URL(gatewayUrl).hostname;
-      if (error instanceof Error && error.name === "AbortError") {
-        console.debug(`📦 Gateway ${hostname} timeout`);
-      } else {
-        console.debug(`📦 Gateway ${hostname} error:`, error);
-      }
-      return null;
-    }
+    // SDK returns compatible IpnsGatewayResult type
+    return result;
   }
 
   /**
@@ -1418,7 +1332,7 @@ export class IpfsStorageService {
   }
 
   // ==========================================
-  // Version Counter Management
+  // Version Counter Management (via SDK State Persistence)
   // ==========================================
 
   /**
@@ -1426,8 +1340,8 @@ export class IpfsStorageService {
    */
   private getVersionCounter(): number {
     if (!this.cachedIpnsName) return 0;
-    const key = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${this.cachedIpnsName}`;
-    return parseInt(localStorage.getItem(key) || "0", 10);
+    const state = this.statePersistence.load(this.cachedIpnsName);
+    return state?.version ?? 0;
   }
 
   /**
@@ -1435,10 +1349,13 @@ export class IpfsStorageService {
    */
   private incrementVersionCounter(): number {
     if (!this.cachedIpnsName) return 1;
-    const key = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${this.cachedIpnsName}`;
-    const current = this.getVersionCounter();
-    const next = current + 1;
-    localStorage.setItem(key, String(next));
+    const state = this.statePersistence.load(this.cachedIpnsName);
+    const next = (state?.version ?? 0) + 1;
+    this.statePersistence.save(this.cachedIpnsName, {
+      version: next,
+      sequenceNumber: state?.sequenceNumber ?? '0',
+      lastCid: state?.lastCid ?? null,
+    });
     return next;
   }
 
@@ -1447,8 +1364,12 @@ export class IpfsStorageService {
    */
   private setVersionCounter(version: number): void {
     if (!this.cachedIpnsName) return;
-    const key = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${this.cachedIpnsName}`;
-    localStorage.setItem(key, String(version));
+    const state = this.statePersistence.load(this.cachedIpnsName);
+    this.statePersistence.save(this.cachedIpnsName, {
+      version,
+      sequenceNumber: state?.sequenceNumber ?? '0',
+      lastCid: state?.lastCid ?? null,
+    });
   }
 
   /**
@@ -1456,8 +1377,8 @@ export class IpfsStorageService {
    */
   private getLastCid(): string | null {
     if (!this.cachedIpnsName) return null;
-    const key = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${this.cachedIpnsName}`;
-    return localStorage.getItem(key);
+    const state = this.statePersistence.load(this.cachedIpnsName);
+    return state?.lastCid ?? null;
   }
 
   /**
@@ -1465,8 +1386,12 @@ export class IpfsStorageService {
    */
   private setLastCid(cid: string): void {
     if (!this.cachedIpnsName) return;
-    const key = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${this.cachedIpnsName}`;
-    localStorage.setItem(key, cid);
+    const state = this.statePersistence.load(this.cachedIpnsName);
+    this.statePersistence.save(this.cachedIpnsName, {
+      version: state?.version ?? 0,
+      sequenceNumber: state?.sequenceNumber ?? '0',
+      lastCid: cid,
+    });
   }
 
   // ==========================================
@@ -1478,8 +1403,8 @@ export class IpfsStorageService {
    */
   private getPendingIpnsPublish(): string | null {
     if (!this.cachedIpnsName) return null;
-    const key = `${STORAGE_KEY_PREFIXES.IPFS_PENDING_IPNS}${this.cachedIpnsName}`;
-    return localStorage.getItem(key);
+    const state = this.statePersistence.load(this.cachedIpnsName);
+    return state?.pendingIpnsCid ?? null;
   }
 
   /**
@@ -1487,8 +1412,13 @@ export class IpfsStorageService {
    */
   private setPendingIpnsPublish(cid: string): void {
     if (!this.cachedIpnsName) return;
-    const key = `${STORAGE_KEY_PREFIXES.IPFS_PENDING_IPNS}${this.cachedIpnsName}`;
-    localStorage.setItem(key, cid);
+    const state = this.statePersistence.load(this.cachedIpnsName);
+    this.statePersistence.save(this.cachedIpnsName, {
+      version: state?.version ?? 0,
+      sequenceNumber: state?.sequenceNumber ?? '0',
+      lastCid: state?.lastCid ?? null,
+      pendingIpnsCid: cid,
+    });
     console.log(`📦 IPNS publish marked as pending for CID: ${cid.slice(0, 16)}...`);
   }
 
@@ -1497,8 +1427,13 @@ export class IpfsStorageService {
    */
   private clearPendingIpnsPublish(): void {
     if (!this.cachedIpnsName) return;
-    const key = `${STORAGE_KEY_PREFIXES.IPFS_PENDING_IPNS}${this.cachedIpnsName}`;
-    localStorage.removeItem(key);
+    const state = this.statePersistence.load(this.cachedIpnsName);
+    if (state) {
+      this.statePersistence.save(this.cachedIpnsName, {
+        ...state,
+        pendingIpnsCid: null,
+      });
+    }
   }
 
   /**
@@ -3062,8 +2997,8 @@ export class IpfsStorageService {
     }
 
     try {
-      const walletSecret = this.hexToBytes(identity.privateKey);
-      const derivedKey = hkdf(sha256, walletSecret, undefined, HKDF_INFO, 32);
+      // Use SDK key derivation
+      const derivedKey = deriveEd25519KeyMaterial(identity.privateKey, IPNS_HKDF_INFO);
 
       // Generate libp2p key pair and derive peer ID for proper IPNS name
       const keyPair = await generateKeyPairFromSeed("Ed25519", derivedKey);

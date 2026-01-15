@@ -31,6 +31,8 @@ import {
   uploadIpfsContent,
 } from './ipns-client';
 import type { PrivateKey } from "@libp2p/interface";
+import type { IpfsStatePersistence } from '../storage/ipfs-state-persistence';
+import { InMemoryIpfsStatePersistence } from '../storage/ipfs-state-persistence';
 
 // ==========================================
 // IpfsStorageProvider
@@ -55,20 +57,25 @@ export class IpfsStorageProvider<
   // Services
   private conflictResolver: ConflictResolutionService<TStorageData>;
   private eventCallbacks: StorageEventCallback[] = [];
+  private statePersistence: IpfsStatePersistence;
 
   // Config
-  private readonly config: Required<IpfsStorageConfig>;
+  private readonly config: Omit<Required<IpfsStorageConfig>, 'statePersistence'>;
 
   constructor(config: IpfsStorageConfig) {
+    // Extract statePersistence before spreading config
+    const { statePersistence, ...restConfig } = config;
     this.config = {
       bootstrapPeers: [],
       backendPeerId: "",
       debug: false,
       ipnsTtlSeconds: 60,
       gatewayTimeoutMs: 10000,
-      ...config,
+      ...restConfig,
     };
     this.conflictResolver = new ConflictResolutionService<TStorageData>();
+    // Use provided persistence or fall back to in-memory
+    this.statePersistence = statePersistence ?? new InMemoryIpfsStatePersistence();
   }
 
   // ==========================================
@@ -534,47 +541,36 @@ export class IpfsStorageProvider<
   }
 
   // ==========================================
-  // State Persistence (localStorage)
+  // State Persistence (via IpfsStatePersistence interface)
   // ==========================================
 
-  private getStorageKey(suffix: string): string {
-    return `ipfs_storage_${this.ipnsName}_${suffix}`;
-  }
-
   private loadPersistedState(): void {
-    if (!this.ipnsName || typeof localStorage === "undefined") return;
+    if (!this.ipnsName) return;
 
     try {
-      const version = localStorage.getItem(this.getStorageKey("version"));
-      if (version) this.currentVersion = parseInt(version, 10);
-
-      const seq = localStorage.getItem(this.getStorageKey("sequence"));
-      if (seq) this.ipnsSequenceNumber = BigInt(seq);
-
-      const cid = localStorage.getItem(this.getStorageKey("lastCid"));
-      if (cid) this.lastCid = cid;
-    } catch {
-      // Ignore localStorage errors
+      const state = this.statePersistence.load(this.ipnsName);
+      if (state) {
+        this.currentVersion = state.version;
+        this.ipnsSequenceNumber = BigInt(state.sequenceNumber);
+        this.lastCid = state.lastCid;
+        this.log(`Loaded persisted state: v${state.version}, seq=${state.sequenceNumber}`);
+      }
+    } catch (error) {
+      this.log(`Failed to load persisted state: ${error}`);
     }
   }
 
   private savePersistedState(): void {
-    if (!this.ipnsName || typeof localStorage === "undefined") return;
+    if (!this.ipnsName) return;
 
     try {
-      localStorage.setItem(
-        this.getStorageKey("version"),
-        String(this.currentVersion)
-      );
-      localStorage.setItem(
-        this.getStorageKey("sequence"),
-        String(this.ipnsSequenceNumber)
-      );
-      if (this.lastCid) {
-        localStorage.setItem(this.getStorageKey("lastCid"), this.lastCid);
-      }
-    } catch {
-      // Ignore localStorage errors
+      this.statePersistence.save(this.ipnsName, {
+        version: this.currentVersion,
+        sequenceNumber: String(this.ipnsSequenceNumber),
+        lastCid: this.lastCid,
+      });
+    } catch (error) {
+      this.log(`Failed to save persisted state: ${error}`);
     }
   }
 }

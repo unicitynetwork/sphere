@@ -40,5 +40,16 @@ export {
   createInMemoryStorageProvider,
 } from './in-memory-storage';
 
+// IPFS State Persistence Interface
+export type {
+  IpfsPersistedState,
+  IpfsStatePersistence,
+} from './ipfs-state-persistence';
+
+export {
+  InMemoryIpfsStatePersistence,
+  createInMemoryIpfsStatePersistence,
+} from './ipfs-state-persistence';
+
 // NOTE: FileStorageProvider is available for Node.js only:
 // import { FileStorageProvider, createFileStorageProvider } from './sdk/storage/file-storage';

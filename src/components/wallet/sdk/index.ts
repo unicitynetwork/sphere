@@ -12,6 +12,18 @@
 // Wallet creation
 export { createWallet, restoreFromMnemonic, validateMnemonic } from './core/wallet';
 
+// Identity derivation (L3)
+export {
+  deriveIdentityFromPrivateKey,
+  deriveIdentityFromMnemonic,
+  getWalletDirectAddress,
+} from './core/identity';
+
+export type {
+  UserIdentity,
+  L3DerivedAddress,
+} from './core/identity';
+
 // Key derivation
 export {
   generateMasterKeyFromSeed,
@@ -526,9 +538,24 @@ export {
   createInMemoryStorageProvider,
 } from './storage';
 
+// IPFS State Persistence Interface (platform-independent)
+export type {
+  IpfsPersistedState,
+  IpfsStatePersistence,
+} from './storage';
+
+export {
+  InMemoryIpfsStatePersistence,
+  createInMemoryIpfsStatePersistence,
+} from './storage';
+
 // NOTE: FileStorageProvider uses Node.js fs/path modules and is NOT exported here.
 // For Node.js/CLI usage, import directly:
 // import { FileStorageProvider, createFileStorageProvider } from './sdk/storage/file-storage';
+//
+// NOTE: BrowserIpfsStatePersistence uses localStorage and is NOT exported here.
+// For browser usage, import from browser module:
+// import { BrowserIpfsStatePersistence } from './sdk/browser';
 
 // ============================================================================
 // IPNS UTILITIES

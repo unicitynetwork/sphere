@@ -2,34 +2,19 @@ import CryptoJS from "crypto-js";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 import {
-  deriveL3Address as coreDeriveL3Address,
+  // SDK identity functions
+  deriveIdentityFromPrivateKey as sdkDeriveIdentityFromPrivateKey,
+  getWalletDirectAddress,
   validateMnemonic,
-  UNICITY_TOKEN_TYPE_HEX,
-  // Unicity SDK types
-  SigningService,
-  TokenType,
-  HashAlgorithm,
-  UnmaskedPredicateReference,
+  deriveL3Address,
   type DirectAddress,
-} from "../sdk";
-const DEFAULT_SESSION_KEY = "user-pin-1234";
+} from "../../sdk";
 
-/**
- * User identity for L3 Unicity wallet.
- *
- * NOTE: The wallet address is derived using UnmaskedPredicateReference (no nonce/salt).
- * This creates a stable, reusable DirectAddress from publicKey + tokenType.
- * The SDK's UnmaskedPredicate (which uses salt) is only used for token ownership
- * predicates during transfers, where the salt comes from the transaction itself.
- */
-export interface UserIdentity {
-  privateKey: string;
-  publicKey: string;
-  address: string;
-  mnemonic?: string;
-  l1Address?: string; // Alpha L1 address (if derived from unified wallet)
-  addressIndex?: number; // BIP44 address index
-}
+// Re-export UserIdentity type from SDK for consumers
+export type { UserIdentity } from "../../sdk";
+import type { UserIdentity } from "../../sdk";
+
+const DEFAULT_SESSION_KEY = "user-pin-1234";
 
 export class IdentityManager {
   private static instance: IdentityManager;
@@ -116,8 +101,8 @@ export class IdentityManager {
     // Get L1 address info from UnifiedKeyManager
     const derived = keyManager.deriveAddressFromPath(path);
 
-    // Use WalletCore for L3 address derivation
-    const l3 = await coreDeriveL3Address(derived.privateKey);
+    // Use SDK for L3 address derivation
+    const l3 = await deriveL3Address(derived.privateKey);
 
     // Parse path to get index for addressIndex field
     const match = path.match(/\/(\d+)$/);
@@ -136,17 +121,11 @@ export class IdentityManager {
   /**
    * Derive identity from a raw private key
    * Useful for external integrations
-   * Delegates to WalletCore for L3 address derivation
+   * Delegates to SDK for L3 address derivation
    */
   async deriveIdentityFromPrivateKey(privateKey: string): Promise<UserIdentity> {
-    // Use WalletCore for L3 address derivation
-    const l3 = await coreDeriveL3Address(privateKey);
-
-    return {
-      privateKey,
-      publicKey: l3.publicKey,
-      address: l3.address,
-    };
+    // Use SDK identity function
+    return sdkDeriveIdentityFromPrivateKey(privateKey);
   }
 
   /**
@@ -219,23 +198,8 @@ export class IdentityManager {
     if (!identity) return null;
 
     try {
-      const secret = Buffer.from(identity.privateKey, "hex");
-      const signingService = await SigningService.createFromSecret(secret);
-      const publicKey = signingService.publicKey;
-      const tokenType = new TokenType(
-        Buffer.from(UNICITY_TOKEN_TYPE_HEX, "hex")
-      );
-
-      // UnmaskedPredicateReference creates a stable, reusable DirectAddress
-      // This does NOT use nonce - the address is derived only from publicKey + tokenType
-      const predicateRef = UnmaskedPredicateReference.create(
-        tokenType,
-        signingService.algorithm,
-        publicKey,
-        HashAlgorithm.SHA256
-      );
-
-      return (await predicateRef).toAddress();
+      // Use SDK function for wallet address derivation
+      return await getWalletDirectAddress(identity.privateKey);
     } catch (error) {
       console.error("Failed to derive wallet address", error);
       return null;
