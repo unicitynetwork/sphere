@@ -87,7 +87,7 @@ export const STORAGE_KEYS = {
   OUTBOX_SPLIT_GROUPS: 'sphere_outbox_split_groups',
 
   // ============================================================================
-  // CHAT (User-to-User)
+  // CHAT (User-to-User DMs)
   // ============================================================================
 
   // Chat conversations list
@@ -95,6 +95,25 @@ export const STORAGE_KEYS = {
 
   // Chat messages
   CHAT_MESSAGES: 'sphere_chat_messages',
+
+  // ============================================================================
+  // GROUP CHAT (NIP-29)
+  // ============================================================================
+
+  // Joined groups list
+  GROUP_CHAT_GROUPS: 'sphere_group_chat_groups',
+
+  // Group messages
+  GROUP_CHAT_MESSAGES: 'sphere_group_chat_messages',
+
+  // Group members cache
+  GROUP_CHAT_MEMBERS: 'sphere_group_chat_members',
+
+  // Group chat relay URL
+  GROUP_CHAT_RELAY_URL: 'sphere_group_chat_relay_url',
+
+  // Processed group event IDs (for deduplication)
+  GROUP_CHAT_PROCESSED_EVENTS: 'sphere_group_chat_processed_events',
 
   // ============================================================================
   // AGENT CHAT SESSIONS

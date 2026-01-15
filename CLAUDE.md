@@ -47,18 +47,19 @@ npx tsc --noEmit
 
 ### Application Structure
 
-The app uses a single-page architecture with three main routes:
+The app uses a single-page architecture with dynamic agent routing:
 - `/` - Intro/splash screen
-- `/home` - Main dashboard with agent cards, chat, and wallet panel
-- `/ai` - AI assistant page
+- `/agents/:agentId` - Dynamic agent pages (chat, ai, trivia, games, sport, p2p, merch, etc.)
+- `/home` - Redirects to `/agents/chat`
+- `/ai` - Redirects to `/agents/ai`
 
-All routes except intro use `DashboardLayout` which provides header, navigation, and handles incoming transfers.
+All routes except intro are wrapped in `WalletGate` and use `DashboardLayout` which provides header, navigation, and handles incoming transfers.
 
 ### Wallet Architecture (Two-Layer System)
 
 **Layer 1 (L1) - ALPHA Blockchain:**
 - Location: `src/components/wallet/L1/`
-- Custom HD wallet implementation with BIP32-style derivation (see `SPHERE_DEVELOPER_GUIDE.md` for details)
+- Custom HD wallet implementation with BIP32-style derivation
 - Uses Fulcrum WebSocket for blockchain data (Electrum-style protocol)
 - Supports vesting classification (coins from blocks ≤280,000 are "vested")
 - SDK in `src/components/wallet/L1/sdk/` handles crypto, transactions, network calls
@@ -95,6 +96,10 @@ All routes except intro use `DashboardLayout` which provides header, navigation,
 - `NostrPinPublisher` - broadcasts token pins for discovery
 - `TxfSerializer` - serializes token transfer files (.txf format)
 - `IpnsNametagFetcher` - resolves nametags via IPNS during wallet import
+- `OutboxRecoveryService` - recovers failed outbound transfers
+- `TokenBackupService` - handles token backup operations
+- `RegistryService` - token registry management
+- `IpnsUtils` - IPNS utility functions
 
 **Shared Services:**
 - `UnifiedKeyManager` - cross-layer key management (L1/L3 key derivation)
@@ -142,15 +147,15 @@ class Token {
 
 ```
 App
-└── DashboardLayout
-    ├── Header
-    ├── Navigation
-    └── HomePage
-        ├── AgentCard[] (chat agents)
-        ├── ChatSection / SimpleAIChat / etc.
-        └── WalletPanel
-            ├── L1WalletView (when Layer 1 selected)
-            └── L3WalletView (when Layer 3 selected)
+└── WalletGate
+    └── DashboardLayout
+        ├── Header
+        └── AgentPage (route: /agents/:agentId)
+            ├── AgentCard[] (agent picker)
+            ├── ChatSection / AIChat / TriviaChat / etc. (based on agentId)
+            └── WalletPanel
+                ├── L1WalletView (when Layer 1 selected)
+                └── L3WalletView (when Layer 3 selected)
 ```
 
 ## Environment Variables
@@ -183,7 +188,7 @@ Tests are located in `tests/` directory and run with Vitest:
 The project uses node polyfills (`vite-plugin-node-polyfills`) for browser compatibility with crypto libraries like `elliptic`, `bip39`, and `crypto-js`. The `/rpc` endpoint is proxied to the Unicity aggregator in development.
 
 ### BIP32 Implementation
-The L1 wallet uses a custom derivation that differs from standard BIP32 (see `SPHERE_DEVELOPER_GUIDE.md` for migration details). Standard path would be `m/44'/0'/0'/0/{index}`.
+The L1 wallet uses a custom derivation that differs from standard BIP32. Standard path would be `m/44'/0'/0'/0/{index}`.
 
 ### Vesting System
 ALPHA coins are classified as "vested" or "unvested" based on coinbase block height (threshold: 280,000). The classifier traces each UTXO back to its coinbase origin and caches results in IndexedDB.
@@ -215,14 +220,16 @@ Tokens are synced to IPFS with IPNS for consistent addressing:
 A standalone single-file HTML wallet exists at `src/components/wallet/L1/guiwallet-main/`. This is a separate 888KB self-contained wallet application, not integrated into the React app.
 
 ### localStorage Keys
-Key persistence patterns:
-- `unified_wallet_*` - Encrypted wallet credentials (mnemonic, master key, chain code)
-- `unicity_wallet_{address}` - Per-address wallet data
-- `unicity_transaction_history` - L1 transaction history
-- `unicity_chat_*` - Chat conversations and messages
-- `wallet-active-layer` - Currently selected layer (L1/L3)
-- `sphere-theme` - UI theme preference
-- `l3_selected_address_path` - Selected address BIP32 path for L3 identity (e.g., "m/84'/1'/0'/0/0"); determines which derived key is used for IPFS/IPNS publishing and token ownership
+All keys use `sphere_` prefix (centralized in `src/config/storageKeys.ts`):
+- `sphere_wallet_mnemonic` - AES-256 encrypted BIP39 mnemonic
+- `sphere_wallet_master` - AES-256 encrypted master private key
+- `sphere_wallet_chaincode` - Chain code for BIP32 derivation
+- `sphere_wallet_${address}` - Per-address wallet data
+- `sphere_transaction_history` - L1 transaction history
+- `sphere_chat_*` - Chat conversations and messages
+- `sphere_wallet_active_layer` - Currently selected layer (L1/L3)
+- `sphere_theme` - UI theme preference
+- `sphere_l3_selected_address_path` - Selected address BIP32 path for L3 identity
 
 ### Custom Events
 The app uses custom events for cross-component communication:

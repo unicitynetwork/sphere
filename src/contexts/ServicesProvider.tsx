@@ -1,49 +1,58 @@
 import React, { useEffect, useState, type ReactNode } from 'react';
+import { NostrKeyManager } from '@unicitylabs/nostr-js-sdk';
 import { IdentityManager } from '../components/wallet/L3/services/IdentityManager';
 import { NostrService } from '../components/wallet/L3/services/NostrService';
+import { GroupChatService } from '../components/chat/services/GroupChatService';
 import { ServicesContext } from './ServicesContext';
 
 export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isNostrConnected, setIsNostrConnected] = useState(false);
+  const [isGroupChatConnected, setIsGroupChatConnected] = useState(false);
 
   // Create singleton instances once
   const identityManager = IdentityManager.getInstance();
   const nostrService = NostrService.getInstance(identityManager);
+  const groupChatService = GroupChatService.getInstance(identityManager);
 
   useEffect(() => {
     let isMounted = true;
 
-    const initializeNostr = async () => {
+    const initializeServices = async () => {
       try {
-        // Check if user has identity before starting Nostr
+        // Check if user has identity before starting services
         const identity = await identityManager.getCurrentIdentity();
         if (!identity) {
-          console.log("🔕 No identity found. Nostr service on standby.");
+          console.log("🔕 No identity found. Services on standby.");
           return;
         }
 
-        console.log("🚀 Starting Nostr service from ServicesProvider...");
+        const nostrKeyManager = NostrKeyManager.fromPrivateKey(Buffer.from(identity.privateKey, 'hex'));
+        console.log("🔑 Nostr pubkey:", nostrKeyManager.getPublicKeyHex());
+
+        // Start Nostr service (for DMs and token transfers)
         await nostrService.start();
 
         if (isMounted) {
           setIsNostrConnected(true);
-          console.log("✅ Nostr service connected");
         }
+
+        // GroupChatService starts lazily when user opens group chat
       } catch (error) {
-        console.error("❌ Failed to start Nostr service:", error);
+        console.error("❌ Failed to start services:", error);
       }
     };
 
     // Initialize on mount
-    initializeNostr();
+    initializeServices();
 
     // Re-initialize when wallet is created/restored
     const handleWalletLoaded = async () => {
-      console.log("📢 Wallet loaded, resetting and reinitializing Nostr...");
-      // Reset first to ensure we use the new identity's keypair
+      // Reset services to use new identity's keypair
       await nostrService.reset();
+      await groupChatService.reset();
       setIsNostrConnected(false);
-      initializeNostr();
+      setIsGroupChatConnected(false);
+      initializeServices();
     };
 
     window.addEventListener('wallet-loaded', handleWalletLoaded);
@@ -53,10 +62,18 @@ export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }
       window.removeEventListener('wallet-loaded', handleWalletLoaded);
       console.log("🛑 ServicesProvider cleanup");
     };
-  }, [identityManager, nostrService]);
+  }, [identityManager, nostrService, groupChatService]);
 
   return (
-    <ServicesContext.Provider value={{ identityManager, nostrService, isNostrConnected }}>
+    <ServicesContext.Provider
+      value={{
+        identityManager,
+        nostrService,
+        isNostrConnected,
+        groupChatService,
+        isGroupChatConnected,
+      }}
+    >
       {children}
     </ServicesContext.Provider>
   );
