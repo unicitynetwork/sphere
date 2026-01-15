@@ -349,24 +349,29 @@ export class GroupChatService {
     if (!this.client) return [];
 
     return new Promise((resolve) => {
-      const groups: Group[] = [];
+      const groupsMap = new Map<string, Group>();
       const filter = new Filter({ kinds: [NIP29_KINDS.GROUP_METADATA] });
 
       this.client!.subscribe(filter, {
         onEvent: (event) => {
           const group = this.parseGroupMetadata(event);
           if (group && group.visibility === GroupVisibility.PUBLIC) {
-            groups.push(group);
+            // Dedupe by group ID, keep the most recent
+            const existing = groupsMap.get(group.id);
+            if (!existing || group.createdAt > existing.createdAt) {
+              groupsMap.set(group.id, group);
+            }
           }
         },
         onEndOfStoredEvents: () => {
+          const groups = Array.from(groupsMap.values());
           console.log(`Found ${groups.length} available groups`);
           resolve(groups);
         },
       });
 
       // Timeout after 10 seconds
-      setTimeout(() => resolve(groups), 10000);
+      setTimeout(() => resolve(Array.from(groupsMap.values())), 10000);
     });
   }
 
@@ -709,15 +714,40 @@ export class GroupChatService {
       const groupId = this.getGroupIdFromMetadataEvent(event);
       if (!groupId) return null;
 
-      const metadata = JSON.parse(event.content);
-      const isPrivate = metadata.private === true || event.tags.some((t) => t[0] === 'private');
+      // Try parsing content as JSON first, fall back to tags
+      let name = 'Unnamed Group';
+      let description: string | undefined;
+      let picture: string | undefined;
+      let isPrivate = false;
+
+      // Try JSON content first
+      if (event.content && event.content.trim()) {
+        try {
+          const metadata = JSON.parse(event.content);
+          name = metadata.name || name;
+          description = metadata.about || metadata.description;
+          picture = metadata.picture;
+          isPrivate = metadata.private === true;
+        } catch {
+          // Content is not JSON, use tags instead
+        }
+      }
+
+      // Also check tags (can override or supplement JSON)
+      for (const tag of event.tags) {
+        if (tag[0] === 'name' && tag[1]) name = tag[1];
+        if (tag[0] === 'about' && tag[1]) description = tag[1];
+        if (tag[0] === 'picture' && tag[1]) picture = tag[1];
+        if (tag[0] === 'private') isPrivate = true;
+        if (tag[0] === 'public' && tag[1] === 'false') isPrivate = true;
+      }
 
       return new Group({
         id: groupId,
         relayUrl: this.relayUrls[0], // Primary relay URL
-        name: metadata.name || 'Unnamed Group',
-        description: metadata.about,
-        picture: metadata.picture,
+        name,
+        description,
+        picture,
         visibility: isPrivate ? GroupVisibility.PRIVATE : GroupVisibility.PUBLIC,
         createdAt: event.created_at * 1000,
       });

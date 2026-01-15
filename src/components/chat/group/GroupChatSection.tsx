@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Hash, Menu, PanelLeft, ChevronDown, Users } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useGroupChat } from '../hooks/useGroupChat';
 import { GroupList } from './GroupList';
 import { GroupMessageList } from './GroupMessageList';
@@ -16,6 +16,7 @@ interface GroupChatSectionProps {
 
 export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const {
     selectedGroup,
     selectGroup,
@@ -41,8 +42,23 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showJoinGroup, setShowJoinGroup] = useState(false);
   const [showAgentPicker, setShowAgentPicker] = useState(false);
+  const [inviteLinkFromUrl, setInviteLinkFromUrl] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Handle ?join= URL parameter for invite links
+  useEffect(() => {
+    const joinParam = searchParams.get('join');
+    if (joinParam) {
+      setInviteLinkFromUrl(joinParam);
+      setShowJoinGroup(true);
+      // Clear the parameter from URL
+      setSearchParams((prev) => {
+        prev.delete('join');
+        return prev;
+      });
+    }
+  }, [searchParams, setSearchParams]);
 
   // Get my pubkey for message display
   const { groupChatService } = useGroupChat() as any;
@@ -286,11 +302,15 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
       {/* Join Group Modal */}
       <JoinGroupModal
         isOpen={showJoinGroup}
-        onClose={() => setShowJoinGroup(false)}
+        onClose={() => {
+          setShowJoinGroup(false);
+          setInviteLinkFromUrl(null);
+        }}
         availableGroups={availableGroups}
         isLoading={isLoadingAvailable}
         onRefresh={refreshAvailableGroups}
         onJoin={handleJoinGroup}
+        initialInviteLink={inviteLinkFromUrl || undefined}
       />
     </div>
   );

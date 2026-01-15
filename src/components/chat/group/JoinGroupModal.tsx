@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Hash, Lock, Users, RefreshCw, Loader2, Link } from 'lucide-react';
 import { Group, GroupVisibility } from '../data/groupModels';
@@ -12,6 +12,7 @@ interface JoinGroupModalProps {
   isLoading: boolean;
   onRefresh: () => void;
   onJoin: (groupId: string, inviteCode?: string) => Promise<boolean>;
+  initialInviteLink?: string;
 }
 
 export function JoinGroupModal({
@@ -21,8 +22,9 @@ export function JoinGroupModal({
   isLoading,
   onRefresh,
   onJoin,
+  initialInviteLink,
 }: JoinGroupModalProps) {
-  const [activeTab, setActiveTab] = useState<TabType>('browse');
+  const [activeTab, setActiveTab] = useState<TabType>(initialInviteLink ? 'invite' : 'browse');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState('');
@@ -106,6 +108,14 @@ export function JoinGroupModal({
     setInviteLink('');
     setError(null);
   };
+
+  // Initialize with invite link from URL if provided
+  useEffect(() => {
+    if (isOpen && initialInviteLink) {
+      setActiveTab('invite');
+      setInviteLink(initialInviteLink);
+    }
+  }, [isOpen, initialInviteLink]);
 
   return (
     <AnimatePresence>
