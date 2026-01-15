@@ -7,35 +7,72 @@
  * - React Native (mobile apps)
  *
  * No localStorage, no React, no browser APIs.
+ *
+ * Module structure:
+ * - core/       - Wallet creation, key derivation, cryptography
+ * - address/    - Address generation, bech32 encoding, scripts
+ * - network/    - WebSocket adapter, network provider interfaces
+ * - transaction/ - Transaction building, vesting, token splits
+ * - serialization/ - Import/export, TXF format
+ * - wallets/    - L1Wallet, L3Wallet, UnityWallet classes
+ * - storage/    - Token storage providers, conflict resolution
+ * - validation/ - Token validation, proof verification
+ * - api/        - HTTP client, price API, registry API
+ * - nostr/      - Nostr client, token transfers, nametags
+ * - ipns/       - IPNS utilities for wallet sync
+ * - browser/    - Browser-specific implementations (separate import)
+ * - types/      - TypeScript type definitions
  */
 
-// Wallet creation
-export { createWallet, restoreFromMnemonic, validateMnemonic } from './core/wallet';
+// ============================================================================
+// CORE MODULE
+// ============================================================================
 
-// Identity derivation (L3)
 export {
-  deriveIdentityFromPrivateKey,
-  deriveIdentityFromMnemonic,
-  getWalletDirectAddress,
-} from './core/identity';
-
-export type {
-  UserIdentity,
-  L3DerivedAddress,
-} from './core/identity';
-
-// Key derivation
-export {
+  // Wallet creation
+  createWallet,
+  restoreFromMnemonic,
+  validateMnemonic,
+  // Key derivation
   generateMasterKeyFromSeed,
   deriveChildKeyBIP32,
   deriveKeyAtPath,
   deriveChildKeyLegacy,
   deriveKeyWifHmac,
   extractBasePathFromFullPath,
-} from './core/derivation';
+  // Crypto utilities
+  hexToWIF,
+  encrypt,
+  decrypt,
+  generatePrivateKey,
+  encryptWallet,
+  decryptWallet,
+  // Common utilities
+  bytesToHex,
+  hexToBytes,
+  findPattern,
+  isValidPrivateKey,
+  base58Encode,
+  base58Decode,
+  extractFromText,
+  // Identity derivation (L3)
+  deriveIdentityFromPrivateKey,
+  deriveIdentityFromMnemonic,
+  getWalletDirectAddress,
+  UNICITY_TOKEN_TYPE_HEX,
+} from './core';
 
-// Address generation (L1)
+export type {
+  UserIdentity,
+  L3DerivedAddress,
+} from './core';
+
+// ============================================================================
+// ADDRESS MODULE
+// ============================================================================
+
 export {
+  // Address generation
   computeHash160,
   hash160ToBytes,
   publicKeyToAddress,
@@ -50,13 +87,7 @@ export {
   recoverKeyWifHmac,
   recoverKeyBIP32AtPath,
   recoverKeyBIP32Scan,
-} from './address/address';
-
-// Address key recovery types
-export type { RecoveredAddressKey, RecoverKeyResult } from './address/address';
-
-// Unified address derivation (L1 + L3)
-export {
+  // Unified address derivation (L1 + L3)
   deriveL1Address,
   deriveDefaultL1Address,
   deriveNextL1Address,
@@ -66,85 +97,126 @@ export {
   deriveNextUnifiedAddress,
   parsePathComponents,
   getAddressPath,
-} from './address/unified';
-
-// Bech32 encoding
-export { createBech32, decodeBech32, convertBits, CHARSET } from './address/bech32';
-
-// Script utilities
-export { addressToScriptHash, createScriptPubKey } from './address/script';
-
-// Address helpers
-export { WalletAddressHelper } from './address/addressHelpers';
-
-// Transaction building (L1)
-export {
-  createSignatureHash,
-  createWitnessData,
-  buildSegWitTransaction,
-  signTransaction,
-  selectUtxos,
-  TX_FEE,
-  DUST_THRESHOLD,
-  SATS_PER_COIN,
-} from './transaction/transaction';
-
-// Token split calculator (L3)
-export {
-  TokenSplitCalculator,
-  createTokenSplitCalculator,
-} from './transaction/token-split';
+  // Bech32 encoding
+  createBech32,
+  decodeBech32,
+  convertBits,
+  CHARSET,
+  // Script utilities
+  addressToScriptHash,
+  createScriptPubKey,
+  // Address helpers
+  WalletAddressHelper,
+} from './address';
 
 export type {
+  RecoveredAddressKey,
+  RecoverKeyResult,
+} from './address';
+
+// ============================================================================
+// NETWORK MODULE
+// ============================================================================
+
+export {
+  getTotalBalance,
+  getAllUtxos,
+  waitForConfirmation,
+} from './network';
+
+export type {
+  WebSocketAdapter,
+  WebSocketState,
+  MessageHandler,
+  CloseHandler,
+  ErrorHandler,
+  L1NetworkProviderFull,
+  BlockHeader,
+  TransactionHistoryItem,
+  TransactionDetail,
+} from './network';
+
+// ============================================================================
+// TRANSACTION MODULE
+// ============================================================================
+
+export {
+  // L1 Transaction building
+  buildTransaction,
+  signTransaction,
+  serializeTransaction,
+  calculateFee,
+  createRawTransaction,
+  // Vesting classification
+  VestingClassifier,
+  createVestingClassifier,
+  // Token split calculator (L3)
+  TokenSplitCalculator,
+  createTokenSplitCalculator,
+  // Split executor
+  TokenSplitExecutor,
+  createTokenSplitExecutor,
+  DefaultSha256Provider,
+  DefaultUuidProvider,
+} from './transaction';
+
+export type {
+  // Transaction types
+  TransactionInput,
+  TransactionOutput,
+  TransactionOptions,
+  BuiltTransaction,
+  // Vesting types
+  VestingResult,
+  VestingCacheProvider,
+  VestingCacheEntry,
+  VestingClassifierOptions,
+  // Token split types
   SplittableToken,
   TokenWithAmount,
   SplitPlan,
-} from './transaction/token-split';
+  // Split transfer types
+  MintedTokenInfo,
+  SplitTokenResult,
+  SplitPlanResult,
+  SplitOutboxStatus,
+  SplitTransferEntry,
+  SplitGroup,
+  SplitOutboxProvider,
+  SplitOutboxContext,
+  OnTokenBurnedCallback,
+  // Split executor types
+  TokenSplitExecutorConfig,
+  Sha256Provider,
+  UuidProvider,
+} from './transaction';
 
-// Crypto utilities
-export {
-  hexToWIF,
-  encrypt,
-  decrypt,
-  generatePrivateKey,
-  encryptWallet,
-  decryptWallet,
-} from './core/crypto';
+// ============================================================================
+// SERIALIZATION MODULE
+// ============================================================================
 
-// Common utilities
 export {
-  bytesToHex,
-  hexToBytes,
-  findPattern,
-  isValidPrivateKey,
-  base58Encode,
-  base58Decode,
-  extractFromText,
-} from './core/utils';
-
-// Wallet JSON serialization
-export {
+  // Universal import/export
+  importWalletFromContent,
+  exportWallet,
+  exportWalletToText,
+  exportWalletToJSON,
+  isJSONWalletFormat,
+  // Wallet JSON format
   serializeWalletToJSON,
   stringifyWalletJSON,
   parseWalletJSON,
-  isJSONWalletFormat,
   generateAddressForJSON,
   determineDerivationMode,
   determineSource,
-} from './serialization/wallet-json';
-
-// Wallet Text serialization
-export {
+  // Wallet text format
   serializeWalletToText,
   serializeEncryptedWalletToText,
   parseWalletText,
   isWalletTextFormat,
   encryptForTextFormat,
   decryptFromTextFormat,
-} from './serialization/wallet-text';
-
-// Wallet.dat parsing and decryption
-export {
+  // Wallet.dat parsing
   isSQLiteDatabase,
   findAllCMasterKeys,
   isEncryptedWalletDat,
@@ -159,9 +231,351 @@ export {
   decryptCMasterKey,
   decryptPrivateKey,
   decryptWalletDat,
-} from './serialization/wallet-dat';
+  // TXF serializer
+  buildTxfStorageData,
+  parseTxfStorageDataGeneric,
+  buildTxfExportFile,
+  parseTxfFile,
+  isValidTxfToken,
+  countCommittedTransactions,
+  hasUncommittedTransactions,
+  getTotalAmount,
+  getPrimaryCoinId,
+  computeGenesisHash,
+  normalizeTxfToken,
+  isTokenKey,
+  isArchivedKey,
+  isForkedKey,
+  tokenIdFromKey,
+  tokenIdFromArchivedKey,
+  parseForkedKey,
+  keyFromTokenId,
+  archivedKeyFromTokenId,
+  forkedKeyFromTokenIdAndState,
+  getCurrentStateHash,
+  // Scan utilities
+  generateAddressAtPath,
+  generateAddresses,
+  ACTIVE_SYNC_LIMIT,
+  DEFAULT_BASE_PATH_SCAN,
+} from './serialization';
 
-// Types
+export type {
+  // Import/export types
+  ImportWalletResult,
+  ImportWalletOptions,
+  ExportWalletOptions,
+  ExportWalletParams,
+  // Wallet text types
+  WalletTextData,
+  WalletTextExportOptions,
+  WalletTextExportParams,
+  WalletTextParseResult,
+  // Wallet.dat types
+  CMasterKeyData,
+  WalletDatInfo,
+  WalletDatParseResult,
+  DecryptionProgressCallback,
+  DecryptWalletDatResult,
+  // TXF serializer types
+  ParseTxfStorageResult,
+  BuildTxfStorageOptions,
+  // Scan types
+  GeneratedAddressInfo,
+  ScannedAddress,
+  ScanProgress,
+  ScanResult,
+} from './serialization';
+
+// ============================================================================
+// WALLETS MODULE
+// ============================================================================
+
+export {
+  // L1 Wallet
+  L1Wallet,
+  // L3 Wallet
+  L3Wallet,
+  // L3 Transfer Service
+  L3TransferService,
+  DefaultL3RandomBytesProvider,
+  createL3TransferService,
+  // Unified Wallet
+  UnityWallet,
+} from './wallets';
+
+export type {
+  // L1 Wallet types
+  L1WalletConfig,
+  SendResult,
+  // L3 Wallet types
+  L3WalletConfig,
+  L3Identity,
+  // L3 Transfer Service types
+  L3TokenStorageProvider,
+  L3NostrProvider,
+  L3RandomBytesProvider,
+  L3TransferResult,
+  L3TransferRequest,
+  L3TransferServiceConfig,
+  // Unified Wallet types
+  UnityWalletConfig,
+} from './wallets';
+
+// ============================================================================
+// STORAGE MODULE
+// ============================================================================
+
+export {
+  // Conflict Resolution
+  ConflictResolutionService,
+  createConflictResolutionService,
+  // Token Comparison
+  compareTokenVersions,
+  compareTokenVersionsSimple,
+  isLocalBetter,
+  isRemoteBetter,
+  areTokensEqual,
+  countCommittedTransactions as countStorageCommittedTransactions,
+  countPendingTransactions,
+  hasPendingTransactions,
+  getTokenTransactionStats,
+  // Tombstone Utilities
+  buildTombstoneKeySet,
+  buildTombstoneMap,
+  isTombstoned,
+  isTokenTombstoned,
+  createTombstone,
+  createTombstoneFromToken,
+  mergeTombstones,
+  filterTombstonesByTokenIds,
+  getTombstonesForToken,
+  findNewTombstones,
+  removeExpiredTombstones,
+  extractTombstonedTokenIds,
+  findMatchingTombstone,
+  validateTombstones,
+  // Sync Orchestrator
+  SyncOrchestrator,
+  createSyncOrchestrator,
+  // In-Memory Storage
+  InMemoryStorageProvider,
+  createInMemoryStorageProvider,
+  // IPFS State Persistence
+  InMemoryIpfsStatePersistence,
+  createInMemoryIpfsStatePersistence,
+  // Wallet State Persistence
+  WALLET_STATE_KEYS,
+  InMemoryWalletStatePersistence,
+  createInMemoryWalletStatePersistence,
+} from './storage';
+
+export type {
+  // Event types
+  StorageEventType,
+  StorageEvent,
+  StorageEventCallback,
+  // Result types
+  SaveResult,
+  LoadResult,
+  SyncResult,
+  StorageStatus,
+  // Provider interface
+  TokenStorageProvider,
+  // Options types
+  StorageProviderOptions,
+  FileStorageOptions,
+  IpfsStorageOptions,
+  InMemoryStorageOptions,
+  // Factory type
+  StorageProviderFactory,
+  // Token Comparison types
+  TokenComparisonResult,
+  TokenTransactionStats,
+  // Tombstone types
+  TombstoneValidationResult,
+  TombstoneCheckResult,
+  // Sync Orchestrator types
+  SyncAction,
+  SyncDecision,
+  DiffResult,
+  SyncOrchestratorOptions,
+  // IPFS State Persistence types
+  IpfsPersistedState,
+  IpfsStatePersistence,
+  // Wallet State Persistence types
+  WalletStatePersistence,
+} from './storage';
+
+// ============================================================================
+// VALIDATION MODULE
+// ============================================================================
+
+export {
+  // Structure validation
+  hasValidTxfStructure,
+  hasValidGenesis,
+  hasValidState,
+  // Transaction validation
+  getUncommittedTransactions,
+  getCommittedTransactions,
+  hasUncommittedTxs,
+  getTransactionAtIndex,
+  // State hash utilities
+  getPreviousStateHash,
+  getCurrentState,
+  // Split token detection
+  isSplitToken,
+  extractBurnTxHash,
+  // Validation summary
+  getValidationSummary,
+  // Proof Provider
+  AggregatorProofProvider,
+  FetchHttpClient,
+  fetchProofFromAggregator,
+  createAggregatorProofProvider,
+  // Trust Base Provider
+  CachedTrustBaseProvider,
+  InMemoryTrustBaseProvider,
+  createCachedTrustBaseProvider,
+  createInMemoryTrustBaseProvider,
+  // Token Validator
+  TokenValidator,
+  createTokenValidator,
+  // Spent Token Checker
+  SpentTokenChecker,
+  SdkTokenStateProvider,
+  createSpentTokenChecker,
+  createSdkTokenStateProvider,
+} from './validation';
+
+export type {
+  // Validation types
+  ValidationAction,
+  TokenValidationResult,
+  ValidationIssue,
+  ValidationResult,
+  SpentTokenInfo,
+  SpentTokenResult,
+  PendingTransactionCheckResult,
+  PendingTransactionsSummary,
+  BatchValidationOptions,
+  ProofProvider,
+  TokenStateProvider,
+  // Proof Provider types
+  HttpClient as ValidationHttpClient,
+  HttpClientOptions,
+  ProofFetchResult,
+  AggregatorProofProviderConfig,
+  // Trust Base Provider types
+  TrustBaseProvider,
+  TrustBaseProviderConfig,
+  TrustBaseLoader,
+  // Token Validator types
+  TokenValidatorConfig,
+  ValidatableToken,
+  BurnVerificationResult,
+  // Spent Token Checker types
+  SpentTokenCheckerConfig,
+  SpentCheckableToken,
+} from './validation';
+
+// ============================================================================
+// API MODULE
+// ============================================================================
+
+export {
+  // HTTP Client
+  createFetchHttpClient,
+  createAxiosHttpClient,
+  getDefaultHttpClient,
+  setDefaultHttpClient,
+  // Price API
+  COINGECKO_API_URL,
+  DEFAULT_PRICES,
+  fetchPrices,
+  getPrice,
+  calculateUsdValue,
+  formatPrice,
+  // Registry API
+  UNICITY_REGISTRY_URL,
+  fetchRegistry,
+  getBestIconUrl,
+  findTokenByCoinId,
+  findTokenBySymbol,
+  filterByNetwork,
+  filterByAssetKind,
+} from './api';
+
+export type {
+  HttpClient,
+  HttpResponse,
+  HttpRequestOptions,
+  CryptoPriceData,
+  PriceMap,
+  TokenDefinition,
+  ApiServiceConfig,
+  CoinGeckoResponse,
+} from './api';
+
+// ============================================================================
+// NOSTR MODULE
+// ============================================================================
+
+export {
+  // Core client
+  NostrClientWrapper,
+  // Token transfer service
+  TokenTransferService,
+  createTokenTransferPayload,
+  // Nametag service
+  NametagMintService,
+  DefaultRandomBytesProvider,
+  // Types
+  DEFAULT_NOSTR_RELAYS,
+  InMemoryNostrStorage,
+} from './nostr';
+
+export type {
+  // Token transfer types
+  NametagTokenProvider,
+  TokenReceivedCallback,
+  TokenMetadata,
+  StateTransitionProvider,
+  // Nametag types
+  MintResult,
+  RandomBytesProvider,
+  // Config types
+  NostrConfig,
+  NostrIdentity,
+  NostrIdentityProvider,
+  TokenTransferPayload,
+  TokenTransferOptions,
+  ReceivedTokenTransfer,
+  PaymentRequest,
+  ReceivedPaymentRequest,
+  TokenTransferHandler,
+  PaymentRequestHandler,
+  NametagBinding,
+  NostrStorageProvider,
+} from './nostr';
+
+// ============================================================================
+// IPNS MODULE
+// ============================================================================
+
+export {
+  IPNS_HKDF_INFO,
+  deriveEd25519KeyMaterial,
+  deriveIpnsNameFromPrivateKey,
+  deriveEd25519KeyPair,
+  derivePeerIdFromPrivateKey,
+} from './ipns';
+
+// ============================================================================
+// TYPES MODULE
+// ============================================================================
+
 export type {
   // Base wallet types
   BaseWallet,
@@ -198,140 +612,99 @@ export type {
   WalletJSONImportResult,
 } from './types';
 
-// Transaction types
-export type {
-  TxPlan,
-  BuiltTransaction,
-  UTXOInput,
-  TransactionOutput,
-  PlannedTransaction,
-  TransactionPlanResult,
-} from './transaction/transaction';
-
-// Wallet.dat types
-export type {
-  CMasterKeyData,
-  WalletDatInfo,
-  WalletDatParseResult,
-  DecryptionProgressCallback,
-  DecryptWalletDatResult,
-} from './serialization/wallet-dat';
-
-// Wallet Text types
-export type {
-  WalletTextData,
-  WalletTextExportOptions,
-  WalletTextExportParams,
-  WalletTextParseResult,
-} from './serialization/wallet-text';
-
-// Universal import/export
-export {
-  importWalletFromContent,
-  exportWallet,
-  exportWalletToText,
-  exportWalletToJSON,
-} from './serialization/import-export';
-
-// Import/export types
-export type {
-  ImportWalletResult,
-  ImportWalletOptions,
-  ExportWalletOptions,
-  ExportWalletParams,
-} from './serialization/import-export';
-
-// Network provider interface and utilities
-export {
-  getTotalBalance,
-  getAllUtxos,
-  waitForConfirmation,
-} from './network/network';
-
-// Network types
-export type {
-  L1NetworkProviderFull,
-  BlockHeader,
-  TransactionHistoryItem,
-  TransactionDetail,
-} from './network/network';
-
 export {
   DEFAULT_BASE_PATH,
   DEFAULT_DERIVATION_MODE,
-  UNICITY_TOKEN_TYPE_HEX,
 } from './types';
 
-// Scan utilities
+// ============================================================================
+// TXF (TOKEN EXCHANGE FORMAT) TYPES
+// ============================================================================
+
 export {
-  generateAddressAtPath,
-  generateAddresses,
-  ACTIVE_SYNC_LIMIT,
-  DEFAULT_BASE_PATH_SCAN,
-} from './serialization/scan';
+  isActiveTokenKey,
+  isValidTokenId,
+  countProofs,
+} from './types/txf';
 
 export type {
-  GeneratedAddressInfo,
-  ScannedAddress,
-  ScanProgress,
-  ScanResult,
-} from './serialization/scan';
+  // Base types (generic, platform-independent)
+  NametagDataBase,
+  TombstoneEntry,
+  OutboxStatus,
+  OutboxEntryBase,
+  TxfMeta,
+  TxfStorageDataBase,
+  // Token structure
+  TxfToken,
+  TxfGenesis,
+  TxfGenesisData,
+  TxfState,
+  TxfTransaction,
+  TxfInclusionProof,
+  TxfAuthenticator,
+  TxfMerkleTreePath,
+  TxfMerkleStep,
+  TxfIntegrity,
+  // Conflict resolution
+  TokenConflict,
+  MergeResult,
+} from './types/txf';
 
-// Vesting classification
+// TXF Zod schemas for runtime validation
 export {
-  VestingClassifier,
-  InMemoryCacheProvider,
-  VESTING_THRESHOLD,
-} from './transaction/vesting';
+  TxfMerkleStepSchema,
+  TxfMerkleTreePathSchema,
+  TxfAuthenticatorSchema,
+  TxfInclusionProofSchema,
+  TxfGenesisDataSchema,
+  TxfGenesisSchema,
+  TxfStateSchema,
+  TxfTransactionSchema,
+  TxfIntegritySchema,
+  TxfTokenSchema,
+  TxfMetaSchema,
+  NametagDataBaseSchema,
+  TombstoneEntrySchema,
+  OutboxEntryBaseSchema,
+  TxfStorageDataBaseSchema,
+  parseTxfToken,
+  safeParseTxfToken,
+  parseTxfStorageData,
+  safeParseTxfStorageData,
+  parseTxfMeta,
+  safeParseTxfMeta,
+  validateTokenEntry,
+} from './types/txf-schemas';
 
 export type {
-  ClassificationResult,
-  ClassifiedUTXO,
-  ClassifyUtxosResult,
-  ClassificationProgressCallback,
-} from './transaction/vesting';
+  ValidatedTxfToken,
+  ValidatedTxfMeta,
+  ValidatedTxfStorageData,
+  ValidatedTxfGenesis,
+  ValidatedTxfTransaction,
+  ValidatedTxfInclusionProof,
+  ValidatedNametagDataBase,
+  ValidatedTombstoneEntry,
+  ValidatedOutboxEntryBase,
+} from './types/txf-schemas';
 
-// Vesting cache types (from types.ts)
-export type {
-  VestingCacheEntry,
-  VestingCacheProvider,
-} from './types';
-
-// L1 Wallet
-export { L1Wallet } from './wallets/L1Wallet';
-export type { L1WalletConfig, SendResult } from './wallets/L1Wallet';
-
-// WebSocket adapter interface
-export type {
-  WebSocketAdapter,
-  WebSocketState,
-  MessageHandler,
-  CloseHandler,
-  ErrorHandler,
-} from './network/websocket';
-
-// L3 Wallet
-export { L3Wallet } from './wallets/L3Wallet';
-export type { L3WalletConfig, L3Identity } from './wallets/L3Wallet';
-
-// L3 Transfer Service
+// Outbox types for transfer recovery
 export {
-  L3TransferService,
-  DefaultL3RandomBytesProvider,
-  createL3TransferService,
-} from './wallets/L3TransferService';
-export type {
-  L3TokenStorageProvider,
-  L3NostrProvider,
-  L3RandomBytesProvider,
-  L3TransferResult,
-  L3TransferRequest,
-  L3TransferServiceConfig,
-} from './wallets/L3TransferService';
+  isTerminalStatus,
+  isPendingStatus,
+  isRetryableStatus,
+  getNextStatus,
+  validateOutboxEntryBase,
+} from './types/outbox';
 
-// Unified L1 + L3 Wallet
-export { UnityWallet } from './wallets/UnityWallet';
-export type { UnityWalletConfig } from './wallets/UnityWallet';
+export type {
+  OutboxEntryStatus,
+  OutboxEntryType,
+  OutboxSplitGroup,
+  RecoveryResult,
+  RecoveryDetail,
+} from './types/outbox';
 
 // ============================================================================
 // UNICITY SDK RE-EXPORTS
@@ -397,196 +770,6 @@ export type {
   NostrEvent,
 } from './unicity-sdk';
 
-// ============================================================================
-// TXF (TOKEN EXCHANGE FORMAT) TYPES
-// ============================================================================
-
-// TXF types and utilities for token serialization
-export {
-  // Key utility functions
-  isArchivedKey,
-  isForkedKey,
-  isActiveTokenKey,
-  isTokenKey,
-  tokenIdFromKey,
-  keyFromTokenId,
-  archivedKeyFromTokenId,
-  tokenIdFromArchivedKey,
-  forkedKeyFromTokenIdAndState,
-  parseForkedKey,
-  isValidTokenId,
-  getCurrentStateHash,
-  countProofs,
-} from './types/txf';
-
-export type {
-  // Base types (generic, platform-independent)
-  NametagDataBase,
-  TombstoneEntry,
-  OutboxStatus,      // Re-exported from outbox.ts via txf.ts (alias for OutboxEntryStatus)
-  OutboxEntryBase,   // Re-exported from outbox.ts via txf.ts
-  TxfMeta,
-  TxfStorageDataBase,
-  // Token structure
-  TxfToken,
-  TxfGenesis,
-  TxfGenesisData,
-  TxfState,
-  TxfTransaction,
-  TxfInclusionProof,
-  TxfAuthenticator,
-  TxfMerkleTreePath,
-  TxfMerkleStep,
-  TxfIntegrity,
-  // Conflict resolution
-  TokenConflict,
-  MergeResult,
-} from './types/txf';
-
-// TXF Zod schemas for runtime validation
-export {
-  // Schemas
-  TxfMerkleStepSchema,
-  TxfMerkleTreePathSchema,
-  TxfAuthenticatorSchema,
-  TxfInclusionProofSchema,
-  TxfGenesisDataSchema,
-  TxfGenesisSchema,
-  TxfStateSchema,
-  TxfTransactionSchema,
-  TxfIntegritySchema,
-  TxfTokenSchema,
-  TxfMetaSchema,
-  NametagDataBaseSchema,
-  TombstoneEntrySchema,
-  OutboxEntryBaseSchema,
-  TxfStorageDataBaseSchema,
-  // Validation functions
-  parseTxfToken,
-  safeParseTxfToken,
-  parseTxfStorageData,
-  safeParseTxfStorageData,
-  parseTxfMeta,
-  safeParseTxfMeta,
-  validateTokenEntry,
-} from './types/txf-schemas';
-
-export type {
-  ValidatedTxfToken,
-  ValidatedTxfMeta,
-  ValidatedTxfStorageData,
-  ValidatedTxfGenesis,
-  ValidatedTxfTransaction,
-  ValidatedTxfInclusionProof,
-  ValidatedNametagDataBase,
-  ValidatedTombstoneEntry,
-  ValidatedOutboxEntryBase,
-} from './types/txf-schemas';
-
-// Outbox types for transfer recovery
-export {
-  // Utility functions
-  isTerminalStatus,
-  isPendingStatus,
-  isRetryableStatus,
-  getNextStatus,
-  validateOutboxEntryBase,
-} from './types/outbox';
-
-export type {
-  OutboxEntryStatus,
-  OutboxEntryType,
-  // OutboxEntryBase is re-exported from ./types/txf for backwards compatibility
-  OutboxSplitGroup,
-  RecoveryResult,
-  RecoveryDetail,
-} from './types/outbox';
-
-// TXF Serializer (platform-independent)
-export {
-  // Storage data building
-  buildTxfStorageData as buildTxfStorageDataGeneric,
-  // Storage data parsing
-  parseTxfStorageDataGeneric,
-  // File export/import
-  buildTxfExportFile as buildTxfExportFileGeneric,
-  parseTxfFile as parseTxfFileGeneric,
-  // Utility functions
-  isValidTxfToken,
-  countCommittedTransactions,
-  hasUncommittedTransactions,
-  getTotalAmount,
-  getPrimaryCoinId,
-  computeGenesisHash,
-  normalizeTxfToken,
-} from './serialization/txf-serializer';
-
-export type {
-  ParseTxfStorageResult,
-  BuildTxfStorageOptions,
-} from './serialization/txf-serializer';
-
-// ============================================================================
-// TOKEN STORAGE
-// ============================================================================
-
-// Storage Provider Interface and Types
-export type {
-  // Event types
-  StorageEventType,
-  StorageEvent,
-  StorageEventCallback,
-  // Result types
-  SaveResult,
-  LoadResult,
-  SyncResult,
-  StorageStatus,
-  // Provider interface
-  TokenStorageProvider,
-  // Options types
-  StorageProviderOptions,
-  FileStorageOptions,
-  IpfsStorageOptions,
-  InMemoryStorageOptions,
-  // Factory type
-  StorageProviderFactory,
-} from './storage';
-
-// Conflict Resolution Service
-export {
-  ConflictResolutionService,
-  createConflictResolutionService,
-} from './storage';
-
-// Storage Providers (browser-safe)
-export {
-  // In-Memory (browser & Node.js)
-  InMemoryStorageProvider,
-  createInMemoryStorageProvider,
-} from './storage';
-
-// IPFS State Persistence Interface (platform-independent)
-export type {
-  IpfsPersistedState,
-  IpfsStatePersistence,
-} from './storage';
-
-export {
-  InMemoryIpfsStatePersistence,
-  createInMemoryIpfsStatePersistence,
-} from './storage';
-
-// Wallet State Persistence Interface (platform-independent)
-export type {
-  WalletStatePersistence,
-} from './storage';
-
-export {
-  WALLET_STATE_KEYS,
-  InMemoryWalletStatePersistence,
-  createInMemoryWalletStatePersistence,
-} from './storage';
-
 // NOTE: FileStorageProvider uses Node.js fs/path modules and is NOT exported here.
 // For Node.js/CLI usage, import directly:
 // import { FileStorageProvider, createFileStorageProvider } from './sdk/storage/file-storage';
@@ -594,107 +777,3 @@ export {
 // NOTE: BrowserIpfsStatePersistence and BrowserWalletStatePersistence use localStorage
 // and are NOT exported here. For browser usage, import from browser module:
 // import { BrowserIpfsStatePersistence, BrowserWalletStatePersistence } from './sdk/browser';
-
-// ============================================================================
-// IPNS UTILITIES
-// ============================================================================
-
-// IPNS name derivation from wallet keys
-export {
-  // Constants
-  IPNS_HKDF_INFO,
-  // IPNS derivation
-  deriveEd25519KeyMaterial,
-  deriveIpnsNameFromPrivateKey,
-  deriveEd25519KeyPair,
-  derivePeerIdFromPrivateKey,
-} from './ipns';
-
-// ============================================================================
-// API SERVICES
-// ============================================================================
-
-// HTTP Client abstraction
-export {
-  createFetchHttpClient,
-  createAxiosHttpClient,
-  getDefaultHttpClient,
-  setDefaultHttpClient,
-} from './api';
-
-export type {
-  HttpClient,
-  HttpResponse,
-  HttpRequestOptions,
-} from './api';
-
-// Price API
-export {
-  COINGECKO_API_URL,
-  DEFAULT_PRICES,
-  fetchPrices,
-  getPrice,
-  calculateUsdValue,
-  formatPrice,
-} from './api';
-
-export type {
-  CryptoPriceData,
-  PriceMap,
-} from './api';
-
-// Token Registry API
-export {
-  UNICITY_REGISTRY_URL,
-  fetchRegistry,
-  getBestIconUrl,
-  findTokenByCoinId,
-  findTokenBySymbol,
-  filterByNetwork,
-  filterByAssetKind,
-} from './api';
-
-export type {
-  TokenDefinition,
-  ApiServiceConfig,
-} from './api';
-
-// ============================================================================
-// TOKEN VALIDATION
-// ============================================================================
-
-// Validation types
-export type {
-  ValidationAction,
-  TokenValidationResult,
-  ValidationIssue,
-  ValidationResult,
-  SpentTokenInfo,
-  SpentTokenResult,
-  PendingTransactionCheckResult,
-  PendingTransactionsSummary,
-  BatchValidationOptions,
-  ProofProvider,
-  TokenStateProvider,
-} from './validation';
-
-// TXF validation functions
-export {
-  // Structure validation
-  hasValidTxfStructure,
-  hasValidGenesis,
-  hasValidState,
-  // Transaction validation
-  getUncommittedTransactions,
-  getCommittedTransactions,
-  hasUncommittedTxs,
-  getTransactionAtIndex,
-  // State hash utilities
-  getPreviousStateHash,
-  getCurrentState,
-  // Split token detection
-  isSplitToken,
-  extractBurnTxHash,
-  // Validation summary
-  getValidationSummary,
-} from './validation';
