@@ -31,26 +31,19 @@
  */
 
 // ==========================================
-// WebSocket Adapter
-// ==========================================
-
-export { BrowserWSAdapter } from './BrowserWSAdapter';
-
-// ==========================================
-// Network Provider
+// Network (WebSocket, HTTP)
 // ==========================================
 
 export {
+  BrowserWSAdapter,
   BrowserNetworkProvider,
   getBrowserProvider,
   disposeBrowserProvider,
-} from './BrowserNetworkProvider';
+} from './network';
 
 // ==========================================
-// Vesting
+// Vesting (Classification)
 // ==========================================
-
-export { IndexedDBVestingCache } from './IndexedDBVestingCache';
 
 export {
   BrowserVestingClassifier,
@@ -59,43 +52,32 @@ export {
   type ClassificationResult,
   type ClassifiedUTXO,
   type ClassifyUtxosResult,
-} from './BrowserVestingClassifier';
-
-export {
   VestingStateManager,
   getVestingState,
   type VestingMode,
   type VestingBalances,
-} from './VestingStateManager';
+} from './vesting';
 
 // ==========================================
-// Storage
+// Storage (localStorage, IndexedDB, Keys)
 // ==========================================
 
 export {
+  // Storage utilities
   BrowserWalletStorage,
   createWalletStorage,
   DEFAULT_WALLET_STORAGE_CONFIG,
-  // Generic utilities
   saveToStorage,
   loadFromStorage,
   deleteFromStorage,
   hasInStorage,
-  // Wallet-specific functions
   saveWalletToStorage,
   loadWalletFromStorage,
   deleteWalletFromStorage,
   getAllStoredWallets,
-  // Types
   type StorageKeyConfig,
   type StoredWalletEntry,
-} from './storage';
-
-// ==========================================
-// Storage Keys
-// ==========================================
-
-export {
+  // Storage keys
   DEFAULT_STORAGE_PREFIX,
   WALLET_STORAGE_KEYS,
   WALLET_KEY_GENERATORS,
@@ -107,7 +89,18 @@ export {
   buildWalletKeyPrefixes,
   type WalletStorageKey,
   type WalletKeyPrefix,
-} from './storageKeys';
+  // Key Manager
+  BrowserKeyManager,
+  getBrowserKeyManager,
+  type BrowserKeyManagerStorageKeys,
+  type BrowserKeyManagerConfig,
+  type WalletSource,
+  type DerivedAddress,
+  type WalletInfo,
+  type KeyManagerState,
+  // IndexedDB Cache
+  IndexedDBVestingCache,
+} from './storage';
 
 // ==========================================
 // Wallet Operations
@@ -188,52 +181,44 @@ export {
 // IPFS Storage
 // ==========================================
 
-// IPFS types
-export type {
-  IpnsGatewayResult,
-  IpnsProgressiveResult,
-  IpnsPublishResult,
-  IpfsStorageConfig,
-  IpfsStorageStatus,
-  IpfsContentResult,
-  GatewayHealthResult,
-} from './ipfs-types';
-
-export { DEFAULT_IPFS_CONFIG } from './ipfs-types';
-
-// IPNS client utilities
 export {
-  // Key derivation
+  // Types
+  type IpnsGatewayResult,
+  type IpnsProgressiveResult,
+  type IpnsPublishResult,
+  type IpfsStorageConfig,
+  type IpfsStorageStatus,
+  type IpfsContentResult,
+  type GatewayHealthResult,
+  DEFAULT_IPFS_CONFIG,
+  // IPNS Client
   deriveIpnsKeyPair,
-  // Record creation
   createSignedIpnsRecord,
-  // HTTP gateway publishing
   publishIpnsToGateway,
   publishIpnsToGateways,
-  // HTTP gateway resolution
   resolveIpnsFromGateway,
   resolveIpnsViaPath,
   resolveIpnsProgressively,
-  // Content operations
   fetchIpfsContent,
   uploadIpfsContent,
-  // Utilities
   uint8ArrayToBase64,
-} from './ipns-client';
-
-// IPFS Storage Provider (implements TokenStorageProvider)
-export {
+  // IPFS Storage Provider
   IpfsStorageProvider,
   createIpfsStorageProvider,
-} from './ipfs-storage-provider';
-
-// Browser IPFS State Persistence (localStorage)
-export {
+  // Browser State Persistence
   BrowserIpfsStatePersistence,
   createBrowserIpfsStatePersistence,
-} from './ipfs-state-persistence-browser';
+  // Nametag Fetcher
+  fetchNametagFromIpns,
+  fetchNametagsForKeys,
+  type IpnsNametagResult,
+  type IpnsNametagConfig,
+} from './ipfs';
 
-// Browser Wallet State Persistence (localStorage)
+// ==========================================
+// Browser Wallet State Persistence
+// ==========================================
+
 export {
   BrowserWalletStatePersistence,
   createBrowserWalletStatePersistence,
@@ -248,25 +233,3 @@ export {
   getSyncCoordinator,
   type SyncCoordinatorConfig,
 } from './sync-coordinator';
-
-// ==========================================
-// IPNS Nametag Fetcher
-// ==========================================
-
-export {
-  fetchNametagFromIpns,
-  fetchNametagsForKeys,
-  type IpnsNametagResult,
-  type IpnsNametagConfig,
-} from './ipns-nametag-fetcher';
-
-// ==========================================
-// Key Manager (Browser-specific)
-// ==========================================
-
-export {
-  BrowserKeyManager,
-  getBrowserKeyManager,
-  type BrowserKeyManagerStorageKeys,
-  type BrowserKeyManagerConfig,
-} from './BrowserKeyManager';

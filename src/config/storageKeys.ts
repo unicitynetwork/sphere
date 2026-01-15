@@ -12,7 +12,7 @@ import {
   buildWalletStorageKeys,
   buildWalletKeyGenerators,
   buildWalletKeyPrefixes,
-} from '../components/wallet/sdk/browser/storageKeys';
+} from '../components/wallet/sdk/browser';
 
 // ============================================================================
 // APP PREFIX

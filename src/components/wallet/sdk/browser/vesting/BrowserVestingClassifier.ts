@@ -5,16 +5,16 @@
  * Uses BrowserNetworkProvider for network and IndexedDBVestingCache for caching.
  */
 
-import { getBrowserProvider } from './BrowserNetworkProvider';
-import { IndexedDBVestingCache } from './IndexedDBVestingCache';
+import { getBrowserProvider } from '../network';
+import { IndexedDBVestingCache } from '../storage';
 import {
   VestingClassifier,
   VESTING_THRESHOLD,
   type ClassificationResult,
   type ClassifiedUTXO,
   type ClassifyUtxosResult,
-} from '../transaction/vesting';
-import type { L1UTXO } from '../types';
+} from '../../transaction/vesting';
+import type { L1UTXO } from '../../types';
 
 // Re-export SDK constants and types for backwards compatibility
 export { VESTING_THRESHOLD };

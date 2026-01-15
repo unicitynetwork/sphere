@@ -10,7 +10,7 @@ import {
   fetchNametagsForKeys as sdkFetchNametagsForKeys,
   type IpnsNametagResult,
   type IpnsNametagConfig,
-} from "../../sdk/browser/ipns-nametag-fetcher";
+} from "../../sdk/browser";
 import {
   getAllBackendGatewayUrls,
   getBackendGatewayUrl,

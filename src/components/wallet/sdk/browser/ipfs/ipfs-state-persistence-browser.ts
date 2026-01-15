@@ -5,7 +5,7 @@
  * Handles key migration from old format to new PeerId format.
  */
 
-import type { IpfsStatePersistence, IpfsPersistedState } from '../storage/ipfs-state-persistence';
+import type { IpfsStatePersistence, IpfsPersistedState } from '../../storage/ipfs-state-persistence';
 
 // ==========================================
 // Constants

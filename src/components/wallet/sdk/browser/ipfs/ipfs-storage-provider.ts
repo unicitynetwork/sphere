@@ -6,7 +6,7 @@
  * Optionally uses Helia for DHT redundancy.
  */
 
-import type { TxfStorageDataBase, TxfMeta } from '../types/txf';
+import type { TxfStorageDataBase, TxfMeta } from '../../types/txf';
 import type {
   TokenStorageProvider,
   StorageStatus,
@@ -15,8 +15,8 @@ import type {
   SyncResult,
   StorageEventCallback,
   StorageEvent,
-} from '../storage/types';
-import { ConflictResolutionService } from '../storage/conflict-resolution';
+} from '../../storage/types';
+import { ConflictResolutionService } from '../../storage/conflict-resolution';
 
 import type {
   IpfsStorageConfig,
@@ -31,8 +31,8 @@ import {
   uploadIpfsContent,
 } from './ipns-client';
 import type { PrivateKey } from "@libp2p/interface";
-import type { IpfsStatePersistence } from '../storage/ipfs-state-persistence';
-import { InMemoryIpfsStatePersistence } from '../storage/ipfs-state-persistence';
+import type { IpfsStatePersistence } from '../../storage/ipfs-state-persistence';
+import { InMemoryIpfsStatePersistence } from '../../storage/ipfs-state-persistence';
 
 // ==========================================
 // IpfsStorageProvider

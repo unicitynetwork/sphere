@@ -186,8 +186,7 @@ export function generateAddress(wallet: BrowserWallet): BaseWalletAddress {
 // Default Wallet Factory Instance
 // ==========================================
 
-import { DEFAULT_WALLET_STORAGE_CONFIG } from './storage';
-import { buildWalletStorageKeys, DEFAULT_STORAGE_PREFIX } from './storageKeys';
+import { DEFAULT_WALLET_STORAGE_CONFIG, buildWalletStorageKeys, DEFAULT_STORAGE_PREFIX } from './storage';
 
 // Default keys for wallet operations
 const DEFAULT_KEYS = buildWalletStorageKeys(DEFAULT_STORAGE_PREFIX);

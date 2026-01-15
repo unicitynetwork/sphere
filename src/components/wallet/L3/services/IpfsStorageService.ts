@@ -16,11 +16,8 @@ import {
 import {
   publishIpnsToGateways as sdkPublishIpnsToGateways,
   resolveIpnsFromGateway as sdkResolveIpnsFromGateway,
-} from "../../sdk/browser/ipns-client";
-// SDK State Persistence for IPFS (localStorage abstraction)
-import {
   BrowserIpfsStatePersistence,
-} from "../../sdk/browser/ipfs-state-persistence-browser";
+} from "../../sdk/browser";
 import type { IpfsStatePersistence } from "../../sdk/storage/ipfs-state-persistence";
 import type { CID } from "multiformats/cid";
 import type { PrivateKey, ConnectionGater, PeerId } from "@libp2p/interface";

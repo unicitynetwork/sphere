@@ -9,7 +9,7 @@ import {
   getVestingClassifier,
   type ClassifiedUTXO,
 } from './BrowserVestingClassifier';
-import type { L1UTXO } from '../types';
+import type { L1UTXO } from '../../types';
 
 /**
  * Vesting mode for filtering UTXOs

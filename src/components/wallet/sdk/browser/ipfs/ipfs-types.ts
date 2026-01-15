@@ -4,8 +4,8 @@
  * Types for IPFS/IPNS storage operations.
  */
 
-import type { TxfStorageDataBase } from '../types/txf';
-import type { IpfsStatePersistence } from '../storage/ipfs-state-persistence';
+import type { TxfStorageDataBase } from '../../types/txf';
+import type { IpfsStatePersistence } from '../../storage/ipfs-state-persistence';
 
 // ==========================================
 // IPNS Types

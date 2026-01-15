@@ -37,23 +37,23 @@ import {
   isWalletInitialized,
   formatWalletExport,
   validatePrivateKey,
-} from "../wallets/KeyManager";
+} from "../../wallets/KeyManager";
 import {
   createWallet as coreCreateWallet,
   restoreFromMnemonic as coreRestoreFromMnemonic,
   deriveKeyAtPath,
-} from "../core";
+} from "../../core";
 import {
   type DerivationMode,
   DEFAULT_BASE_PATH,
-} from "../types";
+} from "../../types";
 import {
   exportWalletToJSON,
   downloadJSON,
   importWalletFromJSON,
   type WalletJSON,
   type WalletJSONExportOptions,
-} from "./import-export";
+} from "../import-export";
 
 // ==========================================
 // Types

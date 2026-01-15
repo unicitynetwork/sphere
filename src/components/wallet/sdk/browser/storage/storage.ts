@@ -5,7 +5,7 @@
  * Application-specific key generators should be passed in or configured.
  */
 
-import type { BaseWallet } from '../types';
+import type { BaseWallet } from '../../types';
 
 /**
  * Storage key configuration
@@ -171,7 +171,7 @@ import {
   buildWalletKeyGenerators,
   buildWalletKeyPrefixes,
   DEFAULT_STORAGE_PREFIX,
-} from './storageKeys';
+} from './storage-keys';
 
 // Build default keys with SDK prefix
 const DEFAULT_KEYS = buildWalletStorageKeys(DEFAULT_STORAGE_PREFIX);

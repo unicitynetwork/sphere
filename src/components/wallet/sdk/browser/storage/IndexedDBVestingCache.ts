@@ -5,7 +5,7 @@
  * for persistent caching of vesting classification data.
  */
 
-import type { VestingCacheProvider, VestingCacheEntry } from '../types';
+import type { VestingCacheProvider, VestingCacheEntry } from '../../types';
 
 const DB_NAME = 'UnicityVestingCacheV1';
 const STORE_NAME = 'vestingCache';

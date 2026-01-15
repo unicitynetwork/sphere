@@ -5,17 +5,17 @@
  * Uses BrowserNetworkProvider and VestingStateManager.
  */
 
-import { getBrowserProvider } from './BrowserNetworkProvider';
-import { getVestingState } from './VestingStateManager';
-import { decodeBech32 } from '../address/bech32';
-import { WalletAddressHelper } from '../address/addressHelpers';
+import { getBrowserProvider } from '../network';
+import { getVestingState } from '../vesting';
+import { decodeBech32 } from '../../address/bech32';
+import { WalletAddressHelper } from '../../address/addressHelpers';
 import {
   signTransaction,
   selectUtxos,
   broadcastTransactions,
   SATS_PER_COIN,
-} from '../transaction/transaction';
-import type { BaseWallet, L1UTXO } from '../types';
+} from '../../transaction/transaction';
+import type { BaseWallet, L1UTXO } from '../../types';
 
 // Re-export SDK transaction functions
 export {
@@ -25,10 +25,10 @@ export {
   TX_FEE,
   DUST_THRESHOLD,
   SATS_PER_COIN,
-} from '../transaction/transaction';
+} from '../../transaction/transaction';
 
 // Import and re-export SendResult from wallets module (single source of truth)
-import type { SendResult } from '../wallets/L1Wallet';
+import type { SendResult } from '../../wallets/L1Wallet';
 export type { SendResult };
 
 // ==========================================

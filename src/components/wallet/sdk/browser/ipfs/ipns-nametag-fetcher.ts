@@ -31,7 +31,7 @@
  */
 
 import { unmarshalIPNSRecord } from "ipns";
-import { deriveIpnsNameFromPrivateKey } from "../ipns";
+import { deriveIpnsNameFromPrivateKey } from "../../ipns";
 
 // ==========================================
 // Types

@@ -8,14 +8,14 @@
  * of the L1NetworkProviderFull interface.
  */
 
-import { addressToScriptHash } from "../address/script";
+import { addressToScriptHash } from "../../address/script";
 import type {
   L1NetworkProviderFull,
   BlockHeader,
   TransactionHistoryItem,
   TransactionDetail,
-} from "../network/network";
-import type { L1UTXO } from "../types";
+} from "../../network/network";
+import type { L1UTXO } from "../../types";
 
 const DEFAULT_ENDPOINT = "wss://fulcrum.unicity.network:50004";
 

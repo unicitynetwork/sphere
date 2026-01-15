@@ -10,7 +10,7 @@ import { generateKeyPairFromSeed } from "@libp2p/crypto/keys";
 import { peerIdFromPrivateKey } from "@libp2p/peer-id";
 import type { PrivateKey } from "@libp2p/interface";
 
-import { deriveEd25519KeyMaterial, IPNS_HKDF_INFO } from '../ipns';
+import { deriveEd25519KeyMaterial, IPNS_HKDF_INFO } from '../../ipns';
 import type {
   IpnsGatewayResult,
   IpnsProgressiveResult,
