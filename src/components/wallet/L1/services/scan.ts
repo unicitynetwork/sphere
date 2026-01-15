@@ -9,16 +9,15 @@
  * - Cached nametags from localStorage displayed immediately
  */
 
-import { browserProvider } from "../sdk";
-import type { Wallet } from "../sdk";
-// SDK imports - pure functions
 import {
+  browserProvider,
   generateAddressAtPath,
   ACTIVE_SYNC_LIMIT,
+  type Wallet,
   type ScannedAddress,
   type ScanProgress,
   type ScanResult,
-} from "../../sdk/serialization/scan";
+} from "../sdk";
 // L3 inventory checking imports (browser-specific)
 import { IdentityManager } from "../../L3/services/IdentityManager";
 import { WalletRepository } from "../../../../repositories/WalletRepository";

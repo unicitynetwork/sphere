@@ -202,7 +202,22 @@ export type {
 export type { StoredWalletEntry as StoredWallet } from '../../sdk/browser';
 
 // ============================================================================
-// SCAN (has L3 dependencies, located in L1/services)
+// SCAN UTILITIES (pure functions from SDK)
+// ============================================================================
+
+export {
+  generateAddressAtPath,
+  generateAddresses,
+  DEFAULT_BASE_PATH_SCAN,
+  ACTIVE_SYNC_LIMIT,
+  type GeneratedAddressInfo,
+  type ScannedAddress,
+  type ScanProgress,
+  type ScanResult,
+} from '../../sdk/serialization/scan';
+
+// ============================================================================
+// SCAN (browser-specific, has L3 dependencies)
 // ============================================================================
 
 export * from '../services/scan';
