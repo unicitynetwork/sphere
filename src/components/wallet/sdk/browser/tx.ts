@@ -27,6 +27,10 @@ export {
   SATS_PER_COIN,
 } from '../transaction/transaction';
 
+// Import and re-export SendResult from wallets module (single source of truth)
+import type { SendResult } from '../wallets/L1Wallet';
+export type { SendResult };
+
 // ==========================================
 // Types
 // ==========================================
@@ -60,12 +64,6 @@ export interface TransactionPlan {
 export interface SignedTransaction {
   raw: string;
   txid: string;
-}
-
-export interface SendResult {
-  success: boolean;
-  txids: string[];
-  error?: string;
 }
 
 // ==========================================

@@ -68,6 +68,7 @@ export interface L1WalletConfig {
 export interface SendResult {
   txids: string[];
   success: boolean;
+  error?: string;
 }
 
 // ==========================================

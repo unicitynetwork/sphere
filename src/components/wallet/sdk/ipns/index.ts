@@ -1,13 +1,12 @@
 /**
  * IPNS utilities - platform-independent
+ *
+ * NOTE: hexToBytes/bytesToHex are in core/utils.ts - import from there
  */
 
 export {
   // Constants
   IPNS_HKDF_INFO,
-  // Utility functions
-  hexToBytes,
-  bytesToHex,
   // IPNS derivation
   deriveEd25519KeyMaterial,
   deriveIpnsNameFromPrivateKey,

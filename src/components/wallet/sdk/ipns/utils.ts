@@ -18,6 +18,9 @@ import { sha256 } from "@noble/hashes/sha256";
 import { generateKeyPairFromSeed } from "@libp2p/crypto/keys";
 import { peerIdFromPrivateKey } from "@libp2p/peer-id";
 
+// Import hex utilities from core to avoid duplication
+import { hexToBytes } from "../core/utils";
+
 // ==========================================
 // Constants
 // ==========================================
@@ -27,30 +30,6 @@ import { peerIdFromPrivateKey } from "@libp2p/peer-id";
  * Must match IpfsStorageService.HKDF_INFO for compatible IPNS names
  */
 export const IPNS_HKDF_INFO = "ipfs-storage-ed25519-v1";
-
-// ==========================================
-// Utility Functions
-// ==========================================
-
-/**
- * Convert hex string to Uint8Array
- */
-export function hexToBytes(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-  }
-  return bytes;
-}
-
-/**
- * Convert Uint8Array to hex string
- */
-export function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map(b => b.toString(16).padStart(2, "0"))
-    .join("");
-}
 
 // ==========================================
 // IPNS Derivation
