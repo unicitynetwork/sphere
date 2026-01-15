@@ -14,9 +14,7 @@ import {
   UnmaskedPredicateReference,
   type DirectAddress,
 } from '../unicity-sdk';
-
-// Unicity token type (fungible tokens)
-export const UNICITY_TOKEN_TYPE_HEX = "00000000000000000000000000000000000000000000000000000000000000ff";
+import { UNICITY_TOKEN_TYPE_HEX } from '../types';
 
 // ==========================================
 // Types

@@ -51,7 +51,6 @@ export {
   deriveIdentityFromPrivateKey,
   deriveIdentityFromMnemonic,
   getWalletDirectAddress,
-  UNICITY_TOKEN_TYPE_HEX,
 } from './identity';
 
 export type {
