@@ -97,7 +97,9 @@ export async function deriveIdentityFromMnemonic(
 export async function getWalletDirectAddress(
   privateKey: string
 ): Promise<DirectAddress> {
-  const secret = Buffer.from(privateKey, "hex");
+  // Use Uint8Array directly instead of Buffer for SDK compatibility
+  const secretBuffer = Buffer.from(privateKey, "hex");
+  const secret = new Uint8Array(secretBuffer.buffer, secretBuffer.byteOffset, secretBuffer.byteLength);
   const signingService = await SigningService.createFromSecret(secret);
   const publicKey = signingService.publicKey;
   const tokenType = new TokenType(
