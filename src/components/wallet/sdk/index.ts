@@ -480,11 +480,48 @@ export type {
   BuildTxfStorageOptions,
 } from './serialization/txf-serializer';
 
+// ============================================================================
+// TOKEN STORAGE
+// ============================================================================
+
+// Storage Provider Interface and Types
+export type {
+  // Event types
+  StorageEventType,
+  StorageEvent,
+  StorageEventCallback,
+  // Result types
+  SaveResult,
+  LoadResult,
+  SyncResult,
+  StorageStatus,
+  // Provider interface
+  TokenStorageProvider,
+  // Options types
+  StorageProviderOptions,
+  FileStorageOptions,
+  IpfsStorageOptions,
+  InMemoryStorageOptions,
+  // Factory type
+  StorageProviderFactory,
+} from './storage';
+
 // Conflict Resolution Service
 export {
   ConflictResolutionService,
   createConflictResolutionService,
-} from './storage/conflict-resolution';
+} from './storage';
+
+// Storage Providers (browser-safe)
+export {
+  // In-Memory (browser & Node.js)
+  InMemoryStorageProvider,
+  createInMemoryStorageProvider,
+} from './storage';
+
+// NOTE: FileStorageProvider uses Node.js fs/path modules and is NOT exported here.
+// For Node.js/CLI usage, import directly:
+// import { FileStorageProvider, createFileStorageProvider } from './sdk/storage/file-storage';
 
 // ============================================================================
 // IPNS UTILITIES
