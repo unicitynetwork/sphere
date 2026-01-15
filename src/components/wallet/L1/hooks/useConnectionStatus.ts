@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { browserProvider } from "../sdk/network";
+import { browserProvider } from "../sdk";
 
 export type ConnectionState =
   | "disconnected"

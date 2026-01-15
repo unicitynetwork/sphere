@@ -7,7 +7,7 @@
 
 import { UnifiedKeyManager } from "./UnifiedKeyManager";
 import type { Wallet, WalletAddress } from "../../L1/sdk/types";
-import { loadWalletFromStorage } from "../../L1/sdk/storage";
+import { loadWalletFromStorage } from "../../L1/sdk";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 // Same session key as L3 (from useWallet.ts)

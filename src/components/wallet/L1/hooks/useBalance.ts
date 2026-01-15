@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { browserProvider } from "../sdk/network";
+import { browserProvider } from "../sdk";
 
 interface UseBalanceOptions {
   onNewBlock?: (address: string) => void;

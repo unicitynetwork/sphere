@@ -9,7 +9,7 @@
  * - Cached nametags from localStorage displayed immediately
  */
 
-import { browserProvider } from "../sdk/network";
+import { browserProvider } from "../sdk";
 import type { Wallet } from "../sdk/types";
 // SDK imports - pure functions
 import {

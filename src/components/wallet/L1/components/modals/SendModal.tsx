@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { X, ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
-import { vestingState } from "../../sdk/vestingState";
+import { vestingState } from "../../sdk";
 import type { VestingMode, VestingBalances } from "../../sdk/types";
 
 interface SendModalProps {

@@ -15,7 +15,7 @@ import {
   type VestingMode,
   type VestingBalances,
 } from "../sdk";
-import { browserProvider } from "../sdk/network";
+import { browserProvider } from "../sdk";
 import { loadWalletFromUnifiedKeyManager, getUnifiedKeyManager } from "../../shared/services/UnifiedWalletBridge";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import { WalletRepository } from "../../../../repositories/WalletRepository";

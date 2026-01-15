@@ -3,7 +3,7 @@
  * Similar to L1's useConnectionStatus but simplified for onboarding needs
  */
 import { useState, useEffect, useCallback, useRef } from "react";
-import { browserProvider } from "../../L1/sdk/network";
+import { browserProvider } from "../../L1/sdk";
 
 export type ConnectionState =
   | "disconnected"
