@@ -181,3 +181,54 @@ export function generateAddress(wallet: BrowserWallet): BaseWalletAddress {
   wallet.addresses.push(addr);
   return addr;
 }
+
+// ==========================================
+// Default Wallet Factory Instance
+// ==========================================
+
+import { DEFAULT_WALLET_STORAGE_CONFIG } from './storage';
+import { buildWalletStorageKeys, DEFAULT_STORAGE_PREFIX } from './storageKeys';
+
+// Default keys for wallet operations
+const DEFAULT_KEYS = buildWalletStorageKeys(DEFAULT_STORAGE_PREFIX);
+
+// Singleton factory instance
+let defaultFactory: BrowserWalletFactory | null = null;
+
+/**
+ * Get the default wallet factory
+ */
+export function getDefaultWalletFactory(): BrowserWalletFactory {
+  if (!defaultFactory) {
+    defaultFactory = new BrowserWalletFactory(DEFAULT_WALLET_STORAGE_CONFIG);
+  }
+  return defaultFactory;
+}
+
+/**
+ * Create and save a new wallet (uses default storage)
+ */
+export function createAndSaveWallet(): BrowserWallet {
+  return getDefaultWalletFactory().create();
+}
+
+/**
+ * Load wallet from storage (uses default storage)
+ */
+export function loadWallet(): BrowserWallet | null {
+  return getDefaultWalletFactory().load();
+}
+
+/**
+ * Delete wallet from storage (uses default storage)
+ */
+export function deleteWallet(): void {
+  localStorage.removeItem(DEFAULT_KEYS.L1_WALLET_MAIN);
+}
+
+/**
+ * Generate and save a new address (uses default storage)
+ */
+export function generateAndSaveAddress(wallet: BrowserWallet): BaseWalletAddress {
+  return getDefaultWalletFactory().generateAddress(wallet);
+}

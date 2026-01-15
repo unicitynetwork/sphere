@@ -74,13 +74,40 @@ export {
 
 export {
   BrowserWalletStorage,
+  createWalletStorage,
+  DEFAULT_WALLET_STORAGE_CONFIG,
+  // Generic utilities
   saveToStorage,
   loadFromStorage,
   deleteFromStorage,
   hasInStorage,
+  // Wallet-specific functions
+  saveWalletToStorage,
+  loadWalletFromStorage,
+  deleteWalletFromStorage,
+  getAllStoredWallets,
+  // Types
   type StorageKeyConfig,
   type StoredWalletEntry,
 } from './storage';
+
+// ==========================================
+// Storage Keys
+// ==========================================
+
+export {
+  DEFAULT_STORAGE_PREFIX,
+  WALLET_STORAGE_KEYS,
+  WALLET_KEY_GENERATORS,
+  WALLET_KEY_PREFIXES,
+  INDEXEDDB_NAMES,
+  buildStorageKey,
+  buildWalletStorageKeys,
+  buildWalletKeyGenerators,
+  buildWalletKeyPrefixes,
+  type WalletStorageKey,
+  type WalletKeyPrefix,
+} from './storageKeys';
 
 // ==========================================
 // Wallet Operations
@@ -88,8 +115,16 @@ export {
 
 export {
   BrowserWalletFactory,
+  getDefaultWalletFactory,
+  // Pure functions (without storage)
   createWallet,
   generateAddress,
+  // Functions with default storage
+  createAndSaveWallet,
+  loadWallet,
+  deleteWallet,
+  generateAndSaveAddress,
+  // Types
   type BrowserWallet,
 } from './wallet';
 

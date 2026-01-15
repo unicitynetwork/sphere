@@ -161,3 +161,94 @@ export function deleteFromStorage(key: string): void {
 export function hasInStorage(key: string): boolean {
   return localStorage.getItem(key) !== null;
 }
+
+// ==========================================
+// Default SDK Storage Instance
+// ==========================================
+
+import {
+  buildWalletStorageKeys,
+  buildWalletKeyGenerators,
+  buildWalletKeyPrefixes,
+  DEFAULT_STORAGE_PREFIX,
+} from './storageKeys';
+
+// Build default keys with SDK prefix
+const DEFAULT_KEYS = buildWalletStorageKeys(DEFAULT_STORAGE_PREFIX);
+const DEFAULT_GENERATORS = buildWalletKeyGenerators(DEFAULT_STORAGE_PREFIX);
+const DEFAULT_PREFIXES = buildWalletKeyPrefixes(DEFAULT_STORAGE_PREFIX);
+
+/**
+ * Default wallet storage configuration
+ */
+export const DEFAULT_WALLET_STORAGE_CONFIG: StorageKeyConfig = {
+  walletPrefix: DEFAULT_PREFIXES.L1_WALLET,
+  mainWalletKey: DEFAULT_KEYS.L1_WALLET_MAIN,
+};
+
+/**
+ * Create wallet storage with custom prefix
+ */
+export function createWalletStorage<T extends BaseWallet = BaseWallet>(
+  prefix: string = DEFAULT_STORAGE_PREFIX
+): BrowserWalletStorage<T> {
+  const keys = buildWalletStorageKeys(prefix);
+  const prefixes = buildWalletKeyPrefixes(prefix);
+  return new BrowserWalletStorage<T>({
+    walletPrefix: prefixes.L1_WALLET,
+    mainWalletKey: keys.L1_WALLET_MAIN,
+  });
+}
+
+// ==========================================
+// Convenience functions with default prefix
+// ==========================================
+
+/**
+ * Save L1 wallet to localStorage (uses default SDK prefix)
+ */
+export function saveWalletToStorage<T extends BaseWallet>(key: string, wallet: T): void {
+  localStorage.setItem(DEFAULT_GENERATORS.l1WalletByKey(key), JSON.stringify(wallet));
+}
+
+/**
+ * Load L1 wallet from localStorage (uses default SDK prefix)
+ */
+export function loadWalletFromStorage<T extends BaseWallet>(key: string): T | null {
+  const raw = localStorage.getItem(DEFAULT_GENERATORS.l1WalletByKey(key));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    console.error(`[Storage] Failed to parse wallet data for key: ${key}`);
+    return null;
+  }
+}
+
+/**
+ * Delete L1 wallet from localStorage (uses default SDK prefix)
+ */
+export function deleteWalletFromStorage(key: string): void {
+  localStorage.removeItem(DEFAULT_GENERATORS.l1WalletByKey(key));
+}
+
+/**
+ * Get all stored L1 wallets (uses default SDK prefix)
+ */
+export function getAllStoredWallets<T extends BaseWallet>(): StoredWalletEntry<T>[] {
+  const wallets: StoredWalletEntry<T>[] = [];
+  for (const k of Object.keys(localStorage)) {
+    if (!k.startsWith(DEFAULT_PREFIXES.L1_WALLET)) continue;
+    const raw = localStorage.getItem(k);
+    if (!raw) continue;
+    try {
+      wallets.push({
+        key: k.replace(DEFAULT_PREFIXES.L1_WALLET, ''),
+        data: JSON.parse(raw) as T,
+      });
+    } catch {
+      console.error(`[Storage] Failed to parse wallet: ${k}`);
+    }
+  }
+  return wallets;
+}

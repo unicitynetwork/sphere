@@ -1,3 +1,11 @@
+/**
+ * L1 Wallet Types
+ *
+ * L1-specific type definitions.
+ * Base types are in ../../sdk/types.ts
+ * Transaction types are in ../../sdk/browser/tx.ts
+ */
+
 import type { BaseWallet, BaseWalletAddress } from "../../sdk";
 
 /**
@@ -21,31 +29,13 @@ export interface StoredWallet {
   data: Wallet;
 }
 
-export interface TransactionInput {
-  txid: string;
-  vout: number;
-  value: number;
-  address: string;
-}
-
-export interface TransactionOutput {
-  value: number;
-  address: string;
-}
-
-export interface Transaction {
-  input: TransactionInput;
-  outputs: TransactionOutput[];
-  fee: number;
-  changeAmount: number;
-  changeAddress: string;
-}
-
-export interface TransactionPlan {
-  success: boolean;
-  transactions: Transaction[];
-  error?: string;
-}
+// Re-export transaction types from SDK browser
+export type {
+  TransactionInput,
+  TransactionOutput,
+  Transaction,
+  TransactionPlan,
+} from "../../sdk/browser/tx";
 
 export interface UTXO {
   txid?: string;
@@ -99,6 +89,3 @@ export type {
   VestingMode,
   VestingBalances,
 } from "../../sdk/browser";
-
-// ClassifiedUTXO and ClassificationResult are in SDK vesting.ts
-// Re-exported from ./vesting.ts for backwards compatibility
