@@ -69,11 +69,12 @@ export interface SpentCheckableToken {
  * ```
  */
 export class SpentTokenChecker {
-  private trustBaseProvider: TrustBaseProvider;
+  // @ts-expect-error Stored for potential future use (e.g., direct trust base access)
+  private _trustBaseProvider: TrustBaseProvider;
   private stateProvider: TokenStateProvider;
 
   constructor(config: SpentTokenCheckerConfig) {
-    this.trustBaseProvider = config.trustBaseProvider;
+    this._trustBaseProvider = config.trustBaseProvider;
     this.stateProvider = config.stateProvider;
   }
 

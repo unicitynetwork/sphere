@@ -142,14 +142,19 @@ export type {
 
 export {
   // L1 Transaction building
-  buildTransaction,
   signTransaction,
-  serializeTransaction,
-  calculateFee,
-  createRawTransaction,
+  selectUtxos,
+  buildSegWitTransaction,
+  createSignatureHash,
+  createWitnessData,
+  broadcastTransactions,
+  TX_FEE,
+  DUST_THRESHOLD,
+  SATS_PER_COIN,
   // Vesting classification
   VestingClassifier,
-  createVestingClassifier,
+  InMemoryCacheProvider,
+  VESTING_THRESHOLD,
   // Token split calculator (L3)
   TokenSplitCalculator,
   createTokenSplitCalculator,
@@ -162,15 +167,20 @@ export {
 
 export type {
   // Transaction types
-  TransactionInput,
+  TxPlan,
   TransactionOutput,
-  TransactionOptions,
+  PlannedTransaction,
+  TransactionPlanResult,
   BuiltTransaction,
+  UTXOInput,
+  BroadcastResult,
   // Vesting types
-  VestingResult,
+  ClassificationResult,
+  ClassifiedUTXO,
+  ClassifyUtxosResult,
+  ClassificationProgressCallback,
   VestingCacheProvider,
   VestingCacheEntry,
-  VestingClassifierOptions,
   // Token split types
   SplittableToken,
   TokenWithAmount,

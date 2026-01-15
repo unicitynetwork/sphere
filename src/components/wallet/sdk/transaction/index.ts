@@ -6,32 +6,48 @@
 
 // L1 Transaction Building
 export {
-  buildTransaction,
   signTransaction,
-  serializeTransaction,
-  calculateFee,
-  createRawTransaction,
+  selectUtxos,
+  buildSegWitTransaction,
+  createSignatureHash,
+  createWitnessData,
+  broadcastTransactions,
+  TX_FEE,
+  DUST_THRESHOLD,
+  SATS_PER_COIN,
 } from './transaction';
 
 export type {
-  TransactionInput,
+  TxInput,
+  TxOutput,
+  TxPlan,
   TransactionOutput,
-  TransactionOptions,
+  PlannedTransaction,
+  TransactionPlanResult,
   BuiltTransaction,
+  UTXOInput,
+  BroadcastResult,
 } from './transaction';
 
 // Vesting Classification
 export {
   VestingClassifier,
-  createVestingClassifier,
+  InMemoryCacheProvider,
+  VESTING_THRESHOLD,
 } from './vesting';
 
 export type {
-  VestingResult,
+  ClassificationResult,
+  ClassifiedUTXO,
+  ClassifyUtxosResult,
+  ClassificationProgressCallback,
+} from './vesting';
+
+// Re-export vesting types from types module
+export type {
   VestingCacheProvider,
   VestingCacheEntry,
-  VestingClassifierOptions,
-} from './vesting';
+} from '../types';
 
 // Token Split Calculator
 export {

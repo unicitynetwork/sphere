@@ -21,7 +21,8 @@ import type { MintCommitment } from '@unicitylabs/state-transition-sdk/lib/trans
  */
 export interface MintedTokenInfo {
   /** The mint commitment used */
-  commitment: MintCommitment;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  commitment: MintCommitment<any>;
   /** Inclusion proof from blockchain */
   inclusionProof: unknown;
   /** Whether this token is intended for the recipient */
@@ -37,9 +38,11 @@ export interface MintedTokenInfo {
  */
 export interface SplitTokenResult {
   /** Token created for recipient (before transfer to them) */
-  tokenForRecipient: SdkToken<unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tokenForRecipient: SdkToken<any>;
   /** Token created for sender (change) */
-  tokenForSender: SdkToken<unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tokenForSender: SdkToken<any>;
   /** Transfer transaction for recipient token */
   recipientTransferTx: TransferTransaction;
   /** Outbox entry ID for tracking (if outbox enabled) */
@@ -53,9 +56,11 @@ export interface SplitTokenResult {
  */
 export interface SplitPlanResult {
   /** All tokens transferred to recipient */
-  tokensForRecipient: SdkToken<unknown>[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tokensForRecipient: SdkToken<any>[];
   /** All tokens kept by sender (change) */
-  tokensKeptBySender: SdkToken<unknown>[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tokensKeptBySender: SdkToken<any>[];
   /** UI token IDs that were burned */
   burnedTokens: Array<{ id: string }>;
   /** Transfer transactions for recipient tokens */

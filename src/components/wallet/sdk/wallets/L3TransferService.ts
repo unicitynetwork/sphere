@@ -30,11 +30,8 @@ import {
   type SplitPlan,
 } from '../transaction/token-split';
 
-import {
-  TokenSplitExecutor,
-  type SplitOutboxProvider,
-  type SplitOutboxContext,
-} from '../transaction/split-executor';
+import { TokenSplitExecutor } from '../transaction/split-executor';
+import type { SplitOutboxProvider, SplitOutboxContext } from '../transaction/split-types';
 
 // ==========================================
 // Provider Interfaces

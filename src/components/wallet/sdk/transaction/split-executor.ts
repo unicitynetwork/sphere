@@ -70,7 +70,10 @@ export class DefaultSha256Provider implements Sha256Provider {
 
     // Try Web Crypto first (browser)
     if (typeof globalThis.crypto !== 'undefined' && globalThis.crypto.subtle) {
-      const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', data);
+      // Ensure we pass ArrayBuffer, not SharedArrayBuffer
+      // Copy to new Uint8Array to guarantee standard ArrayBuffer
+      const safeBuffer = new Uint8Array(data);
+      const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', safeBuffer);
       return new Uint8Array(hashBuffer);
     }
 
@@ -505,7 +508,7 @@ export class TokenSplitExecutor {
     const token = await SdkToken.mint(
       this.trustBase,
       state,
-      info.commitment.toTransaction(info.inclusionProof)
+      info.commitment.toTransaction(info.inclusionProof as any)
     );
 
     // 4. Verify
