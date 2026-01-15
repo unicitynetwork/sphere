@@ -74,15 +74,26 @@ export { waitInclusionProof } from '@unicitylabs/state-transition-sdk/lib/util/I
 // NOSTR SDK (@unicitylabs/nostr-js-sdk)
 // ============================================================================
 
-export {
-  NostrClient,
-  NostrKeyManager,
-  EventKinds,
-  TokenTransferProtocol,
-  PaymentRequestProtocol,
+import {
+  NostrClient as _NostrClient,
+  NostrKeyManager as _NostrKeyManager,
+  EventKinds as _EventKinds,
+  TokenTransferProtocol as _TokenTransferProtocol,
+  PaymentRequestProtocol as _PaymentRequestProtocol,
+  Filter as _Filter,
 } from '@unicitylabs/nostr-js-sdk';
 
-export type {
-  Filter as NostrFilter,
-  Event as NostrEvent,
+import type {
+  Event as _Event,
 } from '@unicitylabs/nostr-js-sdk';
+
+// Re-export as values
+export const NostrClient = _NostrClient;
+export const NostrKeyManager = _NostrKeyManager;
+export const EventKinds = _EventKinds;
+export const TokenTransferProtocol = _TokenTransferProtocol;
+export const PaymentRequestProtocol = _PaymentRequestProtocol;
+export const NostrFilter = _Filter;
+
+// Re-export types
+export type NostrEvent = _Event;

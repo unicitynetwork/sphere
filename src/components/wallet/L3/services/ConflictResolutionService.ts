@@ -46,7 +46,7 @@ export class ConflictResolutionService extends BaseConflictResolutionService<
   override resolveConflict(
     local: TxfStorageData,
     remote: TxfStorageData
-  ): MergeResult {
+  ): MergeResult<TxfStorageData> {
     // Call parent method with proper type casting
     const result = super.resolveConflict(local, remote);
     return {

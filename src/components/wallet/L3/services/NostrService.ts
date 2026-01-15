@@ -17,7 +17,7 @@ import {
   EventKinds,
   TokenTransferProtocol,
   PaymentRequestProtocol,
-  type NostrFilter as Filter,
+  NostrFilter,
   type NostrEvent as Event,
   // Unicity SDK
   Token,
@@ -59,7 +59,7 @@ const MAX_PROCESSED_EVENTS = 100; // Maximum number of processed event IDs to st
 
 export class NostrService {
   private static instance: NostrService;
-  private client: NostrClient | null = null;
+  private client: InstanceType<typeof NostrClient> | null = null;
   private identityManager: IdentityManager;
   private isConnected: boolean = false;
   private isConnecting: boolean = false;
@@ -156,16 +156,14 @@ export class NostrService {
 
     // Subscribe to wallet events (token transfers, payment requests) with since filter
     const lastSync = this.getOrInitLastSync();
-    const walletFilter = new Filter();
-    walletFilter.kinds = [
-      EventKinds.TOKEN_TRANSFER,
-      EventKinds.PAYMENT_REQUEST,
-    ];
-    walletFilter["#p"] = [publicKey];
-    walletFilter.since = lastSync;
+    const walletFilter = NostrFilter.builder()
+      .kinds(EventKinds.TOKEN_TRANSFER, EventKinds.PAYMENT_REQUEST)
+      .pTags(publicKey)
+      .since(lastSync)
+      .build();
 
     this.client.subscribe(walletFilter, {
-      onEvent: (event) => this.handleSubscriptionEvent(event, true),
+      onEvent: (event: Event) => this.handleSubscriptionEvent(event, true),
       onEndOfStoredEvents: () => {
         console.log("End of stored wallet events");
       },
@@ -173,12 +171,13 @@ export class NostrService {
 
     // Subscribe to chat events (NIP-17 gift wrap) without since filter
     // Chat messages are deduplicated via ChatRepository (localStorage)
-    const chatFilter = new Filter();
-    chatFilter.kinds = [EventKinds.GIFT_WRAP];
-    chatFilter["#p"] = [publicKey];
+    const chatFilter = NostrFilter.builder()
+      .kinds(EventKinds.GIFT_WRAP)
+      .pTags(publicKey)
+      .build();
 
     this.client.subscribe(chatFilter, {
-      onEvent: (event) => this.handleSubscriptionEvent(event, false),
+      onEvent: (event: Event) => this.handleSubscriptionEvent(event, false),
       onEndOfStoredEvents: () => {
         console.log("End of stored chat events");
       },
@@ -743,7 +742,7 @@ export class NostrService {
     }
   }
 
-  private async getKeyManager(): Promise<NostrKeyManager | undefined> {
+  private async getKeyManager(): Promise<ReturnType<typeof NostrKeyManager.fromPrivateKey> | undefined> {
     const identity = await this.identityManager.getCurrentIdentity();
     if (!identity || !this.client) return;
 

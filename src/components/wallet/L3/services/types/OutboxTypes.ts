@@ -25,7 +25,7 @@ export type {
 } from '../../../sdk';
 
 // Import base type for extension
-import type { OutboxEntryBase, OutboxEntryStatus, OutboxEntryType } from '../../../sdk';
+import type { OutboxEntryBase, OutboxEntryType } from '../../../sdk';
 
 // ==========================================
 // App-Specific Outbox Entry

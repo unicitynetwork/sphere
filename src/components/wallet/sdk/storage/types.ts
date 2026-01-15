@@ -5,7 +5,7 @@
  * Allows different implementations: IPFS, file system, database, etc.
  */
 
-import type { TxfStorageDataBase, TxfToken, TombstoneEntry } from '../types/txf';
+import type { TxfStorageDataBase } from '../types/txf';
 
 // ==========================================
 // Storage Event Types

@@ -337,17 +337,24 @@ export type {
   IAddress,
 } from './unicity-sdk';
 
-// Nostr SDK re-exports
-export {
-  NostrClient,
-  NostrKeyManager,
-  EventKinds,
-  TokenTransferProtocol,
-  PaymentRequestProtocol,
+// Nostr SDK re-exports - import and re-export to ensure proper value exports
+import {
+  NostrClient as _NostrClient,
+  NostrKeyManager as _NostrKeyManager,
+  EventKinds as _EventKinds,
+  TokenTransferProtocol as _TokenTransferProtocol,
+  PaymentRequestProtocol as _PaymentRequestProtocol,
+  NostrFilter as _NostrFilter,
 } from './unicity-sdk';
 
+export const NostrClient = _NostrClient;
+export const NostrKeyManager = _NostrKeyManager;
+export const EventKinds = _EventKinds;
+export const TokenTransferProtocol = _TokenTransferProtocol;
+export const PaymentRequestProtocol = _PaymentRequestProtocol;
+export const NostrFilter = _NostrFilter;
+
 export type {
-  NostrFilter,
   NostrEvent,
 } from './unicity-sdk';
 

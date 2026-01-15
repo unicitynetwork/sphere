@@ -2559,7 +2559,7 @@ export class IpfsStorageService {
 
               // Also sync nametag from remote if local doesn't have one
               if (!nametag && mergeResult.merged._nametag) {
-                walletRepo.setNametag(mergeResult.merged._nametag);
+                walletRepo.setNametag(mergeResult.merged._nametag as NametagData);
                 console.log(`📦 Synced nametag "${mergeResult.merged._nametag.name}" from IPFS to local`);
               }
 

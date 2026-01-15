@@ -108,7 +108,7 @@ export async function deriveIpnsNameFromPrivateKey(
  */
 export async function deriveEd25519KeyPair(
   privateKeyHex: string
-): Promise<ReturnType<typeof generateKeyPairFromSeed>> {
+) {
   const derivedKey = deriveEd25519KeyMaterial(privateKeyHex);
   return generateKeyPairFromSeed("Ed25519", derivedKey);
 }

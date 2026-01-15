@@ -158,10 +158,10 @@ export {
   EventKinds,
   TokenTransferProtocol,
   PaymentRequestProtocol,
+  NostrFilter,
 } from '../../sdk';
 
 export type {
-  NostrFilter,
   NostrEvent,
 } from '../../sdk';
 

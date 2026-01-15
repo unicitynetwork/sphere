@@ -40,7 +40,7 @@ export interface TombstoneEntry {
 // ==========================================
 
 // Import outbox types to use in TxfStorageDataBase
-import type { OutboxEntryStatus, OutboxEntryBase } from './outbox';
+import type { OutboxEntryBase } from './outbox';
 
 // Re-export for backwards compatibility
 export type { OutboxEntryStatus as OutboxStatus, OutboxEntryBase } from './outbox';
@@ -51,13 +51,14 @@ export type { OutboxEntryStatus as OutboxStatus, OutboxEntryBase } from './outbo
 
 /**
  * Storage metadata
- * Note: timestamp is excluded to ensure CID stability (same content = same CID)
  */
 export interface TxfMeta {
   version: number;           // Monotonic counter (increments each sync)
-  address: string;           // Wallet L3 address
-  ipnsName: string;          // IPNS name for this wallet
-  formatVersion: "2.0";      // TXF format version
+  lastModified?: number;     // Timestamp of last modification
+  format?: string;           // Format identifier (e.g., 'txf')
+  formatVersion?: string;    // TXF format version (e.g., '2.0')
+  address?: string;          // Wallet L3 address
+  ipnsName?: string;         // IPNS name for this wallet
   lastCid?: string;          // Last successfully stored CID
   deviceId?: string;         // Unique device identifier for conflict resolution
 }
@@ -119,6 +120,7 @@ export interface TxfGenesisData {
 export interface TxfState {
   data: string;              // State data (can be empty)
   predicate: string;         // Hex-encoded CBOR predicate
+  stateHash?: string;        // Current state hash (hex with "0000" prefix)
 }
 
 /**

@@ -2,7 +2,7 @@
  * Token Validation Types (Platform-Independent)
  */
 
-import type { TxfToken, TxfTransaction } from '../types/txf';
+import type { TxfToken } from '../types/txf';
 
 // ==========================================
 // Validation Result Types

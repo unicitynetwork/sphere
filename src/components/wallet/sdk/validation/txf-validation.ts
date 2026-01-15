@@ -5,7 +5,7 @@
  * No external dependencies - can be used in any environment.
  */
 
-import type { TxfToken, TxfTransaction, TxfInclusionProof } from '../types/txf';
+import type { TxfToken, TxfTransaction } from '../types/txf';
 
 // ==========================================
 // Structure Validation

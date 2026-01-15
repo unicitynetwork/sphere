@@ -183,3 +183,46 @@ export {
   type ExportToTextOptions,
   type ExportToJSONOptions,
 } from './import-export';
+
+// ==========================================
+// IPFS Storage
+// ==========================================
+
+// IPFS types
+export type {
+  IpnsGatewayResult,
+  IpnsProgressiveResult,
+  IpnsPublishResult,
+  IpfsStorageConfig,
+  IpfsStorageStatus,
+  IpfsContentResult,
+  GatewayHealthResult,
+} from './ipfs-types';
+
+export { DEFAULT_IPFS_CONFIG } from './ipfs-types';
+
+// IPNS client utilities
+export {
+  // Key derivation
+  deriveIpnsKeyPair,
+  // Record creation
+  createSignedIpnsRecord,
+  // HTTP gateway publishing
+  publishIpnsToGateway,
+  publishIpnsToGateways,
+  // HTTP gateway resolution
+  resolveIpnsFromGateway,
+  resolveIpnsViaPath,
+  resolveIpnsProgressively,
+  // Content operations
+  fetchIpfsContent,
+  uploadIpfsContent,
+  // Utilities
+  uint8ArrayToBase64,
+} from './ipns-client';
+
+// IPFS Storage Provider (implements TokenStorageProvider)
+export {
+  IpfsStorageProvider,
+  createIpfsStorageProvider,
+} from './ipfs-storage-provider';

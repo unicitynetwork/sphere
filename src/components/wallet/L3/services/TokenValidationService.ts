@@ -77,7 +77,7 @@ export class TokenValidationService {
   async validateAllTokens(
     tokens: LocalToken[],
     options?: { batchSize?: number; onProgress?: (completed: number, total: number) => void }
-  ): Promise<ValidationResult> {
+  ): Promise<ValidationResult<LocalToken>> {
     const validTokens: LocalToken[] = [];
     const issues: ValidationIssue[] = [];
 
@@ -100,7 +100,7 @@ export class TokenValidationService {
               result: {
                 isValid: false,
                 reason: err instanceof Error ? err.message : String(err),
-              } as TokenValidationResult,
+              } as TokenValidationResult<LocalToken>,
             };
           }
         })
@@ -143,7 +143,7 @@ export class TokenValidationService {
   /**
    * Validate a single token
    */
-  async validateToken(token: LocalToken): Promise<TokenValidationResult> {
+  async validateToken(token: LocalToken): Promise<TokenValidationResult<LocalToken>> {
     // Check if token has jsonData
     if (!token.jsonData) {
       return {

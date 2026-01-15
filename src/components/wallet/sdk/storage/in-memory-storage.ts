@@ -328,7 +328,7 @@ export class InMemoryStorageProvider<
     return true;
   }
 
-  async exists(identifier?: string): Promise<boolean> {
+  async exists(_identifier?: string): Promise<boolean> {
     return this.data !== null;
   }
 
