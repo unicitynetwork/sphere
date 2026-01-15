@@ -259,3 +259,14 @@ export {
   type IpnsNametagResult,
   type IpnsNametagConfig,
 } from './ipns-nametag-fetcher';
+
+// ==========================================
+// Key Manager (Browser-specific)
+// ==========================================
+
+export {
+  BrowserKeyManager,
+  getBrowserKeyManager,
+  type BrowserKeyManagerStorageKeys,
+  type BrowserKeyManagerConfig,
+} from './BrowserKeyManager';

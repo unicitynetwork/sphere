@@ -6,7 +6,37 @@
  * - L3Wallet: Unicity token network operations
  * - L3TransferService: Token transfer orchestration
  * - UnityWallet: Combined L1 + L3 wallet
+ * - KeyManager: Platform-independent key management utilities
  */
+
+// ==========================================
+// Key Manager (Platform-Independent)
+// ==========================================
+
+export {
+  // Validation functions
+  validatePrivateKey,
+  normalizePrivateKey,
+  // File parsing
+  parseWalletFileContent,
+  // Export formatting
+  formatWalletExport,
+  // Address derivation
+  deriveAddressFromPath,
+  getDefaultAddressPath,
+  // State utilities
+  getWalletInfo,
+  isWalletInitialized,
+  createEmptyState,
+  createStateFromFileData,
+  // Types
+  type WalletSource,
+  type DerivedAddress,
+  type WalletInfo,
+  type WalletFileData,
+  type WalletExportOptions,
+  type KeyManagerState,
+} from './KeyManager';
 
 // ==========================================
 // L1 Wallet
