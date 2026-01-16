@@ -24,7 +24,7 @@ import type { PrivateKey, ConnectionGater, PeerId } from "@libp2p/interface";
 import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
 import { OutboxRepository } from "../../../../repositories/OutboxRepository";
 import { IdentityManager } from "./IdentityManager";
-import type { Token } from "../data/model";
+import type { WalletToken } from "../data/model";
 import type { TxfStorageData, TxfMeta, TxfToken, TombstoneEntry } from "./types/TxfTypes";
 import { isTokenKey, tokenIdFromKey } from "./types/TxfTypes";
 import { buildTxfStorageData, parseTxfStorageData, txfToToken, tokenToTxf, getCurrentStateHash } from "./TxfSerializer";
@@ -81,7 +81,7 @@ export interface StorageResult {
 
 export interface RestoreResult {
   success: boolean;
-  tokens?: Token[];
+  tokens?: WalletToken[];
   nametag?: NametagData;
   version?: number;
   timestamp: number;
@@ -1584,14 +1584,14 @@ export class IpfsStorageService {
    * Returns tokens that should be preserved (unspent on Unicity)
    */
   private async sanityCheckMissingTokens(
-    localTokens: Token[],
+    localTokens: WalletToken[],
     remoteTokenIds: Set<string>,
     remoteTombstoneIds: Set<string>
   ): Promise<Array<{ tokenId: string; txf: TxfToken }>> {
     const tokensToPreserve: Array<{ tokenId: string; txf: TxfToken }> = [];
 
     // Find tokens that are in local but missing from remote (and not tombstoned)
-    const missingTokens: Token[] = [];
+    const missingTokens: WalletToken[] = [];
     for (const token of localTokens) {
       const txf = tokenToTxf(token);
       if (!txf) continue;
@@ -1964,7 +1964,7 @@ export class IpfsStorageService {
 
     // Build local token map for comparison (re-get as they may have changed after restore)
     const currentLocalTokens = walletRepo.getWallet()?.tokens || [];
-    const localTokenMap = new Map<string, Token>();
+    const localTokenMap = new Map<string, WalletToken>();
     for (const token of currentLocalTokens) {
       const txf = tokenToTxf(token);
       if (txf) {
@@ -2919,11 +2919,11 @@ export class IpfsStorageService {
 
         console.log(`📦 Restored ${storageData.tokens.length} tokens (legacy format)${storageData.nametag ? ` + nametag "${storageData.nametag.name}"` : ""} from IPFS`);
 
-        // Convert serialized tokens back to Token objects
-        const { Token: TokenClass, TokenStatus } = await import("../data/model");
+        // Convert serialized tokens back to WalletToken objects
+        const { WalletToken: WalletTokenClass, TokenStatus } = await import("../data/model");
         const tokens = storageData.tokens.map(
           (t) =>
-            new TokenClass({
+            new WalletTokenClass({
               id: t.id,
               name: t.name,
               symbol: t.symbol,
@@ -2937,7 +2937,7 @@ export class IpfsStorageService {
               type: t.type,
               iconUrl: t.iconUrl,
             })
-        ) as Token[];
+        ) as WalletToken[];
 
         return {
           success: true,
@@ -3079,7 +3079,7 @@ export class IpfsStorageService {
    */
   async importFromTxf(content: string): Promise<{
     success: boolean;
-    tokens?: Token[];
+    tokens?: WalletToken[];
     imported?: number;
     skipped?: number;
     error?: string;
@@ -3102,7 +3102,7 @@ export class IpfsStorageService {
       }
 
       // Validate each token
-      const validTokens: Token[] = [];
+      const validTokens: WalletToken[] = [];
       let skipped = 0;
 
       for (const token of parsedTokens) {

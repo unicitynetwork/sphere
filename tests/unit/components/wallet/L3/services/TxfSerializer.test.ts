@@ -10,7 +10,7 @@ import {
   countCommittedTransactions,
   hasUncommittedTransactions,
 } from "../../../../../../src/components/wallet/L3/services/TxfSerializer";
-import { Token, TokenStatus } from "../../../../../../src/components/wallet/L3/data/model";
+import { WalletToken, TokenStatus } from "../../../../../../src/components/wallet/L3/data/model";
 import type { TxfToken, TxfStorageData } from "../../../../../../src/components/wallet/L3/services/types/TxfTypes";
 
 // ==========================================
@@ -56,8 +56,8 @@ const validTxfToken: TxfToken = {
   },
 };
 
-const createMockToken = (overrides: Partial<Token> = {}): Token => {
-  return new Token({
+const createMockToken = (overrides: Partial<WalletToken> = {}): WalletToken => {
+  return new WalletToken({
     id: "test-token-id",
     name: "Test Token",
     type: "UCT",
@@ -145,7 +145,7 @@ describe("txfToToken", () => {
     const tokenId = "a".repeat(64);
     const result = txfToToken(tokenId, validTxfToken);
 
-    expect(result).toBeInstanceOf(Token);
+    expect(result).toBeInstanceOf(WalletToken);
     expect(result.id).toBe(tokenId);
     expect(result.status).toBe(TokenStatus.CONFIRMED);
     expect(result.amount).toBe("1000000000");

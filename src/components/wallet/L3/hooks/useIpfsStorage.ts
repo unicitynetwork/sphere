@@ -9,7 +9,7 @@ import {
 } from "../services/IpfsStorageService";
 import { IdentityManager } from "../services/IdentityManager";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
-import type { Token } from "../data/model";
+import type { WalletToken } from "../data/model";
 
 // Query keys
 export const IPFS_STORAGE_KEYS = {
@@ -189,7 +189,7 @@ export function useIpfsStorage() {
   const importTxfMutation = useMutation({
     mutationFn: async (content: string): Promise<{
       success: boolean;
-      tokens?: Token[];
+      tokens?: WalletToken[];
       imported?: number;
       skipped?: number;
       error?: string;

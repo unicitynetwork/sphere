@@ -44,7 +44,7 @@ import { RegistryService } from "./RegistryService";
 import {
   PaymentRequestStatus,
   TokenStatus,
-  Token as UiToken,
+  WalletToken,
   type IncomingPaymentRequest,
 } from "../data/model";
 import { v4 as uuidv4 } from "uuid";
@@ -673,7 +673,7 @@ export class NostrService {
 
     const walletRepo = WalletRepository.getInstance();
 
-    const uiToken = new UiToken({
+    const uiToken = new WalletToken({
       id: uuidv4(),
       name: symbol ? symbol : "Unicity Token",
       type: token.type.toString(),

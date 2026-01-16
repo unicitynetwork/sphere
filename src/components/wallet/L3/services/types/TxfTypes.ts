@@ -77,7 +77,7 @@ export interface TxfStorageData {
 // ==========================================
 
 export interface ValidationResult {
-  validTokens: import("../../data/model").Token[];
+  validTokens: import("../../data/model").WalletToken[];
   issues: ValidationIssue[];
 }
 
@@ -89,6 +89,6 @@ export interface ValidationIssue {
 
 export interface TokenValidationResult {
   isValid: boolean;
-  token?: import("../../data/model").Token;
+  token?: import("../../data/model").WalletToken;
   reason?: string;
 }

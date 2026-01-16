@@ -129,7 +129,7 @@ export {
   // Addresses
   AddressScheme,
   ProxyAddress,
-  // Tokens
+  // Cryptographic Token from @unicitylabs/state-transition-sdk
   Token,
   TokenId,
   TokenType,

@@ -3,7 +3,7 @@
  * Converts between Token model and TXF format for IPFS storage
  */
 
-import { Token, TokenStatus } from "../data/model";
+import { WalletToken, TokenStatus } from "../data/model";
 import type { NametagData } from "../../../../repositories/WalletRepository";
 import {
   type TxfStorageData,
@@ -38,7 +38,7 @@ import {
  * The jsonData field already contains TXF-format JSON string
  * Uses Zod validation for type safety
  */
-export function tokenToTxf(token: Token): TxfToken | null {
+export function tokenToTxf(token: WalletToken): TxfToken | null {
   if (!token.jsonData) {
     console.warn(`Token ${token.id} has no jsonData, skipping TXF conversion`);
     return null;
@@ -113,7 +113,7 @@ function computeGenesisHash(genesisData: TxfGenesis["data"]): string {
 /**
  * Convert TXF token back to Token model
  */
-export function txfToToken(tokenId: string, txf: TxfToken): Token {
+export function txfToToken(tokenId: string, txf: TxfToken): WalletToken {
   // Extract coin info from genesis data
   const coinData = txf.genesis.data.coinData;
   const totalAmount = coinData.reduce((sum, [, amt]) => {
@@ -142,7 +142,7 @@ export function txfToToken(tokenId: string, txf: TxfToken): Token {
   const tokenType = txf.genesis.data.tokenType;
   const isNft = tokenType === "455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89";
 
-  return new Token({
+  return new WalletToken({
     id: tokenId,
     name: isNft ? "NFT" : "Token",
     type: isNft ? "NFT" : "UCT",
@@ -164,7 +164,7 @@ export function txfToToken(tokenId: string, txf: TxfToken): Token {
  * Build complete TXF storage data from tokens and metadata
  */
 export function buildTxfStorageData(
-  tokens: Token[],
+  tokens: WalletToken[],
   meta: Omit<TxfMeta, "formatVersion">,
   nametag?: NametagData,
   tombstones?: TombstoneEntry[],
@@ -228,7 +228,7 @@ export function buildTxfStorageData(
  * Parse TXF storage data from IPFS with Zod validation
  */
 export function parseTxfStorageData(data: unknown): {
-  tokens: Token[];
+  tokens: WalletToken[];
   meta: TxfMeta | null;
   nametag: NametagData | null;
   tombstones: TombstoneEntry[];
@@ -238,7 +238,7 @@ export function parseTxfStorageData(data: unknown): {
   validationErrors: string[];
 } {
   const result: {
-    tokens: Token[];
+    tokens: WalletToken[];
     meta: TxfMeta | null;
     nametag: NametagData | null;
     tombstones: TombstoneEntry[];
@@ -395,7 +395,7 @@ export function parseTxfStorageData(data: unknown): {
  * Build TXF export file from tokens (for manual export)
  * This creates a standard TXF file without metadata envelope
  */
-export function buildTxfExportFile(tokens: Token[]): Record<string, TxfToken> {
+export function buildTxfExportFile(tokens: WalletToken[]): Record<string, TxfToken> {
   const txfFile: Record<string, TxfToken> = {};
 
   for (const token of tokens) {
@@ -412,12 +412,12 @@ export function buildTxfExportFile(tokens: Token[]): Record<string, TxfToken> {
 /**
  * Parse TXF file content (for manual import) with Zod validation
  */
-export function parseTxfFile(content: unknown): { tokens: Token[]; errors: string[] } {
+export function parseTxfFile(content: unknown): { tokens: WalletToken[]; errors: string[] } {
   if (!content || typeof content !== "object") {
     return { tokens: [], errors: ["Content is not an object"] };
   }
 
-  const tokens: Token[] = [];
+  const tokens: WalletToken[] = [];
   const errors: string[] = [];
   const data = content as Record<string, unknown>;
 
@@ -466,7 +466,7 @@ export function parseTxfFile(content: unknown): { tokens: Token[]; errors: strin
  * Get token ID from Token object
  * Prefers the genesis.data.tokenId if available
  */
-export function getTokenId(token: Token): string {
+export function getTokenId(token: WalletToken): string {
   if (token.jsonData) {
     try {
       const txf = JSON.parse(token.jsonData);
@@ -497,7 +497,7 @@ export function getCurrentStateHash(txf: TxfToken): string {
 /**
  * Get current state hash from a Token object (parses jsonData)
  */
-export function getCurrentStateHashFromToken(token: Token): string | null {
+export function getCurrentStateHashFromToken(token: WalletToken): string | null {
   if (!token.jsonData) return null;
 
   try {
@@ -511,7 +511,7 @@ export function getCurrentStateHashFromToken(token: Token): string | null {
 /**
  * Check if token has valid TXF data
  */
-export function hasValidTxfData(token: Token): boolean {
+export function hasValidTxfData(token: WalletToken): boolean {
   if (!token.jsonData) return false;
 
   try {
@@ -531,7 +531,7 @@ export function hasValidTxfData(token: Token): boolean {
 /**
  * Count committed transactions in a token
  */
-export function countCommittedTransactions(token: Token): number {
+export function countCommittedTransactions(token: WalletToken): number {
   if (!token.jsonData) return 0;
 
   try {
@@ -549,7 +549,7 @@ export function countCommittedTransactions(token: Token): number {
 /**
  * Check if token has uncommitted transactions
  */
-export function hasUncommittedTransactions(token: Token): boolean {
+export function hasUncommittedTransactions(token: WalletToken): boolean {
   if (!token.jsonData) return false;
 
   try {

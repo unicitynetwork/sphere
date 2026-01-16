@@ -630,6 +630,35 @@ export {
 } from './types';
 
 // ============================================================================
+// TOKEN TYPES (Business Logic Layer)
+// ============================================================================
+
+export {
+  // Token status enum
+  TokenStatus,
+  TransactionType,
+  PaymentRequestStatus,
+  // Utility functions
+  isTokenAvailable,
+  isTokenPending,
+  isTokenInactive,
+  getTokenAmountAsBigInt,
+  // Token classes
+  WalletToken,
+  AggregatedAsset,
+  TokenCollection,
+  TransactionEvent,
+} from './types/token';
+
+export type {
+  // Token interfaces
+  BaseToken,
+  TransferableToken,
+  AggregatedAssetData,
+  PaymentRequestData,
+} from './types/token';
+
+// ============================================================================
 // TXF (TOKEN EXCHANGE FORMAT) TYPES
 // ============================================================================
 
@@ -730,7 +759,8 @@ export {
   // Addresses
   AddressScheme,
   ProxyAddress,
-  // Tokens
+  // Cryptographic Token from @unicitylabs/state-transition-sdk
+  // NOTE: WalletToken is for UI/storage, Token is for crypto operations (mint, transfer, split)
   Token,
   TokenId,
   TokenType,

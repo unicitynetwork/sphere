@@ -3,7 +3,7 @@ import {
   TokenValidationService,
   getTokenValidationService,
 } from "../../../../../../src/components/wallet/L3/services/TokenValidationService";
-import { Token, TokenStatus } from "../../../../../../src/components/wallet/L3/data/model";
+import { WalletToken, TokenStatus } from "../../../../../../src/components/wallet/L3/data/model";
 import type { TxfToken } from "../../../../../../src/components/wallet/L3/services/types/TxfTypes";
 
 // ==========================================
@@ -56,8 +56,8 @@ const validTxfToken: TxfToken = {
   },
 };
 
-const createMockToken = (overrides: Partial<Token> = {}): Token => {
-  return new Token({
+const createMockToken = (overrides: Partial<WalletToken> = {}): WalletToken => {
+  return new WalletToken({
     id: "test-token-id",
     name: "Test Token",
     type: "UCT",

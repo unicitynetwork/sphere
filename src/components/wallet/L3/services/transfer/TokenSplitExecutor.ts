@@ -6,7 +6,7 @@ import { OutboxRepository } from "../../../../../repositories/OutboxRepository";
 import {
   UnmaskedPredicateReference,
   waitInclusionProof,
-  Token as SdkToken,
+  Token,
   TokenId,
   CoinId,
   TokenSplitBuilder,
@@ -33,8 +33,8 @@ interface MintedTokenInfo {
 }
 
 interface SplitTokenResult {
-  tokenForRecipient: SdkToken<any>;
-  tokenForSender: SdkToken<any>;
+  tokenForRecipient: Token<any>;
+  tokenForSender: Token<any>;
   recipientTransferTx: TransferTransaction;
   /** Outbox entry ID for tracking Nostr delivery (if outbox enabled) */
   outboxEntryId?: string;
@@ -70,8 +70,8 @@ export class TokenSplitExecutor {
       recipientPubkey: string;
     }
   ): Promise<{
-    tokensForRecipient: SdkToken<any>[];
-    tokensKeptBySender: SdkToken<any>[];
+    tokensForRecipient: Token<any>[];
+    tokensKeptBySender: Token<any>[];
     burnedTokens: any[];
     recipientTransferTxs: TransferTransaction[];
     /** Outbox entry IDs for tracking Nostr delivery (one per recipient token) */
@@ -82,8 +82,8 @@ export class TokenSplitExecutor {
     console.log(`⚙️ Executing split plan using TokenSplitBuilder...`);
 
     const result = {
-      tokensForRecipient: [] as SdkToken<any>[],
-      tokensKeptBySender: [] as SdkToken<any>[],
+      tokensForRecipient: [] as Token<any>[],
+      tokensKeptBySender: [] as Token<any>[],
       burnedTokens: [] as any[],
       recipientTransferTxs: [] as TransferTransaction[],
       outboxEntryIds: [] as string[],
@@ -129,7 +129,7 @@ export class TokenSplitExecutor {
   }
 
   private async executeSingleTokenSplit(
-    tokenToSplit: SdkToken<any>,
+    tokenToSplit: Token<any>,
     splitAmount: bigint,
     remainderAmount: bigint,
     coinId: CoinId,
@@ -395,7 +395,7 @@ export class TokenSplitExecutor {
     signingService: SigningService,
     tokenType: any,
     label: string
-  ): Promise<SdkToken<any>> {
+  ): Promise<Token<any>> {
     // 1. Recreate Predicate
     const predicate = await UnmaskedPredicate.create(
       info.tokenId,
@@ -409,7 +409,7 @@ export class TokenSplitExecutor {
     const state = new TokenState(predicate, null); // No data for fungible usually
 
     // 3. Create Token
-    const token = await SdkToken.mint(
+    const token = await Token.mint(
       this.trustBase,
       state,
       info.commitment.toTransaction(info.inclusionProof)

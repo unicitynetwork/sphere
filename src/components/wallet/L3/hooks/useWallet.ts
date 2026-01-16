@@ -2,7 +2,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { AggregatedAsset, Token, TokenStatus } from "../data/model";
+import { AggregatedAsset, WalletToken, TokenStatus } from "../data/model";
 import { ServiceProvider } from "../services/ServiceProvider";
 import { ApiService } from "../services/api";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
@@ -13,7 +13,7 @@ import { TokenSplitCalculator } from "../services/transfer/TokenSplitCalculator"
 import { IpfsStorageService } from "../services/IpfsStorageService";
 import {
   ProxyAddress,
-  Token as SdkToken,
+  Token,
   SigningService,
   TransferCommitment,
   waitInclusionProof,
@@ -216,7 +216,7 @@ export const useWallet = () => {
 
       const tokens = tokensQuery.data || [];
       const prices = pricesQuery.data || {};
-      const groupedTokens: Record<string, Token[]> = {};
+      const groupedTokens: Record<string, WalletToken[]> = {};
 
       tokens.forEach((token) => {
         if (
@@ -330,7 +330,7 @@ export const useWallet = () => {
   });
 
   const sendTokenMutation = useMutation({
-    mutationFn: async (params: { recipientNametag: string; token: Token }) => {
+    mutationFn: async (params: { recipientNametag: string; token: WalletToken }) => {
       const { recipientNametag, token } = params;
       console.log(
         `Starting transfer of ${token.symbol} to ${recipientNametag}`
@@ -352,7 +352,7 @@ export const useWallet = () => {
       );
 
       if (!token.jsonData) throw new Error("Token data missing");
-      const sourceToken = await SdkToken.fromJSON(token.jsonData);
+      const sourceToken = await Token.fromJSON(token.jsonData);
 
       const signingService = await SigningService.createFromSecret(secret);
       const salt = window.crypto.getRandomValues(Buffer.alloc(32));
@@ -575,7 +575,7 @@ export const useWallet = () => {
   });
 
   const executeDirectTransfer = async (
-    sourceToken: SdkToken<any>,
+    sourceToken: Token<any>,
     uiId: string,
     recipientAddress: any,
     recipientPubkey: string,
@@ -728,7 +728,7 @@ export const useWallet = () => {
     }
   };
 
-  const saveChangeTokenToWallet = (sdkToken: SdkToken<any>, coinId: string) => {
+  const saveChangeTokenToWallet = (sdkToken: Token<any>, coinId: string) => {
     let amount = "0";
     const coinsOpt = sdkToken.coins;
     const coinData = coinsOpt;
@@ -780,7 +780,7 @@ export const useWallet = () => {
     // Extract token ID for logging
     const genesisTokenId = sdkJson.genesis?.data?.tokenId;
 
-    const uiToken = new Token({
+    const uiToken = new WalletToken({
       id: uuidv4(),
       name: def?.symbol || "Change Token",
       symbol: def?.symbol || "UNK",

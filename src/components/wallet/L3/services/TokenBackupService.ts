@@ -15,7 +15,7 @@
  * - Support for both file download and localStorage backup
  */
 
-import { Token as LocalToken, TokenStatus } from "../data/model";
+import { WalletToken as LocalToken, TokenStatus } from "../data/model";
 import type { TxfToken } from "./types/TxfTypes";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 import type { WalletStatePersistence } from "../../sdk";

@@ -1,11 +1,11 @@
 import { motion } from 'framer-motion';
-import { Token } from '../../L3/data/model';
+import { WalletToken } from '../../L3/data/model';
 import { Box, Copy, CheckCircle2 } from 'lucide-react';
 import { useState } from 'react';
 import { AmountFormatUtils } from '../../L3/utils/currency';
 
 interface TokenRowProps {
-  token: Token;
+  token: WalletToken;
   delay: number;
 }
 

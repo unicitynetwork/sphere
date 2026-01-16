@@ -3,14 +3,14 @@
  * Validates tokens before IPFS sync and fetches missing Unicity proofs
  */
 
-import { Token as LocalToken, TokenStatus } from "../data/model";
+import { WalletToken as LocalToken, TokenStatus } from "../data/model";
 import type {
   TxfTransaction,
   TxfInclusionProof,
   TxfToken,
 } from "./types/TxfTypes";
 import { getCurrentStateHash, tokenToTxf } from "./TxfSerializer";
-import { Token as SdkToken } from "../sdk";
+import { Token } from "../sdk";
 
 // Re-export SDK validation types for backwards compatibility
 export type {
@@ -325,7 +325,7 @@ export class TokenValidationService {
 
     try {
       // Use SDK to check if source state is spent
-      const sdkToken = await SdkToken.fromJSON(txf);
+      const sdkToken = await Token.fromJSON(txf);
 
       // Get token owner public key from IdentityManager
       const { IdentityManager } = await import("./IdentityManager");
@@ -588,7 +588,7 @@ export class TokenValidationService {
     for (const [tokenId, txfToken] of tokens) {
       try {
         // Parse SDK token from TXF data
-        const sdkToken = await SdkToken.fromJSON(txfToken);
+        const sdkToken = await Token.fromJSON(txfToken);
 
         // Convert public key to bytes for SDK
         const pubKeyBytes = Buffer.from(publicKey, "hex");
@@ -741,7 +741,7 @@ export class TokenValidationService {
 
     try {
       // Parse SDK token
-      const sdkToken = await SdkToken.fromJSON(txfToken);
+      const sdkToken = await Token.fromJSON(txfToken);
 
       // Convert public key to bytes for SDK
       const pubKeyBytes = Buffer.from(publicKey, "hex");
@@ -835,7 +835,7 @@ export class TokenValidationService {
   ): Promise<{ success: boolean; error?: string }> {
     try {
       // Parse token from JSON
-      const sdkToken = await SdkToken.fromJSON(txfToken);
+      const sdkToken = await Token.fromJSON(txfToken);
 
       // Get trust base
       const trustBase = await this.getTrustBase();

@@ -1,193 +1,70 @@
-import { v4 as uuidv4 } from 'uuid';
-
 // ==========================================
-// 1. Enums & Constants
-// ==========================================
-
-export const TokenStatus = {
-    PENDING: 'PENDING',
-    SUBMITTED: 'SUBMITTED',
-    TRANSFERRED: 'TRANSFERRED',
-    CONFIRMED: 'CONFIRMED',
-    BURNED: 'BURNED',
-    FAILED: 'FAILED'
-} as const;
-
-export type TokenStatus = typeof TokenStatus[keyof typeof TokenStatus];
-
-export const TransactionType = {
-    RECEIVED: 'RECEIVED',
-    SENT: 'SENT'
-} as const;
-
-export type TransactionType = typeof TransactionType[keyof typeof TransactionType];
-
-// ==========================================
-// 2. Token Model
+// L3 Data Model
+// Re-exports SDK types and classes for backwards compatibility
 // ==========================================
 
-export class Token {
-    id: string;
-    name: string;
-    type: string;
-    timestamp: number;
-    unicityAddress?: string;
-    jsonData?: string;
-    sizeBytes: number;
-    status: TokenStatus;
-    transactionId?: string;
-    isOfflineTransfer: boolean;
-    pendingOfflineData?: string;
-    amount?: string;           // String to hold BigInteger safe
-    coinId?: string;
-    symbol?: string;
-    iconUrl?: string;
-    transferredAt?: number;
-    splitSourceTokenId?: string;
-    splitSentAmount?: string;
-    senderPubkey?: string;     // Pubkey of sender (for received tokens)
+// ==========================================
+// 1. Enums, Constants & Utility Functions (from SDK)
+// ==========================================
 
-    constructor(data: Partial<Token>) {
-        this.id = data.id || uuidv4();
-        this.name = data.name || "Unknown Token";
-        this.type = data.type || "Unknown";
-        this.timestamp = data.timestamp || Date.now();
-        this.unicityAddress = data.unicityAddress;
-        this.jsonData = data.jsonData;
-        this.sizeBytes = data.sizeBytes || 0;
-        this.status = data.status || TokenStatus.CONFIRMED;
-        this.transactionId = data.transactionId;
-        this.isOfflineTransfer = data.isOfflineTransfer || false;
-        this.pendingOfflineData = data.pendingOfflineData;
-        this.amount = data.amount;
-        this.coinId = data.coinId;
-        this.symbol = data.symbol;
-        this.iconUrl = data.iconUrl;
-        this.transferredAt = data.transferredAt;
-        this.splitSourceTokenId = data.splitSourceTokenId;
-        this.splitSentAmount = data.splitSentAmount;
-        this.senderPubkey = data.senderPubkey;
-    }
+export {
+    TokenStatus,
+    TransactionType,
+    PaymentRequestStatus,
+    isTokenAvailable,
+    isTokenPending,
+    isTokenInactive,
+    getTokenAmountAsBigInt,
+} from '../../../sdk';
 
-    getFormattedSize(): string {
-        if (this.sizeBytes < 1024) return `${this.sizeBytes}B`;
-        if (this.sizeBytes < 1024 * 1024) return `${Math.floor(this.sizeBytes / 1024)}KB`;
-        return `${Math.floor(this.sizeBytes / (1024 * 1024))}MB`;
-    }
+// ==========================================
+// 2. Token Classes (from SDK)
+// ==========================================
 
-    getAmountAsBigInteger(): bigint | null {
-        try {
-            return this.amount ? BigInt(this.amount) : null;
-        } catch {
-            return null;
-        }
-    }
+export {
+    WalletToken,
+    AggregatedAsset,
+    TokenCollection,
+    TransactionEvent,
+} from '../../../sdk';
+
+// ==========================================
+// 3. Type Interfaces (from SDK)
+// ==========================================
+
+export type {
+    BaseToken,
+    TransferableToken,
+    AggregatedAssetData,
+    PaymentRequestData,
+} from '../../../sdk';
+
+// ==========================================
+// 4. User Identity
+// ==========================================
+
+// Re-export SDK UserIdentity and extend with app-specific fields
+import type { UserIdentity as SdkUserIdentity } from '../../../sdk';
+
+/**
+ * User identity for L3 Unicity wallet.
+ * Extends SDK UserIdentity with optional nametag field for app convenience.
+ *
+ * NOTE: The wallet address is derived using UnmaskedPredicateReference (no nonce/salt).
+ * This creates a stable, reusable DirectAddress from publicKey + tokenType.
+ */
+export interface UserIdentity extends SdkUserIdentity {
+    nametag?: string; // Optional field for local storage convenience
 }
 
 // ==========================================
-// 3. AggregatedAsset Model
+// 5. Legacy/Demo Models (App-specific)
 // ==========================================
 
-export class AggregatedAsset {
-    coinId: string;
-    symbol: string;
-    name: string | null;
-    totalAmount: string; // String representation of BigInt
-    decimals: number;
-    tokenCount: number;
-    iconUrl: string | null;
-    priceUsd: number;
-    priceEur: number;
-    change24h: number;
-
-    constructor(data: {
-        coinId: string;
-        symbol: string;
-        name?: string | null;
-        totalAmount: string;
-        decimals: number;
-        tokenCount: number;
-        iconUrl?: string | null;
-        priceUsd?: number;
-        priceEur?: number;
-        change24h?: number;
-    }) {
-        this.coinId = data.coinId;
-        this.symbol = data.symbol;
-        this.name = data.name || null;
-        this.totalAmount = data.totalAmount;
-        this.decimals = data.decimals;
-        this.tokenCount = data.tokenCount;
-        this.iconUrl = data.iconUrl || null;
-        this.priceUsd = data.priceUsd || 0.0;
-        this.priceEur = data.priceEur || 0.0;
-        this.change24h = data.change24h || 0.0;
-    }
-
-    getAmountAsBigInt(): bigint {
-        try {
-            return BigInt(this.totalAmount);
-        } catch {
-            return BigInt(0);
-        }
-    }
-
-    getFormattedAmount(): string {
-        const bigIntAmount = this.getAmountAsBigInt();
-        if (bigIntAmount === BigInt(0)) return "0";
-
-        const amountStr = bigIntAmount.toString();
-
-        if (amountStr.length <= this.decimals) {
-            const padded = amountStr.padStart(this.decimals + 1, '0');
-            const integerPart = "0";
-            const fractionalPart = padded.slice(-this.decimals);
-            return this.stripTrailingZeros(`${integerPart}.${fractionalPart}`);
-        }
-
-        const integerPart = amountStr.slice(0, amountStr.length - this.decimals);
-        const fractionalPart = amountStr.slice(amountStr.length - this.decimals);
-        
-        return this.stripTrailingZeros(`${integerPart}.${fractionalPart}`);
-    }
-
-    private stripTrailingZeros(str: string): string {
-        if (!str.includes('.')) return str;
-        const result = str.replace(/\.?0+$/, '');
-        return result;
-    }
-
-    getAmountAsDecimal(): number {
-        const bigIntAmount = this.getAmountAsBigInt();
-        const divisor = Math.pow(10, this.decimals);
-        return Number(bigIntAmount) / divisor;
-    }
-
-    getTotalFiatValue(currency: string): number {
-        const price = currency === "EUR" ? this.priceEur : this.priceUsd;
-        return this.getAmountAsDecimal() * price;
-    }
-
-    getFormattedFiatValue(currency: string): string {
-        const symbol = currency === "EUR" ? "€" : "$";
-        const value = this.getTotalFiatValue(currency);
-        
-        return `${symbol}${value.toLocaleString('en-US', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-        })}`;
-    }
-
-    getFormattedChange(): string {
-        const sign = this.change24h >= 0 ? "+" : "";
-        return `${sign}${this.change24h.toFixed(2)}%`;
-    }
-}
-
-// ==========================================
-// 4. CryptoCurrency Model (Legacy/Demo)
-// ==========================================
-
+/**
+ * CryptoCurrency - Legacy/Demo model for cryptocurrency display
+ * @deprecated Use AggregatedAsset for real token data
+ */
 export class CryptoCurrency {
     id: string;
     symbol: string;
@@ -196,7 +73,7 @@ export class CryptoCurrency {
     priceUsd: number;
     priceEur: number;
     change24h: number;
-    iconResId: number; // Keep for compatibility, though usually unused in web
+    iconResId: number;
     isDemo: boolean;
     iconUrl?: string | null;
 
@@ -214,8 +91,8 @@ export class CryptoCurrency {
     }
 
     getBalanceInFiat(currency: string): number {
-        return currency === "EUR" 
-            ? this.balance * this.priceEur 
+        return currency === "EUR"
+            ? this.balance * this.priceEur
             : this.balance * this.priceUsd;
     }
 
@@ -223,7 +100,6 @@ export class CryptoCurrency {
         if (this.balance % 1 === 0) {
             return Math.floor(this.balance).toString();
         }
-        // Trim logic
         return this.balance.toFixed(8).replace(/\.?0+$/, '');
     }
 
@@ -246,61 +122,15 @@ export class CryptoCurrency {
 }
 
 // ==========================================
-// 5. Transaction Event
+// 6. Payment Request (App-specific)
 // ==========================================
 
-export class TransactionEvent {
-    token: Token;
-    type: TransactionType;
-    timestamp: number;
-
-    constructor(token: Token, type: TransactionType, timestamp: number) {
-        this.token = token;
-        this.type = type;
-        this.timestamp = timestamp;
-    }
-}
-
-// ==========================================
-// 6. User Identity & Wallet
-// ==========================================
+import type { PaymentRequestStatus } from '../../../sdk';
 
 /**
- * User identity for L3 Unicity wallet.
- *
- * NOTE: The wallet address is derived using UnmaskedPredicateReference (no nonce/salt).
- * This creates a stable, reusable DirectAddress from publicKey + tokenType.
+ * Incoming payment request - app-specific with bigint amount
+ * Extends SDK PaymentRequestData concept
  */
-export interface UserIdentity {
-    privateKey: string;
-    publicKey: string;
-    address: string;
-    nametag?: string; // Optional field for local storage convenience
-}
-
-export class Wallet {
-    id: string;
-    name: string;
-    address: string;
-    tokens: Token[];
-
-    constructor(id: string, name: string, address: string, tokens: Token[] = []) {
-        this.id = id;
-        this.name = name;
-        this.address = address;
-        this.tokens = tokens;
-    }
-}
-
-export const PaymentRequestStatus = {
-    PENDING: 'PENDING',
-    ACCEPTED: 'ACCEPTED',
-    REJECTED: 'REJECTED',
-    PAID: 'PAID'
-} as const
-
-export type PaymentRequestStatus = typeof PaymentRequestStatus[keyof typeof PaymentRequestStatus];
-
 export interface IncomingPaymentRequest {
     id: string;
     senderPubkey: string;
@@ -313,3 +143,15 @@ export interface IncomingPaymentRequest {
     timestamp: number;
     status: PaymentRequestStatus;
 }
+
+// ==========================================
+// 7. Backwards Compatibility Aliases
+// ==========================================
+
+import { TokenCollection } from '../../../sdk';
+
+/**
+ * @deprecated Use TokenCollection instead. "Wallet" is misleading as this is just a token container.
+ * Kept for backwards compatibility during migration.
+ */
+export const Wallet = TokenCollection;

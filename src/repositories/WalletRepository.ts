@@ -1,4 +1,4 @@
-import { Token, Wallet, TokenStatus } from "../components/wallet/L3/data/model";
+import { WalletToken, TokenCollection, TokenStatus } from "../components/wallet/L3/data/model";
 import type { TombstoneEntry, TxfToken, TxfTransaction } from "../components/wallet/L3/services/types/TxfTypes";
 import { v4 as uuidv4 } from "uuid";
 import { STORAGE_KEYS, STORAGE_KEY_GENERATORS, STORAGE_KEY_PREFIXES } from "../config/storageKeys";
@@ -36,7 +36,7 @@ interface StoredWallet {
   id: string;
   name: string;
   address: string;
-  tokens: Partial<Token>[];
+  tokens: Partial<WalletToken>[];
   nametag?: NametagData;  // One nametag per wallet/identity
   tombstones?: TombstoneEntry[] | string[];  // TombstoneEntry[] (new) or string[] (legacy, discarded on load)
   archivedTokens?: Record<string, TxfToken>;  // Archived spent tokens (keyed by tokenId)
@@ -46,7 +46,7 @@ interface StoredWallet {
 export class WalletRepository {
   private static instance: WalletRepository;
 
-  private _wallet: Wallet | null = null;
+  private _wallet: TokenCollection | null = null;
   private _currentAddress: string | null = null;
   private _migrationComplete: boolean = false;
   private _nametag: NametagData | null = null;
@@ -232,7 +232,7 @@ export class WalletRepository {
   /**
    * Load wallet for a specific address
    */
-  loadWalletForAddress(address: string): Wallet | null {
+  loadWalletForAddress(address: string): TokenCollection | null {
     // Validate address format
     if (!this.validateAddress(address)) {
       console.error(`Invalid address format: ${address}`);
@@ -265,8 +265,8 @@ export class WalletRepository {
           return null;
         }
 
-        const tokens = parsed.tokens.map((t: Partial<Token>) => new Token(t));
-        const wallet = new Wallet(
+        const tokens = parsed.tokens.map((t: Partial<WalletToken>) => new WalletToken(t));
+        const wallet = new TokenCollection(
           parsed.id,
           parsed.name,
           parsed.address,
@@ -334,7 +334,7 @@ export class WalletRepository {
   /**
    * Switch to a different address
    */
-  switchToAddress(address: string): Wallet | null {
+  switchToAddress(address: string): TokenCollection | null {
     // Validate address format
     if (!this.validateAddress(address)) {
       console.error(`Cannot switch to invalid address: ${address}`);
@@ -403,7 +403,7 @@ export class WalletRepository {
    * @param name - Optional wallet name
    * @param silent - If true, don't emit events (useful during address creation flow)
    */
-  createWallet(address: string, name: string = "My Wallet", silent: boolean = false): Wallet {
+  createWallet(address: string, name: string = "My Wallet", silent: boolean = false): TokenCollection {
     // Validate address format
     if (!this.validateAddress(address)) {
       throw new Error(`Cannot create wallet with invalid address: ${address}`);
@@ -424,7 +424,7 @@ export class WalletRepository {
     this._archivedTokens = new Map();
     this._forkedTokens = new Map();
 
-    const newWallet = new Wallet(uuidv4(), name, address, []);
+    const newWallet = new TokenCollection(uuidv4(), name, address, []);
     this._currentAddress = address;
     this.saveWallet(newWallet);
     console.log(`Created new wallet for address ${address}`);
@@ -438,7 +438,7 @@ export class WalletRepository {
     return newWallet;
   }
 
-  private saveWallet(wallet: Wallet) {
+  private saveWallet(wallet: TokenCollection) {
     this._wallet = wallet;
     this._currentAddress = wallet.address;
     const storageKey = this.getStorageKey(wallet.address);
@@ -458,15 +458,15 @@ export class WalletRepository {
     localStorage.setItem(storageKey, JSON.stringify(storedData));
   }
 
-  getWallet(): Wallet | null {
+  getWallet(): TokenCollection | null {
     return this._wallet;
   }
 
-  getTokens(): Token[] {
+  getTokens(): WalletToken[] {
     return this._wallet?.tokens || [];
   }
 
-  private isSameToken(t1: Token, t2: Token): boolean {
+  private isSameToken(t1: WalletToken, t2: WalletToken): boolean {
     if (t1.id === t2.id) return true;
 
     try {
@@ -484,7 +484,7 @@ export class WalletRepository {
     return false;
   }
 
-  addToken(token: Token, skipHistory: boolean = false): void {
+  addToken(token: WalletToken, skipHistory: boolean = false): void {
     console.log("💾 Repository: Adding token...", token.id);
     if (!this._wallet) {
       console.error("💾 Repository: Wallet not initialized!");
@@ -511,7 +511,7 @@ export class WalletRepository {
 
     const updatedTokens = [token, ...currentTokens];
 
-    const updatedWallet = new Wallet(
+    const updatedWallet = new TokenCollection(
       this._wallet.id,
       this._wallet.name,
       this._wallet.address,
@@ -544,7 +544,7 @@ export class WalletRepository {
    * Update an existing token with a new version
    * Used when remote has a better version (more transactions/proofs)
    */
-  updateToken(token: Token): void {
+  updateToken(token: WalletToken): void {
     console.log("💾 Repository: Updating token...", token.id);
     if (!this._wallet) {
       console.error("💾 Repository: Wallet not initialized!");
@@ -553,7 +553,7 @@ export class WalletRepository {
 
     // Find the existing token by genesis tokenId
     let existingIndex = -1;
-    let existingToken: Token | null = null;
+    let existingToken: WalletToken | null = null;
 
     for (let i = 0; i < this._wallet.tokens.length; i++) {
       const existing = this._wallet.tokens[i];
@@ -589,7 +589,7 @@ export class WalletRepository {
     const updatedTokens = [...this._wallet.tokens];
     updatedTokens[existingIndex] = token;
 
-    const updatedWallet = new Wallet(
+    const updatedWallet = new TokenCollection(
       this._wallet.id,
       this._wallet.name,
       this._wallet.address,
@@ -617,7 +617,7 @@ export class WalletRepository {
     }
 
     const updatedTokens = this._wallet.tokens.filter((t) => t.id !== tokenId);
-    const updatedWallet = new Wallet(
+    const updatedWallet = new TokenCollection(
       this._wallet.id,
       this._wallet.name,
       this._wallet.address,
@@ -859,7 +859,7 @@ export class WalletRepository {
     );
 
     // Find and remove any local tokens whose state matches a remote tombstone
-    const tokensToRemove: Token[] = [];
+    const tokensToRemove: WalletToken[] = [];
     for (const token of this._wallet.tokens) {
       // Extract tokenId and stateHash from the token's jsonData
       if (token.jsonData) {
@@ -887,9 +887,9 @@ export class WalletRepository {
     for (const token of tokensToRemove) {
       if (!this._wallet) break; // Type guard
       // Remove from wallet without adding to history (it's a sync operation)
-      const currentTokens: Token[] = this._wallet.tokens;
-      const updatedTokens: Token[] = currentTokens.filter((t: Token) => t.id !== token.id);
-      this._wallet = new Wallet(
+      const currentTokens: WalletToken[] = this._wallet.tokens;
+      const updatedTokens: WalletToken[] = currentTokens.filter((t: WalletToken) => t.id !== token.id);
+      this._wallet = new TokenCollection(
         this._wallet.id,
         this._wallet.name,
         this._wallet.address,
@@ -951,7 +951,7 @@ export class WalletRepository {
    * Archive a token before removal
    * Only updates archive if incoming token is an incremental (non-forking) update
    */
-  archiveToken(token: Token): void {
+  archiveToken(token: WalletToken): void {
     if (!token.jsonData) return;
 
     let txfToken: TxfToken;
@@ -1138,7 +1138,7 @@ export class WalletRepository {
       const tokenType = txfToken.genesis?.data?.tokenType || "";
       const isNft = tokenType === "455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89";
 
-      const token = new Token({
+      const token = new WalletToken({
         id: tokenId,
         name: isNft ? "NFT" : "Token",
         type: isNft ? "NFT" : "UCT",
@@ -1165,7 +1165,7 @@ export class WalletRepository {
         // Update existing token
         const updatedTokens = [...this._wallet.tokens];
         updatedTokens[existingIdx] = token;
-        this._wallet = new Wallet(
+        this._wallet = new TokenCollection(
           this._wallet.id,
           this._wallet.name,
           this._wallet.address,
@@ -1174,7 +1174,7 @@ export class WalletRepository {
       } else {
         // Add new token
         const updatedTokens = [token, ...this._wallet.tokens];
-        this._wallet = new Wallet(
+        this._wallet = new TokenCollection(
           this._wallet.id,
           this._wallet.name,
           this._wallet.address,

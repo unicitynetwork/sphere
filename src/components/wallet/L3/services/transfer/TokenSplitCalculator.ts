@@ -6,12 +6,12 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Token } from "../../data/model";
+import { WalletToken } from "../../data/model";
 import {
   TokenSplitCalculator as SdkTokenSplitCalculator,
   type SplitPlan as SdkSplitPlan,
   type TokenWithAmount as SdkTokenWithAmount,
-  Token as SdkToken,
+  Token,
 } from "../../sdk";
 
 // ==========================================
@@ -23,10 +23,10 @@ import {
  * Maps SDK's generic type to use UI Token
  */
 export interface TokenWithAmount {
-  sdkToken: SdkToken<any>;
+  sdkToken: Token<any>;
   amount: bigint;
   /** @deprecated Use sourceToken from SDK. Kept for backwards compatibility */
-  uiToken: Token;
+  uiToken: WalletToken;
 }
 
 /**
@@ -71,7 +71,7 @@ export class TokenSplitCalculator {
    * @returns Split plan with app-layer Token references
    */
   async calculateOptimalSplit(
-    availableTokens: Token[],
+    availableTokens: WalletToken[],
     targetAmount: bigint,
     targetCoinIdHex: string
   ): Promise<SplitPlan | null> {
@@ -97,7 +97,7 @@ export class TokenSplitCalculator {
   /**
    * Map SDK split plan to app-layer split plan
    */
-  private mapToAppLayerPlan(sdkPlan: SdkSplitPlan<Token>): SplitPlan {
+  private mapToAppLayerPlan(sdkPlan: SdkSplitPlan<WalletToken>): SplitPlan {
     return {
       tokensToTransferDirectly: sdkPlan.tokensToTransferDirectly.map(
         this.mapToAppLayerToken
@@ -116,7 +116,7 @@ export class TokenSplitCalculator {
   /**
    * Map SDK token with amount to app-layer version
    */
-  private mapToAppLayerToken(sdkToken: SdkTokenWithAmount<Token>): TokenWithAmount {
+  private mapToAppLayerToken(sdkToken: SdkTokenWithAmount<WalletToken>): TokenWithAmount {
     return {
       sdkToken: sdkToken.sdkToken,
       amount: sdkToken.amount,
