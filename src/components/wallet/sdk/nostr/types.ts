@@ -2,9 +2,11 @@
  * Nostr SDK Types
  *
  * Platform-agnostic types for Nostr operations.
+ * Extends core SDK types with Nostr-specific fields.
  */
 
 import type { SigningService } from '@unicitylabs/state-transition-sdk/lib/sign/SigningService';
+import type { UserIdentity } from '../core/identity';
 
 // ==========================================
 // Configuration
@@ -26,13 +28,22 @@ export const DEFAULT_NOSTR_RELAYS = [
 // ==========================================
 
 /**
- * Nostr identity with keypair
+ * Nostr identity with keypair (minimal, for Nostr operations only)
  */
 export interface NostrIdentity {
   /** Private key hex */
   privateKey: string;
   /** Public key hex */
   publicKey: string;
+}
+
+/**
+ * Extended user identity with Nostr nametag
+ * Extends core UserIdentity with human-readable nametag for P2P transfers
+ */
+export interface NostrUserIdentity extends UserIdentity {
+  /** Human-readable nametag (e.g., "alice", without @) */
+  nametag?: string;
 }
 
 /**

@@ -43,19 +43,19 @@ export type {
 // 4. User Identity
 // ==========================================
 
-// Re-export SDK UserIdentity and extend with app-specific fields
-import type { UserIdentity as SdkUserIdentity } from '../../../sdk';
+// Re-export from SDK - use NostrUserIdentity which includes nametag
+export type { UserIdentity } from '../../../sdk';
+export type { NostrUserIdentity } from '../../../sdk/nostr';
+
+// For backwards compatibility, alias NostrUserIdentity as the default UserIdentity with nametag
+// App code that needs nametag should use NostrUserIdentity explicitly
+import type { NostrUserIdentity } from '../../../sdk/nostr';
 
 /**
- * User identity for L3 Unicity wallet.
- * Extends SDK UserIdentity with optional nametag field for app convenience.
- *
- * NOTE: The wallet address is derived using UnmaskedPredicateReference (no nonce/salt).
- * This creates a stable, reusable DirectAddress from publicKey + tokenType.
+ * @deprecated Use NostrUserIdentity from sdk/nostr for identity with nametag,
+ * or UserIdentity from sdk/core for base identity without nametag.
  */
-export interface UserIdentity extends SdkUserIdentity {
-    nametag?: string; // Optional field for local storage convenience
-}
+export type UserIdentityWithNametag = NostrUserIdentity;
 
 // ==========================================
 // 5. Legacy/Demo Models (App-specific)

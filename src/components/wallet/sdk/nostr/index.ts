@@ -72,6 +72,7 @@ export {
 export type {
   NostrConfig,
   NostrIdentity,
+  NostrUserIdentity,
   NostrIdentityProvider,
   TokenTransferPayload,
   TokenTransferOptions,

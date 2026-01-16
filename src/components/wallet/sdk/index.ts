@@ -560,6 +560,7 @@ export type {
   // Config types
   NostrConfig,
   NostrIdentity,
+  NostrUserIdentity,
   NostrIdentityProvider,
   TokenTransferPayload,
   TokenTransferOptions,
