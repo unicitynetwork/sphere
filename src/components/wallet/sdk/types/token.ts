@@ -213,55 +213,20 @@ export interface AggregatedAssetData {
 export type { UserIdentity } from '../core/identity';
 
 // ==========================================
-// Payment Request Types
+// Payment Request Types (re-exported from nostr module)
 // ==========================================
 
-/**
- * Payment request status
- */
-export const PaymentRequestStatus = {
-  PENDING: 'PENDING',
-  ACCEPTED: 'ACCEPTED',
-  REJECTED: 'REJECTED',
-  PAID: 'PAID',
-} as const;
-
-export type PaymentRequestStatus = typeof PaymentRequestStatus[keyof typeof PaymentRequestStatus];
+// PaymentRequestStatus and ProcessedPaymentRequest are defined in sdk/nostr/types.ts
+// Re-export here for convenience and backwards compatibility
+export {
+  PaymentRequestStatus,
+  type ProcessedPaymentRequest,
+} from '../nostr/types';
 
 /**
- * Incoming payment request data
+ * @deprecated Use ProcessedPaymentRequest from sdk/nostr instead
  */
-export interface PaymentRequestData {
-  /** Unique request ID */
-  id: string;
-
-  /** Sender's public key */
-  senderPubkey: string;
-
-  /** Requested amount */
-  amount: bigint;
-
-  /** Coin ID for payment */
-  coinId: string;
-
-  /** Token symbol */
-  symbol: string;
-
-  /** Optional message from sender */
-  message?: string;
-
-  /** Recipient's nametag */
-  recipientNametag: string;
-
-  /** Request ID from Nostr */
-  requestId: string;
-
-  /** Request timestamp */
-  timestamp: number;
-
-  /** Current status */
-  status: PaymentRequestStatus;
-}
+export type PaymentRequestData = import('../nostr/types').ProcessedPaymentRequest;
 
 // ==========================================
 // WalletToken Class Implementation

@@ -79,8 +79,10 @@ export type {
   ReceivedTokenTransfer,
   PaymentRequest,
   ReceivedPaymentRequest,
+  ProcessedPaymentRequest,
   TokenTransferHandler,
   PaymentRequestHandler,
   NametagBinding,
   NostrStorageProvider,
 } from './types';
+export { PaymentRequestStatus } from './types';

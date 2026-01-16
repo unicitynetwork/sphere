@@ -10,7 +10,6 @@
 export {
     TokenStatus,
     TransactionType,
-    PaymentRequestStatus,
     isTokenAvailable,
     isTokenPending,
     isTokenInactive,
@@ -122,27 +121,18 @@ export class CryptoCurrency {
 }
 
 // ==========================================
-// 6. Payment Request (App-specific)
+// 6. Payment Request (from SDK nostr module)
 // ==========================================
 
-import type { PaymentRequestStatus } from '../../../sdk';
+// Re-export from SDK nostr module
+export type { ProcessedPaymentRequest } from '../../../sdk/nostr';
+export { PaymentRequestStatus } from '../../../sdk/nostr';
 
 /**
- * Incoming payment request - app-specific with bigint amount
- * Extends SDK PaymentRequestData concept
+ * @deprecated Use ProcessedPaymentRequest from sdk/nostr instead
  */
-export interface IncomingPaymentRequest {
-    id: string;
-    senderPubkey: string;
-    amount: bigint;
-    coinId: string;
-    symbol: string;
-    message?: string;
-    recipientNametag: string;
-    requestId: string;
-    timestamp: number;
-    status: PaymentRequestStatus;
-}
+export type IncomingPaymentRequest =
+    import('../../../sdk/nostr').ProcessedPaymentRequest;
 
 // ==========================================
 // 7. Backwards Compatibility Aliases

@@ -143,6 +143,42 @@ export interface ReceivedPaymentRequest {
  */
 export type PaymentRequestHandler = (request: ReceivedPaymentRequest) => void;
 
+/**
+ * Payment request status for UI tracking
+ */
+export const PaymentRequestStatus = {
+  PENDING: 'PENDING',
+  ACCEPTED: 'ACCEPTED',
+  REJECTED: 'REJECTED',
+  PAID: 'PAID',
+} as const;
+
+export type PaymentRequestStatus =
+  (typeof PaymentRequestStatus)[keyof typeof PaymentRequestStatus];
+
+/**
+ * Processed payment request for UI display
+ * Extends ReceivedPaymentRequest with flattened fields and UI state
+ */
+export interface ProcessedPaymentRequest extends ReceivedPaymentRequest {
+  /** Unique ID (same as eventId) */
+  id: string;
+  /** Amount as bigint (parsed from request.amount) */
+  amount: bigint;
+  /** Coin ID (from request) */
+  coinId: string;
+  /** Token symbol for display */
+  symbol: string;
+  /** Optional message (from request) */
+  message?: string;
+  /** Recipient nametag (from request) */
+  recipientNametag: string;
+  /** Request ID (from request) */
+  requestId: string;
+  /** Current status for UI */
+  status: PaymentRequestStatus;
+}
+
 // ==========================================
 // Nametag
 // ==========================================

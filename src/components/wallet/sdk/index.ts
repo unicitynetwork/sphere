@@ -567,11 +567,13 @@ export type {
   ReceivedTokenTransfer,
   PaymentRequest,
   ReceivedPaymentRequest,
+  ProcessedPaymentRequest,
   TokenTransferHandler,
   PaymentRequestHandler,
   NametagBinding,
   NostrStorageProvider,
 } from './nostr';
+export { PaymentRequestStatus } from './nostr';
 
 // ============================================================================
 // IPNS MODULE
@@ -638,7 +640,6 @@ export {
   // Token status enum
   TokenStatus,
   TransactionType,
-  PaymentRequestStatus,
   // Utility functions
   isTokenAvailable,
   isTokenPending,
@@ -656,6 +657,7 @@ export type {
   BaseToken,
   TransferableToken,
   AggregatedAssetData,
+  // PaymentRequestData is deprecated alias for ProcessedPaymentRequest
   PaymentRequestData,
 } from './types/token';
 

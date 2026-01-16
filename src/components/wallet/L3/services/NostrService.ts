@@ -384,15 +384,25 @@ export class NostrService {
       const symbol = def?.symbol || "UNKNOWN";
 
       const incomingRequest: IncomingPaymentRequest = {
-        id: event.id,
+        // ReceivedPaymentRequest fields
+        eventId: event.id,
         senderPubkey: event.pubkey,
+        request: {
+          requestId: request.requestId,
+          amount: request.amount.toString(),
+          coinId: request.coinId,
+          message: request.message,
+          recipientNametag: request.recipientNametag,
+        },
+        timestamp: event.created_at * 1000,
+        // ProcessedPaymentRequest extended fields
+        id: event.id,
         amount: request.amount,
         coinId: request.coinId,
         symbol: symbol,
         message: request.message,
         recipientNametag: request.recipientNametag,
         requestId: request.requestId,
-        timestamp: event.created_at * 1000,
         status: PaymentRequestStatus.PENDING,
       };
 
