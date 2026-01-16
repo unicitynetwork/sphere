@@ -380,6 +380,35 @@ export {
   WALLET_STATE_KEYS,
   InMemoryWalletStatePersistence,
   createInMemoryWalletStatePersistence,
+  // Token Repository (pure functions)
+  isIncrementalUpdate,
+  getTokenCurrentStateHash,
+  countCommittedTxns,
+  extractTokenIdFromJsonData,
+  extractStateHashFromJsonData,
+  isSameStoredToken,
+  createTombstoneFromStoredToken,
+  validateL3Address,
+  validateStoredWalletData,
+  parseTombstones,
+  parseArchivedTokens,
+  parseForkedTokens,
+  // Wallet Repository
+  WalletRepository,
+  createWalletRepository,
+  WALLET_REPOSITORY_KEYS,
+  // Storage Providers
+  PROVIDER_IDS,
+  LocalStorageProvider,
+  createLocalStorageProvider,
+  InMemoryProvider,
+  createInMemoryProvider,
+  // Sync Manager
+  DefaultSyncManager,
+  createSyncManager,
+  // IPFS Sync Provider
+  IpfsSyncProvider,
+  createIpfsSyncProvider,
 } from './storage';
 
 export type {
@@ -417,6 +446,36 @@ export type {
   IpfsStatePersistence,
   // Wallet State Persistence types
   WalletStatePersistence,
+  // Token Repository types
+  StoredToken,
+  StoredWalletData,
+  TransactionHistoryEntry,
+  // Wallet Repository types
+  WalletRepositoryConfig,
+  TokenRepository,
+  // Storage Provider types (aliased to avoid conflict with types/wallet.ts)
+  StorageProvider as AsyncStorageProvider,
+  StorageProviderConfig as AsyncStorageProviderConfig,
+  ProviderStatus,
+  ProviderType,
+  ProviderMetadata,
+  ProviderId,
+  // Sync Provider types
+  SyncProvider,
+  SyncProviderConfig,
+  SyncManager,
+  SyncManagerConfig,
+  SyncStrategy,
+  SyncResult as AsyncSyncResult,
+  SyncEvent,
+  SyncEventType,
+  SyncEventCallback,
+  WalletSnapshot,
+  // Async Provider Config types
+  LocalStorageProviderConfig,
+  InMemoryProviderConfig,
+  IpfsSyncProviderConfig,
+  IpnsKeyPair,
 } from './storage';
 
 // ============================================================================

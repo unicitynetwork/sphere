@@ -57,3 +57,8 @@ export {
 
 // IndexedDB Vesting Cache
 export { IndexedDBVestingCache } from './IndexedDBVestingCache';
+
+// NOTE: BrowserTokenRepository has been replaced by WalletRepository
+// which uses KeyValueStorage interface for platform independence.
+// Import from sdk/storage instead:
+// import { WalletRepository, LocalStorageProvider } from './sdk/storage';

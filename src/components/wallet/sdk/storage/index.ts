@@ -116,5 +116,99 @@ export {
   createInMemoryWalletStatePersistence,
 } from './wallet-state-persistence';
 
+// Token Repository (base interface and pure functions)
+export {
+  // Pure functions
+  isIncrementalUpdate,
+  getTokenCurrentStateHash,
+  countCommittedTxns,
+  extractTokenIdFromJsonData,
+  extractStateHashFromJsonData,
+  isSameStoredToken,
+  createTombstoneFromStoredToken,
+  validateL3Address,
+  validateStoredWalletData,
+  parseTombstones,
+  parseArchivedTokens,
+  parseForkedTokens,
+  // Pruning functions
+  pruneTombstonesByAge,
+  pruneMapByCount,
+  // Best version selection
+  findBestTokenVersion,
+} from './token-repository';
+
+export type {
+  // Types
+  StoredToken,
+  StoredWalletData,
+  NametagDataBase,
+  TransactionHistoryEntry,
+} from './token-repository';
+
 // NOTE: FileStorageProvider is available for Node.js only:
 // import { FileStorageProvider, createFileStorageProvider } from './sdk/storage/file-storage';
+
+// ==========================================
+// Storage Provider System
+// ==========================================
+// StorageProvider = primary storage (localStorage, SQLite, file system)
+// SyncProvider = backup/sync (IPFS, iCloud, Google Drive)
+
+// Storage Provider Interface & Types
+export {
+  PROVIDER_IDS,
+} from './storage-provider';
+
+export type {
+  ProviderId,
+  StorageProvider,
+  StorageProviderConfig,
+  ProviderStatus,
+  ProviderType,
+  ProviderMetadata,
+  // Sync types
+  SyncProvider,
+  SyncProviderConfig,
+  SyncManager,
+  SyncManagerConfig,
+  SyncStrategy,
+  SyncResult as AsyncSyncResult,
+  SyncEvent,
+  SyncEventType,
+  SyncEventCallback,
+  WalletSnapshot,
+} from './storage-provider';
+
+// Storage Providers
+export {
+  LocalStorageProvider,
+  createLocalStorageProvider,
+  type LocalStorageProviderConfig,
+  InMemoryProvider,
+  createInMemoryProvider,
+  type InMemoryProviderConfig,
+  // IPFS Sync
+  IpfsSyncProvider,
+  createIpfsSyncProvider,
+  type IpfsSyncProviderConfig,
+  type IpnsKeyPair,
+} from './providers';
+
+// Sync Manager
+export {
+  DefaultSyncManager,
+  createSyncManager,
+} from './sync-manager';
+
+// Wallet Repository (platform-independent implementation)
+export {
+  WalletRepository,
+  createWalletRepository,
+  WALLET_REPOSITORY_KEYS,
+} from './wallet-repository';
+
+export type {
+  WalletRepositoryConfig,
+  TokenRepository,
+} from './wallet-repository';
