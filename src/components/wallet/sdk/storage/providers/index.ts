@@ -26,7 +26,11 @@ export {
   type IpnsKeyPair,
 } from './ipfs-sync';
 
-// Re-export base types
+// Re-export base types and constants
+export {
+  PROVIDER_IDS,
+} from '../storage-provider';
+
 export type {
   StorageProvider,
   StorageProviderConfig,
