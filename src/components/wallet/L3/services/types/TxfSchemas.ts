@@ -9,9 +9,59 @@ import { z } from "zod";
 // Basic Patterns
 // ==========================================
 
-const hexString = z.string().regex(/^[0-9a-fA-F]*$/, "Must be hex string");
-const hexString64 = z.string().regex(/^[0-9a-fA-F]{64}$/, "Must be 64-char hex");
-// const hexWithPrefix = z.string().regex(/^0000[0-9a-fA-F]+$/, "Must be hex with 0000 prefix");
+// Note: hexString and hexString64 replaced by hexStringOrBytesAny and hexStringOrBytes64
+// which accept both hex strings and SDK bytes objects for backward compatibility
+
+/**
+ * Helper to convert bytes object/array to hex string
+ * SDK tokens sometimes serialize IDs as { bytes: [...] } or Uint8Array
+ */
+function bytesToHex(bytes: number[] | Uint8Array): string {
+  const arr = Array.isArray(bytes) ? bytes : Array.from(bytes);
+  return arr.map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Schema that accepts both hex string and bytes object, normalizing to hex string
+ * Handles SDK token format where IDs are objects with bytes arrays
+ */
+const hexStringOrBytes64 = z.union([
+  // Direct hex string (preferred format)
+  z.string().regex(/^[0-9a-fA-F]{64}$/),
+  // SDK format: object with bytes array
+  z.object({
+    bytes: z.union([
+      z.array(z.number()),
+      z.instanceof(Uint8Array),
+    ]),
+  }).transform(obj => bytesToHex(obj.bytes)),
+  // Buffer-like format from JSON.stringify
+  z.object({
+    type: z.literal("Buffer"),
+    data: z.array(z.number()),
+  }).transform(obj => bytesToHex(obj.data)),
+]);
+
+/**
+ * Schema for variable-length hex strings or bytes objects (no length restriction)
+ * Used for signatures, public keys, etc.
+ */
+const hexStringOrBytesAny = z.union([
+  // Direct hex string (preferred format)
+  z.string().regex(/^[0-9a-fA-F]*$/),
+  // SDK format: object with bytes array
+  z.object({
+    bytes: z.union([
+      z.array(z.number()),
+      z.instanceof(Uint8Array),
+    ]),
+  }).transform(obj => bytesToHex(obj.bytes)),
+  // Buffer-like format from JSON.stringify
+  z.object({
+    type: z.literal("Buffer"),
+    data: z.array(z.number()),
+  }).transform(obj => bytesToHex(obj.data)),
+]);
 
 // ==========================================
 // Merkle Tree Path
@@ -33,8 +83,8 @@ export const TxfMerkleTreePathSchema = z.object({
 
 export const TxfAuthenticatorSchema = z.object({
   algorithm: z.string(),
-  publicKey: hexString,
-  signature: hexString,
+  publicKey: hexStringOrBytesAny,
+  signature: hexStringOrBytesAny,
   stateHash: z.string(),
 });
 
@@ -54,12 +104,13 @@ export const TxfInclusionProofSchema = z.object({
 // ==========================================
 
 export const TxfGenesisDataSchema = z.object({
-  tokenId: hexString64,
-  tokenType: hexString64,
+  // Use hexStringOrBytes64 to handle both string and SDK bytes object formats
+  tokenId: hexStringOrBytes64,
+  tokenType: hexStringOrBytes64,
   coinData: z.array(z.tuple([z.string(), z.string()])).optional().default([]),
   // tokenData can be null/undefined in stored data, coerce to empty string
   tokenData: z.string().nullable().optional().transform((v) => v ?? ""),
-  salt: hexString64,
+  salt: hexStringOrBytes64,
   recipient: z.string(),
   recipientDataHash: z.string().nullable(),
   reason: z.string().nullable(),
@@ -215,6 +266,26 @@ export function validateTokenEntry(key: string, value: unknown): { valid: boolea
   const result = TxfTokenSchema.safeParse(value);
   if (result.success) {
     return { valid: true, token: result.data };
+  }
+
+  // Log detailed error path for debugging
+  const issues = result.error.issues;
+  if (issues.length > 0) {
+    const firstIssue = issues[0];
+    const path = firstIssue.path.join(".");
+    console.debug(`[Zod] Token validation failed at path "${path}": ${firstIssue.message} (code: ${firstIssue.code})`);
+    // Log the actual value at the failing path for debugging
+    if (firstIssue.path.length > 0 && value && typeof value === "object") {
+      let current: unknown = value;
+      for (const segment of firstIssue.path) {
+        if (current && typeof current === "object" && segment in current) {
+          current = (current as Record<string, unknown>)[segment as string];
+        } else {
+          break;
+        }
+      }
+      console.debug(`[Zod] Value at failing path:`, current);
+    }
   }
 
   return { valid: false, error: result.error.message };

@@ -47,6 +47,7 @@ import type {
 // Note: isMintRecoverable is available but we use getMintEntriesForRecovery() instead
 import { IpfsStorageService, SyncPriority } from "./IpfsStorageService";
 import { TokenRecoveryService } from "./TokenRecoveryService";
+import { normalizeSdkTokenToStorage } from "./TxfSerializer";
 
 // ==========================================
 // Configuration Constants
@@ -985,7 +986,7 @@ export class OutboxRecoveryService {
     // Update outbox with final token
     outboxRepo.updateMintEntry(entry.id, {
       status: "COMPLETED",
-      tokenJson: JSON.stringify(token.toJSON()),
+      tokenJson: JSON.stringify(normalizeSdkTokenToStorage(token.toJSON())),
     });
 
     // Save to storage based on mint type

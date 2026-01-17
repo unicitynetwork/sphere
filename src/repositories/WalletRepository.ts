@@ -4,6 +4,44 @@ import { v4 as uuidv4 } from "uuid";
 import { STORAGE_KEYS, STORAGE_KEY_GENERATORS, STORAGE_KEY_PREFIXES } from "../config/storageKeys";
 import { assertValidNametagData, sanitizeNametagForLogging, validateTokenJson } from "../utils/tokenValidation";
 
+// Session flag to indicate active import flow
+// This allows wallet creation during import even when credentials exist
+// (because during import, credentials are set BEFORE wallet data is created)
+const IMPORT_SESSION_FLAG = "sphere_active_import";
+
+// DEBUG: Log wallet state on module load (BEFORE any code runs)
+// This helps diagnose if corruption happens before or during app initialization
+(function debugModuleLoad() {
+  try {
+    console.log("🔍 [MODULE LOAD] WalletRepository module initializing...");
+    const walletKeys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("sphere_wallet_DIRECT://")) {
+        walletKeys.push(key);
+      }
+    }
+    if (walletKeys.length === 0) {
+      console.log("🔍 [MODULE LOAD] No wallet data found in localStorage");
+    } else {
+      for (const key of walletKeys) {
+        const value = localStorage.getItem(key);
+        if (value) {
+          try {
+            const parsed = JSON.parse(value);
+            console.log(`🔍 [MODULE LOAD] Found wallet: key=${key.slice(0, 60)}..., size=${value.length} bytes`);
+            console.log(`🔍 [MODULE LOAD]   id=${parsed.id?.slice(0, 8)}..., tokens=${parsed.tokens?.length || 0}, nametag=${parsed.nametag?.name || 'none'}`);
+          } catch {
+            console.log(`🔍 [MODULE LOAD] Found wallet: key=${key.slice(0, 60)}..., size=${value.length} bytes (parse error)`);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error("🔍 [MODULE LOAD] Error checking localStorage:", e);
+  }
+})();
+
 /**
  * Interface for nametag data (one per identity)
  */
@@ -114,6 +152,33 @@ export class WalletRepository {
   }
 
   /**
+   * Mark that we're in an active import flow.
+   * During import, credentials are saved BEFORE wallet data, so the safeguard
+   * that prevents wallet creation when credentials exist needs to be bypassed.
+   * This flag is stored in sessionStorage so it's cleared on browser close.
+   */
+  static setImportInProgress(): void {
+    console.log("📦 [IMPORT] Setting import-in-progress flag");
+    sessionStorage.setItem(IMPORT_SESSION_FLAG, "true");
+  }
+
+  /**
+   * Clear the import-in-progress flag.
+   * Should be called when import completes (success or failure).
+   */
+  static clearImportInProgress(): void {
+    console.log("📦 [IMPORT] Clearing import-in-progress flag");
+    sessionStorage.removeItem(IMPORT_SESSION_FLAG);
+  }
+
+  /**
+   * Check if we're in an active import flow.
+   */
+  static isImportInProgress(): boolean {
+    return sessionStorage.getItem(IMPORT_SESSION_FLAG) === "true";
+  }
+
+  /**
    * Save nametag for an address without loading the full wallet
    * Used during onboarding when we fetch nametag from IPNS
    * Creates minimal wallet structure if needed
@@ -123,6 +188,8 @@ export class WalletRepository {
    */
   static saveNametagForAddress(address: string, nametag: NametagData): void {
     if (!address || !nametag) return;
+
+    console.log(`📦 [saveNametagForAddress] Called for address=${address.slice(0, 20)}..., nametag="${nametag.name}"`);
 
     // CRITICAL VALIDATION: Prevent saving corrupted nametag data
     // This check prevents the bug where `token: {}` was saved
@@ -144,13 +211,45 @@ export class WalletRepository {
       let walletData: StoredWallet;
       const existingJson = localStorage.getItem(storageKey);
 
+      console.log(`📦 [saveNametagForAddress] Existing data: ${existingJson ? `${existingJson.length} bytes` : 'null'}`);
+
       if (existingJson) {
         walletData = JSON.parse(existingJson) as StoredWallet;
+        console.log(`📦 [saveNametagForAddress] Updating existing wallet id=${walletData.id?.slice(0, 8)}..., tokens=${walletData.tokens?.length || 0}`);
         walletData.nametag = nametag;
       } else {
+        // CRITICAL SAFEGUARD: If wallet credentials exist but wallet data doesn't,
+        // something is very wrong. DO NOT create a minimal wallet - this would
+        // overwrite the user's tokens when they restart. This case can happen if
+        // localStorage was corrupted or cleared while credentials remain intact.
+        //
+        // EXCEPTION: During active import flow, credentials are saved BEFORE wallet
+        // data, so we check for the import flag to allow creation in that case.
+        const hasMasterKey = localStorage.getItem(STORAGE_KEYS.UNIFIED_WALLET_MASTER);
+        const hasMnemonic = localStorage.getItem(STORAGE_KEYS.UNIFIED_WALLET_MNEMONIC);
+        const isImporting = WalletRepository.isImportInProgress();
+        if ((hasMasterKey || hasMnemonic) && !isImporting) {
+          console.error(`🚨 CRITICAL: saveNametagForAddress called with null existingJson but wallet credentials exist!`);
+          console.error(`   This would create a minimal wallet and overwrite user's tokens on restart!`);
+          console.error(`   Address: ${address.slice(0, 30)}...`);
+          console.error(`   Nametag: ${nametag.name}`);
+          console.error(`   hasMasterKey: ${!!hasMasterKey}, hasMnemonic: ${!!hasMnemonic}`);
+          console.trace(`🚨 Call stack:`);
+          // DO NOT create a new wallet - throw to prevent data loss
+          throw new Error(`Cannot save nametag: wallet data missing but credentials exist. This would cause data loss.`);
+        }
+
+        if (isImporting) {
+          console.log(`📦 [saveNametagForAddress] Import in progress - allowing wallet creation despite credentials`);
+        }
+
         // Create minimal wallet structure with just the nametag
+        // This should only happen during FRESH onboarding (no credentials) OR during import
+        const newId = crypto.randomUUID ? crypto.randomUUID() : `wallet-${Date.now()}`;
+        console.warn(`⚠️ [saveNametagForAddress] Creating NEW minimal wallet! id=${newId.slice(0, 8)}... - this should only happen during onboarding`);
+        console.trace(`📦 [saveNametagForAddress] Call stack for new wallet creation:`);
         walletData = {
-          id: crypto.randomUUID ? crypto.randomUUID() : `wallet-${Date.now()}`,
+          id: newId,
           name: "Wallet",
           address: address,
           tokens: [],
@@ -254,9 +353,11 @@ export class WalletRepository {
    * Load wallet for a specific address
    */
   loadWalletForAddress(address: string): Wallet | null {
+    console.log(`📦 [LOAD] loadWalletForAddress called for ${address?.slice(0, 30)}...`);
+
     // Validate address format
     if (!this.validateAddress(address)) {
-      console.error(`Invalid address format: ${address}`);
+      console.error(`📦 [LOAD] FAILED: Invalid address format: ${address}`);
       return null;
     }
 
@@ -267,12 +368,17 @@ export class WalletRepository {
       const storageKey = this.getStorageKey(address);
       const json = localStorage.getItem(storageKey);
 
+      console.log(`📦 [LOAD] Storage key: ${storageKey}`);
+      console.log(`📦 [LOAD] localStorage has data: ${!!json}, length: ${json?.length || 0}`);
+
       if (json) {
         const parsed = JSON.parse(json) as StoredWallet;
 
+        console.log(`📦 [LOAD] Parsed wallet: id=${parsed.id?.slice(0, 8)}..., tokens=${parsed.tokens?.length || 0}, archived=${Object.keys(parsed.archivedTokens || {}).length}`);
+
         // Validate stored data structure
         if (!parsed.id || !parsed.address || !Array.isArray(parsed.tokens)) {
-          console.error(`Invalid wallet structure in storage for ${address}`);
+          console.error(`📦 [LOAD] FAILED: Invalid wallet structure - id=${!!parsed.id}, address=${!!parsed.address}, tokens=${Array.isArray(parsed.tokens)}`);
           localStorage.removeItem(storageKey);
           return null;
         }
@@ -280,7 +386,7 @@ export class WalletRepository {
         // Verify address match - critical security check
         if (parsed.address !== address) {
           console.error(
-            `Address mismatch: requested ${address}, stored ${parsed.address}. Removing corrupted data.`
+            `📦 [LOAD] FAILED: Address mismatch: requested ${address}, stored ${parsed.address}. Removing corrupted data.`
           );
           localStorage.removeItem(storageKey);
           return null;
@@ -356,10 +462,11 @@ export class WalletRepository {
 
         const archiveInfo = this._archivedTokens.size > 0 ? `, ${this._archivedTokens.size} archived` : "";
         const forkedInfo = this._forkedTokens.size > 0 ? `, ${this._forkedTokens.size} forked` : "";
-        console.log(`Loaded wallet for address ${address} with ${tokens.length} tokens${this._nametag ? `, nametag: ${this._nametag.name}` : ""}${this._tombstones.length > 0 ? `, ${this._tombstones.length} tombstones` : ""}${archiveInfo}${forkedInfo}`);
+        console.log(`📦 [LOAD] SUCCESS: wallet id=${parsed.id.slice(0, 8)}..., ${tokens.length} tokens${this._nametag ? `, nametag: ${this._nametag.name}` : ""}${this._tombstones.length > 0 ? `, ${this._tombstones.length} tombstones` : ""}${archiveInfo}${forkedInfo}`);
         return wallet;
       }
 
+      console.log(`📦 [LOAD] No wallet found in localStorage for key ${storageKey}`);
       return null;
     } catch (error) {
       console.error(`Failed to load wallet for address ${address}`, error);
@@ -434,6 +541,8 @@ export class WalletRepository {
   }
 
   createWallet(address: string, name: string = "My Wallet"): Wallet {
+    console.log(`📦 [CREATE] createWallet called for ${address?.slice(0, 30)}...`);
+
     // Validate address format
     if (!this.validateAddress(address)) {
       throw new Error(`Cannot create wallet with invalid address: ${address}`);
@@ -442,23 +551,89 @@ export class WalletRepository {
     // Check if wallet already exists for this address
     const existing = this.loadWalletForAddress(address);
     if (existing) {
-      console.log(`Wallet already exists for address ${address}, using existing wallet`);
+      console.log(`📦 [CREATE] Wallet already exists (id=${existing.id.slice(0, 8)}...), using existing`);
       return existing;
     }
 
-    const newWallet = new Wallet(uuidv4(), name, address, []);
+    // CRITICAL SAFEGUARD: If wallet credentials exist but wallet data doesn't,
+    // something is very wrong. DO NOT create a new empty wallet - this would lose tokens!
+    //
+    // EXCEPTION: During active import flow, credentials are saved BEFORE wallet
+    // data, so we check for the import flag to allow creation in that case.
+    const hasMasterKey = localStorage.getItem(STORAGE_KEYS.UNIFIED_WALLET_MASTER);
+    const hasMnemonic = localStorage.getItem(STORAGE_KEYS.UNIFIED_WALLET_MNEMONIC);
+    const isImporting = WalletRepository.isImportInProgress();
+    if ((hasMasterKey || hasMnemonic) && !isImporting) {
+      console.error(`🚨 CRITICAL: createWallet called but wallet credentials exist without wallet data!`);
+      console.error(`🚨 Address: ${address}`);
+      console.error(`🚨 Has master key: ${!!hasMasterKey}, Has mnemonic: ${!!hasMnemonic}`);
+      console.trace(`🚨 Call stack:`);
+      throw new Error(`Cannot create wallet: wallet data missing but credentials exist. This would cause data loss. Address: ${address.slice(0, 30)}...`);
+    }
+
+    if (isImporting) {
+      console.log(`📦 [CREATE] Import in progress - allowing wallet creation despite credentials`);
+    }
+
+    const newId = uuidv4();
+    console.log(`📦 [CREATE] Creating NEW wallet with id=${newId.slice(0, 8)}...`);
+    console.trace(`📦 [CREATE] Call stack for new wallet creation:`);
+
+    const newWallet = new Wallet(newId, name, address, []);
     this._currentAddress = address;
     this.saveWallet(newWallet);
-    console.log(`Created new wallet for address ${address}`);
+    console.log(`📦 [CREATE] Saved new wallet for address ${address}`);
     this.refreshWallet(); // Trigger wallet-updated for UI updates
     window.dispatchEvent(new Event("wallet-loaded")); // Signal wallet creation for Nostr initialization
     return newWallet;
   }
 
   private saveWallet(wallet: Wallet) {
+    console.log(`📦 [SAVE] saveWallet called: id=${wallet.id.slice(0, 8)}..., tokens=${wallet.tokens.length}, address=${wallet.address.slice(0, 30)}...`);
+
+    const storageKey = this.getStorageKey(wallet.address);
+
+    // CRITICAL SAFETY CHECK: Merge wallet data on ID mismatch
+    // This is the last line of defense against data corruption
+    try {
+      const existingJson = localStorage.getItem(storageKey);
+      if (existingJson) {
+        const existing = JSON.parse(existingJson) as StoredWallet;
+
+        // DETECT: Wallet ID mismatch - merge instead of overwrite
+        if (existing.id && existing.id !== wallet.id) {
+          const isImporting = WalletRepository.isImportInProgress();
+          if (!isImporting) {
+            console.error(`🚨 CRITICAL: Wallet ID mismatch detected!`);
+            console.error(`🚨 Existing ID: ${existing.id}`);
+            console.error(`🚨 Incoming ID: ${wallet.id}`);
+            console.error(`🚨 Existing tokens: ${existing.tokens?.length || 0}`);
+            console.error(`🚨 Incoming tokens: ${wallet.tokens.length}`);
+            console.trace(`🚨 Call stack for wallet ID mismatch:`);
+
+            // MERGE wallet data instead of just preserving ID
+            wallet = this.mergeWalletData(existing, wallet);
+
+            // Also merge other StoredWallet fields into memory
+            this.mergeStoredWalletFields(existing);
+          } else {
+            console.log(`📦 [SAVE] Allowing wallet ID change during import (old: ${existing.id.slice(0, 8)}..., new: ${wallet.id.slice(0, 8)}...)`);
+          }
+        }
+
+        // WARN: Token count decrease (but allow it - could be valid due to transfers)
+        if (existing.tokens && existing.tokens.length > wallet.tokens.length) {
+          console.warn(`⚠️ [SAVE] TOKEN COUNT DECREASE! Old: ${existing.tokens.length}, New: ${wallet.tokens.length}`);
+          console.trace(`📦 [SAVE] Call stack for token decrease:`);
+        }
+      }
+    } catch (e) {
+      console.error(`📦 [SAVE] Error in safety check:`, e);
+      // Proceed with save on error - don't block legitimate saves
+    }
+
     this._wallet = wallet;
     this._currentAddress = wallet.address;
-    const storageKey = this.getStorageKey(wallet.address);
 
     // Include nametag, tombstones, archived/forked tokens, and invalidated nametags in stored data
     const storedData: StoredWallet = {
@@ -500,6 +675,214 @@ export class WalletRepository {
     }
 
     return false;
+  }
+
+  // ==========================================
+  // Wallet Data Merge Methods (ID mismatch handling)
+  // ==========================================
+
+  /**
+   * Merge two wallet data sets when ID mismatch is detected.
+   * Preserves existing wallet ID and merges tokens from both sources.
+   *
+   * @param existing - The wallet data currently in localStorage
+   * @param incoming - The wallet data being saved
+   * @returns Merged wallet with existing.id preserved
+   */
+  private mergeWalletData(existing: StoredWallet, incoming: Wallet): Wallet {
+    console.log(`🔀 [MERGE] Merging wallet data due to ID mismatch`);
+    console.log(`🔀 [MERGE] Existing: id=${existing.id.slice(0, 8)}..., tokens=${existing.tokens?.length || 0}`);
+    console.log(`🔀 [MERGE] Incoming: id=${incoming.id.slice(0, 8)}..., tokens=${incoming.tokens.length}`);
+
+    // 1. Merge tokens by SDK tokenId
+    const mergedTokens = this.mergeTokenArrays(
+      existing.tokens || [],
+      incoming.tokens
+    );
+
+    // 2. Create merged wallet with EXISTING ID preserved
+    const mergedWallet = new Wallet(
+      existing.id,           // PRESERVE existing ID
+      incoming.name,         // Use incoming name
+      incoming.address,      // Address must match
+      mergedTokens           // Merged tokens
+    );
+
+    console.log(`🔀 [MERGE] Result: id=${mergedWallet.id.slice(0, 8)}..., tokens=${mergedWallet.tokens.length}`);
+    return mergedWallet;
+  }
+
+  /**
+   * Merge other StoredWallet fields (tombstones, archives, etc.) into memory.
+   * Called after mergeWalletData when ID mismatch is detected.
+   */
+  private mergeStoredWalletFields(existing: StoredWallet): void {
+    // Merge tombstones (union by tokenId:stateHash)
+    if (existing.tombstones && Array.isArray(existing.tombstones)) {
+      for (const entry of existing.tombstones) {
+        if (
+          typeof entry === "object" &&
+          entry !== null &&
+          typeof (entry as TombstoneEntry).tokenId === "string" &&
+          typeof (entry as TombstoneEntry).stateHash === "string"
+        ) {
+          const typedEntry = entry as TombstoneEntry;
+          const alreadyExists = this._tombstones.some(
+            t => t.tokenId === typedEntry.tokenId && t.stateHash === typedEntry.stateHash
+          );
+          if (!alreadyExists) {
+            this._tombstones.push(typedEntry);
+          }
+        }
+      }
+    }
+
+    // Merge archived tokens (prefer more complete version)
+    if (existing.archivedTokens && typeof existing.archivedTokens === "object") {
+      for (const [tokenId, txfToken] of Object.entries(existing.archivedTokens)) {
+        if (txfToken && typeof txfToken === "object" && (txfToken as TxfToken).genesis) {
+          const typedTxf = txfToken as TxfToken;
+          const existingArchive = this._archivedTokens.get(tokenId);
+          if (!existingArchive) {
+            this._archivedTokens.set(tokenId, typedTxf);
+          } else if (this.isIncrementalUpdate(existingArchive, typedTxf)) {
+            // Existing localStorage version is more advanced
+            this._archivedTokens.set(tokenId, typedTxf);
+          }
+        }
+      }
+    }
+
+    // Merge forked tokens (union by tokenId_stateHash)
+    if (existing.forkedTokens && typeof existing.forkedTokens === "object") {
+      for (const [key, txfToken] of Object.entries(existing.forkedTokens)) {
+        if (txfToken && typeof txfToken === "object" && (txfToken as TxfToken).genesis) {
+          if (!this._forkedTokens.has(key)) {
+            this._forkedTokens.set(key, txfToken as TxfToken);
+          }
+        }
+      }
+    }
+
+    // Merge invalidated nametags (union by name)
+    if (existing.invalidatedNametags && Array.isArray(existing.invalidatedNametags)) {
+      for (const entry of existing.invalidatedNametags) {
+        if (
+          typeof entry === "object" &&
+          entry !== null &&
+          typeof (entry as InvalidatedNametagEntry).name === "string"
+        ) {
+          const typedEntry = entry as InvalidatedNametagEntry;
+          const alreadyExists = this._invalidatedNametags.some(e => e.name === typedEntry.name);
+          if (!alreadyExists) {
+            this._invalidatedNametags.push(typedEntry);
+          }
+        }
+      }
+    }
+
+    // Merge nametag (prefer valid over corrupted, prefer existing if both valid)
+    if (existing.nametag && !this._nametag) {
+      this._nametag = existing.nametag;
+    }
+
+    console.log(`🔀 [MERGE] Merged fields: ${this._tombstones.length} tombstones, ${this._archivedTokens.size} archived, ${this._forkedTokens.size} forked, ${this._invalidatedNametags.length} invalidated nametags`);
+  }
+
+  /**
+   * Merge two token arrays by SDK tokenId.
+   * For duplicates, use conflict resolution (longer chain > more proofs).
+   */
+  private mergeTokenArrays(
+    existingTokens: Partial<Token>[],
+    incomingTokens: Token[]
+  ): Token[] {
+    const tokenMap = new Map<string, Token>();
+
+    // Helper to get SDK token ID from a token
+    const getSdkTokenId = (t: Partial<Token>): string | null => {
+      try {
+        if (t.jsonData) {
+          const parsed = JSON.parse(t.jsonData);
+          return parsed.genesis?.data?.tokenId || null;
+        }
+      } catch { /* ignore */ }
+      return null;
+    };
+
+    // Add existing tokens to map
+    for (const t of existingTokens) {
+      const sdkId = getSdkTokenId(t);
+      const key = sdkId || t.id || crypto.randomUUID();
+      if (!tokenMap.has(key)) {
+        // Convert Partial<Token> to Token
+        tokenMap.set(key, new Token(t));
+      }
+    }
+
+    // Merge incoming tokens
+    for (const t of incomingTokens) {
+      const sdkId = getSdkTokenId(t);
+      const key = sdkId || t.id || crypto.randomUUID();
+
+      if (tokenMap.has(key)) {
+        // Conflict: use resolution logic
+        const existing = tokenMap.get(key)!;
+        const winner = this.resolveTokenConflict(existing, t);
+        tokenMap.set(key, winner);
+      } else {
+        // New token: add it
+        tokenMap.set(key, t);
+      }
+    }
+
+    const result = Array.from(tokenMap.values());
+    console.log(`🔀 [MERGE] Tokens: existing=${existingTokens.length}, incoming=${incomingTokens.length}, merged=${result.length}`);
+    return result;
+  }
+
+  /**
+   * Resolve conflict between two tokens with same SDK ID.
+   * Priority: longer transaction chain > more proofs > existing wins tie
+   */
+  private resolveTokenConflict(existing: Token, incoming: Token): Token {
+    try {
+      const existingData = existing.jsonData ? JSON.parse(existing.jsonData) : null;
+      const incomingData = incoming.jsonData ? JSON.parse(incoming.jsonData) : null;
+
+      // Compare transaction chain length
+      const existingTxCount = existingData?.transactions?.length || 0;
+      const incomingTxCount = incomingData?.transactions?.length || 0;
+
+      if (incomingTxCount > existingTxCount) {
+        console.log(`🔀 [CONFLICT] Incoming wins (more tx: ${incomingTxCount} > ${existingTxCount})`);
+        return incoming;
+      }
+      if (existingTxCount > incomingTxCount) {
+        console.log(`🔀 [CONFLICT] Existing wins (more tx: ${existingTxCount} > ${incomingTxCount})`);
+        return existing;
+      }
+
+      // Compare proofs (inclusionProofs array)
+      const existingProofs = existingData?.inclusionProofs?.length || 0;
+      const incomingProofs = incomingData?.inclusionProofs?.length || 0;
+
+      if (incomingProofs > existingProofs) {
+        console.log(`🔀 [CONFLICT] Incoming wins (more proofs: ${incomingProofs} > ${existingProofs})`);
+        return incoming;
+      }
+      if (existingProofs > incomingProofs) {
+        console.log(`🔀 [CONFLICT] Existing wins (more proofs: ${existingProofs} > ${incomingProofs})`);
+        return existing;
+      }
+
+      // Tie: prefer existing (already in storage)
+      console.log(`🔀 [CONFLICT] Tie - keeping existing`);
+      return existing;
+    } catch (e) {
+      console.warn(`🔀 [CONFLICT] Error comparing tokens, keeping existing:`, e);
+      return existing;
+    }
   }
 
   addToken(token: Token, skipHistory: boolean = false): void {
@@ -1066,9 +1449,11 @@ export class WalletRepository {
 
           if (txf.transactions && txf.transactions.length > 0) {
             currentStateHash = txf.transactions[txf.transactions.length - 1].newStateHash || "";
-          } else if (txf.genesis?.inclusionProof?.authenticator?.stateHash) {
-            currentStateHash = txf.genesis.inclusionProof.authenticator.stateHash;
           }
+          // NOTE: For genesis-only tokens (no transactions), we leave currentStateHash empty.
+          // The genesis.inclusionProof.authenticator.stateHash is the MINT COMMITMENT hash,
+          // NOT the state hash. Genesis-only tokens have never been transferred, so they
+          // shouldn't match any tombstones anyway (tombstones are created on transfer).
 
           const key = `${sdkTokenId}:${currentStateHash}`;
           if (tombstoneKeys.has(key)) {
@@ -1154,6 +1539,22 @@ export class WalletRepository {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Remove ALL tombstones for a given tokenId (regardless of stateHash)
+   * Used when archive recovery detects that a token is not actually spent
+   * and all tombstones for that token are invalid
+   */
+  removeTombstonesForToken(tokenId: string): number {
+    const initialLength = this._tombstones.length;
+    this._tombstones = this._tombstones.filter(t => t.tokenId !== tokenId);
+
+    const removedCount = initialLength - this._tombstones.length;
+    if (removedCount > 0 && this._wallet) {
+      this.saveWallet(this._wallet);
+    }
+    return removedCount;
   }
 
   /**

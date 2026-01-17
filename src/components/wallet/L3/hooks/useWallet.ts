@@ -94,11 +94,15 @@ export const useWallet = () => {
       if (!identity?.address) return null;
 
       // Ensure wallet is loaded/created for current identity (loads nametag from storage)
+      console.log(`📦 [nametagQuery] Checking wallet for identity: ${identity.address.slice(0, 30)}...`);
       const currentWallet = walletRepo.getWallet();
+      console.log(`📦 [nametagQuery] Current in-memory wallet: ${currentWallet ? `id=${currentWallet.id.slice(0, 8)}..., address=${currentWallet.address.slice(0, 30)}...` : 'null'}`);
       if (!currentWallet || currentWallet.address !== identity.address) {
+        console.log(`📦 [nametagQuery] Need to load/create wallet (currentWallet=${!!currentWallet}, addressMatch=${currentWallet?.address === identity.address})`);
         const loaded = walletRepo.loadWalletForAddress(identity.address);
         if (!loaded) {
           // No existing wallet, create one (same as tokensQuery does)
+          console.log(`📦 [nametagQuery] loadWalletForAddress returned null, creating new wallet`);
           walletRepo.createWallet(identity.address);
         }
       }
@@ -217,11 +221,15 @@ export const useWallet = () => {
       if (!identity?.address) return [];
 
       // Load wallet for current address if not already loaded
+      console.log(`📦 [tokensQuery] Checking wallet for identity: ${identity.address.slice(0, 30)}...`);
       const currentWallet = walletRepo.getWallet();
+      console.log(`📦 [tokensQuery] Current in-memory wallet: ${currentWallet ? `id=${currentWallet.id.slice(0, 8)}..., tokens=${currentWallet.tokens.length}` : 'null'}`);
       if (!currentWallet || currentWallet.address !== identity.address) {
+        console.log(`📦 [tokensQuery] Need to load/create wallet`);
         const loaded = walletRepo.loadWalletForAddress(identity.address);
         if (!loaded) {
           // No existing wallet, create one
+          console.log(`📦 [tokensQuery] loadWalletForAddress returned null, creating new wallet`);
           walletRepo.createWallet(identity.address);
         }
       }
@@ -229,7 +237,7 @@ export const useWallet = () => {
       // Verify wallet still matches identity after load
       const wallet = walletRepo.getWallet();
       if (!wallet || wallet.address !== identity.address) {
-        console.warn(`Wallet address mismatch after load: wallet=${wallet?.address}, identity=${identity.address}`);
+        console.warn(`📦 [tokensQuery] Wallet address mismatch after load: wallet=${wallet?.address}, identity=${identity.address}`);
         return [];
       }
 

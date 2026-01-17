@@ -21,6 +21,9 @@ import { UnifiedKeyManager } from '../../shared/services/UnifiedKeyManager';
 import { SaveWalletModal } from '../../L1/components/modals';
 import { validateUnicityId, invalidateUnicityId, repairUnicityId, type UnicityIdValidationResult } from '../../../../utils/unicityIdValidator';
 import { WalletRepository } from '../../../../repositories/WalletRepository';
+import { SyncModeSelector } from '../components/SyncModeSelector';
+import { SyncProgressIndicator } from '../components/SyncProgressIndicator';
+import { useInventorySync } from '../hooks/useInventorySync';
 
 // Module-level tracking to prevent validation loops across component remounts
 // Key format: "address:nametag" - tracks which nametags have been validated for which addresses
@@ -55,8 +58,18 @@ export function L3WalletView({
 }: L3WalletViewProps) {
   const navigate = useNavigate();
   const { identity, assets, tokens, isLoadingAssets, isLoadingIdentity, nametag, getSeedPhrase } = useWallet();
-  const { exportTxf, importTxf, isExportingTxf, isImportingTxf, isSyncing, isEnabled: isIpfsEnabled } = useIpfsStorage();
+  const { exportTxf, importTxf, isExportingTxf, isImportingTxf, isSyncing: isIpfsSyncing, isEnabled: isIpfsEnabled } = useIpfsStorage();
   const { balance: l1Balance, deleteWallet } = useL1Wallet();
+  const {
+    isSyncing: isInventorySyncing,
+    mode: syncMode,
+    lastResult: lastSyncResult,
+    circuitBreaker,
+    retryIpfsSync
+  } = useInventorySync();
+
+  // Combined syncing state
+  const isSyncing = isIpfsSyncing || isInventorySyncing;
 
   const [activeTab, setActiveTab] = useState<Tab>('assets');
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
@@ -85,11 +98,9 @@ export function L3WalletView({
     // Track when sync starts
     if (isSyncing && isIpfsEnabled) {
       hasSyncStarted.current = true;
-      console.log(`🔄 L3WalletView: sync started, hasSyncStarted=true`);
     }
     // Only mark complete after sync has started AND then stopped
     if (!isSyncing && isIpfsEnabled && !initialSyncComplete && hasSyncStarted.current) {
-      console.log(`🔄 L3WalletView: sync completed, marking initialSyncComplete=true`);
       setInitialSyncComplete(true);
     }
   }, [isSyncing, isIpfsEnabled, initialSyncComplete]);
@@ -221,10 +232,6 @@ export function L3WalletView({
     const l1Value = l1AlphaAsset.getTotalFiatValue('USD');
     return l3Value + l1Value;
   }, [assets, l1AlphaAsset]);
-
-  // Debug: Log spinner visibility conditions
-  const shouldShowSpinner = isSyncing && isIpfsEnabled && !initialSyncComplete;
-  console.log(`🔄 L3WalletView render: isSyncing=${isSyncing}, isIpfsEnabled=${isIpfsEnabled}, initialSyncComplete=${initialSyncComplete}, shouldShowSpinner=${shouldShowSpinner}`);
 
   const handleTopUp = async () => {
     if (!nametag) {
@@ -379,8 +386,15 @@ export function L3WalletView({
             >
               {showBalances ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
             </motion.button>
-            {isSyncing && isIpfsEnabled && (
-              <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+            {isIpfsEnabled && (
+              <SyncModeSelector
+                mode={syncMode}
+                circuitBreaker={circuitBreaker ?? undefined}
+                lastSyncResult={lastSyncResult}
+                isSyncing={isSyncing}
+                onRetrySync={retryIpfsSync}
+                compact={true}
+              />
             )}
           </div>
         </div>
@@ -697,6 +711,15 @@ export function L3WalletView({
         onCancel={() => setIsSaveWalletOpen(false)}
         hasMnemonic={hasMnemonic}
       />
+
+      {/* Sync Progress Indicator - floating notification */}
+      {isIpfsEnabled && (
+        <SyncProgressIndicator
+          lastSyncResult={lastSyncResult}
+          isSyncing={isSyncing}
+          autoDismissMs={5000}
+        />
+      )}
     </div>
   );
 }

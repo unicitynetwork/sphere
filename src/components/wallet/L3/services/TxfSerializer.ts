@@ -47,7 +47,11 @@ export function tokenToTxf(token: Token): TxfToken | null {
   }
 
   try {
-    const txfData = JSON.parse(token.jsonData);
+    // Parse and NORMALIZE the data - this ensures all bytes objects are converted
+    // to hex strings BEFORE Zod validation and BEFORE writing to IPFS.
+    // This is critical for fixing tokens that were stored with bytes format before
+    // the normalization fix was deployed.
+    const txfData = normalizeSdkTokenToStorage(JSON.parse(token.jsonData));
 
     // Validate it has the expected TXF structure
     if (!txfData.genesis || !txfData.state) {
@@ -156,6 +160,95 @@ export function txfToToken(tokenId: string, txf: TxfToken): Token {
     symbol: isNft ? "NFT" : "UCT",
     sizeBytes: JSON.stringify(txf).length,
   });
+}
+
+// ==========================================
+// SDK Token Normalization
+// ==========================================
+
+/**
+ * Convert bytes array/object to hex string
+ */
+function bytesToHexInternal(bytes: number[] | Uint8Array): string {
+  const arr = Array.isArray(bytes) ? bytes : Array.from(bytes);
+  return arr.map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Normalize a value that may be a hex string, bytes object, or Buffer to hex string
+ */
+function normalizeToHex(value: unknown): string {
+  if (typeof value === "string") {
+    return value; // Already hex string
+  }
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    // SDK format: { bytes: [...] }
+    if ("bytes" in obj && (Array.isArray(obj.bytes) || obj.bytes instanceof Uint8Array)) {
+      return bytesToHexInternal(obj.bytes as number[] | Uint8Array);
+    }
+    // Buffer.toJSON() format: { type: "Buffer", data: [...] }
+    if (obj.type === "Buffer" && Array.isArray(obj.data)) {
+      return bytesToHexInternal(obj.data as number[]);
+    }
+  }
+  console.warn("Unknown bytes format, returning as-is:", value);
+  return String(value);
+}
+
+/**
+ * Normalize SDK token JSON to canonical TXF storage format.
+ * Converts all bytes objects to hex strings before storage.
+ *
+ * Call this immediately after Token.toJSON() to ensure consistent storage format.
+ * This prevents storing SDK's internal format (bytes objects) and ensures all
+ * tokenId, tokenType, salt, publicKey, signature fields are hex strings.
+ */
+export function normalizeSdkTokenToStorage(sdkTokenJson: unknown): TxfToken {
+  // Deep copy to avoid mutating the original
+  const txf = JSON.parse(JSON.stringify(sdkTokenJson));
+
+  // Normalize genesis.data fields (tokenId, tokenType, salt)
+  if (txf.genesis?.data) {
+    const data = txf.genesis.data;
+    if (data.tokenId !== undefined) {
+      data.tokenId = normalizeToHex(data.tokenId);
+    }
+    if (data.tokenType !== undefined) {
+      data.tokenType = normalizeToHex(data.tokenType);
+    }
+    if (data.salt !== undefined) {
+      data.salt = normalizeToHex(data.salt);
+    }
+  }
+
+  // Normalize authenticator fields in genesis inclusion proof
+  if (txf.genesis?.inclusionProof?.authenticator) {
+    const auth = txf.genesis.inclusionProof.authenticator;
+    if (auth.publicKey !== undefined) {
+      auth.publicKey = normalizeToHex(auth.publicKey);
+    }
+    if (auth.signature !== undefined) {
+      auth.signature = normalizeToHex(auth.signature);
+    }
+  }
+
+  // Normalize transaction authenticators
+  if (Array.isArray(txf.transactions)) {
+    for (const tx of txf.transactions) {
+      if (tx.inclusionProof?.authenticator) {
+        const auth = tx.inclusionProof.authenticator;
+        if (auth.publicKey !== undefined) {
+          auth.publicKey = normalizeToHex(auth.publicKey);
+        }
+        if (auth.signature !== undefined) {
+          auth.signature = normalizeToHex(auth.signature);
+        }
+      }
+    }
+  }
+
+  return txf as TxfToken;
 }
 
 // ==========================================

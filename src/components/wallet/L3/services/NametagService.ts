@@ -18,6 +18,7 @@ import { WalletRepository, type NametagData } from "../../../../repositories/Wal
 import { OutboxRepository } from "../../../../repositories/OutboxRepository";
 import { createMintOutboxEntry, type MintOutboxEntry } from "./types/OutboxTypes";
 import { IpfsStorageService, SyncPriority } from "./IpfsStorageService";
+import { normalizeSdkTokenToStorage } from "./TxfSerializer";
 import type { StateTransitionClient } from "@unicitylabs/state-transition-sdk/lib/StateTransitionClient";
 import type { InclusionProof } from "@unicitylabs/state-transition-sdk/lib/transaction/InclusionProof";
 
@@ -336,7 +337,7 @@ export class NametagService {
       // 10. Update outbox with final token and mark complete
       outboxRepo.updateMintEntry(outboxEntryId, {
         status: "COMPLETED",
-        tokenJson: JSON.stringify(token.toJSON()),
+        tokenJson: JSON.stringify(normalizeSdkTokenToStorage(token.toJSON())),
       });
 
       console.log(`✅ Nametag minted: ${nametag}`);
@@ -389,6 +390,90 @@ export class NametagService {
     // Get nametag from WalletRepository (per-identity)
     const nametag = WalletRepository.getInstance().getNametag();
     return nametag?.name || null;
+  }
+
+  /**
+   * Refresh the nametag token's inclusion proof from the aggregator.
+   * This is needed before using the nametag in token finalization,
+   * as the SDK verifies the nametag's proof against the current root trust base.
+   *
+   * @returns The refreshed token, or null if refresh failed
+   */
+  async refreshNametagProof(): Promise<Token<any> | null> {
+    const walletRepo = WalletRepository.getInstance();
+    const nametagData = walletRepo.getNametag();
+
+    if (!nametagData || !nametagData.token) {
+      console.log("📦 No nametag token to refresh");
+      return null;
+    }
+
+    const nametagTxf = nametagData.token as any;
+
+    // Validate token structure
+    if (!nametagTxf.genesis?.data?.salt) {
+      console.error("📦 Nametag token missing genesis data or salt");
+      return null;
+    }
+
+    try {
+      console.log(`📦 Refreshing nametag proof for "${nametagData.name}"...`);
+
+      // Reconstruct the MintCommitment to get the correct requestId
+      const genesisData = nametagTxf.genesis.data;
+      const mintDataJson = {
+        tokenId: genesisData.tokenId,
+        tokenType: genesisData.tokenType,
+        tokenData: genesisData.tokenData || null,
+        coinData: genesisData.coinData && genesisData.coinData.length > 0 ? genesisData.coinData : null,
+        recipient: genesisData.recipient,
+        salt: genesisData.salt,
+        recipientDataHash: genesisData.recipientDataHash,
+        reason: genesisData.reason ? JSON.parse(genesisData.reason) : null,
+      };
+
+      const mintTransactionData = await MintTransactionData.fromJSON(mintDataJson);
+      const commitment = await MintCommitment.create(mintTransactionData);
+      const requestId = commitment.requestId;
+
+      console.log(`📦 Fetching fresh proof for requestId: ${requestId.toJSON().slice(0, 16)}...`);
+
+      // Fetch fresh proof from aggregator
+      const client = ServiceProvider.stateTransitionClient;
+      const response = await client.getInclusionProof(requestId);
+
+      if (!response.inclusionProof) {
+        console.warn("📦 No inclusion proof available from aggregator");
+        // Return the existing token without update
+        return await Token.fromJSON(nametagTxf);
+      }
+
+      // Check if it's an inclusion proof (has authenticator) vs exclusion proof
+      if (response.inclusionProof.authenticator === null) {
+        console.warn("📦 Got exclusion proof - nametag may need re-minting");
+        return await Token.fromJSON(nametagTxf);
+      }
+
+      // Update the token with fresh proof
+      const newProofJson = response.inclusionProof.toJSON();
+      nametagTxf.genesis.inclusionProof = newProofJson;
+
+      // Save updated token back to storage
+      walletRepo.setNametag({ ...nametagData, token: nametagTxf });
+
+      console.log(`✅ Nametag proof refreshed successfully`);
+
+      // Return the updated token
+      return await Token.fromJSON(nametagTxf);
+    } catch (error) {
+      console.error("📦 Failed to refresh nametag proof:", error);
+      // Return existing token on error - let caller decide how to handle
+      try {
+        return await Token.fromJSON(nametagTxf);
+      } catch {
+        return null;
+      }
+    }
   }
 
   /**

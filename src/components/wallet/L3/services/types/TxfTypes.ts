@@ -5,6 +5,7 @@
 
 import type { NametagData } from "../../../../../repositories/WalletRepository";
 import type { OutboxEntry, MintOutboxEntry } from "./OutboxTypes";
+import type { InvalidReasonCode } from "../../types/SyncTypes";
 
 // ==========================================
 // Storage Format (for IPFS)
@@ -35,6 +36,28 @@ export interface InvalidatedNametagEntry {
 }
 
 /**
+ * Entry for tokens moved to Sent folder (Section 3.2)
+ * Stored when a token's latest state is SPENT with inclusion proof
+ */
+export interface SentTokenEntry {
+  token: TxfToken;           // Complete token data
+  timestamp: number;         // When moved to Sent (epoch ms)
+  spentAt: number;           // When token was spent (epoch ms, from inclusion proof)
+}
+
+/**
+ * Entry for tokens moved to Invalid folder (Section 3.3)
+ * Stored when a token fails validation but is kept for investigation
+ */
+export interface InvalidTokenEntry {
+  token: TxfToken;           // Complete token data (may be partial)
+  timestamp: number;         // When moved to Invalid (epoch ms)
+  invalidatedAt: number;     // When invalidated (epoch ms)
+  reason: InvalidReasonCode; // Structured reason code
+  details?: string;          // Optional human-readable details
+}
+
+/**
  * Complete storage data structure for IPFS
  * Contains metadata, nametag, tombstones, outbox, invalidated nametags, and all tokens keyed by their IDs
  */
@@ -45,8 +68,10 @@ export interface TxfStorageData {
   _invalidatedNametags?: InvalidatedNametagEntry[]; // Nametags that failed Nostr validation
   _outbox?: OutboxEntry[];                     // Pending transfers (CRITICAL for recovery)
   _mintOutbox?: MintOutboxEntry[];             // Pending mints (CRITICAL for recovery)
+  _sent?: SentTokenEntry[];                    // Sent tokens (SPENT with inclusion proof)
+  _invalid?: InvalidTokenEntry[];              // Invalid tokens (failed validation, kept for investigation)
   // Dynamic keys for tokens: _<tokenId>
-  [key: string]: TxfToken | TxfMeta | NametagData | TombstoneEntry[] | InvalidatedNametagEntry[] | OutboxEntry[] | MintOutboxEntry[] | undefined;
+  [key: string]: TxfToken | TxfMeta | NametagData | TombstoneEntry[] | InvalidatedNametagEntry[] | OutboxEntry[] | MintOutboxEntry[] | SentTokenEntry[] | InvalidTokenEntry[] | undefined;
 }
 
 /**
@@ -238,6 +263,8 @@ export function isActiveTokenKey(key: string): boolean {
          key !== "_invalidatedNametags" &&
          key !== "_outbox" &&
          key !== "_mintOutbox" &&
+         key !== "_sent" &&
+         key !== "_invalid" &&
          key !== "_integrity";
 }
 

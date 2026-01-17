@@ -437,6 +437,10 @@ export class TokenSplitExecutor {
       }
 
       // Submit mint to aggregator
+      // Log the MINT RequestId (critical for spent detection debugging)
+      console.log(`🔑 [SplitMint] RequestId committed for ${isSenderToken ? 'CHANGE' : 'recipient'}: ${commitment.requestId.toString()}`);
+      console.log(`   - tokenId: ${commTokenIdHex.slice(0, 16)}...`);
+
       const res = await this.client.submitMintCommitment(commitment);
       if (res.status !== "SUCCESS" && res.status !== "REQUEST_ID_EXISTS") {
         if (outboxRepo && mintEntryId) {
@@ -716,7 +720,16 @@ export class TokenSplitExecutor {
         transactions: [],
         nametags: [],
       };
-      return await SdkToken.fromJSON(tokenJson);
+      const token = await SdkToken.fromJSON(tokenJson);
+
+      // Log the state hash for debugging - this MUST match what spent check calculates
+      const stateHash = await token.state.calculateHash();
+      const tokenIdHex = Buffer.from(info.tokenId.bytes).toString("hex");
+      console.log(`🔑 [${label}] Token state hash after creation: ${stateHash.toJSON()}`);
+      console.log(`   - tokenId: ${tokenIdHex.slice(0, 16)}...`);
+      console.log(`   - This hash should match spent check RequestId calculation`);
+
+      return token;
     }
 
     // Normal mode: use SDK's mint with trust base verification

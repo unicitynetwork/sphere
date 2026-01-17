@@ -47,6 +47,7 @@ import {
 } from "../data/model";
 import { v4 as uuidv4 } from "uuid";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
+import { normalizeSdkTokenToStorage } from "./TxfSerializer";
 
 const UNICITY_RELAYS = [
   "wss://nostr-relay.testnet.unicity.network",
@@ -203,44 +204,48 @@ export class NostrService {
 
     console.log(`📥 Processing ${isWalletEvent ? 'wallet' : 'chat'} event kind=${event.kind}`);
 
-    // Process the event and only mark as processed AFTER successful handling
-    // This prevents token loss if browser closes during processing
-    const success = await this.handleIncomingEvent(event);
+    // Process the event - now returns token for TOKEN_TRANSFER
+    const result = await this.handleIncomingEvent(event);
 
-    if (success) {
-      // IPFS is primary source of truth - sync before marking event as processed
-      // This ensures token can be recovered from Nostr if IPFS sync fails
-      // Uses HIGH priority queue so it jumps ahead of auto-syncs
-      try {
-        const { IpfsStorageService, SyncPriority } = await import("./IpfsStorageService");
-        const ipfsService = IpfsStorageService.getInstance(this.identityManager);
-        const syncResult = await ipfsService.syncNow({
-          priority: SyncPriority.HIGH,
-          timeout: 60000,
-          callerContext: 'nostr-incoming-token',
-        });
+    if (result.success) {
+      // For token transfers, use background loop for batched sync
+      if (event.kind === EventKinds.TOKEN_TRANSFER && result.token) {
+        try {
+          const { InventoryBackgroundLoopsManager } = await import("./InventoryBackgroundLoops");
+          const loopsManager = InventoryBackgroundLoopsManager.getInstance(this.identityManager);
 
-        if (!syncResult.success) {
-          console.warn(`⚠️ IPFS sync failed for event ${event.id.slice(0, 8)}: ${syncResult.error}`);
-          console.warn(`Token saved locally but NOT marked as processed - will retry on next connect`);
-          return; // Don't mark as processed - retry on next connect
+          // Ensure loops are initialized
+          if (!loopsManager.isReady()) {
+            await loopsManager.initialize();
+          }
+
+          const receiveLoop = loopsManager.getReceiveLoop();
+
+          // Set callback to mark events as processed (only need to do once)
+          receiveLoop.setEventProcessedCallback((eventId) => {
+            this.markEventAsProcessed(eventId);
+          });
+
+          // Queue token for batched sync
+          await receiveLoop.queueIncomingToken(result.token, event.id, event.pubkey);
+
+          console.log(`📥 Token ${event.id.slice(0, 8)} queued for batch sync`);
+        } catch (err) {
+          console.error(`Failed to queue token for batch sync:`, err);
+          // Fallback: mark as processed anyway since token is saved locally
+          this.markEventAsProcessed(event.id);
         }
-
-        console.log(`☁️ Token synced to IPFS: CID=${syncResult.cid?.slice(0, 12)}...`);
-      } catch (err) {
-        console.error(`IPFS sync error for event ${event.id.slice(0, 8)}:`, err);
-        console.warn(`Token saved locally but NOT marked as processed - will retry on next connect`);
-        return; // Don't mark as processed - retry on next connect
+      } else {
+        // For non-token events (chat, payment requests), mark as processed immediately
+        this.markEventAsProcessed(event.id);
+        console.log(`✅ Event ${event.id.slice(0, 8)} processed`);
       }
-
-      this.markEventAsProcessed(event.id);
-      console.log(`✅ Event ${event.id.slice(0, 8)} fully processed (localStorage + IPFS)`);
     } else {
       console.warn(`⚠️ Event ${event.id.slice(0, 8)} processing failed, will retry on next connect`);
     }
 
-    // Update lastSync only for wallet events that were successfully processed
-    if (isWalletEvent && success) {
+    // Update lastSync for wallet events
+    if (isWalletEvent && result.success) {
       this.updateLastSync(event.created_at);
     }
   }
@@ -315,22 +320,23 @@ export class NostrService {
     return this.processedEventIds.has(eventId);
   }
 
-  private async handleIncomingEvent(event: Event): Promise<boolean> {
+  private async handleIncomingEvent(event: Event): Promise<{ success: boolean; token?: UiToken }> {
     console.log(
       `Received event kind=${event.kind} from=${event.pubkey.slice(0, 16)}`
     );
     if (event.kind === EventKinds.TOKEN_TRANSFER) {
-      return await this.handleTokenTransfer(event);
+      const token = await this.handleTokenTransfer(event);
+      return { success: token !== null, token: token || undefined };
     } else if (event.kind === EventKinds.GIFT_WRAP) {
       console.log("Received NIP-17 gift-wrapped message");
       this.handleGiftWrappedMessage(event);
-      return true; // Chat messages always succeed (stored in local chat repo)
+      return { success: true }; // Chat messages always succeed (stored in local chat repo)
     } else if (event.kind === EventKinds.PAYMENT_REQUEST) {
       this.handlePaymentRequest(event);
-      return true; // Payment requests are in-memory only
+      return { success: true }; // Payment requests are in-memory only
     } else {
       console.log(`Unhandled event kind - ${event.kind}`);
-      return true; // Unknown events - don't retry
+      return { success: true }; // Unknown events - don't retry
     }
   }
 
@@ -412,12 +418,12 @@ export class NostrService {
     return this.paymentRequests;
   }
 
-  private async handleTokenTransfer(event: Event): Promise<boolean> {
+  private async handleTokenTransfer(event: Event): Promise<UiToken | null> {
     try {
       const keyManager = await this.getKeyManager();
       if (!keyManager) {
         console.error("KeyManager is undefined");
-        return false;
+        return null;
       }
 
       const tokenJson = await TokenTransferProtocol.parseTokenTransfer(
@@ -439,18 +445,18 @@ export class NostrService {
           payloadObj = JSON.parse(tokenJson);
         } catch (error) {
           console.warn("Failed to parse JSON:", error);
-          return false;
+          return null;
         }
         return await this.handleProperTokenTransfer(payloadObj, event.pubkey);
       }
-      return false; // Unknown transfer format
+      return null; // Unknown transfer format
     } catch (error) {
       console.error("Failed to handle token transfer", error);
-      return false;
+      return null;
     }
   }
 
-  private async handleProperTokenTransfer(payloadObj: Record<string, any>, senderPubkey: string): Promise<boolean> {
+  private async handleProperTokenTransfer(payloadObj: Record<string, any>, senderPubkey: string): Promise<UiToken | null> {
     try {
       let sourceTokenInput = payloadObj["sourceToken"];
       let transferTxInput = payloadObj["transferTx"];
@@ -473,7 +479,7 @@ export class NostrService {
 
       if (!sourceTokenInput || !transferTxInput) {
         console.error("Missing sourceToken or transferTx in payload");
-        return false;
+        return null;
       }
 
       const sourceToken = await Token.fromJSON(sourceTokenInput);
@@ -482,7 +488,7 @@ export class NostrService {
       return await this.finalizeTransfer(sourceToken, transferTx, senderPubkey);
     } catch (error) {
       console.error("Error handling proper token transfer", error);
-      return false;
+      return null;
     }
   }
 
@@ -490,7 +496,7 @@ export class NostrService {
     sourceToken: Token<any>,
     transferTx: TransferTransaction,
     senderPubkey: string
-  ): Promise<boolean> {
+  ): Promise<UiToken | null> {
     try {
       const recipientAddress = transferTx.data.recipient;
       console.log(`Recipient address: ${recipientAddress}`);
@@ -506,7 +512,7 @@ export class NostrService {
 
         if (allNametags.length === 0) {
           console.error("No nametags configured for this wallet");
-          return false;
+          return null;
         }
 
         let myNametagToken: Token<any> | null = null;
@@ -522,7 +528,7 @@ export class NostrService {
           console.error("Transfer is not for any of my nametags!");
           console.error(`Got: ${recipientAddress.address}`);
           console.error(`My nametags: ${allNametags.toString()}`);
-          return false;
+          return null;
         }
 
         console.log("Transfer is for my nametag!");
@@ -533,7 +539,7 @@ export class NostrService {
           console.error(
             "No wallet identity found, can't finalize the transfer!"
           );
-          return false;
+          return null;
         }
 
         const secret = Buffer.from(identity.privateKey, "hex");
@@ -582,13 +588,44 @@ export class NostrService {
           };
           finalizedToken = await Token.fromJSON(finalizedTxf);
         } else {
-          finalizedToken = await client.finalizeTransaction(
-            rootTrustBase,
-            sourceToken,
-            recipientState,
-            transferTx,
-            [myNametagToken]
-          );
+          // Try finalization with existing nametag token first
+          // If it fails with "Nametag tokens verification failed", refresh proof and retry
+          try {
+            finalizedToken = await client.finalizeTransaction(
+              rootTrustBase,
+              sourceToken,
+              recipientState,
+              transferTx,
+              [myNametagToken]
+            );
+          } catch (finalizeError: unknown) {
+            const errorMessage = finalizeError instanceof Error ? finalizeError.message : String(finalizeError);
+
+            // Check if this is a nametag verification failure (stale proof)
+            if (errorMessage.includes("Nametag tokens verification failed")) {
+              console.log("📦 Nametag proof appears stale, refreshing and retrying...");
+
+              const refreshedNametag = await nametagService.refreshNametagProof();
+              if (!refreshedNametag) {
+                console.error("Failed to refresh nametag proof");
+                throw finalizeError;
+              }
+
+              // Retry with refreshed nametag
+              myNametagToken = refreshedNametag;
+              finalizedToken = await client.finalizeTransaction(
+                rootTrustBase,
+                sourceToken,
+                recipientState,
+                transferTx,
+                [myNametagToken]
+              );
+              console.log("✅ Finalization succeeded after proof refresh");
+            } else {
+              // Different error, re-throw
+              throw finalizeError;
+            }
+          }
         }
 
         console.log("Token finalized successfully!");
@@ -605,7 +642,7 @@ export class NostrService {
           console.error(
             "No wallet identity found, can't finalize the direct transfer!"
           );
-          return false;
+          return null;
         }
 
         const secret = Buffer.from(identity.privateKey, "hex");
@@ -670,11 +707,11 @@ export class NostrService {
       }
     } catch (error) {
       console.error("Error occured while finalizing transfer:", error);
-      return false;
+      return null;
     }
   }
 
-  private saveReceivedToken(token: Token<any>, senderPubkey: string): boolean {
+  private saveReceivedToken(token: Token<any>, senderPubkey: string): UiToken | null {
     let amount = undefined;
     let coinId = undefined;
     let symbol = undefined;
@@ -722,7 +759,7 @@ export class NostrService {
 
     if (!coinId || amount === "0" || coinId === "0" || coinId === "undefined") {
       console.error("❌ Invalid token data. Skipping.");
-      return false;
+      return null;
     }
 
     if (coinId) {
@@ -741,7 +778,7 @@ export class NostrService {
       name: symbol ? symbol : "Unicity Token",
       type: token.type.toString(),
       symbol: symbol,
-      jsonData: JSON.stringify(token.toJSON()),
+      jsonData: JSON.stringify(normalizeSdkTokenToStorage(token.toJSON())),
       status: TokenStatus.CONFIRMED,
       amount: amount,
       coinId: coinId,
@@ -752,7 +789,7 @@ export class NostrService {
 
     walletRepo.addToken(uiToken);
     console.log(`💾 Token saved to wallet: ${uiToken.id}`);
-    return true;
+    return uiToken;
   }
 
   async queryPubkeyByNametag(nametag: string): Promise<string | null> {
@@ -791,6 +828,44 @@ export class NostrService {
       console.error("Failed to send token transfer", error);
       return false;
     }
+  }
+
+  /**
+   * Send token payload to recipient via Nostr
+   * Used by NostrDeliveryQueue for background delivery
+   * @returns Event ID of the sent transfer
+   */
+  async sendTokenToRecipient(recipientPubkey: string, payloadJson: string): Promise<string> {
+    if (!this.client) await this.start();
+
+    // Parse payload to extract amount/symbol for metadata
+    let amount: bigint | undefined;
+    let symbol: string | undefined;
+
+    try {
+      const payload = JSON.parse(payloadJson);
+      if (payload.amount) {
+        amount = BigInt(payload.amount);
+      }
+      if (payload.symbol) {
+        symbol = payload.symbol;
+      }
+    } catch {
+      // Ignore parsing errors - amount/symbol are optional metadata
+    }
+
+    // Send token transfer and get event ID
+    // The SDK's sendTokenTransfer returns the event ID
+    const eventId = await this.client?.sendTokenTransfer(recipientPubkey, payloadJson, {
+      amount,
+      symbol,
+    });
+
+    if (!eventId) {
+      throw new Error('Failed to send token transfer - no event ID returned');
+    }
+
+    return eventId;
   }
 
   async publishNametagBinding(

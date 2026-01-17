@@ -62,11 +62,12 @@ async function tryGatewayPath(
   timeoutMs: number = 5000
 ): Promise<{ content: TxfStorageData; cid?: string } | null> {
   try {
-    const url = `${gatewayUrl}/ipns/${ipnsName}?format=dag-json`;
+    // Request raw JSON (not dag-json) to preserve original encoding for CID verification
+    const url = `${gatewayUrl}/ipns/${ipnsName}`;
 
     const response = await fetchWithTimeout(url, timeoutMs, {
       headers: {
-        Accept: "application/vnd.ipld.dag-json, application/json",
+        Accept: "application/json",
       },
     });
 
@@ -147,7 +148,7 @@ async function tryRoutingApi(
  * - Hash with SHA-256
  * - Create CIDv1 with json codec (0x0200)
  */
-async function computeCidFromContent(content: TxfStorageData): Promise<string> {
+export async function computeCidFromContent(content: TxfStorageData): Promise<string> {
   // Encode content as JSON (same as @helia/json uses)
   const encoded = jsonCodec.encode(content);
   // Hash with SHA-256 (same as @helia/json default)
