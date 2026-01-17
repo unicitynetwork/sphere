@@ -352,6 +352,13 @@ export function useCreateAddress(): UseCreateAddressReturn {
 
       console.log(`✅ Created fresh wallet for new identity: ${identity.address.slice(0, 20)}...`);
 
+      // CRITICAL: Reset IpfsStorageService BEFORE minting to cancel any pending/running syncs
+      // The old instance may have a sync in progress from earlier wallet activity.
+      // Resetting ensures we have a fresh instance for the new identity.
+      console.log("🔄 Resetting IpfsStorageService for new identity...");
+      await IpfsStorageService.resetInstance();
+      console.log("✅ IpfsStorageService reset - any pending syncs cancelled");
+
       // CRITICAL: Reset and restart NostrService with new identity BEFORE minting
       // NostrService is a singleton that may still be connected with OLD identity's keypair.
       // NametagService.mintNametagAndPublish() calls nostr.start() which does nothing if already connected.
@@ -415,31 +422,54 @@ export function useCreateAddress(): UseCreateAddressReturn {
         });
       };
 
-      // Check if a sync is already in progress (for old identity)
+      // Get fresh IPFS service (we reset it earlier before minting)
       let ipfsService = IpfsStorageService.getInstance(identityManager);
-      let syncResult = await ipfsService.syncNow();
+      let syncResult: Awaited<ReturnType<typeof ipfsService.syncNow>> = {
+        success: false,
+        timestamp: Date.now(),
+        error: "Sync not started",
+      };
 
-      // If sync is already in progress, wait for it to complete
-      if (!syncResult.success && syncResult.error === "Sync already in progress") {
-        console.log("⏳ Sync already in progress (old identity), waiting for completion...");
-        setProgress("Waiting for previous sync to complete...");
-        await waitForSyncCompletion();
-
-        // Reset IPFS service instance so it re-initializes with new identity
-        console.log("🔄 Resetting IPFS service for new identity...");
-        await IpfsStorageService.resetInstance();
-
-        // Get fresh instance and sync again
-        ipfsService = IpfsStorageService.getInstance(identityManager);
+      // Retry loop for sync - handles "Sync already in progress" and "Another tab is syncing"
+      const MAX_SYNC_RETRIES = 3;
+      for (let attempt = 1; attempt <= MAX_SYNC_RETRIES; attempt++) {
+        console.log(`📦 Sync attempt ${attempt}/${MAX_SYNC_RETRIES}...`);
         syncResult = await ipfsService.syncNow();
-      }
 
-      // Handle "Another tab is syncing" - also wait and retry
-      if (!syncResult.success && syncResult.error === "Another tab is syncing") {
-        console.log("⏳ Another tab is syncing, waiting...");
-        setProgress("Waiting for other tab to finish sync...");
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5s
-        syncResult = await ipfsService.syncNow();
+        if (syncResult.success) {
+          console.log(`✅ Sync succeeded on attempt ${attempt}`);
+          break;
+        }
+
+        // Handle "Sync already in progress" - wait and retry
+        if (syncResult.error === "Sync already in progress") {
+          if (attempt < MAX_SYNC_RETRIES) {
+            console.log("⏳ Sync already in progress, waiting for completion...");
+            setProgress("Waiting for sync to complete...");
+            await waitForSyncCompletion();
+
+            // Reset IPFS service in case the previous sync was for wrong identity
+            console.log("🔄 Resetting IPFS service after sync completion...");
+            await IpfsStorageService.resetInstance();
+            ipfsService = IpfsStorageService.getInstance(identityManager);
+            continue;
+          }
+        }
+
+        // Handle "Another tab is syncing" - wait and retry
+        if (syncResult.error === "Another tab is syncing") {
+          if (attempt < MAX_SYNC_RETRIES) {
+            console.log("⏳ Another tab is syncing, waiting...");
+            setProgress("Waiting for other tab to finish sync...");
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            continue;
+          }
+        }
+
+        // For other errors or last attempt, break out
+        if (attempt === MAX_SYNC_RETRIES) {
+          console.error(`❌ Sync failed after ${MAX_SYNC_RETRIES} attempts: ${syncResult.error}`);
+        }
       }
 
       console.log("📦 IPFS sync result:", {
@@ -459,44 +489,46 @@ export function useCreateAddress(): UseCreateAddressReturn {
         );
       }
 
-      if (syncResult.ipnsPublishPending) {
-        console.error("❌ IPNS publish failed, marked as pending");
-        throw new Error(
-          `Your Unicity ID was saved to IPFS but IPNS publish failed. It may not be immediately recoverable on other devices.`
-        );
-      }
-
       console.log("✅ IPFS sync completed, IPNS published:", syncResult.ipnsPublished);
 
-      if (!syncResult.ipnsPublished) {
-        console.error("❌ IPNS was not published during sync");
-        throw new Error(
-          `Your Unicity ID was saved to IPFS but was not published to IPNS. This means it won't be recoverable on other devices.`
-        );
+      // IPNS publish is not critical for local functionality
+      // Address works locally even without IPNS - just won't be recoverable on other devices
+      let ipnsWarning: string | null = null;
+
+      if (syncResult.ipnsPublishPending || !syncResult.ipnsPublished) {
+        console.warn("⚠️ IPNS publish failed or pending - address works locally but may not be recoverable on other devices");
+        ipnsWarning = "Your Unicity ID was saved locally but IPNS publish failed. It may not be immediately recoverable on other devices.";
       }
 
-      // Step 3: Verify in IPNS (CRITICAL - ensure recovery works)
-      setStep('verifying_ipns', 'Verifying IPFS availability...');
+      // Step 3: Verify in IPNS (skip if IPNS publish failed)
+      if (syncResult.ipnsPublished && !syncResult.ipnsPublishPending) {
+        setStep('verifying_ipns', 'Verifying IPFS availability...');
 
-      console.log("🔍 Starting IPNS verification for nametag:", cleanTag);
+        console.log("🔍 Starting IPNS verification for nametag:", cleanTag);
 
-      const verified = await verifyNametagInIpnsWithRetry(
-        identity.privateKey,
-        cleanTag,
-        60000,
-        (status) => setProgress(status)
-      );
-
-      console.log("🔍 IPNS verification result:", verified);
-
-      if (!verified) {
-        console.error("❌ IPNS verification failed after 60s");
-        throw new Error(
-          `Your Unicity ID was saved but could not be verified in decentralized storage after 60 seconds. This may be due to network issues. Your ID is saved locally.`
+        const verified = await verifyNametagInIpnsWithRetry(
+          identity.privateKey,
+          cleanTag,
+          60000,
+          (status) => setProgress(status)
         );
+
+        console.log("🔍 IPNS verification result:", verified);
+
+        if (!verified) {
+          console.warn("⚠️ IPNS verification failed after 60s - continuing anyway");
+          ipnsWarning = "Your Unicity ID could not be verified in decentralized storage. It may not be recoverable on other devices.";
+        } else {
+          console.log(`✅ Verified nametag "${cleanTag}" available via IPNS`);
+        }
+      } else {
+        console.log("⏭️ Skipping IPNS verification - IPNS publish failed");
       }
 
-      console.log(`✅ Verified nametag "${cleanTag}" available via IPNS`);
+      // Log warning but don't fail - address is created and works locally
+      if (ipnsWarning) {
+        console.warn("⚠️ IPNS Warning:", ipnsWarning);
+      }
 
       // Step 4: Complete - update TanStack Query cache
       setStep('complete', 'Address created successfully!');

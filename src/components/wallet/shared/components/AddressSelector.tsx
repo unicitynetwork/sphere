@@ -3,7 +3,7 @@ import { ChevronDown, Plus, Loader2, Check, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useL1Wallet } from '../../L1/hooks/useL1Wallet';
 import { useAddressNametags } from '../../L1/hooks/useAddressNametags';
-import { WalletRepository } from '../../../../repositories/WalletRepository';
+import { useSwitchAddress } from '../hooks/useSwitchAddress';
 import { STORAGE_KEYS } from '../../../../config/storageKeys';
 import { CreateAddressModal } from '../modals/CreateAddressModal';
 
@@ -21,6 +21,7 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
 
   const { wallet } = useL1Wallet();
   const { nametagState, addressesWithNametags } = useAddressNametags(wallet?.addresses);
+  const { switchToAddress, isSwitching } = useSwitchAddress();
 
   // Check if any address is still loading nametag from IPNS
   const isAnyAddressLoading = useMemo(() => {
@@ -50,16 +51,22 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
     });
   }, [wallet?.addresses]);
 
-  const handleSelectAddress = (address: string) => {
+  const handleSelectAddress = async (address: string) => {
+    if (isSwitching) return;
+
     const selectedAddr = wallet?.addresses.find(a => a.address === address);
-    if (selectedAddr?.path) {
-      localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, selectedAddr.path);
-    } else {
-      localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
+    if (!selectedAddr) return;
+
+    // Don't switch if already on this address
+    if (selectedAddr.address === currentAddress?.address) {
+      setShowDropdown(false);
+      return;
     }
-    WalletRepository.getInstance().resetInMemoryState();
+
     setShowDropdown(false);
-    window.location.reload();
+
+    // Use the hook to switch address without page reload
+    await switchToAddress(selectedAddr.address, selectedAddr.path || null);
   };
 
   const handleNewAddress = () => {
@@ -146,10 +153,10 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
                 {/* Header */}
                 <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2">
                   <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 flex items-center gap-1.5">
-                    {isAnyAddressLoading && (
+                    {(isAnyAddressLoading || isSwitching) && (
                       <Loader2 className="w-3 h-3 animate-spin" />
                     )}
-                    {isAnyAddressLoading ? 'Checking nametags...' : `Addresses (${sortedAddresses.length})`}
+                    {isSwitching ? 'Switching...' : isAnyAddressLoading ? 'Checking nametags...' : `Addresses (${sortedAddresses.length})`}
                   </span>
                   <motion.button
                     whileHover={{ scale: isAnyAddressLoading ? 1 : 1.05 }}
@@ -175,7 +182,8 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
                       <button
                         key={addr.address}
                         onClick={() => handleSelectAddress(addr.address)}
-                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${
+                        disabled={isSwitching}
+                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                           isSelected ? 'bg-orange-50 dark:bg-orange-900/20' : ''
                         }`}
                       >

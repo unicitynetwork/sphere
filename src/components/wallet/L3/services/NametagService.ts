@@ -230,16 +230,18 @@ export class NametagService {
     const walletRepo = WalletRepository.getInstance();
 
     // Load or create wallet for this identity's address
+    // Use async methods to ensure data is loaded/saved before proceeding
     let wallet = walletRepo.getWallet();
     if (!wallet || wallet.address !== identity.address) {
-      wallet = walletRepo.loadWalletForAddress(identity.address);
+      wallet = await walletRepo.loadWalletForAddressAsync(identity.address);
       if (!wallet) {
-        wallet = walletRepo.createWallet(identity.address, "My Wallet");
+        wallet = await walletRepo.createWalletAsync(identity.address, "My Wallet");
       }
     }
 
     // Store nametag via WalletRepository (per-identity, not global)
-    walletRepo.setNametag(nametagData);
+    // Use async method to ensure nametag is persisted before returning
+    await walletRepo.setNametagAsync(nametagData);
   }
 
   getActiveNametag(): string | null {
@@ -253,7 +255,20 @@ export class NametagService {
    * Returns at most one token (one nametag per identity)
    */
   async getNametagToken(): Promise<Token<any> | null> {
-    const nametagData = WalletRepository.getInstance().getNametag();
+    // Ensure wallet is loaded for current identity before reading nametag
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (!identity) return null;
+
+    const walletRepo = WalletRepository.getInstance();
+
+    // Check if wallet is loaded for current identity, if not - load it
+    const currentWallet = walletRepo.getWallet();
+    if (!currentWallet || currentWallet.address !== identity.address) {
+      console.log(`📦 NametagService: Loading wallet for ${identity.address.slice(0, 20)}...`);
+      await walletRepo.loadWalletForAddressAsync(identity.address);
+    }
+
+    const nametagData = walletRepo.getNametag();
     if (!nametagData) return null;
 
     try {

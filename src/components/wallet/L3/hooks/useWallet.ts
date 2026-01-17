@@ -85,17 +85,18 @@ export const useWallet = () => {
 
   const nametagQuery = useQuery({
     queryKey: [...KEYS.NAMETAG, identityQuery.data?.address],
-    queryFn: () => {
+    queryFn: async () => {
       const identity = identityQuery.data;
       if (!identity?.address) return null;
 
       // Ensure wallet is loaded/created for current identity (loads nametag from storage)
+      // Use async methods to ensure data is loaded before reading
       const currentWallet = walletRepo.getWallet();
       if (!currentWallet || currentWallet.address !== identity.address) {
-        const loaded = walletRepo.loadWalletForAddress(identity.address);
+        const loaded = await walletRepo.loadWalletForAddressAsync(identity.address);
         if (!loaded) {
           // No existing wallet, create one (same as tokensQuery does)
-          walletRepo.createWallet(identity.address);
+          await walletRepo.createWalletAsync(identity.address, "My Wallet", true);
         }
       }
 
@@ -182,12 +183,13 @@ export const useWallet = () => {
       if (!identity?.address) return [];
 
       // Load wallet for current address if not already loaded
+      // Use async versions to ensure data is loaded from storage before reading
       const currentWallet = walletRepo.getWallet();
       if (!currentWallet || currentWallet.address !== identity.address) {
-        const loaded = walletRepo.loadWalletForAddress(identity.address);
+        const loaded = await walletRepo.loadWalletForAddressAsync(identity.address);
         if (!loaded) {
-          // No existing wallet, create one
-          walletRepo.createWallet(identity.address);
+          // No existing wallet, create one (silent to avoid duplicate events)
+          await walletRepo.createWalletAsync(identity.address, "My Wallet", true);
         }
       }
 

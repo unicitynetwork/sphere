@@ -23,8 +23,8 @@ import {
 import { CreateAddressModal } from "../../shared/modals/CreateAddressModal";
 import { useL1Wallet, useConnectionStatus } from "../hooks";
 import { useAddressNametags } from "../hooks/useAddressNametags";
+import { useSwitchAddress } from "../../shared/hooks/useSwitchAddress";
 import { ConnectionStatus } from "../components/ConnectionStatus";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 import {
   QRModal,
@@ -85,6 +85,7 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
 
   const addresses = wallet?.addresses.map((a) => a.address) ?? [];
   const { nametagState, addressesWithNametags } = useAddressNametags(wallet?.addresses);
+  const { switchToAddress, isSwitching } = useSwitchAddress();
 
   // Check if any address is still loading nametag from IPNS
   const isAnyAddressLoading = addressesWithNametags.some(addr => addr.ipnsLoading);
@@ -181,15 +182,23 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     }
   };
 
-  const onSelectAddress = (address: string) => {
+  const onSelectAddress = async (address: string) => {
+    if (isSwitching) return;
+
     const selectedAddr = wallet?.addresses.find(a => a.address === address);
-    if (selectedAddr?.path) {
-      localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, selectedAddr.path);
-    } else {
-      localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
+    if (!selectedAddr) return;
+
+    // Don't switch if already on this address
+    if (address === selectedAddress) {
+      setShowDropdown(false);
+      return;
     }
-    WalletRepository.getInstance().resetInMemoryState();
-    window.location.reload();
+
+    setShowDropdown(false);
+
+    // Use the hook to switch address without page reload
+    await switchToAddress(address, selectedAddr.path || null);
+    setSelectedAddress(address);
   };
 
   const formatBalance = (bal: number) => {
