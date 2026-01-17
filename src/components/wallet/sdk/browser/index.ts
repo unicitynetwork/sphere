@@ -233,3 +233,16 @@ export {
   getSyncCoordinator,
   type SyncCoordinatorConfig,
 } from './sync-coordinator';
+
+// ==========================================
+// Wallet Repository Singleton
+// ==========================================
+
+export {
+  getWalletRepository,
+  disposeWalletRepository,
+  dispatchWalletLoaded,
+  waitForInit,
+  isRepositoryInitialized,
+  type BrowserWalletRepositoryConfig,
+} from './wallet-repository-singleton';

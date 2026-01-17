@@ -1,22 +1,46 @@
-import { WalletToken, TokenCollection, TokenStatus } from "../components/wallet/L3/data/model";
-import type { TombstoneEntry, TxfToken, TxfTransaction } from "../components/wallet/L3/services/types/TxfTypes";
-import { v4 as uuidv4 } from "uuid";
-import { STORAGE_KEYS, STORAGE_KEY_GENERATORS, STORAGE_KEY_PREFIXES } from "../config/storageKeys";
-
 /**
- * Interface for nametag data (one per identity)
+ * WalletRepository - App Wrapper over SDK Browser Singleton
+ *
+ * This is a thin wrapper that:
+ * 1. Provides backward-compatible singleton API (getInstance)
+ * 2. Converts between app types (WalletToken) and SDK types (StoredToken)
+ * 3. Dispatches DOM events for wallet updates
+ *
+ * All core logic lives in SDK: src/components/wallet/sdk/core/wallet-repository.ts
+ * Browser singleton: src/components/wallet/sdk/browser/wallet-repository-singleton.ts
  */
+
+import { WalletToken, TokenCollection, TokenStatus } from "../components/wallet/L3/data/model";
+import type { TombstoneEntry, TxfToken } from "../components/wallet/L3/services/types/TxfTypes";
+import { STORAGE_KEYS, STORAGE_KEY_PREFIXES } from "../config/storageKeys";
+
+// SDK imports
+import {
+  getWalletRepository,
+  dispatchWalletLoaded,
+} from "../components/wallet/sdk/browser";
+import {
+  WALLET_REPOSITORY_KEYS,
+  type StoredToken,
+  type StoredWalletData,
+  isIncrementalUpdate as sdkIsIncrementalUpdate,
+} from "../components/wallet/sdk/core";
+
+// Re-export SDK types
+export type { TombstoneEntry, TxfToken };
+
+// ==========================================
+// App-Specific Types
+// ==========================================
+
 export interface NametagData {
-  name: string;           // e.g., "cryptohog"
-  token: object;          // SDK Token JSON
+  name: string;
+  token: object;
   timestamp: number;
   format: string;
   version: string;
 }
 
-/**
- * Interface for transaction history entries
- */
 export interface TransactionHistoryEntry {
   id: string;
   type: 'SENT' | 'RECEIVED';
@@ -29,38 +53,68 @@ export interface TransactionHistoryEntry {
   senderPubkey?: string;
 }
 
-/**
- * Interface for stored wallet data (for type safety when parsing JSON)
- */
-interface StoredWallet {
-  id: string;
-  name: string;
-  address: string;
-  tokens: Partial<WalletToken>[];
-  nametag?: NametagData;  // One nametag per wallet/identity
-  tombstones?: TombstoneEntry[] | string[];  // TombstoneEntry[] (new) or string[] (legacy, discarded on load)
-  archivedTokens?: Record<string, TxfToken>;  // Archived spent tokens (keyed by tokenId)
-  forkedTokens?: Record<string, TxfToken>;    // Forked tokens (keyed by tokenId_stateHash)
+// ==========================================
+// Type Converters
+// ==========================================
+
+function toStoredToken(token: WalletToken): StoredToken {
+  return {
+    id: token.id,
+    jsonData: token.jsonData,
+    coinId: token.coinId,
+    amount: token.amount,
+    symbol: token.symbol,
+    timestamp: token.timestamp,
+  };
 }
+
+function fromStoredToken(stored: StoredToken): WalletToken {
+  let name = "Token";
+  let type = "UCT";
+
+  if (stored.jsonData) {
+    try {
+      const txf = JSON.parse(stored.jsonData);
+      const tokenType = txf.genesis?.data?.tokenType || "";
+      const isNft = tokenType === "455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89";
+      name = isNft ? "NFT" : "Token";
+      type = isNft ? "NFT" : "UCT";
+    } catch {
+      // Use defaults
+    }
+  }
+
+  return new WalletToken({
+    id: stored.id,
+    name,
+    type,
+    timestamp: stored.timestamp || Date.now(),
+    jsonData: stored.jsonData,
+    status: TokenStatus.CONFIRMED,
+    amount: stored.amount,
+    coinId: stored.coinId,
+    symbol: stored.symbol || "UNK",
+    sizeBytes: stored.jsonData?.length,
+  });
+}
+
+// ==========================================
+// WalletRepository Class (Backward-Compatible API)
+// ==========================================
 
 export class WalletRepository {
   private static instance: WalletRepository;
 
-  private _wallet: TokenCollection | null = null;
-  private _currentAddress: string | null = null;
-  private _migrationComplete: boolean = false;
-  private _nametag: NametagData | null = null;
-  private _tombstones: TombstoneEntry[] = [];  // State-hash-aware tombstones for IPFS sync
-  private _transactionHistory: TransactionHistoryEntry[] = [];
-  private _archivedTokens: Map<string, TxfToken> = new Map();  // Archived spent tokens (keyed by tokenId)
-  private _forkedTokens: Map<string, TxfToken> = new Map();    // Forked tokens (keyed by tokenId_stateHash)
-
-  // Debounce timer for wallet refresh events
-  private _refreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
   private constructor() {
-    // Don't auto-load wallet in constructor - wait for address
-    this.loadTransactionHistory();
+    // Initialize SDK singleton with app config
+    getWalletRepository<StoredToken, NametagData>({
+      storagePrefix: STORAGE_KEY_PREFIXES.WALLET_ADDRESS,
+      legacyWalletKey: STORAGE_KEYS.WALLET_DATA_LEGACY,
+    });
+  }
+
+  private get sdk() {
+    return getWalletRepository<StoredToken, NametagData>();
   }
 
   static getInstance(): WalletRepository {
@@ -70,1264 +124,297 @@ export class WalletRepository {
     return WalletRepository.instance;
   }
 
-  /**
-   * Check if an address has a nametag without loading the full wallet
-   * Static method for use during onboarding address selection
-   */
+  // ==========================================
+  // Static Methods (Direct localStorage access)
+  // ==========================================
+
   static checkNametagForAddress(address: string): NametagData | null {
     if (!address) return null;
-
-    const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+    const key = STORAGE_KEY_PREFIXES.WALLET_ADDRESS + WALLET_REPOSITORY_KEYS.walletByAddress(address);
     try {
-      const json = localStorage.getItem(storageKey);
-      if (json) {
-        const parsed = JSON.parse(json) as StoredWallet;
-        return parsed.nametag || null;
-      }
-    } catch (error) {
-      console.error("Error checking nametag for address:", error);
-    }
+      const json = localStorage.getItem(key);
+      if (json) return JSON.parse(json).nametag || null;
+    } catch { /* ignore */ }
     return null;
   }
 
-  /**
-   * Check if an address has tokens without loading the full wallet
-   * Static method for use during onboarding address selection
-   */
   static checkTokensForAddress(address: string): boolean {
     if (!address) return false;
-
-    const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+    const key = STORAGE_KEY_PREFIXES.WALLET_ADDRESS + WALLET_REPOSITORY_KEYS.walletByAddress(address);
     try {
-      const json = localStorage.getItem(storageKey);
+      const json = localStorage.getItem(key);
       if (json) {
-        const parsed = JSON.parse(json) as StoredWallet;
+        const parsed = JSON.parse(json);
         return Array.isArray(parsed.tokens) && parsed.tokens.length > 0;
       }
-    } catch (error) {
-      console.error("Error checking tokens for address:", error);
-    }
+    } catch { /* ignore */ }
     return false;
   }
 
-  /**
-   * Save nametag for an address without loading the full wallet
-   * Used during onboarding when we fetch nametag from IPNS
-   * Creates minimal wallet structure if needed
-   */
   static saveNametagForAddress(address: string, nametag: NametagData): void {
     if (!address || !nametag) return;
-
-    const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+    const key = STORAGE_KEY_PREFIXES.WALLET_ADDRESS + WALLET_REPOSITORY_KEYS.walletByAddress(address);
     try {
-      // Load existing wallet data or create minimal structure
-      let walletData: StoredWallet;
-      const existingJson = localStorage.getItem(storageKey);
-
-      if (existingJson) {
-        walletData = JSON.parse(existingJson) as StoredWallet;
-        walletData.nametag = nametag;
-      } else {
-        // Create minimal wallet structure with just the nametag
-        walletData = {
-          id: crypto.randomUUID ? crypto.randomUUID() : `wallet-${Date.now()}`,
-          name: "Wallet",
-          address: address,
-          tokens: [],
-          nametag: nametag,
-        };
-      }
-
-      localStorage.setItem(storageKey, JSON.stringify(walletData));
-      console.log(`💾 Saved IPNS-fetched nametag "${nametag.name}" for address ${address.slice(0, 20)}...`);
-    } catch (error) {
-      console.error("Error saving nametag for address:", error);
-    }
+      const existing = localStorage.getItem(key);
+      const data: StoredWalletData<StoredToken, NametagData> = existing
+        ? { ...JSON.parse(existing), nametag }
+        : { id: crypto.randomUUID?.() || `wallet-${Date.now()}`, name: "Wallet", address, tokens: [], nametag };
+      localStorage.setItem(key, JSON.stringify(data));
+    } catch (e) { console.error("Error saving nametag:", e); }
   }
 
-  /**
-   * Validate address format
-   * Returns true if the address is valid, false otherwise
-   */
-  private validateAddress(address: string | null | undefined): address is string {
-    if (!address || typeof address !== "string") {
-      return false;
-    }
-
-    const trimmed = address.trim();
-
-    // Check minimum length (L3 addresses are typically long)
-    if (trimmed.length < 20) {
-      return false;
-    }
-
-    // L3 addresses can be in format: DIRECT://... or PROXY://...
-    // Allow alphanumeric, colon, slash (for scheme), and underscore
-    // Block dangerous characters: <, >, ", ', \, and path traversal (..)
-    if (/[<>"'\\]|\.\./.test(trimmed)) {
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Generate storage key for a specific address
-   */
-  private getStorageKey(address: string): string {
-    return STORAGE_KEY_GENERATORS.walletByAddress(address);
-  }
-
-  /**
-   * Migrate legacy wallet data to address-based storage
-   * Only runs once per session
-   */
-  private migrateLegacyWallet(): void {
-    if (this._migrationComplete) {
-      return;
-    }
-
-    try {
-      const legacyJson = localStorage.getItem(STORAGE_KEYS.WALLET_DATA_LEGACY);
-      if (!legacyJson) {
-        this._migrationComplete = true;
-        return;
-      }
-
-      console.log("Migrating legacy wallet data to address-based storage...");
-      const parsed = JSON.parse(legacyJson) as StoredWallet;
-
-      if (!parsed.address) {
-        console.warn("Legacy wallet has no address, cannot migrate");
-        this._migrationComplete = true;
-        return;
-      }
-
-      if (!this.validateAddress(parsed.address)) {
-        console.error(`Legacy wallet has invalid address: ${parsed.address}`);
-        this._migrationComplete = true;
-        return;
-      }
-
-      const newKey = this.getStorageKey(parsed.address);
-
-      // Check if already migrated
-      if (localStorage.getItem(newKey)) {
-        console.log("Wallet already migrated, removing legacy key");
-        localStorage.removeItem(STORAGE_KEYS.WALLET_DATA_LEGACY);
-        this._migrationComplete = true;
-        return;
-      }
-
-      localStorage.setItem(newKey, legacyJson);
-      localStorage.removeItem(STORAGE_KEYS.WALLET_DATA_LEGACY);
-      console.log(`Successfully migrated wallet for ${parsed.address}`);
-      this._migrationComplete = true;
-    } catch (error) {
-      console.error("Failed to migrate legacy wallet", error);
-      this._migrationComplete = true; // Don't retry on error
-    }
-  }
-
-  /**
-   * Load wallet for a specific address
-   */
-  loadWalletForAddress(address: string): TokenCollection | null {
-    // Validate address format
-    if (!this.validateAddress(address)) {
-      console.error(`Invalid address format: ${address}`);
-      return null;
-    }
-
-    try {
-      // First check if migration is needed (only runs once per session)
-      this.migrateLegacyWallet();
-
-      const storageKey = this.getStorageKey(address);
-      const json = localStorage.getItem(storageKey);
-
-      if (json) {
-        const parsed = JSON.parse(json) as StoredWallet;
-
-        // Validate stored data structure
-        if (!parsed.id || !parsed.address || !Array.isArray(parsed.tokens)) {
-          console.error(`Invalid wallet structure in storage for ${address}`);
-          localStorage.removeItem(storageKey);
-          return null;
-        }
-
-        // Verify address match - critical security check
-        if (parsed.address !== address) {
-          console.error(
-            `Address mismatch: requested ${address}, stored ${parsed.address}. Removing corrupted data.`
-          );
-          localStorage.removeItem(storageKey);
-          return null;
-        }
-
-        const tokens = parsed.tokens.map((t: Partial<WalletToken>) => new WalletToken(t));
-        const wallet = new TokenCollection(
-          parsed.id,
-          parsed.name,
-          parsed.address,
-          tokens
-        );
-
-        this._wallet = wallet;
-        this._currentAddress = address;
-        this._nametag = parsed.nametag || null;
-
-        // Parse tombstones - handle legacy format (string[]) by discarding it
-        this._tombstones = [];
-        if (parsed.tombstones && Array.isArray(parsed.tombstones)) {
-          for (const entry of parsed.tombstones) {
-            // New format: TombstoneEntry objects
-            if (
-              typeof entry === "object" &&
-              entry !== null &&
-              typeof (entry as TombstoneEntry).tokenId === "string" &&
-              typeof (entry as TombstoneEntry).stateHash === "string" &&
-              typeof (entry as TombstoneEntry).timestamp === "number"
-            ) {
-              this._tombstones.push(entry as TombstoneEntry);
-            }
-            // Legacy string format: discard (no state hash info)
-          }
-        }
-
-        // Load archived tokens
-        this._archivedTokens = new Map();
-        if (parsed.archivedTokens && typeof parsed.archivedTokens === "object") {
-          for (const [tokenId, txfToken] of Object.entries(parsed.archivedTokens)) {
-            if (txfToken && typeof txfToken === "object" && (txfToken as TxfToken).genesis) {
-              this._archivedTokens.set(tokenId, txfToken as TxfToken);
-            }
-          }
-        }
-
-        // Load forked tokens
-        this._forkedTokens = new Map();
-        if (parsed.forkedTokens && typeof parsed.forkedTokens === "object") {
-          for (const [key, txfToken] of Object.entries(parsed.forkedTokens)) {
-            if (txfToken && typeof txfToken === "object" && (txfToken as TxfToken).genesis) {
-              this._forkedTokens.set(key, txfToken as TxfToken);
-            }
-          }
-        }
-
-        // Don't call refreshWallet() here - loading is a read operation, not a write
-        // refreshWallet() should only be called when data actually changes
-
-        const archiveInfo = this._archivedTokens.size > 0 ? `, ${this._archivedTokens.size} archived` : "";
-        const forkedInfo = this._forkedTokens.size > 0 ? `, ${this._forkedTokens.size} forked` : "";
-        console.log(`Loaded wallet for address ${address} with ${tokens.length} tokens${this._nametag ? `, nametag: ${this._nametag.name}` : ""}${this._tombstones.length > 0 ? `, ${this._tombstones.length} tombstones` : ""}${archiveInfo}${forkedInfo}`);
-        return wallet;
-      }
-
-      return null;
-    } catch (error) {
-      console.error(`Failed to load wallet for address ${address}`, error);
-      return null;
-    }
-  }
-
-  /**
-   * Switch to a different address
-   */
-  switchToAddress(address: string): TokenCollection | null {
-    // Validate address format
-    if (!this.validateAddress(address)) {
-      console.error(`Cannot switch to invalid address: ${address}`);
-      return null;
-    }
-
-    // Optimization: skip if already on the correct address
-    if (this._currentAddress === address && this._wallet?.address === address) {
-      return this._wallet;
-    }
-
-    console.log(`Switching from ${this._currentAddress || "none"} to ${address}`);
-    return this.loadWalletForAddress(address);
-  }
-
-  // Transaction History Methods
-  private loadTransactionHistory() {
-    try {
-      const json = localStorage.getItem(STORAGE_KEYS.TRANSACTION_HISTORY);
-      if (json) {
-        this._transactionHistory = JSON.parse(json);
-      }
-    } catch (error) {
-      console.error("Failed to load transaction history", error);
-      this._transactionHistory = [];
-    }
-  }
-
-  private saveTransactionHistory() {
-    try {
-      localStorage.setItem(STORAGE_KEYS.TRANSACTION_HISTORY, JSON.stringify(this._transactionHistory));
-    } catch (error) {
-      console.error("Failed to save transaction history", error);
-    }
-  }
-
-  addTransactionToHistory(entry: Omit<TransactionHistoryEntry, 'id'>): void {
-    const historyEntry: TransactionHistoryEntry = {
-      id: uuidv4(),
-      ...entry,
-    };
-    this._transactionHistory.push(historyEntry);
-    this.saveTransactionHistory();
-    this.refreshWallet(); // Trigger UI update
-  }
-
-  getTransactionHistory(): TransactionHistoryEntry[] {
-    return [...this._transactionHistory].sort((a, b) => b.timestamp - a.timestamp);
-  }
-
-  addSentTransaction(amount: string, coinId: string, symbol: string, iconUrl: string | undefined, recipientNametag: string): void {
-    this.addTransactionToHistory({
-      type: 'SENT',
-      amount: amount,
-      coinId: coinId,
-      symbol: symbol,
-      iconUrl: iconUrl,
-      timestamp: Date.now(),
-      recipientNametag: recipientNametag,
-    });
-  }
-
-  /**
-   * Create a new wallet for the given address
-   * @param address - The wallet address
-   * @param name - Optional wallet name
-   * @param silent - If true, don't emit events (useful during address creation flow)
-   */
-  createWallet(address: string, name: string = "My Wallet", silent: boolean = false): TokenCollection {
-    // Validate address format
-    if (!this.validateAddress(address)) {
-      throw new Error(`Cannot create wallet with invalid address: ${address}`);
-    }
-
-    // Check if wallet already exists for this address
-    const existing = this.loadWalletForAddress(address);
-    if (existing) {
-      console.log(`Wallet already exists for address ${address}, using existing wallet`);
-      return existing;
-    }
-
-    // CRITICAL: Clear nametag cache when creating NEW wallet
-    // loadWalletForAddress returns null but doesn't clear _nametag if no data found
-    // This ensures new wallets start with no nametag
-    this._nametag = null;
-    this._tombstones = [];
-    this._archivedTokens = new Map();
-    this._forkedTokens = new Map();
-
-    const newWallet = new TokenCollection(uuidv4(), name, address, []);
-    this._currentAddress = address;
-    this.saveWallet(newWallet);
-    console.log(`Created new wallet for address ${address}`);
-
-    // Only emit events if not silent - during address creation flow we don't want
-    // to trigger useWallet re-renders that could interfere with the process
-    if (!silent) {
-      this.refreshWallet(); // Trigger wallet-updated for UI updates
-      window.dispatchEvent(new Event("wallet-loaded")); // Signal wallet creation for Nostr initialization
-    }
-    return newWallet;
-  }
-
-  private saveWallet(wallet: TokenCollection) {
-    this._wallet = wallet;
-    this._currentAddress = wallet.address;
-    const storageKey = this.getStorageKey(wallet.address);
-
-    // Include nametag, tombstones, and archived/forked tokens in stored data
-    const storedData: StoredWallet = {
-      id: wallet.id,
-      name: wallet.name,
-      address: wallet.address,
-      tokens: wallet.tokens,
-      nametag: this._nametag || undefined,
-      tombstones: this._tombstones.length > 0 ? this._tombstones : undefined,
-      archivedTokens: this._archivedTokens.size > 0 ? Object.fromEntries(this._archivedTokens) : undefined,
-      forkedTokens: this._forkedTokens.size > 0 ? Object.fromEntries(this._forkedTokens) : undefined,
-    };
-
-    localStorage.setItem(storageKey, JSON.stringify(storedData));
-  }
-
-  getWallet(): TokenCollection | null {
-    return this._wallet;
-  }
-
-  getTokens(): WalletToken[] {
-    return this._wallet?.tokens || [];
-  }
-
-  private isSameToken(t1: WalletToken, t2: WalletToken): boolean {
-    if (t1.id === t2.id) return true;
-
-    try {
-      const p1 = JSON.parse(t1.jsonData || "{}");
-      const p2 = JSON.parse(t2.jsonData || "{}");
-
-      const id1 = p1.genesis?.data?.tokenId;
-      const id2 = p2.genesis?.data?.tokenId;
-
-      if (id1 && id2 && id1 === id2) return true;
-    } catch {
-      return false;
-    }
-
-    return false;
-  }
-
-  addToken(token: WalletToken, skipHistory: boolean = false): void {
-    console.log("💾 Repository: Adding token...", token.id);
-    if (!this._wallet) {
-      console.error("💾 Repository: Wallet not initialized!");
-      return;
-    }
-
-    const currentTokens = this._wallet.tokens;
-
-    const isDuplicate = currentTokens.some((existing) =>
-      this.isSameToken(existing, token)
-    );
-
-    if (isDuplicate) {
-      console.warn(
-        `⛔ Duplicate token detected (CoinID: ${token.coinId}). Skipping add.`
-      );
-      return;
-    }
-
-    if (currentTokens.some((t) => t.id === token.id)) {
-      console.warn(`Token ${token.id} already exists`);
-      return;
-    }
-
-    const updatedTokens = [token, ...currentTokens];
-
-    const updatedWallet = new TokenCollection(
-      this._wallet.id,
-      this._wallet.name,
-      this._wallet.address,
-      updatedTokens
-    );
-
-    this.saveWallet(updatedWallet);
-
-    // Archive the token (ensures every token is preserved for sanity check restoration)
-    this.archiveToken(token);
-
-    // Add to transaction history (RECEIVED) - skip for change tokens from split
-    if (!skipHistory && token.coinId && token.amount) {
-      this.addTransactionToHistory({
-        type: 'RECEIVED',
-        amount: token.amount,
-        coinId: token.coinId,
-        symbol: token.symbol || 'UNK',
-        iconUrl: token.iconUrl,
-        timestamp: token.timestamp,
-        senderPubkey: token.senderPubkey,
-      });
-    }
-
-    console.log(`💾 Repository: Saved! Total tokens: ${updatedTokens.length}`);
-    this.refreshWallet();
-  }
-
-  /**
-   * Update an existing token with a new version
-   * Used when remote has a better version (more transactions/proofs)
-   */
-  updateToken(token: WalletToken): void {
-    console.log("💾 Repository: Updating token...", token.id);
-    if (!this._wallet) {
-      console.error("💾 Repository: Wallet not initialized!");
-      return;
-    }
-
-    // Find the existing token by genesis tokenId
-    let existingIndex = -1;
-    let existingToken: WalletToken | null = null;
-
-    for (let i = 0; i < this._wallet.tokens.length; i++) {
-      const existing = this._wallet.tokens[i];
-      // Compare by token ID from jsonData (genesis.data.tokenId)
-      if (existing.jsonData && token.jsonData) {
-        try {
-          const existingTxf = JSON.parse(existing.jsonData);
-          const incomingTxf = JSON.parse(token.jsonData);
-          if (existingTxf?.genesis?.data?.tokenId === incomingTxf?.genesis?.data?.tokenId) {
-            existingIndex = i;
-            existingToken = existing;
-            break;
-          }
-        } catch {
-          // Continue checking
-        }
-      }
-      // Fallback: compare by token.id
-      if (existing.id === token.id) {
-        existingIndex = i;
-        existingToken = existing;
-        break;
-      }
-    }
-
-    if (existingIndex === -1 || !existingToken) {
-      console.warn(`💾 Repository: Token ${token.id} not found for update, adding instead`);
-      this.addToken(token, true); // skipHistory since it's an update
-      return;
-    }
-
-    // Replace the token at the same position
-    const updatedTokens = [...this._wallet.tokens];
-    updatedTokens[existingIndex] = token;
-
-    const updatedWallet = new TokenCollection(
-      this._wallet.id,
-      this._wallet.name,
-      this._wallet.address,
-      updatedTokens
-    );
-
-    this.saveWallet(updatedWallet);
-
-    // Archive the updated token
-    this.archiveToken(token);
-
-    console.log(`💾 Repository: Updated token ${token.id.slice(0, 8)}...`);
-    this.refreshWallet();
-  }
-
-  removeToken(tokenId: string, recipientNametag?: string, skipHistory: boolean = false): void {
-    if (!this._wallet) return;
-
-    // Find the token before removing to add to history
-    const tokenToRemove = this._wallet.tokens.find((t) => t.id === tokenId);
-
-    // Archive the token before removing (preserves spent token history)
-    if (tokenToRemove?.jsonData) {
-      this.archiveToken(tokenToRemove);
-    }
-
-    const updatedTokens = this._wallet.tokens.filter((t) => t.id !== tokenId);
-    const updatedWallet = new TokenCollection(
-      this._wallet.id,
-      this._wallet.name,
-      this._wallet.address,
-      updatedTokens
-    );
-
-    // Add to tombstones with state hash (prevents zombie token resurrection during IPFS sync)
-    // Extract current state hash from the token to tombstone the specific spent state
-    let stateHash = "";
-    if (tokenToRemove?.jsonData) {
-      try {
-        const txf = JSON.parse(tokenToRemove.jsonData);
-        if (txf.transactions && txf.transactions.length > 0) {
-          // Use newStateHash from the last transaction
-          stateHash = txf.transactions[txf.transactions.length - 1].newStateHash || "";
-        } else if (txf.genesis?.inclusionProof?.authenticator?.stateHash) {
-          // No transactions - use genesis state hash
-          stateHash = txf.genesis.inclusionProof.authenticator.stateHash;
-        }
-      } catch {
-        console.warn(`💀 Could not extract state hash for token ${tokenId.slice(0, 8)}...`);
-      }
-    }
-
-    // Get the actual SDK token ID from genesis data
-    let actualTokenId = tokenId;
-    if (tokenToRemove?.jsonData) {
-      try {
-        const txf = JSON.parse(tokenToRemove.jsonData);
-        if (txf.genesis?.data?.tokenId) {
-          actualTokenId = txf.genesis.data.tokenId;
-        }
-      } catch {
-        // Use the provided tokenId as fallback
-      }
-    }
-
-    // Only add if not already in tombstones (check by tokenId + stateHash)
-    const alreadyTombstoned = this._tombstones.some(
-      t => t.tokenId === actualTokenId && t.stateHash === stateHash
-    );
-
-    if (!alreadyTombstoned) {
-      const tombstone: TombstoneEntry = {
-        tokenId: actualTokenId,
-        stateHash,
-        timestamp: Date.now(),
-      };
-      this._tombstones.push(tombstone);
-      console.log(`💀 Token ${actualTokenId.slice(0, 8)}... state ${stateHash.slice(0, 12)}... added to tombstones`);
-    }
-
-    this.saveWallet(updatedWallet);
-
-    // Add to transaction history (SENT) - skip for split operations
-    if (!skipHistory && tokenToRemove && tokenToRemove.coinId && tokenToRemove.amount) {
-      this.addTransactionToHistory({
-        type: 'SENT',
-        amount: tokenToRemove.amount,
-        coinId: tokenToRemove.coinId,
-        symbol: tokenToRemove.symbol || 'UNK',
-        iconUrl: tokenToRemove.iconUrl,
-        timestamp: Date.now(),
-        recipientNametag: recipientNametag,
-      });
-    }
-
-    this.refreshWallet();
-  }
-
-  clearWallet(): void {
-    if (this._currentAddress) {
-      const storageKey = this.getStorageKey(this._currentAddress);
-      localStorage.removeItem(storageKey);
-    }
-    // Also remove legacy key if it exists
-    localStorage.removeItem(STORAGE_KEYS.WALLET_DATA_LEGACY);
-    this._wallet = null;
-    this._currentAddress = null;
-    this._nametag = null;
-    this._tombstones = [];
-    this._archivedTokens = new Map();
-    this._forkedTokens = new Map();
-    this.refreshWallet();
-  }
-
-  /**
-   * Reset in-memory state without touching localStorage
-   * Used when switching wallets - preserves per-identity token/nametag storage
-   * @param silent - If true, don't emit wallet-updated event
-   */
-  resetInMemoryState(silent: boolean = false): void {
-    this._wallet = null;
-    this._currentAddress = null;
-    this._nametag = null;
-    this._tombstones = [];
-    this._archivedTokens = new Map();
-    this._forkedTokens = new Map();
-    if (!silent) {
-      this.refreshWallet();
-    }
-  }
-
-  /**
-   * Clear ALL wallet data from localStorage
-   * This removes all per-address wallet data (tokens, nametags)
-   * Used when deleting wallet completely
-   */
   static clearAllWalletStorage(): void {
-    console.log("🗑️ Clearing all wallet storage from localStorage...");
-
-    // Find and remove all keys that start with wallet address prefix
     const keysToRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key && key.startsWith(STORAGE_KEY_PREFIXES.WALLET_ADDRESS)) {
-        keysToRemove.push(key);
-      }
+      if (key?.startsWith(STORAGE_KEY_PREFIXES.WALLET_ADDRESS)) keysToRemove.push(key);
     }
-
-    // Also remove legacy key and transaction history
-    keysToRemove.push(STORAGE_KEYS.WALLET_DATA_LEGACY);
-    keysToRemove.push(STORAGE_KEYS.TRANSACTION_HISTORY);
-
-    // Remove all found keys
-    for (const key of keysToRemove) {
-      localStorage.removeItem(key);
-      console.log(`  Removed: ${key}`);
-    }
-
-    console.log(`🗑️ Cleared ${keysToRemove.length} wallet storage keys`);
+    keysToRemove.push(STORAGE_KEYS.WALLET_DATA_LEGACY, STORAGE_KEYS.TRANSACTION_HISTORY);
+    keysToRemove.forEach(k => localStorage.removeItem(k));
   }
 
+  // ==========================================
+  // Wallet Lifecycle
+  // ==========================================
+
   /**
-   * Get the current active address
+   * Load wallet for address (fire-and-forget sync version)
+   * @deprecated Use loadWalletForAddressAsync for guaranteed data loading
    */
+  loadWalletForAddress(address: string): TokenCollection | null {
+    this.sdk.loadWalletForAddress(address).catch(console.error);
+    return this.getWallet();
+  }
+
+  /**
+   * Load wallet for address (async version - waits for storage)
+   * Use this when you need to read data immediately after loading
+   */
+  async loadWalletForAddressAsync(address: string): Promise<TokenCollection | null> {
+    await this.sdk.loadWalletForAddress(address);
+    return this.getWallet();
+  }
+
+  /**
+   * Switch to address (fire-and-forget sync version)
+   * @deprecated Use switchToAddressAsync for guaranteed data loading
+   */
+  switchToAddress(address: string): TokenCollection | null {
+    this.sdk.switchToAddress(address).catch(console.error);
+    return this.getWallet();
+  }
+
+  /**
+   * Switch to address (async version - waits for storage)
+   */
+  async switchToAddressAsync(address: string): Promise<TokenCollection | null> {
+    await this.sdk.switchToAddress(address);
+    return this.getWallet();
+  }
+
+  /**
+   * Create wallet (fire-and-forget sync version)
+   * @deprecated Use createWalletAsync for guaranteed wallet creation
+   */
+  createWallet(address: string, name = "My Wallet", silent = false): TokenCollection {
+    this.sdk.createWallet(address, name).catch(console.error);
+    if (!silent) dispatchWalletLoaded();
+    return this.getWallet() || new TokenCollection(crypto.randomUUID?.() || "", name, address, []);
+  }
+
+  /**
+   * Create wallet (async version - waits for storage)
+   */
+  async createWalletAsync(address: string, name = "My Wallet", silent = false): Promise<TokenCollection> {
+    await this.sdk.createWallet(address, name);
+    if (!silent) dispatchWalletLoaded();
+    return this.getWallet() || new TokenCollection(crypto.randomUUID?.() || "", name, address, []);
+  }
+
+  getWallet(): TokenCollection | null {
+    const wallet = this.sdk.getWallet();
+    if (!wallet) return null;
+    return new TokenCollection(wallet.id, wallet.name, wallet.address, wallet.tokens.map(fromStoredToken));
+  }
+
+  getTokens(): WalletToken[] {
+    return this.sdk.getTokens().map(fromStoredToken);
+  }
+
   getCurrentAddress(): string | null {
-    return this._currentAddress;
+    return this.sdk.getCurrentAddress();
+  }
+
+  clearWallet(): void {
+    this.sdk.clearWallet().catch(console.error);
+  }
+
+  resetInMemoryState(silent = false): void {
+    this.sdk.resetInMemoryState(silent);
   }
 
   // ==========================================
-  // Nametag Methods (One per identity)
+  // Token Operations
+  // ==========================================
+
+  addToken(token: WalletToken, skipHistory = false): void {
+    this.sdk.addToken(toStoredToken(token), skipHistory).catch(console.error);
+  }
+
+  updateToken(token: WalletToken): void {
+    this.sdk.updateToken(toStoredToken(token)).catch(console.error);
+  }
+
+  removeToken(tokenId: string, recipientNametag?: string, skipHistory = false): void {
+    this.sdk.removeToken(tokenId, recipientNametag, skipHistory).catch(console.error);
+  }
+
+  archiveToken(token: WalletToken): void {
+    this.sdk.archiveToken(toStoredToken(token)).catch(console.error);
+  }
+
+  // ==========================================
+  // Nametag
   // ==========================================
 
   /**
-   * Set the nametag for the current wallet/identity
-   * Only one nametag is allowed per identity
+   * Set nametag (fire-and-forget sync version)
+   * @deprecated Use setNametagAsync for guaranteed save
    */
   setNametag(nametag: NametagData): void {
-    if (!this._wallet) {
-      console.error("Cannot set nametag: wallet not initialized");
-      return;
-    }
-
-    this._nametag = nametag;
-
-    // Re-save wallet to persist nametag
-    this.saveWallet(this._wallet);
-
-    console.log(`💾 Nametag set for ${this._wallet.address}: ${nametag.name}`);
-    this.refreshWallet();
+    this.sdk.setNametag(nametag).catch(console.error);
   }
 
   /**
-   * Get the nametag for the current wallet/identity
+   * Set nametag (async version - waits for storage)
    */
+  async setNametagAsync(nametag: NametagData): Promise<void> {
+    await this.sdk.setNametag(nametag);
+  }
+
   getNametag(): NametagData | null {
-    return this._nametag;
+    return this.sdk.getNametag();
   }
 
-  /**
-   * Clear the nametag for the current wallet/identity
-   */
   clearNametag(): void {
-    if (!this._wallet) return;
-
-    this._nametag = null;
-
-    // Re-save wallet without nametag
-    this.saveWallet(this._wallet);
-
-    console.log(`💾 Nametag cleared for ${this._wallet.address}`);
-    this.refreshWallet();
+    this.sdk.clearNametag().catch(console.error);
   }
 
-  /**
-   * Check if current identity already has a nametag
-   */
   hasNametag(): boolean {
-    return this._nametag !== null;
-  }
-
-  refreshWallet(): void {
-    // Debounce at the source - coalesce rapid updates into one event
-    if (this._refreshDebounceTimer) {
-      clearTimeout(this._refreshDebounceTimer);
-    }
-
-    this._refreshDebounceTimer = setTimeout(() => {
-      this._refreshDebounceTimer = null;
-      window.dispatchEvent(new Event("wallet-updated"));
-    }, 100); // 100ms debounce at source
+    return this.sdk.hasNametag();
   }
 
   // ==========================================
-  // Tombstone Methods (IPFS sync)
+  // Tombstones
   // ==========================================
 
-  /**
-   * Get all tombstones (state-hash-aware entries)
-   * Used during IPFS sync to prevent zombie token resurrection
-   */
   getTombstones(): TombstoneEntry[] {
-    return [...this._tombstones];
+    return this.sdk.getTombstones() as TombstoneEntry[];
   }
 
-  /**
-   * Check if a specific token state is tombstoned
-   * Returns true if both tokenId AND stateHash match a tombstone
-   */
   isStateTombstoned(tokenId: string, stateHash: string): boolean {
-    return this._tombstones.some(
-      t => t.tokenId === tokenId && t.stateHash === stateHash
-    );
+    return this.sdk.isStateTombstoned(tokenId, stateHash);
   }
 
-  /**
-   * Merge remote tombstones into local
-   * Also removes any local tokens whose state matches a remote tombstone
-   */
   mergeTombstones(remoteTombstones: TombstoneEntry[]): number {
-    if (!this._wallet) return 0;
-
-    let removedCount = 0;
-
-    // Build a set of tombstoned states for quick lookup
-    const tombstoneKeys = new Set(
-      remoteTombstones.map(t => `${t.tokenId}:${t.stateHash}`)
-    );
-
-    // Find and remove any local tokens whose state matches a remote tombstone
-    const tokensToRemove: WalletToken[] = [];
-    for (const token of this._wallet.tokens) {
-      // Extract tokenId and stateHash from the token's jsonData
-      if (token.jsonData) {
-        try {
-          const txf = JSON.parse(token.jsonData);
-          const sdkTokenId = txf.genesis?.data?.tokenId;
-          let currentStateHash = "";
-
-          if (txf.transactions && txf.transactions.length > 0) {
-            currentStateHash = txf.transactions[txf.transactions.length - 1].newStateHash || "";
-          } else if (txf.genesis?.inclusionProof?.authenticator?.stateHash) {
-            currentStateHash = txf.genesis.inclusionProof.authenticator.stateHash;
-          }
-
-          const key = `${sdkTokenId}:${currentStateHash}`;
-          if (tombstoneKeys.has(key)) {
-            tokensToRemove.push(token);
-          }
-        } catch {
-          // Skip tokens with invalid jsonData
-        }
-      }
-    }
-
-    for (const token of tokensToRemove) {
-      if (!this._wallet) break; // Type guard
-      // Remove from wallet without adding to history (it's a sync operation)
-      const currentTokens: WalletToken[] = this._wallet.tokens;
-      const updatedTokens: WalletToken[] = currentTokens.filter((t: WalletToken) => t.id !== token.id);
-      this._wallet = new TokenCollection(
-        this._wallet.id,
-        this._wallet.name,
-        this._wallet.address,
-        updatedTokens
-      );
-      console.log(`💀 Removed tombstoned token ${token.id.slice(0, 8)}... from local (state matched)`);
-      removedCount++;
-    }
-
-    // Merge tombstones (union of local and remote by tokenId+stateHash)
-    for (const remoteTombstone of remoteTombstones) {
-      const alreadyExists = this._tombstones.some(
-        t => t.tokenId === remoteTombstone.tokenId && t.stateHash === remoteTombstone.stateHash
-      );
-      if (!alreadyExists) {
-        this._tombstones.push(remoteTombstone);
-      }
-    }
-
-    if (removedCount > 0) {
-      this.saveWallet(this._wallet);
-      this.refreshWallet();
-    }
-
-    return removedCount;
+    this.sdk.mergeTombstones(remoteTombstones).catch(console.error);
+    return 0; // Async, returns immediately
   }
 
-  /**
-   * Clear old tombstones (cleanup to prevent unlimited growth)
-   * Uses timestamp-based pruning - removes tombstones older than maxAge
-   */
-  pruneTombstones(maxAge: number = 30 * 24 * 60 * 60 * 1000): void {
-    const now = Date.now();
-    const originalCount = this._tombstones.length;
-
-    // Filter by age (keep tombstones newer than maxAge)
-    this._tombstones = this._tombstones.filter(t => (now - t.timestamp) < maxAge);
-
-    // Also limit to most recent 100 if still too many
-    if (this._tombstones.length > 100) {
-      // Sort by timestamp descending and keep newest 100
-      this._tombstones.sort((a, b) => b.timestamp - a.timestamp);
-      this._tombstones = this._tombstones.slice(0, 100);
-    }
-
-    if (this._tombstones.length < originalCount) {
-      if (this._wallet) {
-        this.saveWallet(this._wallet);
-      }
-      console.log(`💀 Pruned tombstones from ${originalCount} to ${this._tombstones.length}`);
-    }
+  pruneTombstones(maxAge = 30 * 24 * 60 * 60 * 1000): void {
+    this.sdk.pruneTombstones(maxAge).catch(console.error);
   }
 
   // ==========================================
-  // Archived Token Methods (spent token history)
+  // Archives & Forks
   // ==========================================
 
-  /**
-   * Archive a token before removal
-   * Only updates archive if incoming token is an incremental (non-forking) update
-   */
-  archiveToken(token: WalletToken): void {
-    if (!token.jsonData) return;
-
-    let txfToken: TxfToken;
-    try {
-      txfToken = JSON.parse(token.jsonData);
-    } catch {
-      console.warn(`📦 Cannot archive token ${token.id.slice(0, 8)}...: invalid JSON`);
-      return;
-    }
-
-    // Get the actual SDK token ID from genesis
-    const tokenId = txfToken.genesis?.data?.tokenId;
-    if (!tokenId) {
-      console.warn(`📦 Cannot archive token ${token.id.slice(0, 8)}...: missing genesis tokenId`);
-      return;
-    }
-
-    // Check if we already have this token archived
-    const existingArchive = this._archivedTokens.get(tokenId);
-
-    if (existingArchive) {
-      // Check if this is an incremental (non-forking) update
-      if (this.isIncrementalUpdate(existingArchive, txfToken)) {
-        this._archivedTokens.set(tokenId, txfToken);
-        console.log(`📦 Updated archived token ${tokenId.slice(0, 8)}... (incremental update: ${existingArchive.transactions.length} → ${txfToken.transactions.length} txns)`);
-      } else {
-        // This is a forking update - store as forked token instead
-        const stateHash = this.getCurrentStateHash(txfToken);
-        this.storeForkedToken(tokenId, stateHash, txfToken);
-        console.log(`📦 Archived token ${tokenId.slice(0, 8)}... is a fork, stored as forked`);
-      }
-    } else {
-      // First time archiving this token
-      this._archivedTokens.set(tokenId, txfToken);
-      console.log(`📦 Archived token ${tokenId.slice(0, 8)}... (${txfToken.transactions.length} txns)`);
-    }
-
-    // Save to persist changes
-    if (this._wallet) {
-      this.saveWallet(this._wallet);
-    }
-  }
-
-  /**
-   * Check if an incoming token is an incremental (non-forking) update to an existing archived token
-   *
-   * Incremental update criteria:
-   * 1. Same genesis (tokenId matches)
-   * 2. Incoming has >= transactions than existing
-   * 3. All existing transactions match incoming (same state hashes in order)
-   * 4. New transactions have inclusion proofs (committed)
-   */
-  isIncrementalUpdate(existing: TxfToken, incoming: TxfToken): boolean {
-    // 1. Same genesis (tokenId must match)
-    if (existing.genesis?.data?.tokenId !== incoming.genesis?.data?.tokenId) {
-      return false;
-    }
-
-    const existingTxns = existing.transactions || [];
-    const incomingTxns = incoming.transactions || [];
-
-    // 2. Incoming must have >= transactions
-    if (incomingTxns.length < existingTxns.length) {
-      return false;
-    }
-
-    // 3. All existing transactions must match incoming (same state hashes in order)
-    for (let i = 0; i < existingTxns.length; i++) {
-      const existingTx = existingTxns[i];
-      const incomingTx = incomingTxns[i];
-
-      if (existingTx.previousStateHash !== incomingTx.previousStateHash ||
-          existingTx.newStateHash !== incomingTx.newStateHash) {
-        return false;
-      }
-    }
-
-    // 4. New transactions (if any) must have inclusion proofs (committed)
-    for (let i = existingTxns.length; i < incomingTxns.length; i++) {
-      const newTx = incomingTxns[i] as TxfTransaction;
-      if (newTx.inclusionProof === null) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  /**
-   * Get current state hash from a TxfToken
-   */
-  private getCurrentStateHash(txf: TxfToken): string {
-    if (txf.transactions && txf.transactions.length > 0) {
-      return txf.transactions[txf.transactions.length - 1].newStateHash || "";
-    }
-    return txf.genesis?.inclusionProof?.authenticator?.stateHash || "";
-  }
-
-  /**
-   * Store a forked token (alternative unconfirmed transaction history)
-   */
-  storeForkedToken(tokenId: string, stateHash: string, txfToken: TxfToken): void {
-    const key = `${tokenId}_${stateHash}`;
-
-    // Don't store if we already have this exact fork
-    if (this._forkedTokens.has(key)) {
-      return;
-    }
-
-    this._forkedTokens.set(key, txfToken);
-    console.log(`📦 Stored forked token ${tokenId.slice(0, 8)}... state ${stateHash.slice(0, 12)}...`);
-
-    // Save to persist changes
-    if (this._wallet) {
-      this.saveWallet(this._wallet);
-    }
-  }
-
-  /**
-   * Get all archived tokens (spent token history)
-   */
   getArchivedTokens(): Map<string, TxfToken> {
-    return new Map(this._archivedTokens);
+    return this.sdk.getArchivedTokens() as Map<string, TxfToken>;
   }
 
-  /**
-   * Get the best archived version of a token (most committed transactions)
-   * Checks both _archivedTokens and _forkedTokens
-   * Used for sanity check restoration when tombstones are invalid
-   */
   getBestArchivedVersion(tokenId: string): TxfToken | null {
-    const candidates: TxfToken[] = [];
-
-    // Check main archive
-    const archived = this._archivedTokens.get(tokenId);
-    if (archived) candidates.push(archived);
-
-    // Check forked versions
-    for (const [key, forked] of this._forkedTokens) {
-      if (key.startsWith(tokenId + "_")) {
-        candidates.push(forked);
-      }
-    }
-
-    if (candidates.length === 0) return null;
-
-    // Sort by number of committed transactions (desc)
-    candidates.sort((a, b) => {
-      const aCommitted = (a.transactions || []).filter((tx: TxfTransaction) => tx.inclusionProof !== null).length;
-      const bCommitted = (b.transactions || []).filter((tx: TxfTransaction) => tx.inclusionProof !== null).length;
-      return bCommitted - aCommitted;
-    });
-
-    return candidates[0];
+    return this.sdk.getBestArchivedVersion(tokenId) as TxfToken | null;
   }
 
-  /**
-   * Restore a token from archive back to active tokens
-   * Used when sanity check detects invalid tombstone/missing token
-   * Returns true if restoration succeeded
-   */
+  getForkedTokens(): Map<string, TxfToken> {
+    return this.sdk.getForkedTokens() as Map<string, TxfToken>;
+  }
+
+  storeForkedToken(tokenId: string, stateHash: string, txfToken: TxfToken): void {
+    this.sdk.storeForkedToken(tokenId, stateHash, txfToken).catch(console.error);
+  }
+
+  importArchivedToken(tokenId: string, txfToken: TxfToken): void {
+    this.sdk.importArchivedToken(tokenId, txfToken);
+  }
+
+  importForkedToken(key: string, txfToken: TxfToken): void {
+    this.sdk.importForkedToken(key, txfToken);
+  }
+
+  mergeArchivedTokens(remoteArchived: Map<string, TxfToken>): number {
+    this.sdk.mergeArchivedTokens(remoteArchived).catch(console.error);
+    return 0;
+  }
+
+  mergeForkedTokens(remoteForked: Map<string, TxfToken>): number {
+    this.sdk.mergeForkedTokens(remoteForked).catch(console.error);
+    return 0;
+  }
+
+  pruneArchivedTokens(maxCount = 100): void {
+    this.sdk.pruneArchivedTokens(maxCount).catch(console.error);
+  }
+
+  pruneForkedTokens(maxCount = 50): void {
+    this.sdk.pruneForkedTokens(maxCount).catch(console.error);
+  }
+
+  isIncrementalUpdate(existing: TxfToken, incoming: TxfToken): boolean {
+    return sdkIsIncrementalUpdate(existing, incoming);
+  }
+
   restoreTokenFromArchive(tokenId: string, txfToken: TxfToken): boolean {
-    if (!this._wallet) {
-      console.error("Cannot restore token: wallet not initialized");
-      return false;
-    }
-
     try {
-      // Create Token from TxfToken
       const coinData = txfToken.genesis?.data?.coinData || [];
-      const totalAmount = coinData.reduce((sum: bigint, [, amt]: [string, string]) => {
-        return sum + BigInt(amt || "0");
-      }, BigInt(0));
-
-      // Get coin ID
-      let coinId = coinData[0]?.[0] || "";
-      for (const [cid, amt] of coinData) {
-        if (BigInt(amt || "0") > 0) {
-          coinId = cid;
-          break;
-        }
-      }
-
+      const totalAmount = coinData.reduce((sum: bigint, [, amt]: [string, string]) => sum + BigInt(amt || "0"), BigInt(0));
+      const coinId = coinData.find(([, a]: [string, string]) => BigInt(a || "0") > 0)?.[0] || coinData[0]?.[0] || "";
       const tokenType = txfToken.genesis?.data?.tokenType || "";
       const isNft = tokenType === "455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89";
 
       const token = new WalletToken({
-        id: tokenId,
-        name: isNft ? "NFT" : "Token",
-        type: isNft ? "NFT" : "UCT",
-        timestamp: Date.now(),
-        jsonData: JSON.stringify(txfToken),
-        status: TokenStatus.CONFIRMED,
-        amount: totalAmount.toString(),
-        coinId,
-        symbol: isNft ? "NFT" : "UCT",
+        id: tokenId, name: isNft ? "NFT" : "Token", type: isNft ? "NFT" : "UCT",
+        timestamp: Date.now(), jsonData: JSON.stringify(txfToken), status: TokenStatus.CONFIRMED,
+        amount: totalAmount.toString(), coinId, symbol: isNft ? "NFT" : "UCT",
         sizeBytes: JSON.stringify(txfToken).length,
       });
-
-      // Check if token already exists
-      const existingIdx = this._wallet.tokens.findIndex(t => {
-        try {
-          const parsed = JSON.parse(t.jsonData || "{}");
-          return parsed.genesis?.data?.tokenId === tokenId;
-        } catch {
-          return t.id === tokenId;
-        }
-      });
-
-      if (existingIdx !== -1) {
-        // Update existing token
-        const updatedTokens = [...this._wallet.tokens];
-        updatedTokens[existingIdx] = token;
-        this._wallet = new TokenCollection(
-          this._wallet.id,
-          this._wallet.name,
-          this._wallet.address,
-          updatedTokens
-        );
-      } else {
-        // Add new token
-        const updatedTokens = [token, ...this._wallet.tokens];
-        this._wallet = new TokenCollection(
-          this._wallet.id,
-          this._wallet.name,
-          this._wallet.address,
-          updatedTokens
-        );
-      }
-
-      this.saveWallet(this._wallet);
-      console.log(`📦 Restored token ${tokenId.slice(0, 8)}... from archive`);
+      this.addToken(token, true);
       return true;
-    } catch (err) {
-      console.error(`Failed to restore token ${tokenId}:`, err);
-      return false;
-    }
+    } catch { return false; }
   }
 
-  /**
-   * Get all forked tokens (alternative transaction histories)
-   */
-  getForkedTokens(): Map<string, TxfToken> {
-    return new Map(this._forkedTokens);
+  // ==========================================
+  // Transaction History
+  // ==========================================
+
+  getTransactionHistory(): TransactionHistoryEntry[] {
+    return this.sdk.getTransactionHistory() as TransactionHistoryEntry[];
   }
 
-  /**
-   * Import an archived token from remote (IPFS sync)
-   * Only updates if incoming is incremental or archive doesn't exist
-   */
-  importArchivedToken(tokenId: string, txfToken: TxfToken): void {
-    const existingArchive = this._archivedTokens.get(tokenId);
-
-    if (existingArchive) {
-      // Check if remote is an incremental update
-      if (this.isIncrementalUpdate(existingArchive, txfToken)) {
-        this._archivedTokens.set(tokenId, txfToken);
-        console.log(`📦 Imported remote archived token ${tokenId.slice(0, 8)}... (incremental update)`);
-      } else if (this.isIncrementalUpdate(txfToken, existingArchive)) {
-        // Local is more advanced - keep local
-        console.log(`📦 Kept local archived token ${tokenId.slice(0, 8)}... (local is more advanced)`);
-      } else {
-        // True fork - store remote as forked
-        const stateHash = this.getCurrentStateHash(txfToken);
-        this.storeForkedToken(tokenId, stateHash, txfToken);
-        console.log(`📦 Remote archived token ${tokenId.slice(0, 8)}... is a fork, stored as forked`);
-      }
-    } else {
-      // No local archive - accept remote
-      this._archivedTokens.set(tokenId, txfToken);
-      console.log(`📦 Imported remote archived token ${tokenId.slice(0, 8)}...`);
-    }
+  addTransactionToHistory(entry: Omit<TransactionHistoryEntry, 'id'>): void {
+    this.sdk.addTransactionToHistory(entry).catch(console.error);
   }
 
-  /**
-   * Import a forked token from remote (IPFS sync)
-   */
-  importForkedToken(key: string, txfToken: TxfToken): void {
-    if (!this._forkedTokens.has(key)) {
-      this._forkedTokens.set(key, txfToken);
-      console.log(`📦 Imported remote forked token ${key.slice(0, 20)}...`);
-    }
+  addSentTransaction(amount: string, coinId: string, symbol: string, iconUrl: string | undefined, recipientNametag: string): void {
+    this.addTransactionToHistory({ type: 'SENT', amount, coinId, symbol, iconUrl, timestamp: Date.now(), recipientNametag });
   }
 
-  /**
-   * Merge remote archived tokens into local
-   * Returns number of tokens updated/added
-   */
-  mergeArchivedTokens(remoteArchived: Map<string, TxfToken>): number {
-    let mergedCount = 0;
+  // ==========================================
+  // Events
+  // ==========================================
 
-    for (const [tokenId, remoteTxf] of remoteArchived) {
-      const existingArchive = this._archivedTokens.get(tokenId);
-
-      if (!existingArchive) {
-        // New token - add to archive
-        this._archivedTokens.set(tokenId, remoteTxf);
-        mergedCount++;
-      } else if (this.isIncrementalUpdate(existingArchive, remoteTxf)) {
-        // Remote is incremental update - accept
-        this._archivedTokens.set(tokenId, remoteTxf);
-        mergedCount++;
-      } else if (!this.isIncrementalUpdate(remoteTxf, existingArchive)) {
-        // True fork - store remote as forked
-        const stateHash = this.getCurrentStateHash(remoteTxf);
-        this.storeForkedToken(tokenId, stateHash, remoteTxf);
-      }
-      // Otherwise local is more advanced - keep local
-    }
-
-    if (mergedCount > 0 && this._wallet) {
-      this.saveWallet(this._wallet);
-    }
-
-    return mergedCount;
-  }
-
-  /**
-   * Merge remote forked tokens into local (union merge)
-   * Returns number of tokens added
-   */
-  mergeForkedTokens(remoteForked: Map<string, TxfToken>): number {
-    let addedCount = 0;
-
-    for (const [key, remoteTxf] of remoteForked) {
-      if (!this._forkedTokens.has(key)) {
-        this._forkedTokens.set(key, remoteTxf);
-        addedCount++;
-      }
-    }
-
-    if (addedCount > 0 && this._wallet) {
-      this.saveWallet(this._wallet);
-    }
-
-    return addedCount;
-  }
-
-  /**
-   * Prune archived tokens to prevent unlimited growth
-   * Keeps most recently archived tokens up to maxCount
-   */
-  pruneArchivedTokens(maxCount: number = 100): void {
-    if (this._archivedTokens.size <= maxCount) return;
-
-    // Convert to array for sorting - we don't have timestamp on TxfToken
-    // so just keep arbitrary subset (could be improved by adding archive timestamp)
-    const entries = [...this._archivedTokens.entries()];
-    const toRemove = entries.slice(0, entries.length - maxCount);
-
-    for (const [tokenId] of toRemove) {
-      this._archivedTokens.delete(tokenId);
-    }
-
-    if (this._wallet) {
-      this.saveWallet(this._wallet);
-    }
-    console.log(`📦 Pruned archived tokens to ${this._archivedTokens.size}`);
-  }
-
-  /**
-   * Prune forked tokens to prevent unlimited growth
-   */
-  pruneForkedTokens(maxCount: number = 50): void {
-    if (this._forkedTokens.size <= maxCount) return;
-
-    const entries = [...this._forkedTokens.entries()];
-    const toRemove = entries.slice(0, entries.length - maxCount);
-
-    for (const [key] of toRemove) {
-      this._forkedTokens.delete(key);
-    }
-
-    if (this._wallet) {
-      this.saveWallet(this._wallet);
-    }
-    console.log(`📦 Pruned forked tokens to ${this._forkedTokens.size}`);
+  refreshWallet(): void {
+    window.dispatchEvent(new Event("wallet-updated"));
   }
 }

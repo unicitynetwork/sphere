@@ -116,7 +116,7 @@ export {
   createInMemoryWalletStatePersistence,
 } from './wallet-state-persistence';
 
-// Token Repository (base interface and pure functions)
+// Token Repository (base interface and pure functions) - re-export from core
 export {
   // Pure functions
   isIncrementalUpdate,
@@ -136,7 +136,7 @@ export {
   pruneMapByCount,
   // Best version selection
   findBestTokenVersion,
-} from './token-repository';
+} from '../core/token-repository';
 
 export type {
   // Types
@@ -144,7 +144,7 @@ export type {
   StoredWalletData,
   NametagDataBase,
   TransactionHistoryEntry,
-} from './token-repository';
+} from '../core/token-repository';
 
 // NOTE: FileStorageProvider is available for Node.js only:
 // import { FileStorageProvider, createFileStorageProvider } from './sdk/storage/file-storage';
@@ -201,14 +201,18 @@ export {
   createSyncManager,
 } from './sync-manager';
 
-// Wallet Repository (platform-independent implementation)
+// Wallet Repository (platform-independent implementation) - re-export from core
 export {
   WalletRepository,
-  createWalletRepository,
   WALLET_REPOSITORY_KEYS,
-} from './wallet-repository';
+} from '../core/wallet-repository';
+
+// Factory function
+export { createWalletRepository } from '../core/wallet-repository';
 
 export type {
   WalletRepositoryConfig,
-  TokenRepository,
-} from './wallet-repository';
+} from '../core/wallet-repository';
+
+// TokenRepository interface
+export type { TokenRepository } from '../core/token-repository';

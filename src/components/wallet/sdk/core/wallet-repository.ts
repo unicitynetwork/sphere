@@ -11,7 +11,7 @@
  * - SQLiteProvider (mobile) - TODO
  */
 
-import type { TxfToken, TombstoneEntry, NametagDataBase } from '../types/txf';
+import type { TxfToken, TombstoneEntry, NametagDataBase } from '../types';
 import type {
   StoredToken,
   StoredWalletData,
@@ -33,7 +33,7 @@ import {
   pruneMapByCount,
   findBestTokenVersion,
 } from './token-repository';
-import type { StorageProvider } from './storage-provider';
+import type { StorageProvider } from '../storage/storage-provider';
 
 // ==========================================
 // Storage Key Constants

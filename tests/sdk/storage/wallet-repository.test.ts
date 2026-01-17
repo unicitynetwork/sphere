@@ -3,11 +3,11 @@ import {
   WalletRepository,
   createWalletRepository,
   WALLET_REPOSITORY_KEYS,
-} from '../../../src/components/wallet/sdk/storage/wallet-repository';
+} from '../../../src/components/wallet/sdk/core/wallet-repository';
 import {
   InMemoryProvider,
 } from '../../../src/components/wallet/sdk/storage/providers';
-import type { StoredToken } from '../../../src/components/wallet/sdk/storage/token-repository';
+import type { StoredToken } from '../../../src/components/wallet/sdk/core/token-repository';
 
 // ==========================================
 // Test Helpers

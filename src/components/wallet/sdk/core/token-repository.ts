@@ -13,10 +13,10 @@
  * - FileStorageProvider (Node.js) - see sdk/storage/file-storage.ts
  */
 
-import type { TxfToken, TombstoneEntry, TxfTransaction, NametagDataBase } from '../types/txf';
+import type { TxfToken, TombstoneEntry, TxfTransaction, NametagDataBase } from '../types';
 
 // Re-export base type for convenience
-export type { NametagDataBase } from '../types/txf';
+export type { NametagDataBase } from '../types';
 
 // ==========================================
 // Stored Wallet Data Structure

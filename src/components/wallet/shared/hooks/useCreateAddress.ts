@@ -347,7 +347,8 @@ export function useCreateAddress(): UseCreateAddressReturn {
       // Create wallet for new identity - this is a NEW address so no wallet should exist yet
       // The createWallet will create a fresh wallet with no nametag
       // Use silent=true to prevent events that would trigger useWallet re-renders
-      walletRepo.createWallet(identity.address, "My Wallet", true);
+      // Use async version to ensure wallet is saved before proceeding
+      await walletRepo.createWalletAsync(identity.address, "My Wallet", true);
 
       console.log(`✅ Created fresh wallet for new identity: ${identity.address.slice(0, 20)}...`);
 
@@ -375,7 +376,8 @@ export function useCreateAddress(): UseCreateAddressReturn {
       await new Promise(resolve => setTimeout(resolve, 300));
 
       // Verify nametag is loaded in WalletRepository
-      const wallet = walletRepo.loadWalletForAddress(identity.address);
+      // Use async version to ensure data is loaded from storage
+      const wallet = await walletRepo.loadWalletForAddressAsync(identity.address);
       if (!wallet) {
         throw new Error("Wallet not found after minting");
       }
