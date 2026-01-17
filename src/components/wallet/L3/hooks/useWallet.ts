@@ -20,6 +20,8 @@ import { IpfsStorageService, SyncPriority } from "../services/IpfsStorageService
 import { useServices } from "../../../../contexts/useServices";
 import type { NostrService } from "../services/NostrService";
 import { OutboxRecoveryService } from "../services/OutboxRecoveryService";
+import { InventoryBackgroundLoopsManager } from "../services/InventoryBackgroundLoops";
+import type { NostrDeliveryQueueEntry } from "../services/types/QueueTypes";
 import { TokenRecoveryService } from "../services/TokenRecoveryService";
 import { L1_KEYS } from "../../L1/hooks/useL1Wallet";
 import { isNametagCorrupted } from "../../../../utils/tokenValidation";
@@ -663,6 +665,18 @@ export const useWallet = () => {
           );
         }
 
+        // Queue tokens for delivery via NostrDeliveryQueue (12-way parallel with retry)
+        // Try to get the delivery queue, fall back to direct send if not available
+        let deliveryQueue: ReturnType<typeof InventoryBackgroundLoopsManager.prototype.getDeliveryQueue> | null = null;
+        try {
+          const loopsManager = InventoryBackgroundLoopsManager.getInstance();
+          if (loopsManager.isReady()) {
+            deliveryQueue = loopsManager.getDeliveryQueue();
+          }
+        } catch {
+          // Loops manager not initialized, will use direct send
+        }
+
         for (let i = 0; i < splitResult.tokensForRecipient.length; i++) {
           const token = splitResult.tokensForRecipient[i];
           const tx = splitResult.recipientTransferTxs[i];
@@ -671,33 +685,57 @@ export const useWallet = () => {
           const sourceTokenString = JSON.stringify(token.toJSON());
           const transferTxString = JSON.stringify(tx.toJSON());
 
+          // Extract stateHash for multi-version tracking (Amendment 2)
+          const tokenJson = token.toJSON();
+          const stateHash = tokenJson.state?.stateHash || '';
+
           const payload = JSON.stringify({
             sourceToken: sourceTokenString,
             transferTx: transferTxString,
+            tokenId: token.tokenId.toString(),
+            stateHash,
           });
 
-          console.log("📨 Sending split token via Nostr...");
-          await nostrService.sendTokenTransfer(recipientPubkey, payload, undefined, undefined, params.eventId);
+          if (deliveryQueue) {
+            // Queue for background delivery with automatic retry
+            const queueEntry: NostrDeliveryQueueEntry = {
+              id: crypto.randomUUID(),
+              outboxEntryId: outboxEntryId || '',
+              recipientPubkey,
+              recipientNametag,
+              payloadJson: payload,
+              retryCount: 0,
+              createdAt: Date.now(),
+            };
 
-          // Update outbox: Nostr sent
-          if (outboxEntryId) {
-            outboxRepo.updateStatus(outboxEntryId, "NOSTR_SENT");
-            console.log(`📤 Outbox: Split transfer ${outboxEntryId.slice(0, 8)}... sent via Nostr`);
+            await deliveryQueue.queueForDelivery(queueEntry);
+            console.log(`📨 Queued split token for Nostr delivery (queue ID: ${queueEntry.id.slice(0, 8)})`);
+
+            // Mark outbox as pending delivery (queue will finalize)
+            if (outboxEntryId) {
+              // Keep as PROOF_RECEIVED - the queue's finalizeCompletedTransfers will mark COMPLETED
+              console.log(`📤 Outbox: Split transfer ${outboxEntryId.slice(0, 8)}... queued for delivery`);
+            }
+          } else {
+            // Fallback: Direct send (no delivery queue available)
+            console.log("📨 Sending split token via Nostr (direct)...");
+            await nostrService.sendTokenTransfer(recipientPubkey, payload, undefined, undefined, params.eventId);
+
+            // Update outbox: Nostr sent
+            if (outboxEntryId) {
+              outboxRepo.updateStatus(outboxEntryId, "NOSTR_SENT");
+              outboxRepo.updateStatus(outboxEntryId, "COMPLETED");
+              console.log(`📤 Outbox: Split transfer ${outboxEntryId.slice(0, 8)}... sent via Nostr (direct)`);
+            }
           }
         }
 
         // NOTE: Change tokens are now saved IMMEDIATELY via persistenceCallbacks.onTokenMinted
         // during the mint phase, not here after the split completes (crash-safe pattern)
 
-        // Mark all outbox entries as completed
-        for (const outboxEntryId of splitResult.outboxEntryIds) {
-          if (outboxEntryId) {
-            outboxRepo.updateStatus(outboxEntryId, "COMPLETED");
-            console.log(`📤 Outbox: Split transfer ${outboxEntryId.slice(0, 8)}... completed`);
-          }
-        }
-
         // Clean up split group
+        // For delivery queue: entries stay as PROOF_RECEIVED until queue finalizes
+        // For direct send: entries were already marked COMPLETED above
         if (splitResult.splitGroupId) {
           outboxRepo.removeSplitGroup(splitResult.splitGroupId);
         }
