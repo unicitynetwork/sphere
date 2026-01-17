@@ -27,8 +27,9 @@ export { SyncPriority, type SyncOptions } from "./SyncQueue";
 // Note: retryWithBackoff was used for DHT publish, now handled by HTTP primary path
 import { getBootstrapPeers, getConfiguredCustomPeers, getBackendPeerId, getAllBackendGatewayUrls, IPNS_RESOLUTION_CONFIG, IPFS_CONFIG } from "../../../../config/ipfs.config";
 // Fast HTTP-based IPNS resolution and content fetching (target: <2s sync)
-import { getIpfsHttpResolver } from "./IpfsHttpResolver";
+import { getIpfsHttpResolver, computeCidFromContent } from "./IpfsHttpResolver";
 import { getIpfsMetrics, type IpfsMetricsSnapshot, type IpfsSource } from "./IpfsMetrics";
+import { getIpfsCache } from "./IpfsCache";
 import { STORAGE_KEY_PREFIXES } from "../../../../config/storageKeys";
 import { isNametagCorrupted } from "../../../../utils/tokenValidation";
 
@@ -164,6 +165,9 @@ export class IpfsStorageService {
   private isInitializing = false;
   private isSyncing = false;
   private isInitialSyncing = false;  // Tracks initial IPNS-based sync on startup
+  private isInsideSyncFromIpns = false;  // Tracks if we're inside syncFromIpns (to avoid deadlock)
+  private initialSyncCompletePromise: Promise<void> | null = null;  // Resolves when initial sync finishes
+  private initialSyncCompleteResolver: (() => void) | null = null;  // Resolver for the above promise
   private syncQueue: SyncQueue | null = null; // Lazy-initialized queue for sync requests
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
   private lastSync: StorageResult | null = null;
@@ -809,6 +813,11 @@ export class IpfsStorageService {
           console.log(
             `✅ IPNS record published AND verified (seq: ${this.ipnsSequenceNumber})`
           );
+
+          // Clear IPNS cache to ensure next load fetches fresh content for the new CID
+          // Without this, the cache may return stale content from the old CID
+          getIpfsCache().clearIpnsRecords();
+
           return this.cachedIpnsName;
         } else {
           // Verification failed - the record didn't persist!
@@ -2734,6 +2743,11 @@ export class IpfsStorageService {
 
     // Set initial syncing flag for UI feedback
     this.isInitialSyncing = true;
+    this.isInsideSyncFromIpns = true;  // Mark that we're inside this method (to avoid deadlock)
+    // Create a Promise that external callers can await to wait for initial sync to complete
+    this.initialSyncCompletePromise = new Promise<void>((resolve) => {
+      this.initialSyncCompleteResolver = resolve;
+    });
     this.emitSyncStateChange();
 
     try {
@@ -2811,21 +2825,56 @@ export class IpfsStorageService {
     // 4. Always try to fetch and verify remote content
     // This handles cases where previous sync was interrupted
     // Use cached content from gateway path if available (avoids re-fetch)
+    // CRITICAL: Must verify CID integrity - HTTP gateways may cache stale content
     let remoteData: TxfStorageData | null = null;
 
     if (resolution.best?._cachedContent && resolution.best.cid === cidToFetch) {
-      // Use cached content from gateway path resolution (fast path)
-      remoteData = resolution.best._cachedContent;
-      console.log(`📦 Using cached content from gateway path (avoided re-fetch)`);
+      // Verify cached content matches the CID before using it
+      // HTTP gateways may serve stale cached content for the IPNS name
+      const cachedContent = resolution.best._cachedContent;
+      try {
+        const computedCid = await computeCidFromContent(cachedContent);
+        if (computedCid === cidToFetch) {
+          // CID matches - safe to use cached content
+          remoteData = cachedContent;
+          console.log(`📦 Using cached content from gateway path (CID verified)`);
+        } else {
+          // CID mismatch - gateway has stale cache
+          console.warn(`⚠️ Gateway cached content CID mismatch: expected ${cidToFetch.slice(0, 16)}..., got ${computedCid.slice(0, 16)}...`);
+          console.log(`📦 Fetching fresh content by CID (gateway cache was stale)`);
+          remoteData = await this.fetchRemoteContent(cidToFetch);
+        }
+      } catch (error) {
+        console.warn(`⚠️ Failed to verify cached content CID:`, error);
+        remoteData = await this.fetchRemoteContent(cidToFetch);
+      }
     } else {
       // Fetch content via IPFS
       remoteData = await this.fetchRemoteContent(cidToFetch);
     }
 
     if (!remoteData) {
-      // Could not fetch remote content - republish local
+      // Could not fetch remote content
+      // CRITICAL: Do NOT overwrite remote with empty local state!
+      // If local wallet is empty and remote has content, we must NOT publish empty state
+      const localTokenCount = WalletRepository.getInstance().getTokens().length;
+
+      if (localTokenCount === 0 && remoteCid) {
+        // Local is empty but remote has content - DO NOT overwrite!
+        // This prevents data loss when we can't fetch remote due to connectivity issues
+        console.error(`🚨 BLOCKED: Cannot fetch remote content and local wallet is EMPTY!`);
+        console.error(`🚨 Remote CID exists (${remoteCid.slice(0, 16)}...) - refusing to overwrite with empty state`);
+        console.error(`🚨 Please retry sync when connectivity improves, or recover from backup`);
+        return {
+          success: false,
+          timestamp: Date.now(),
+          error: "Blocked: refusing to overwrite remote with empty local state"
+        };
+      }
+
+      // Local has content - safe to republish
       // Force IPNS publish if IPNS was empty (recovery scenario)
-      console.warn(`📦 Failed to fetch remote content (CID: ${cidToFetch.slice(0, 16)}...), will republish local`);
+      console.warn(`📦 Failed to fetch remote content (CID: ${cidToFetch.slice(0, 16)}...), will republish local (${localTokenCount} tokens)`);
       return this.syncNow({ forceIpnsPublish: ipnsNeedsRecovery });
     }
 
@@ -2948,6 +2997,13 @@ export class IpfsStorageService {
     }
     } finally {
       this.isInitialSyncing = false;
+      this.isInsideSyncFromIpns = false;  // Clear the deadlock-prevention flag
+      // Resolve the Promise so any waiting syncs can proceed
+      if (this.initialSyncCompleteResolver) {
+        this.initialSyncCompleteResolver();
+        this.initialSyncCompleteResolver = null;
+        this.initialSyncCompletePromise = null;
+      }
       this.emitSyncStateChange();
     }
   }
@@ -2982,6 +3038,17 @@ export class IpfsStorageService {
    */
   private async executeSyncInternal(options?: { forceIpnsPublish?: boolean; isRetryAttempt?: boolean }): Promise<StorageResult> {
     const { forceIpnsPublish = false, isRetryAttempt = false } = options || {};
+
+    // CRITICAL: Wait for initial IPNS sync to complete before proceeding
+    // This prevents race conditions where Nostr delivers tokens and triggers a sync
+    // BEFORE the startup sync has fetched remote content, causing token loss
+    // Skip the wait if we're inside syncFromIpns (to avoid deadlock on internal syncNow calls)
+    if (this.initialSyncCompletePromise && !this.isInsideSyncFromIpns) {
+      console.log(`📦 Waiting for initial IPNS sync to complete before proceeding...`);
+      await this.initialSyncCompletePromise;
+      console.log(`📦 Initial IPNS sync completed, proceeding with sync`);
+    }
+
     // Use SyncCoordinator to acquire distributed lock across browser tabs
     const coordinator = getSyncCoordinator();
 

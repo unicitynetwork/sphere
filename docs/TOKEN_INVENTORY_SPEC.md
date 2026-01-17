@@ -1,7 +1,17 @@
 # Token Inventory Management Specification
 
-**Version:** 3.0
+**Version:** 3.2
 **Last Updated:** 2026-01-17
+
+> **v3.2 Changes:** Multi-version token architecture clarification:
+> - Section 3.7: Multi-Version Token Architecture (tokenId vs stateHash, uniqueness constraints, boomerang scenarios)
+> - Section 3.7.4: Merge rules for Sent/Invalid folders using `tokenId:stateHash` key
+
+> **v3.1 Changes:** Added mandatory security and recovery amendments:
+> - Section 3.4.1: IPFS Encryption (XChaCha20-Poly1305) - **DEFERRED** to future release
+> - Step 4: Transaction hash verification
+> - Section 10.7: Circuit Breaker Reset (auto-recovery from LOCAL mode)
+> - Section 13.25: Split Burn Recovery (prevents value loss)
 
 ---
 
@@ -95,6 +105,35 @@ Tokens are placed in the Invalid folder for the following reasons:
 
 **Critical Invariant**: The spent token cache is stored ONLY in localStorage and NEVER synced to IPFS. It is an optimization cache, not source of truth.
 
+### 3.4.1 IPFS Encryption (DEFERRED)
+
+> **Status: DEFERRED** - This feature is planned for a future release. Current implementation stores unencrypted data on IPFS. The IPNS name provides some obscurity but not true privacy.
+
+**Future Implementation Notes:**
+
+When implemented, IPFS uploads SHOULD be encrypted using XChaCha20-Poly1305 authenticated encryption.
+
+**Planned Key Derivation:**
+- Encryption key derived from wallet's master private key using HKDF
+- Salt: `"unicity-ipfs-encryption"` (static)
+- Info: wallet address hex (context binding)
+- Output: 256-bit key for XChaCha20-Poly1305
+
+**Planned Encryption Format:**
+```typescript
+interface EncryptedIpfsPayload {
+  version: 1;
+  nonce: string;       // 24-byte nonce, base64 encoded
+  ciphertext: string;  // XChaCha20-Poly1305 output, base64 encoded
+}
+```
+
+**Rationale for Deferral:**
+- IPNS names are derived from user's private key and not publicly discoverable
+- Token values are not directly visible without knowing the IPNS name
+- Encryption adds complexity to cross-device sync and debugging
+- Can be added in future version with backwards compatibility (detect encrypted vs plaintext)
+
 ### 3.5 Token Storage Format
 
 **All tokens MUST be stored in the native Unicity SDK format.**
@@ -139,6 +178,70 @@ This means:
 | Token burned (split) | No | Yes |
 | Forked state resolved elsewhere | Yes | No |
 | Multi-device state conflict | Yes | No |
+
+### 3.7 Multi-Version Token Architecture
+
+#### 3.7.1 Token Identity vs State
+
+A token's lifecycle involves two distinct identifiers:
+
+| Identifier | Source | Mutability |
+|------------|--------|------------|
+| **Token ID** | Derived from genesis transaction data | Immutable for token's entire lifecycle |
+| **State Hash** | Computed from current state data | Changes with each transaction |
+
+**Key Insight:** The same `tokenId` can exist at multiple states throughout its history. This is not a duplicate - it represents different points in the token's lifecycle.
+
+#### 3.7.2 Uniqueness Constraints by Folder
+
+| Folder | Uniqueness Key | Data Structure | Rationale |
+|--------|----------------|----------------|-----------|
+| **Active** | `tokenId` (ONE per token) | `Map<tokenId, TxfToken>` | A token can only have ONE unspent state at any time |
+| **Sent** | `tokenId:stateHash` (MULTIPLE per token) | `SentTokenEntry[]` | Historical record of all spent states |
+| **Invalid** | `tokenId:stateHash` (MULTIPLE per token) | `InvalidTokenEntry[]` | A token may fail validation at different states |
+| **Tombstones** | `tokenId:stateHash` (MULTIPLE per token) | `TombstoneEntry[]` | Track each spent state for conflict resolution |
+| **Outbox** | `entryId` | `OutboxEntry[]` | Multiple pending operations possible |
+
+#### 3.7.3 Boomerang Scenarios
+
+A "boomerang" occurs when a token returns to its original owner after being sent. This creates multiple historical states for the same token.
+
+**Single-Step Boomerang:**
+```
+State S1: Alice owns token T
+State S2: Alice sends T to Bob (T now at state S2)
+State S3: Bob sends T back to Alice (T now at state S3)
+```
+
+Alice's inventory after boomerang:
+- **Active:** Token T at state S3 (current unspent state)
+- **Sent:** Token T at state S1 (historical spent state)
+
+**Multi-Step Boomerang:**
+```
+State S1: Alice owns token T
+State S2: Alice → Bob
+State S3: Bob → Carol
+State S4: Carol → Alice (boomerang complete)
+```
+
+Alice's inventory:
+- **Active:** Token T at state S4
+- **Sent:** Token T at state S1
+
+#### 3.7.4 Merge Rules for Multi-Version Support
+
+When merging remote data into local inventory (Step 2):
+
+**Active folder:** Keep ONE token per `tokenId` - prefer the version with more transactions or more committed proofs.
+
+**Sent folder:** Keep ALL unique `tokenId:stateHash` combinations from both local and remote.
+
+**Invalid folder:** Keep ALL unique `tokenId:stateHash` combinations from both local and remote.
+
+**Tombstones:** Keep ALL unique `tokenId:stateHash` combinations (union merge).
+
+**Implementation Note:** The merge key `tokenId:stateHash` is computed using `getCurrentStateHash(token)` which returns the state hash of the token's latest transaction.
 
 ---
 
@@ -424,6 +527,7 @@ For each commitment:
 - Find matching proof by request ID
 - Verify proof payload matches commitment
 - Verify authenticator matches commitment
+- **Verify hash(proof.transaction) === hash(commitment.transaction)** (prevents proof substitution attacks)
 - If mismatch: mark token as INVALID with reason `PROOF_MISMATCH`
 - If valid: attach proof to token's transaction
 
@@ -787,6 +891,36 @@ IPFS operations:
 | Integrity failure | Modal: "Critical error detected - please do not close" |
 | Network offline | "Offline mode - some features unavailable" |
 
+### 10.7 Circuit Breaker Reset
+
+**Automatic LOCAL Mode Recovery:**
+
+When LOCAL mode is activated automatically due to IPFS failures (Section 10.2), the system MUST attempt recovery:
+
+**Reset Schedule:**
+1. After 1 hour in LOCAL mode: attempt single IPFS ping
+2. If ping succeeds: clear LOCAL flag, trigger NORMAL sync
+3. If ping fails: wait another hour, repeat
+
+**Implementation:**
+```typescript
+// Check on any user-triggered sync
+if (isLocalMode && localModeActivatedAt < Date.now() - 3600000) {
+  const pingSuccess = await ipfsPing();
+  if (pingSuccess) {
+    clearLocalMode();
+    return inventorySync(); // NORMAL mode
+  }
+  // Reset timer for next attempt
+  localModeActivatedAt = Date.now();
+}
+```
+
+**User Control:**
+- Manual "Retry IPFS" button always available in LOCAL mode
+- Shows countdown: "Auto-retry in X minutes"
+- Success clears LOCAL flag immediately
+
 ---
 
 ## 11. Network Management
@@ -1089,6 +1223,38 @@ Queue behavior:
 2. Return cached nametags with `stale: true` indicator
 3. UI shows: "Using cached identity - network unavailable"
 4. No retry loop (unlike NORMAL mode)
+
+### 13.25 Split Burn Recovery
+
+**Scenario:** During a token split, burn succeeds but ALL mint operations fail after 10 retries.
+
+**Problem:** Without recovery, the burned token value is permanently lost. The burn transaction is already included in the aggregator, so the original token state cannot be used again.
+
+**Resolution:**
+1. After 10 consecutive mint failures for ALL mints in a split group:
+   - Create recovery mint commitment to ORIGINAL OWNER (self)
+   - Amount: sum of all failed mint amounts
+   - Persist recovery commitment to outbox with `isRecoveryMint: true` flag
+2. Submit recovery mint to aggregator
+3. On success: mark split as PARTIALLY_RECOVERED
+4. On failure: retry recovery mint with exponential backoff (no retry limit)
+
+**Implementation:**
+```typescript
+interface RecoveryMintEntry extends OutboxEntry {
+  isRecoveryMint: true;
+  originalSplitGroupId: string;
+  failedRecipients: Array<{
+    address: string;
+    amount: string;
+  }>;
+}
+```
+
+**User Notification:**
+- "Token split partially failed. X tokens recovered to your wallet. Y tokens could not be delivered to [recipients]."
+
+**Rationale:** This ensures no value is permanently lost due to transient failures. The original owner can manually retry transfers after recovery.
 
 ---
 
