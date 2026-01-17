@@ -134,6 +134,9 @@ export interface SyncOperationStats {
 
   /** New tombstones created */
   tombstonesAdded: number;
+
+  /** Nametag bindings published to Nostr (Step 8.5) */
+  nametagsPublished: number;
 }
 
 /**
@@ -244,6 +247,7 @@ export function createDefaultSyncOperationStats(): SyncOperationStats {
     conflictsResolved: 0,
     tokensValidated: 0,
     tombstonesAdded: 0,
+    nametagsPublished: 0,
   };
 }
 

@@ -31,6 +31,8 @@ import { getIpfsHttpResolver, computeCidFromContent } from './IpfsHttpResolver';
 import { getTokenValidationService } from './TokenValidationService';
 import type { InvalidReasonCode } from '../types/SyncTypes';
 import { getAllBackendGatewayUrls } from '../../../../config/ipfs.config';
+import { NostrService } from './NostrService';
+import { IdentityManager } from './IdentityManager';
 
 // ============================================
 // Types
@@ -218,6 +220,10 @@ async function executeFullSync(ctx: SyncContext, params: SyncParams): Promise<Sy
 
   // Step 8: Folder Assignment / Merge Inventory
   step8_mergeInventory(ctx);
+
+  // Step 8.5: Ensure nametag bindings are registered with Nostr
+  // Best-effort, non-blocking - failures don't stop sync
+  await step8_5_ensureNametagNostrBinding(ctx);
 
   // Step 9: Prepare for Storage
   step9_prepareStorage(ctx);
@@ -1089,6 +1095,98 @@ function step8_4_extractNametags(ctx: SyncContext): NametagData[] {
   console.log(`🏷️ [Step 8.4] Extract Nametags`);
   // TODO: Filter nametags for current user
   return ctx.nametags;
+}
+
+/**
+ * Step 8.5: Ensure Nametag-Nostr Consistency
+ *
+ * For each nametag token in the inventory, verify that the nametag binding
+ * is registered with Nostr relays. This ensures relays can route token
+ * transfer events to the correct identity.
+ *
+ * Per spec Section 8.5:
+ * - Query Nostr relay(s) for existing binding
+ * - If binding missing or pubkey mismatch, publish binding
+ * - Best-effort, non-blocking (failures don't stop sync)
+ * - Security: On-chain ownership is source of truth, Nostr is routing optimization
+ * - Skip in NAMETAG mode (read-only operation)
+ */
+async function step8_5_ensureNametagNostrBinding(ctx: SyncContext): Promise<void> {
+  console.log(`🏷️ [Step 8.5] Ensure Nametag-Nostr Consistency`);
+
+  // Skip in NAMETAG mode (read-only operation per spec section 8.5)
+  if (ctx.mode === 'NAMETAG') {
+    console.log(`  Skipping in NAMETAG mode (read-only)`);
+    return;
+  }
+
+  if (ctx.nametags.length === 0) {
+    console.log(`  No nametags to process`);
+    return;
+  }
+
+  // Initialize NostrService (fail gracefully if unavailable)
+  let nostrService: NostrService;
+  try {
+    nostrService = NostrService.getInstance(IdentityManager.getInstance());
+  } catch (err) {
+    console.warn(`  Failed to initialize NostrService:`, err);
+    return;
+  }
+
+  let published = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const nametag of ctx.nametags) {
+    if (!nametag.name) {
+      console.warn(`  Skipping nametag without name`);
+      skipped++;
+      continue;
+    }
+
+    // Clean the nametag name (remove @ prefix if present)
+    const cleanName = nametag.name.replace(/^@/, '').trim();
+
+    // Validate cleaned name is not empty
+    if (!cleanName) {
+      console.warn(`  Skipping nametag with empty name after cleanup`);
+      skipped++;
+      continue;
+    }
+
+    try {
+      // Query relay for existing binding
+      const existingPubkey = await nostrService.queryPubkeyByNametag(cleanName);
+
+      if (existingPubkey && existingPubkey === ctx.publicKey) {
+        // Binding exists and matches our pubkey - no action needed
+        console.log(`  ✓ ${cleanName}: binding already registered`);
+        skipped++;
+        continue;
+      }
+
+      // Binding missing or pubkey mismatch - publish binding
+      // Use ctx.address (nametags already filtered for current user in Step 8.4)
+      console.log(`  Publishing binding for ${cleanName} -> ${ctx.address.slice(0, 12)}...`);
+      const success = await nostrService.publishNametagBinding(cleanName, ctx.address);
+
+      if (success) {
+        console.log(`  ✓ ${cleanName}: binding published successfully`);
+        published++;
+        ctx.stats.nametagsPublished++;
+      } else {
+        console.warn(`  ✗ ${cleanName}: binding publish failed`);
+        failed++;
+      }
+    } catch (error) {
+      // Best-effort - don't fail sync on Nostr errors
+      console.warn(`  ✗ ${cleanName}: error ensuring binding:`, error);
+      failed++;
+    }
+  }
+
+  console.log(`  Nametag binding summary: ${published} published, ${skipped} skipped, ${failed} failed (total: ${ctx.nametags.length})`);
 }
 
 function step9_prepareStorage(ctx: SyncContext): void {
