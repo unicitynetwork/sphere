@@ -633,19 +633,22 @@ Keep one copy, merge any additional data (proofs, metadata).
 - All tokens marked INVALID during validation
 
 **8.4) Nametags:**
-- All nametag tokens pointing to current user's address (multiple Unicity IDs supported)
+- Filter nametag tokens where current user **OWNS** the token (verified via `predicate.isOwner(pubkey)`)
+- Multiple Unicity IDs supported - user can own several nametags
 - Tokens whose current state is NOT in spent cache
 - NOT marked for sending
-- These nametag tokens represent user's Unicity IDs
-- If NAMETAG mode is TRUE: return all nametag tokens immediately and skip Steps 9-10
+- **Note:** Ownership (who controls the token) is separate from proxy address (where transfers go). Step 8.4 filters by ownership.
+- If NAMETAG mode is TRUE: return all owned nametag tokens immediately and skip Steps 9-10
 
 **8.5) Nametag-Nostr Consistency:** (skip if NAMETAG mode is TRUE)
 - For each nametag token extracted in 8.4:
+  - Derive the **proxy address** from nametag name: `ProxyAddress.fromNameTag(nametag)`
   - Query Nostr relay(s) for existing binding: `queryPubkeyByNametag(nametag)`
-  - If binding exists AND matches current user's pubkey: no action needed
-  - If binding missing OR pubkey mismatch: publish binding via `publishNametagBinding(nametag, unicityAddress)`
+  - If binding exists AND matches proxy address: no action needed
+  - If binding missing OR address mismatch: publish binding via `publishNametagBinding(nametag, proxyAddress)`
+- **IMPORTANT:** Publish the **PROXY ADDRESS** (deterministic from nametag name), NOT the owner's address. The proxy address is where transfers to @nametag are delivered.
 - **Best-effort, non-blocking:** Nostr failures do NOT block sync completion
-- **Security note:** On-chain (aggregator) ownership is the source of truth. Nostr bindings are a routing optimization only - they tell relays where to deliver token transfer events
+- **Security note:** On-chain (aggregator) predicate ownership is the source of truth. Nostr bindings are a routing optimization only - they tell relays where to deliver token transfer events
 - **Rationale:** Nametags can exist locally/IPFS but lack Nostr registration (e.g., imported from another device, recovered from backup, or initial publish failed)
 - Track result in `SyncResult.stats.nametagsPublished` counter
 

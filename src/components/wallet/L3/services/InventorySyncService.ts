@@ -180,8 +180,8 @@ async function executeNametagSync(ctx: SyncContext, _params: SyncParams): Promis
   // Step 2: Load nametags from IPFS
   await step2_loadIpfs(ctx);
 
-  // Step 8.4: Extract nametags for current user
-  const nametags = step8_4_extractNametags(ctx);
+  // Step 8.4: Extract nametags for current user (filters for ownership)
+  const nametags = await step8_4_extractNametags(ctx);
 
   return buildNametagResult(ctx, nametags);
 }
@@ -220,6 +220,9 @@ async function executeFullSync(ctx: SyncContext, params: SyncParams): Promise<Sy
 
   // Step 8: Folder Assignment / Merge Inventory
   step8_mergeInventory(ctx);
+
+  // Step 8.4: Filter nametags for current user ownership
+  ctx.nametags = await step8_4_extractNametags(ctx);
 
   // Step 8.5: Ensure nametag bindings are registered with Nostr
   // Best-effort, non-blocking - failures don't stop sync
@@ -1091,10 +1094,63 @@ function step8_mergeInventory(ctx: SyncContext): void {
   console.log(`  Merge complete: ${ctx.tokens.size} active, ${ctx.sent.length} sent, ${ctx.invalid.length} invalid, ${ctx.outbox.length} outbox, ${boomerangTokens.length} boomerangs removed`);
 }
 
-function step8_4_extractNametags(ctx: SyncContext): NametagData[] {
+/**
+ * Step 8.4: Extract Nametags
+ *
+ * Filters nametags to only include those owned by the current user.
+ * Uses predicate ownership verification to ensure security.
+ */
+async function step8_4_extractNametags(ctx: SyncContext): Promise<NametagData[]> {
   console.log(`🏷️ [Step 8.4] Extract Nametags`);
-  // TODO: Filter nametags for current user
-  return ctx.nametags;
+
+  if (ctx.nametags.length === 0) {
+    console.log(`  No nametags to filter`);
+    return [];
+  }
+
+  const userNametags: NametagData[] = [];
+  const pubKeyBytes = Buffer.from(ctx.publicKey, 'hex');
+
+  for (const nametag of ctx.nametags) {
+    if (!nametag.token) {
+      console.warn(`  Skipping nametag ${nametag.name}: missing token data`);
+      continue;
+    }
+
+    try {
+      // Parse the token and verify ownership
+      const tokenJson = nametag.token as Record<string, unknown>;
+
+      // Check if token has state with predicate (required for ownership check)
+      const state = tokenJson.state as Record<string, unknown> | undefined;
+      if (!state || !state.predicate) {
+        console.warn(`  Skipping nametag ${nametag.name}: missing state predicate`);
+        continue;
+      }
+
+      // Use PredicateEngineService to verify ownership
+      const { PredicateEngineService } = await import(
+        '@unicitylabs/state-transition-sdk/lib/predicate/PredicateEngineService'
+      );
+      const predicate = await PredicateEngineService.createPredicate(state.predicate as Uint8Array);
+      const isOwner = await predicate.isOwner(pubKeyBytes);
+
+      if (isOwner) {
+        userNametags.push(nametag);
+        console.log(`  ✓ ${nametag.name}: owned by current user`);
+      } else {
+        console.log(`  ✗ ${nametag.name}: not owned by current user (filtered)`);
+      }
+    } catch (error) {
+      // On parse error, include the nametag but log warning
+      // This prevents data loss if token format is unexpected
+      console.warn(`  ⚠️ ${nametag.name}: ownership check failed, including anyway:`, error);
+      userNametags.push(nametag);
+    }
+  }
+
+  console.log(`  Filtered ${userNametags.length}/${ctx.nametags.length} nametags for current user`);
+  return userNametags;
 }
 
 /**
@@ -1156,20 +1212,27 @@ async function step8_5_ensureNametagNostrBinding(ctx: SyncContext): Promise<void
     }
 
     try {
+      // Derive the proxy address from nametag name
+      // IMPORTANT: Proxy address (where transfers go) is DIFFERENT from owner address (who controls token)
+      // The proxy address is deterministically derived from the nametag name itself
+      const { ProxyAddress } = await import('@unicitylabs/state-transition-sdk/lib/address/ProxyAddress');
+      const proxyAddress = await ProxyAddress.fromNameTag(cleanName);
+      const proxyAddressStr = proxyAddress.address;
+
       // Query relay for existing binding
       const existingPubkey = await nostrService.queryPubkeyByNametag(cleanName);
 
-      if (existingPubkey && existingPubkey === ctx.publicKey) {
-        // Binding exists and matches our pubkey - no action needed
-        console.log(`  ✓ ${cleanName}: binding already registered`);
+      if (existingPubkey && existingPubkey === proxyAddressStr) {
+        // Binding exists and matches proxy address - no action needed
+        console.log(`  ✓ ${cleanName}: binding already registered -> ${proxyAddressStr.slice(0, 12)}...`);
         skipped++;
         continue;
       }
 
-      // Binding missing or pubkey mismatch - publish binding
-      // Use ctx.address (nametags already filtered for current user in Step 8.4)
-      console.log(`  Publishing binding for ${cleanName} -> ${ctx.address.slice(0, 12)}...`);
-      const success = await nostrService.publishNametagBinding(cleanName, ctx.address);
+      // Binding missing or address mismatch - publish binding
+      // Publish the PROXY ADDRESS (where transfers to @nametag should go), not owner address
+      console.log(`  Publishing binding for ${cleanName} -> ${proxyAddressStr.slice(0, 12)}...`);
+      const success = await nostrService.publishNametagBinding(cleanName, proxyAddressStr);
 
       if (success) {
         console.log(`  ✓ ${cleanName}: binding published successfully`);
