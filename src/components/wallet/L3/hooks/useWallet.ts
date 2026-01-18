@@ -301,7 +301,7 @@ export const useWallet = () => {
       window.removeEventListener(SYNC_EVENTS.END, handleSyncEnd);
       if (lockTimeout) clearTimeout(lockTimeout);
     };
-  }, []);
+  }, [queryClient]);
 
   // Ensure registry is loaded before aggregating assets
   const registryQuery = useQuery({

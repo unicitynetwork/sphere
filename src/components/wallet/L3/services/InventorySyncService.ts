@@ -1821,9 +1821,18 @@ function isContentEqual(a: TxfStorageData, b: TxfStorageData): boolean {
 function buildStorageDataFromContext(ctx: SyncContext): TxfStorageData {
   // Build TxfStorageData structure
   // Note: timestamp is excluded from _meta for CID stability (same content = same CID)
+
+  // CRITICAL: Use max(localVersion, remoteVersion) + 1 for version calculation
+  // This ensures proper version progression when:
+  // 1. Recovering from IPFS after localStorage corruption (local=1, remote=5 -> new=6)
+  // 2. Normal sync progression (local=5, remote=5 -> new=6)
+  // 3. Local-only changes (local=5, remote=0 -> new=6)
+  const baseVersion = Math.max(ctx.localVersion, ctx.remoteVersion);
+  const newVersion = baseVersion + 1;
+
   const storageData: TxfStorageData = {
     _meta: {
-      version: ctx.localVersion + 1, // Increment version
+      version: newVersion,
       address: ctx.address,
       ipnsName: ctx.ipnsName,
       formatVersion: '2.0',
@@ -2454,6 +2463,9 @@ export function setNametagForAddress(address: string, nametag: NametagData): voi
     try {
       data = JSON.parse(json) as TxfStorageData;
     } catch {
+      // Parse error - create fresh structure
+      // Note: This preserves existing behavior. If corruption is a concern,
+      // the data should be recovered from IPFS on next sync.
       data = {
         _meta: {
           version: 1,
