@@ -295,8 +295,40 @@ export class IpfsHttpResolver {
 
       // Prefer routing API sequence (authoritative), gateway path content (fast)
       const sequence = routingResult?.sequence ?? 0n;
-      const cid = routingResult?.cid ?? gatewayResult?.cid ?? "unknown";
-      const content = gatewayResult?.content ?? null;
+      const authoritativeCid = routingResult?.cid ?? gatewayResult?.cid ?? "unknown";
+      let content = gatewayResult?.content ?? null;
+      let contentSource = "gateway-path";
+
+      // CRITICAL FIX: Verify gateway content matches authoritative CID
+      // Gateway path returns cached content from gateway's stale IPNS record
+      // Routing API returns authoritative seq/CID
+      // If mismatch, gateway content is stale - fetch fresh content by CID
+      if (content && routingResult?.cid && gatewayResult?.cid) {
+        // Gateway returned content with its own CID - check if it matches routing API CID
+        if (gatewayResult.cid !== routingResult.cid) {
+          console.warn(`⚠️ Gateway content CID mismatch: gateway=${gatewayResult.cid.slice(0, 16)}..., routing=${routingResult.cid.slice(0, 16)}...`);
+          console.log(`📦 Fetching fresh content by authoritative CID...`);
+
+          // Fetch content by the authoritative CID
+          for (const gateway of gateways) {
+            const freshResult = await fetchContentByCidWithVerification(routingResult.cid, gateway);
+            if (freshResult) {
+              content = freshResult.content;
+              contentSource = "cid-fetch";
+              console.log(`📦 Fetched fresh content from ${gateway}: version=${content?._meta?.version}`);
+              break;
+            }
+          }
+
+          if (contentSource !== "cid-fetch") {
+            // Couldn't fetch by CID - clear stale content to prevent using incorrect version
+            console.warn(`⚠️ Could not fetch content by CID ${routingResult.cid.slice(0, 16)}... - returning null content`);
+            content = null;
+          }
+        }
+      }
+
+      const cid = authoritativeCid;
 
       if (gatewayResult || routingResult) {
         // Store in cache with authoritative sequence
@@ -307,7 +339,7 @@ export class IpfsHttpResolver {
         });
 
         console.log(
-          `📦 IPNS resolved: ${ipnsName.slice(0, 16)}... -> seq=${sequence}, cid=${cid.slice(0, 16)}...`
+          `📦 IPNS resolved: ${ipnsName.slice(0, 16)}... -> seq=${sequence}, cid=${cid.slice(0, 16)}..., content=${contentSource}`
         );
 
         return {

@@ -413,9 +413,22 @@ export class WalletRepository {
 
         console.log(`📦 [LOAD] Parsed wallet: id=${parsed.id?.slice(0, 8)}..., tokens=${parsed.tokens?.length || 0}, archived=${Object.keys(parsed.archivedTokens || {}).length}`);
 
-        // Validate stored data structure
+        // CRITICAL FIX: Detect TxfStorageData format (used by InventorySyncService)
+        // TxfStorageData has _meta object instead of id/address/tokens
+        // DO NOT DELETE - InventorySyncService owns this data per spec Section 6.1
+        const parsedAny = parsed as unknown as Record<string, unknown>;
+        if (parsedAny._meta && typeof parsedAny._meta === 'object') {
+          console.log(`📦 [LOAD] Detected TxfStorageData format (version=${(parsedAny._meta as {version?: number}).version}) - skipping StoredWallet load`);
+          console.log(`📦 [LOAD] This is expected behavior - InventorySyncService is the authoritative storage owner`);
+          // Return null (no StoredWallet loaded) but DO NOT DELETE the TxfStorageData
+          return null;
+        }
+
+        // Validate stored data structure (legacy StoredWallet format)
         if (!parsed.id || !parsed.address || !Array.isArray(parsed.tokens)) {
           console.error(`📦 [LOAD] FAILED: Invalid wallet structure - id=${!!parsed.id}, address=${!!parsed.address}, tokens=${Array.isArray(parsed.tokens)}`);
+          // Only delete if it's neither TxfStorageData nor valid StoredWallet
+          // This handles truly corrupted data
           localStorage.removeItem(storageKey);
           return null;
         }
