@@ -1839,6 +1839,7 @@ function buildInventoryStats(ctx: SyncContext): TokenInventoryStats {
 /**
  * Get all active tokens for an address
  * Read-only query - does not trigger sync
+ * Supports both TxfStorageData format (new) and StoredWallet format (legacy)
  */
 export function getTokensForAddress(address: string): Token[] {
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
@@ -1849,11 +1850,22 @@ export function getTokensForAddress(address: string): Token[] {
     const data = JSON.parse(json) as Record<string, unknown>;
     const tokens: Token[] = [];
 
+    // Check for new TxfStorageData format (tokens stored as _<tokenId> keys)
     for (const key of Object.keys(data)) {
       if (isTokenKey(key)) {
         const txf = data[key] as TxfToken;
         const token = txfToToken(tokenIdFromKey(key), txf);
         if (token) {
+          tokens.push(token);
+        }
+      }
+    }
+
+    // If no tokens found, check for legacy StoredWallet format (tokens in array)
+    if (tokens.length === 0 && data.tokens && Array.isArray(data.tokens)) {
+      // Legacy format: { id, name, address, tokens: Token[], nametag: {...} }
+      for (const token of data.tokens as Token[]) {
+        if (token && token.id) {
           tokens.push(token);
         }
       }
@@ -1869,6 +1881,7 @@ export function getTokensForAddress(address: string): Token[] {
 /**
  * Get nametag data for an address
  * Read-only query - does not trigger sync
+ * Supports both TxfStorageData format (new) and StoredWallet format (legacy)
  */
 export function getNametagForAddress(address: string): NametagData | null {
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
@@ -1876,8 +1889,16 @@ export function getNametagForAddress(address: string): NametagData | null {
   if (!json) return null;
 
   try {
-    const data = JSON.parse(json) as TxfStorageData;
-    return data._nametag || null;
+    const data = JSON.parse(json) as Record<string, unknown>;
+    // Check new TxfStorageData format first (_nametag)
+    if (data._nametag) {
+      return data._nametag as NametagData;
+    }
+    // Fall back to legacy StoredWallet format (nametag)
+    if (data.nametag) {
+      return data.nametag as NametagData;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -1886,6 +1907,7 @@ export function getNametagForAddress(address: string): NametagData | null {
 /**
  * Get tombstones for an address
  * Read-only query - does not trigger sync
+ * Supports both TxfStorageData format (new) and StoredWallet format (legacy)
  */
 export function getTombstonesForAddress(address: string): TombstoneEntry[] {
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
@@ -1893,8 +1915,16 @@ export function getTombstonesForAddress(address: string): TombstoneEntry[] {
   if (!json) return [];
 
   try {
-    const data = JSON.parse(json) as TxfStorageData;
-    return data._tombstones || [];
+    const data = JSON.parse(json) as Record<string, unknown>;
+    // Check new TxfStorageData format first (_tombstones)
+    if (data._tombstones && Array.isArray(data._tombstones)) {
+      return data._tombstones as TombstoneEntry[];
+    }
+    // Fall back to legacy StoredWallet format (tombstones)
+    if (data.tombstones && Array.isArray(data.tombstones)) {
+      return data.tombstones as TombstoneEntry[];
+    }
+    return [];
   } catch {
     return [];
   }
@@ -1904,6 +1934,7 @@ export function getTombstonesForAddress(address: string): TombstoneEntry[] {
  * Get invalidated nametags for an address
  * These are nametags that failed Nostr validation (owned by different pubkey)
  * Read-only query - does not trigger sync
+ * Supports both TxfStorageData format (new) and StoredWallet format (legacy)
  */
 export function getInvalidatedNametagsForAddress(address: string): InvalidatedNametagEntry[] {
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
@@ -1911,8 +1942,16 @@ export function getInvalidatedNametagsForAddress(address: string): InvalidatedNa
   if (!json) return [];
 
   try {
-    const data = JSON.parse(json) as TxfStorageData;
-    return data._invalidatedNametags || [];
+    const data = JSON.parse(json) as Record<string, unknown>;
+    // Check new TxfStorageData format first (_invalidatedNametags)
+    if (data._invalidatedNametags && Array.isArray(data._invalidatedNametags)) {
+      return data._invalidatedNametags as InvalidatedNametagEntry[];
+    }
+    // Fall back to legacy StoredWallet format (invalidatedNametags)
+    if (data.invalidatedNametags && Array.isArray(data.invalidatedNametags)) {
+      return data.invalidatedNametags as InvalidatedNametagEntry[];
+    }
+    return [];
   } catch {
     return [];
   }
@@ -1955,6 +1994,7 @@ export function getVersionForAddress(address: string): number {
  * Get archived tokens for an address
  * Archived tokens are spent tokens kept for recovery purposes
  * Read-only query - does not trigger sync
+ * Supports both TxfStorageData format (new) and StoredWallet format (legacy)
  */
 export function getArchivedTokensForAddress(address: string): Map<string, TxfToken> {
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
@@ -1966,11 +2006,22 @@ export function getArchivedTokensForAddress(address: string): Map<string, TxfTok
   try {
     const data = JSON.parse(json) as Record<string, unknown>;
 
+    // Check new TxfStorageData format first (_archived_<tokenId> keys)
     for (const key of Object.keys(data)) {
       if (isArchivedKey(key)) {
         const txf = data[key] as TxfToken;
         const tokenId = tokenIdFromArchivedKey(key);
         result.set(tokenId, txf);
+      }
+    }
+
+    // If no archived tokens found, check legacy StoredWallet format (archivedTokens object)
+    if (result.size === 0 && data.archivedTokens && typeof data.archivedTokens === 'object') {
+      const legacyArchived = data.archivedTokens as Record<string, TxfToken>;
+      for (const [tokenId, txf] of Object.entries(legacyArchived)) {
+        if (txf) {
+          result.set(tokenId, txf);
+        }
       }
     }
 
