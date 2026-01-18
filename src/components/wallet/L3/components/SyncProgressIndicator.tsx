@@ -21,7 +21,7 @@ import {
   Shield,
   Search
 } from 'lucide-react';
-import type { SyncResult, SyncStatus, SyncErrorCode } from '../types/SyncTypes';
+import type { SyncResult, SyncErrorCode } from '../types/SyncTypes';
 
 interface SyncProgressIndicatorProps {
   /** Last sync result */

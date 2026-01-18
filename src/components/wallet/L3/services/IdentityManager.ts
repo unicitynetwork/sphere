@@ -26,6 +26,7 @@ export interface UserIdentity {
   mnemonic?: string;
   l1Address?: string; // Alpha L1 address (if derived from unified wallet)
   addressIndex?: number; // BIP44 address index
+  ipnsName?: string; // IPNS name derived from privateKey (for inventory sync)
 }
 
 export class IdentityManager {

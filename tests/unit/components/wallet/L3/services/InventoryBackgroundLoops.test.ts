@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Token } from "../../../../../../src/components/wallet/L3/data/model";
 import type { IdentityManager } from "../../../../../../src/components/wallet/L3/services/IdentityManager";
-import type { NostrDeliveryQueueEntry, LoopConfig } from "../../../../../../src/components/wallet/L3/services/types/QueueTypes";
+import type { NostrDeliveryQueueEntry } from "../../../../../../src/components/wallet/L3/services/types/QueueTypes";
 import { DEFAULT_LOOP_CONFIG } from "../../../../../../src/components/wallet/L3/services/types/QueueTypes";
 
 // ==========================================
@@ -275,6 +275,7 @@ describe("NostrDeliveryQueue", () => {
       };
 
       // Should not throw
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       queue.setNostrService(mockNostrService as any);
 
       queue.destroy();
@@ -345,7 +346,8 @@ describe("InventoryBackgroundLoopsManager", () => {
         "../../../../../../src/components/wallet/L3/services/InventoryBackgroundLoops"
       );
 
-      const instance1 = InventoryBackgroundLoopsManager.getInstance(mockIdentityManager);
+      // Create first instance (needed to test reset behavior)
+      InventoryBackgroundLoopsManager.getInstance(mockIdentityManager);
       InventoryBackgroundLoopsManager.resetInstance();
 
       // Should throw because instance was reset

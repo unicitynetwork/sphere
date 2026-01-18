@@ -23,7 +23,7 @@ import {
   createDefaultSyncOperationStats,
   createDefaultCircuitBreakerState
 } from '../types/SyncTypes';
-import { isTokenKey, keyFromTokenId, tokenIdFromKey } from './types/TxfTypes';
+import { isTokenKey, keyFromTokenId } from './types/TxfTypes';
 import type { TxfInclusionProof } from './types/TxfTypes';
 import { tokenToTxf, txfToToken, getCurrentStateHash } from './TxfSerializer';
 import { STORAGE_KEY_GENERATORS } from '../../../../config/storageKeys';
@@ -173,6 +173,7 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
 /**
  * Execute NAMETAG mode sync (simplified flow)
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function executeNametagSync(ctx: SyncContext, _params: SyncParams): Promise<SyncResult> {
   // Step 1: Load nametags from localStorage only
   await step1_loadLocalStorage(ctx);
@@ -533,7 +534,7 @@ function step3_normalizeProofs(ctx: SyncContext): void {
 
   let normalizedCount = 0;
 
-  for (const [_tokenId, txf] of ctx.tokens) {
+  for (const txf of ctx.tokens.values()) {
     // Normalize genesis proof
     if (txf.genesis?.inclusionProof) {
       if (normalizeInclusionProof(txf.genesis.inclusionProof)) {
@@ -1125,17 +1126,23 @@ async function step8_4_extractNametags(ctx: SyncContext): Promise<NametagData[]>
       const tokenJson = nametag.token as Record<string, unknown>;
 
       // Check if token has state with predicate (required for ownership check)
-      const state = tokenJson.state as Record<string, unknown> | undefined;
-      if (!state || !state.predicate) {
+      const stateJson = tokenJson.state as { predicate: string; data: string | null } | undefined;
+      if (!stateJson || !stateJson.predicate) {
         console.warn(`  Skipping nametag ${nametag.name}: missing state predicate`);
         continue;
       }
+
+      // Use TokenState.fromJSON to properly parse the hex-encoded CBOR predicate
+      const { TokenState } = await import(
+        '@unicitylabs/state-transition-sdk/lib/token/TokenState'
+      );
+      const tokenState = TokenState.fromJSON(stateJson);
 
       // Use PredicateEngineService to verify ownership
       const { PredicateEngineService } = await import(
         '@unicitylabs/state-transition-sdk/lib/predicate/PredicateEngineService'
       );
-      const predicate = await PredicateEngineService.createPredicate(state.predicate as Uint8Array);
+      const predicate = await PredicateEngineService.createPredicate(tokenState.predicate);
       const isOwner = await predicate.isOwner(pubKeyBytes);
 
       if (isOwner) {

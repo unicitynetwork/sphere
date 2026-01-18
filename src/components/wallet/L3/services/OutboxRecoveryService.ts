@@ -44,8 +44,6 @@ import type {
   RecoveryResult,
   RecoveryDetail,
 } from "./types/OutboxTypes";
-import type { NostrDeliveryQueueEntry } from "./types/QueueTypes";
-import { InventoryBackgroundLoopsManager } from "./InventoryBackgroundLoops";
 // Note: isMintRecoverable is available but we use getMintEntriesForRecovery() instead
 import { IpfsStorageService, SyncPriority } from "./IpfsStorageService";
 import { TokenRecoveryService } from "./TokenRecoveryService";

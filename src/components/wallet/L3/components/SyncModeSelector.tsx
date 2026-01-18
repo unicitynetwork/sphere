@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wifi, WifiOff, Cloud, CloudOff, RefreshCw, Clock, AlertTriangle, CheckCircle2, Zap } from 'lucide-react';
+import { Cloud, CloudOff, RefreshCw, Clock, AlertTriangle, Zap } from 'lucide-react';
 import type { SyncMode, CircuitBreakerState, SyncResult } from '../types/SyncTypes';
 
 interface SyncModeSelectorProps {

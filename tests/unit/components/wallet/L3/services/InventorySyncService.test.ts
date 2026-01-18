@@ -24,10 +24,6 @@ const mockPublishNametagBindingSpy = vi.fn();
 // Spy function for IPFS upload verification
 const mockIpfsUploadSpy = vi.fn();
 
-// Configurable mock for IPNS resolution failures (circuit breaker testing)
-let mockIpnsResolutionFailures = 0;
-let mockIpnsCurrentFailureCount = 0;
-
 // Mock IpfsHttpResolver with configurable response
 vi.mock("../../../../../../src/components/wallet/L3/services/IpfsHttpResolver", () => ({
   getIpfsHttpResolver: vi.fn(() => ({
@@ -290,8 +286,6 @@ const resetMocks = () => {
   mockSpentTokens = [];
   mockIpfsAvailable = false;
   mockRemoteData = null;
-  mockIpnsResolutionFailures = 0;
-  mockIpnsCurrentFailureCount = 0;
   // Reset spy call counts
   mockCheckSpentTokensSpy.mockClear();
   mockValidateAllTokensSpy.mockClear();
@@ -1892,7 +1886,7 @@ describe("inventorySync", () => {
       localStorage.setItem(storageKey, JSON.stringify(data));
 
       const params = createBaseSyncParams();
-      const result = await inventorySync(params);
+      await inventorySync(params);
 
       // Failed entry should still be in outbox for manual intervention
       const stored = getLocalStorage();
@@ -2322,7 +2316,7 @@ describe("inventorySync", () => {
       localStorage.setItem(storageKey, JSON.stringify(data));
 
       const params = createBaseSyncParams();
-      const result = await inventorySync(params);
+      await inventorySync(params);
 
       // Split group should be preserved for recovery
       const stored = getLocalStorage();

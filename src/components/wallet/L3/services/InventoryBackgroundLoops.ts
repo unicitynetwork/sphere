@@ -169,7 +169,7 @@ export class ReceiveTokensToInventoryLoop {
       batch.syncResult = result;
 
       if (result.status === 'SUCCESS' || result.status === 'PARTIAL_SUCCESS') {
-        console.log(`✅ [ReceiveLoop] FAST sync completed: ${result.stats?.tokensImported || 0} tokens imported`);
+        console.log(`✅ [ReceiveLoop] FAST sync completed: ${result.operationStats?.tokensImported || 0} tokens imported`);
 
         // Mark Nostr events as processed
         if (this.onEventProcessed) {

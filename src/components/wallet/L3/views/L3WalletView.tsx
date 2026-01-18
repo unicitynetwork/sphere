@@ -392,7 +392,7 @@ export function L3WalletView({
                 circuitBreaker={circuitBreaker ?? undefined}
                 lastSyncResult={lastSyncResult}
                 isSyncing={isSyncing}
-                onRetrySync={retryIpfsSync}
+                onRetrySync={async () => { await retryIpfsSync(); }}
                 compact={true}
               />
             )}

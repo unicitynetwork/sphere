@@ -347,7 +347,7 @@ export class TokenSplitExecutor {
     // === STEP 2: MINT SPLIT TOKENS ===
     console.log("✨ Creating split mint commitments...");
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // Type is intentionally `any[]` because mintCommitments type varies by code path
     let mintCommitments: any[];
 
     // Dev mode bypass: manually create mint commitments without SDK verification

@@ -684,13 +684,13 @@ export const useWallet = () => {
           const transferTxString = JSON.stringify(tx.toJSON());
 
           // Extract stateHash for multi-version tracking (Amendment 2)
-          const tokenJson = token.toJSON();
-          const stateHash = tokenJson.state?.stateHash || '';
+          const stateHashResult = await token.state.calculateHash();
+          const stateHash = stateHashResult.toString();
 
           const payload = JSON.stringify({
             sourceToken: sourceTokenString,
             transferTx: transferTxString,
-            tokenId: token.tokenId.toString(),
+            tokenId: token.id.toString(),
             stateHash,
           });
 
