@@ -13,6 +13,10 @@ let mockSpentTokens: Array<{ tokenId: string; stateHash: string; localId: string
 let mockIpfsAvailable = false;
 let mockRemoteData: TxfStorageData | null = null;
 
+// Spy functions for verifying calls
+const mockCheckSpentTokensSpy = vi.fn();
+const mockValidateAllTokensSpy = vi.fn();
+
 // Mock IpfsHttpResolver with configurable response
 vi.mock("../../../../../../src/components/wallet/L3/services/IpfsHttpResolver", () => ({
   getIpfsHttpResolver: vi.fn(() => ({
@@ -37,6 +41,7 @@ vi.mock("../../../../../../src/components/wallet/L3/services/IpfsHttpResolver", 
 vi.mock("../../../../../../src/components/wallet/L3/services/TokenValidationService", () => ({
   getTokenValidationService: vi.fn(() => ({
     validateAllTokens: vi.fn().mockImplementation(async (tokens: Token[]) => {
+      mockValidateAllTokensSpy(tokens);
       // Return the configurable mock result
       return {
         valid: mockValidationResult.valid,
@@ -50,6 +55,7 @@ vi.mock("../../../../../../src/components/wallet/L3/services/TokenValidationServ
       };
     }),
     checkSpentTokens: vi.fn().mockImplementation(async () => {
+      mockCheckSpentTokensSpy();
       return {
         spentTokens: mockSpentTokens,
         errors: [],
@@ -267,6 +273,9 @@ const resetMocks = () => {
   mockSpentTokens = [];
   mockIpfsAvailable = false;
   mockRemoteData = null;
+  // Reset spy call counts
+  mockCheckSpentTokensSpy.mockClear();
+  mockValidateAllTokensSpy.mockClear();
 };
 
 // ==========================================
@@ -567,6 +576,21 @@ describe("inventorySync", () => {
       expect((stored?._sent?.[0] as SentTokenEntry)?.spentAt).toBeGreaterThan(0);
     });
 
+    it("should call checkSpentTokens in NORMAL mode", async () => {
+      mockSpentTokens = [];  // No spent tokens, but we want to verify the function is called
+
+      setLocalStorage(createMockStorageData({
+        "normal1": createMockTxfToken("normal1"),
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      expect(result.syncMode).toBe("NORMAL");
+      // CRITICAL: Verify checkSpentTokens WAS called in NORMAL mode
+      expect(mockCheckSpentTokensSpy).toHaveBeenCalled();
+    });
+
     it("should add tombstone when token is detected as spent", async () => {
       const spentTokenId = "tomb1".padEnd(64, "0");
       const spentStateHash = "0000" + "a".repeat(60);
@@ -610,6 +634,8 @@ describe("inventorySync", () => {
       // Even though mock would report spent, FAST mode skips Step 7
       // So sentTokens should be 0 (unless there were pre-existing sent tokens)
       expect(result.inventoryStats?.sentTokens).toBe(0);
+      // CRITICAL: Verify checkSpentTokens was NOT called in FAST mode
+      expect(mockCheckSpentTokensSpy).not.toHaveBeenCalled();
     });
 
     it("should skip spent detection in LOCAL mode", async () => {
@@ -634,6 +660,28 @@ describe("inventorySync", () => {
       // LOCAL mode skips Step 7, token should remain active
       expect(result.inventoryStats?.activeTokens).toBe(1);
       expect(result.inventoryStats?.sentTokens).toBe(0);
+      // CRITICAL: Verify checkSpentTokens was NOT called in LOCAL mode
+      expect(mockCheckSpentTokensSpy).not.toHaveBeenCalled();
+    });
+
+    it("should skip spent detection in NAMETAG mode", async () => {
+      mockSpentTokens = [{
+        tokenId: "nametag1".padEnd(64, "0"),
+        stateHash: "0000" + "a".repeat(60),
+        localId: "nametag1",
+      }];
+
+      const params: SyncParams = {
+        ...createBaseSyncParams(),
+        nametag: true,
+      };
+
+      const result = await inventorySync(params);
+
+      expect(result.syncMode).toBe("NAMETAG");
+      // NAMETAG mode only fetches nametags, skips Step 7
+      // CRITICAL: Verify checkSpentTokens was NOT called in NAMETAG mode
+      expect(mockCheckSpentTokensSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -1028,6 +1076,403 @@ describe("inventorySync", () => {
 
       // Should still have only 1 token (deduplicated)
       expect(result.inventoryStats?.activeTokens).toBe(1);
+
+      // Verify only one token key in localStorage
+      const stored = getLocalStorage();
+      const tokenKeys = Object.keys(stored || {}).filter(k =>
+        k.startsWith("_") &&
+        !k.startsWith("_meta") &&
+        !k.startsWith("_sent") &&
+        !k.startsWith("_invalid") &&
+        !k.startsWith("_outbox") &&
+        !k.startsWith("_tombstones") &&
+        !k.startsWith("_nametag")
+      );
+      expect(tokenKeys.length).toBe(1);
+    });
+  });
+
+  // ------------------------------------------
+  // Step 4: State Hash Chain Validation Tests
+  // ------------------------------------------
+
+  describe("Step 4: State Hash Chain Validation", () => {
+    // Helper to create token with broken chain
+    const createBrokenChainToken = (tokenId: string, breakType: "wrong_previous" | "missing_previous"): TxfToken => {
+      const genesisStateHash = DEFAULT_STATE_HASH;
+      const wrongPreviousHash = "0000" + "f".repeat(60); // Doesn't match genesis
+
+      const token: TxfToken = {
+        version: "2.0",
+        genesis: {
+          data: {
+            tokenId: tokenId.padEnd(64, "0"),
+            coinId: "ALPHA",
+            coinData: [["ALPHA", "1000"]],
+          },
+          inclusionProof: {
+            authenticator: { stateHash: genesisStateHash },
+            merkleTreePath: { root: "0000" + "b".repeat(60), path: [] },
+            transactionHash: "0000" + "c".repeat(60),
+          },
+        },
+        state: { data: "", predicate: new Uint8Array([1, 2, 3]) },
+        transactions: [{
+          data: { recipient: "recipient0" },
+          // Break the chain based on breakType
+          ...(breakType === "wrong_previous" ? { previousStateHash: wrongPreviousHash } : {}),
+          // missing_previous: no previousStateHash at all
+          newStateHash: "0000" + "1".repeat(60),
+          inclusionProof: {
+            authenticator: { stateHash: "0000" + "1".repeat(60) },
+            merkleTreePath: { root: "0000" + "b".repeat(60), path: [] },
+            transactionHash: "0000" + "d".repeat(60),
+          },
+        }],
+        _integrity: {
+          currentStateHash: "0000" + "1".repeat(60),
+          genesisDataJSONHash: "0000" + "e".repeat(60),
+        },
+      } as TxfToken;
+
+      return token;
+    };
+
+    it("should reject token with wrong previousStateHash (chain break)", async () => {
+      setLocalStorage(createMockStorageData({
+        "broken1": createBrokenChainToken("broken1", "wrong_previous"),
+        "valid1": createMockTxfToken("valid1"),
+      }));
+
+      const params: SyncParams = {
+        ...createBaseSyncParams(),
+        local: true,
+      };
+
+      const result = await inventorySync(params);
+
+      // Broken token should be moved to Invalid, valid token stays active
+      expect(result.inventoryStats?.invalidTokens).toBe(1);
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+      expect(result.operationStats.tokensRemoved).toBeGreaterThanOrEqual(1);
+
+      // Verify invalid entry has correct reason
+      const stored = getLocalStorage();
+      expect(stored?._invalid?.length).toBe(1);
+      const invalidEntry = stored?._invalid?.[0] as InvalidTokenEntry;
+      expect(invalidEntry.reason).toBe("PROOF_MISMATCH");
+      expect(invalidEntry.details).toContain("Chain break");
+    });
+
+    it("should reject token with missing previousStateHash", async () => {
+      setLocalStorage(createMockStorageData({
+        "broken2": createBrokenChainToken("broken2", "missing_previous"),
+      }));
+
+      const params: SyncParams = {
+        ...createBaseSyncParams(),
+        local: true,
+      };
+
+      const result = await inventorySync(params);
+
+      // Token should be invalidated
+      expect(result.inventoryStats?.invalidTokens).toBe(1);
+      expect(result.inventoryStats?.activeTokens).toBe(0);
+
+      // Verify reason mentions missing previousStateHash
+      const stored = getLocalStorage();
+      expect(stored?._invalid?.length).toBe(1);
+      const invalidEntry = stored?._invalid?.[0] as InvalidTokenEntry;
+      expect(invalidEntry.reason).toBe("PROOF_MISMATCH");
+      expect(invalidEntry.details).toContain("previousStateHash");
+    });
+  });
+
+  // ------------------------------------------
+  // CompletedList Edge Cases
+  // ------------------------------------------
+
+  describe("CompletedList Edge Cases", () => {
+    it("should NOT move token to Sent when stateHash doesn't match", async () => {
+      const tokenId = "mismatch1".padEnd(64, "0");
+      const wrongStateHash = "0000" + "f".repeat(60); // Doesn't match token's stateHash
+
+      const completedList: CompletedTransfer[] = [{
+        tokenId,
+        stateHash: wrongStateHash, // Wrong hash!
+        inclusionProof: {},
+      }];
+
+      setLocalStorage(createMockStorageData({
+        "mismatch1": createMockTxfToken("mismatch1"),
+      }));
+
+      const params: SyncParams = {
+        ...createBaseSyncParams(),
+        completedList,
+      };
+
+      const result = await inventorySync(params);
+
+      // Token should remain active, not moved to sent
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+      expect(result.inventoryStats?.sentTokens).toBe(0);
+      expect(result.operationStats.tombstonesAdded).toBe(0);
+    });
+
+    it("should handle completedList for token not in inventory", async () => {
+      const completedList: CompletedTransfer[] = [{
+        tokenId: "nonexistent".padEnd(64, "0"),
+        stateHash: DEFAULT_STATE_HASH,
+        inclusionProof: {},
+      }];
+
+      setLocalStorage(createMockStorageData({
+        "existing1": createMockTxfToken("existing1"),
+      }));
+
+      const params: SyncParams = {
+        ...createBaseSyncParams(),
+        completedList,
+      };
+
+      const result = await inventorySync(params);
+
+      // Existing token should remain, no errors
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+      expect(result.inventoryStats?.sentTokens).toBe(0);
+    });
+  });
+
+  // ------------------------------------------
+  // Invalid Folder Merge Tests
+  // ------------------------------------------
+
+  describe("Invalid Folder Merge (Step 2)", () => {
+    it("should merge invalid folder from remote using tokenId:stateHash key", async () => {
+      // Local has one invalid token
+      const localStorageData = createMockStorageData();
+      localStorageData._invalid = [{
+        token: createMockTxfToken("invalid1"),
+        timestamp: Date.now() - 10000,
+        invalidatedAt: Date.now() - 10000,
+        reason: "SDK_VALIDATION" as const,
+        details: "Local validation error",
+      }];
+      setLocalStorage(localStorageData);
+
+      // Remote has different invalid token
+      mockIpfsAvailable = true;
+      const remoteData = createMockStorageData();
+      remoteData._invalid = [{
+        token: createMockTxfToken("invalid2"),
+        timestamp: Date.now() - 5000,
+        invalidatedAt: Date.now() - 5000,
+        reason: "PROOF_MISMATCH" as const,
+        details: "Remote validation error",
+      }];
+      mockRemoteData = remoteData;
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Should have both invalid tokens (union merge)
+      expect(result.inventoryStats?.invalidTokens).toBe(2);
+
+      // Verify both are in localStorage
+      const stored = getLocalStorage();
+      expect(stored?._invalid?.length).toBe(2);
+    });
+
+    it("should not duplicate invalid entries with same tokenId:stateHash", async () => {
+      const sameToken = createMockTxfToken("dup_invalid");
+
+      // Local has invalid token
+      const localStorageData = createMockStorageData();
+      localStorageData._invalid = [{
+        token: sameToken,
+        timestamp: Date.now() - 10000,
+        invalidatedAt: Date.now() - 10000,
+        reason: "SDK_VALIDATION" as const,
+        details: "Original error",
+      }];
+      setLocalStorage(localStorageData);
+
+      // Remote has same invalid token (same tokenId and stateHash)
+      mockIpfsAvailable = true;
+      const remoteData = createMockStorageData();
+      remoteData._invalid = [{
+        token: sameToken, // Same token!
+        timestamp: Date.now() - 5000,
+        invalidatedAt: Date.now() - 5000,
+        reason: "SDK_VALIDATION" as const,
+        details: "Duplicate error",
+      }];
+      mockRemoteData = remoteData;
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Should have only 1 invalid token (deduplicated by tokenId:stateHash)
+      expect(result.inventoryStats?.invalidTokens).toBe(1);
+    });
+  });
+
+  // ------------------------------------------
+  // Boomerang Token Detection Tests (Step 8.2)
+  // ------------------------------------------
+
+  describe("Boomerang Token Detection (Step 8.2)", () => {
+    it("should detect and remove outbox entry when token returns at different state", async () => {
+      const tokenId = "boomerang1".padEnd(64, "0");
+      const originalStateHash = DEFAULT_STATE_HASH;
+
+      // Create token that "returned" with different state (has 1 transaction, so state changed)
+      const returnedToken = createMockTxfToken("boomerang1", "1000", 1);
+
+      // Local storage with outbox entry pointing to this token's original state
+      // The boomerang detection reads previousStateHash from commitmentJson
+      const localStorageData = createMockStorageData({
+        "boomerang1": returnedToken,
+      });
+      localStorageData._outbox = [{
+        id: "outbox-1",
+        sourceTokenId: tokenId,
+        tokenId: tokenId,
+        status: "PENDING_NOSTR" as const,
+        createdAt: Date.now() - 60000,
+        updatedAt: Date.now() - 60000,
+        retryCount: 0,
+        recipientAddress: "DIRECT://recipient",
+        // Boomerang detection reads from commitmentJson.transactionData.previousStateHash
+        commitmentJson: JSON.stringify({
+          transactionData: {
+            previousStateHash: originalStateHash, // Original state when we sent it
+          },
+        }),
+      }] as OutboxEntry[];
+      setLocalStorage(localStorageData);
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Token should still be active (it's ours now)
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+
+      // Outbox entry should be removed (boomerang detected)
+      // Check inventoryStats which reports actual outbox count
+      expect(result.inventoryStats?.outboxTokens).toBe(0);
+
+      // Also verify localStorage - _outbox may be undefined or empty array
+      const stored = getLocalStorage();
+      expect(stored?._outbox?.length ?? 0).toBe(0);
+    });
+
+    it("should keep outbox entry when token state matches (send still pending)", async () => {
+      const tokenId = "pending1".padEnd(64, "0");
+
+      // Token still at original state (send didn't happen yet)
+      const localStorageData = createMockStorageData({
+        "pending1": createMockTxfToken("pending1"),
+      });
+      localStorageData._outbox = [{
+        id: "outbox-2",
+        sourceTokenId: tokenId,
+        tokenId: tokenId,
+        status: "PENDING_NOSTR" as const,
+        createdAt: Date.now() - 60000,
+        updatedAt: Date.now() - 60000,
+        retryCount: 0,
+        recipientAddress: "DIRECT://recipient",
+        // commitmentJson with same previousStateHash as current state
+        commitmentJson: JSON.stringify({
+          transactionData: {
+            previousStateHash: DEFAULT_STATE_HASH, // Same as current state
+          },
+        }),
+      }] as OutboxEntry[];
+      setLocalStorage(localStorageData);
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Token still active
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+
+      // Outbox entry should remain (not a boomerang - send pending)
+      // Check via inventoryStats
+      expect(result.inventoryStats?.outboxTokens).toBe(1);
+
+      // Also verify localStorage
+      const stored = getLocalStorage();
+      expect(stored?._outbox?.length ?? 0).toBe(1);
+    });
+  });
+
+  // ------------------------------------------
+  // Strengthened Deduplication Tests
+  // ------------------------------------------
+
+  describe("Deduplication Verification", () => {
+    it("should keep remote token with correct genesis hash after deduplication", async () => {
+      const localToken = createMockTxfToken("dedup1", "1000", 0);
+      const remoteToken = createMockTxfToken("dedup1", "1000", 2);
+
+      // Mark remote token with distinguishing feature
+      const remoteGenesisHash = "0000" + "remote".padEnd(58, "0");
+      remoteToken._integrity = {
+        currentStateHash: remoteToken._integrity?.currentStateHash || DEFAULT_STATE_HASH,
+        genesisDataJSONHash: remoteGenesisHash, // Unique marker
+      };
+
+      setLocalStorage(createMockStorageData({ "dedup1": localToken }));
+
+      mockIpfsAvailable = true;
+      mockRemoteData = createMockStorageData({ "dedup1": remoteToken });
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+
+      // Verify the REMOTE token was kept (has 2 transactions and unique genesisDataJSONHash)
+      const stored = getLocalStorage();
+      const tokenKey = Object.keys(stored || {}).find(k => k.includes("dedup1"));
+      const keptToken = stored?.[tokenKey!] as TxfToken;
+
+      expect(keptToken.transactions?.length).toBe(2);
+      expect(keptToken._integrity?.genesisDataJSONHash).toBe(remoteGenesisHash);
+    });
+
+    it("should keep local token with correct data when it has more transactions", async () => {
+      const localToken = createMockTxfToken("dedup2", "1000", 3);
+      const remoteToken = createMockTxfToken("dedup2", "1000", 1);
+
+      // Mark local token with distinguishing feature
+      const localGenesisHash = "0000" + "local0".padEnd(58, "0");
+      localToken._integrity = {
+        currentStateHash: localToken._integrity?.currentStateHash || DEFAULT_STATE_HASH,
+        genesisDataJSONHash: localGenesisHash, // Unique marker
+      };
+
+      setLocalStorage(createMockStorageData({ "dedup2": localToken }));
+
+      mockIpfsAvailable = true;
+      mockRemoteData = createMockStorageData({ "dedup2": remoteToken });
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+
+      // Verify the LOCAL token was kept (has 3 transactions and unique genesisDataJSONHash)
+      const stored = getLocalStorage();
+      const tokenKey = Object.keys(stored || {}).find(k => k.includes("dedup2"));
+      const keptToken = stored?.[tokenKey!] as TxfToken;
+
+      expect(keptToken.transactions?.length).toBe(3);
+      expect(keptToken._integrity?.genesisDataJSONHash).toBe(localGenesisHash);
     });
   });
 });

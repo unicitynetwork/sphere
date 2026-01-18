@@ -129,16 +129,28 @@ const DEFAULT_STATE_HASH = "0000" + "a".repeat(60);
 
 const createMockTxfToken = (tokenId: string, amount = "1000", txCount = 0): TxfToken => {
   const transactions = [];
+
+  // Build proper state hash chain for transactions
+  // First tx links to genesis, subsequent txs link to previous
+  let prevStateHash = DEFAULT_STATE_HASH; // Genesis stateHash
+
   for (let i = 0; i < txCount; i++) {
+    const newStateHash = "0000" + (i + 1).toString().padStart(4, "0").padEnd(60, "0");
     transactions.push({
       data: { recipient: "recipient" + i },
+      previousStateHash: prevStateHash,
+      newStateHash: newStateHash,
       inclusionProof: {
-        authenticator: { stateHash: "0000" + (i + 1).toString().padEnd(60, "0") },
+        authenticator: { stateHash: newStateHash },
         merkleTreePath: { root: "0000" + "b".repeat(60), path: [] },
         transactionHash: "0000" + "d".repeat(60),
       },
     });
+    prevStateHash = newStateHash;
   }
+
+  // Current stateHash is the last tx's newStateHash, or genesis if no txs
+  const currentStateHash = txCount > 0 ? prevStateHash : DEFAULT_STATE_HASH;
 
   return {
     version: "2.0",
@@ -156,9 +168,9 @@ const createMockTxfToken = (tokenId: string, amount = "1000", txCount = 0): TxfT
     },
     state: { data: "", predicate: new Uint8Array([1, 2, 3]) },
     transactions,
-    // Add _integrity with currentStateHash for genesis-only tokens
+    // Add _integrity with currentStateHash
     _integrity: {
-      currentStateHash: DEFAULT_STATE_HASH,
+      currentStateHash: currentStateHash,
       genesisDataJSONHash: "0000" + "e".repeat(60),
     },
   } as TxfToken;
