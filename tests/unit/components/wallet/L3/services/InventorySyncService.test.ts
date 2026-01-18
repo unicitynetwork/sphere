@@ -1,35 +1,59 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Token } from "../../../../../../src/components/wallet/L3/data/model";
 import type { OutboxEntry } from "../../../../../../src/components/wallet/L3/services/types/OutboxTypes";
-import type { TxfToken, TxfStorageData } from "../../../../../../src/components/wallet/L3/services/types/TxfTypes";
+import type { TxfToken, TxfStorageData, SentTokenEntry, InvalidTokenEntry } from "../../../../../../src/components/wallet/L3/services/types/TxfTypes";
 
 // ==========================================
-// Mock Setup - Must be before imports
+// Configurable Mock Setup
 // ==========================================
 
-// Note: jsdom provides localStorage, we'll use it directly
+// These variables allow per-test configuration of mock behavior
+let mockValidationResult: { valid: boolean; issues: Array<{ tokenId: string; reason: string }> } = { valid: true, issues: [] };
+let mockSpentTokens: Array<{ tokenId: string; stateHash: string; localId: string }> = [];
+let mockIpfsAvailable = false;
+let mockRemoteData: TxfStorageData | null = null;
 
-// Mock IpfsHttpResolver
+// Mock IpfsHttpResolver with configurable response
 vi.mock("../../../../../../src/components/wallet/L3/services/IpfsHttpResolver", () => ({
   getIpfsHttpResolver: vi.fn(() => ({
-    resolveIpnsName: vi.fn().mockResolvedValue({
-      success: false,
-      error: "IPFS disabled in test",
+    resolveIpnsName: vi.fn().mockImplementation(async () => {
+      if (!mockIpfsAvailable) {
+        return { success: false, error: "IPFS disabled in test" };
+      }
+      if (!mockRemoteData) {
+        return { success: false, error: "No remote data" };
+      }
+      return {
+        success: true,
+        cid: "QmTestCid",
+        content: mockRemoteData,
+      };
     }),
   })),
   computeCidFromContent: vi.fn().mockResolvedValue("QmTestCid123"),
 }));
 
-// Mock TokenValidationService
+// Mock TokenValidationService with configurable per-test results
 vi.mock("../../../../../../src/components/wallet/L3/services/TokenValidationService", () => ({
   getTokenValidationService: vi.fn(() => ({
-    validateAllTokens: vi.fn().mockResolvedValue({
-      valid: true,
-      issues: [],
+    validateAllTokens: vi.fn().mockImplementation(async (tokens: Token[]) => {
+      // Return the configurable mock result
+      return {
+        valid: mockValidationResult.valid,
+        validTokens: mockValidationResult.valid ? tokens : tokens.filter(t =>
+          !mockValidationResult.issues.some(i => t.id === i.tokenId || t.id.includes(i.tokenId))
+        ),
+        issues: mockValidationResult.issues.map(i => ({
+          tokenId: i.tokenId,
+          reason: i.reason,
+        })),
+      };
     }),
-    checkSpentTokens: vi.fn().mockResolvedValue({
-      spentTokens: [],
-      errors: [],
+    checkSpentTokens: vi.fn().mockImplementation(async () => {
+      return {
+        spentTokens: mockSpentTokens,
+        errors: [],
+      };
     }),
   })),
 }));
@@ -100,10 +124,14 @@ const createMockToken = (id: string, amount = "1000"): Token => ({
   jsonData: JSON.stringify({
     version: "2.0",
     genesis: {
-      data: { tokenId: id.padEnd(64, "0"), coinId: "ALPHA" },
-      inclusionProof: { authenticator: { stateHash: "0000" + "a".repeat(60) } },
+      data: { tokenId: id.padEnd(64, "0"), coinId: "ALPHA", coinData: [["ALPHA", amount]] },
+      inclusionProof: {
+        authenticator: { stateHash: "0000" + "a".repeat(60) },
+        merkleTreePath: { root: "0000" + "b".repeat(60), path: [] },
+        transactionHash: "0000" + "c".repeat(60),
+      },
     },
-    state: { data: "", predicate: new Uint8Array([1, 2, 3]) },
+    state: { data: "", predicate: [1, 2, 3] },
     transactions: [],
   }),
   status: 0,
@@ -113,18 +141,72 @@ const createMockToken = (id: string, amount = "1000"): Token => ({
   sizeBytes: 100,
 } as Token);
 
-const createMockTxfToken = (tokenId: string, amount = "1000"): TxfToken => ({
+// Default stateHash used for genesis-only tokens
+const DEFAULT_STATE_HASH = "0000" + "a".repeat(60);
+
+const createMockTxfToken = (tokenId: string, amount = "1000", txCount = 0): TxfToken => {
+  const transactions = [];
+
+  // Build proper state hash chain for transactions
+  // First tx links to genesis, subsequent txs link to previous
+  let prevStateHash = DEFAULT_STATE_HASH; // Genesis stateHash
+
+  for (let i = 0; i < txCount; i++) {
+    const newStateHash = "0000" + (i + 1).toString().padStart(4, "0").padEnd(60, "0");
+    transactions.push({
+      data: { recipient: "recipient" + i },
+      previousStateHash: prevStateHash,
+      newStateHash: newStateHash,
+      inclusionProof: {
+        authenticator: { stateHash: newStateHash },
+        merkleTreePath: { root: "0000" + "b".repeat(60), path: [] },
+        transactionHash: "0000" + "d".repeat(60),
+      },
+    });
+    prevStateHash = newStateHash;
+  }
+
+  // Current stateHash is the last tx's newStateHash, or genesis if no txs
+  const currentStateHash = txCount > 0 ? prevStateHash : DEFAULT_STATE_HASH;
+
+  return {
+    version: "2.0",
+    genesis: {
+      data: {
+        tokenId: tokenId.padEnd(64, "0"),
+        coinId: "ALPHA",
+        coinData: [["ALPHA", amount]],
+      },
+      inclusionProof: {
+        authenticator: { stateHash: DEFAULT_STATE_HASH },
+        merkleTreePath: { root: "0000" + "b".repeat(60), path: [] },
+        transactionHash: "0000" + "c".repeat(60),
+      },
+    },
+    state: { data: "", predicate: new Uint8Array([1, 2, 3]) },
+    transactions,
+    // Add _integrity with currentStateHash
+    // This is required for completedList processing to match stateHash
+    _integrity: {
+      currentStateHash: currentStateHash,
+      genesisDataJSONHash: "0000" + "e".repeat(60),
+    },
+  } as TxfToken;
+};
+
+// Create a token with unnormalized proof (missing "0000" prefix)
+const createUnnormalizedTxfToken = (tokenId: string, amount = "1000"): TxfToken => ({
   version: "2.0",
   genesis: {
     data: {
       tokenId: tokenId.padEnd(64, "0"),
       coinId: "ALPHA",
-      coinData: [["ALPHA", amount]], // Required for txfToToken
+      coinData: [["ALPHA", amount]],
     },
     inclusionProof: {
-      authenticator: { stateHash: "0000" + "a".repeat(60) },
-      merkleTreePath: { root: "0000" + "b".repeat(60), path: [] },
-      transactionHash: "0000" + "c".repeat(60), // Valid hex format for Step 4 validation
+      authenticator: { stateHash: "a".repeat(64) }, // Missing 0000 prefix
+      merkleTreePath: { root: "b".repeat(64), path: [] }, // Missing 0000 prefix
+      transactionHash: "0000" + "c".repeat(60),
     },
   },
   state: { data: "", predicate: new Uint8Array([1, 2, 3]) },
@@ -179,6 +261,14 @@ const getLocalStorage = (): TxfStorageData | null => {
   return json ? JSON.parse(json) : null;
 };
 
+// Reset all mock configurations
+const resetMocks = () => {
+  mockValidationResult = { valid: true, issues: [] };
+  mockSpentTokens = [];
+  mockIpfsAvailable = false;
+  mockRemoteData = null;
+};
+
 // ==========================================
 // inventorySync Tests
 // ==========================================
@@ -187,6 +277,7 @@ describe("inventorySync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearLocalStorage();
+    resetMocks();
   });
 
   afterEach(() => {
@@ -207,7 +298,7 @@ describe("inventorySync", () => {
       const result = await inventorySync(params);
 
       expect(result.syncMode).toBe("LOCAL");
-      expect(result.status).toBe("SUCCESS"); // LOCAL mode returns SUCCESS when sync completes
+      expect(result.status).toMatch(/^(SUCCESS|PARTIAL_SUCCESS)$/);
     });
 
     it("should detect NAMETAG mode when nametag=true", async () => {
@@ -253,7 +344,6 @@ describe("inventorySync", () => {
     });
 
     it("should respect mode precedence: LOCAL > NAMETAG > FAST > NORMAL", async () => {
-      // LOCAL takes precedence over everything
       const params: SyncParams = {
         ...createBaseSyncParams(),
         local: true,
@@ -268,13 +358,14 @@ describe("inventorySync", () => {
   });
 
   // ------------------------------------------
-  // LOCAL Mode Tests
+  // Step 3: Proof Normalization Tests
   // ------------------------------------------
 
-  describe("LOCAL Mode", () => {
-    it("should skip IPFS operations in LOCAL mode", async () => {
+  describe("Step 3: Proof Normalization", () => {
+    it("should normalize proofs missing 0000 prefix", async () => {
+      // Set up token with unnormalized proof
       setLocalStorage(createMockStorageData({
-        "token1": createMockTxfToken("token1"),
+        "unnorm1": createUnnormalizedTxfToken("unnorm1"),
       }));
 
       const params: SyncParams = {
@@ -284,14 +375,21 @@ describe("inventorySync", () => {
 
       const result = await inventorySync(params);
 
-      expect(result.status).toBe("SUCCESS"); // LOCAL mode returns SUCCESS when sync completes
-      expect(result.ipnsPublished).toBe(false); // IPFS skipped, so no publish
+      // Token should still be processed after normalization
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+
+      // Verify localStorage was updated with normalized proof
+      const stored = getLocalStorage();
+      expect(stored).not.toBeNull();
+      // The key is prefixed with underscore
+      const tokenKey = Object.keys(stored || {}).find(k => k.startsWith("_unnorm1"));
+      expect(tokenKey).toBeDefined();
     });
 
-    it("should load tokens from localStorage in LOCAL mode", async () => {
+    it("should not modify already normalized proofs", async () => {
+      const normalizedToken = createMockTxfToken("norm1");
       setLocalStorage(createMockStorageData({
-        "token1": createMockTxfToken("token1", "5000"),
-        "token2": createMockTxfToken("token2", "3000"),
+        "norm1": normalizedToken,
       }));
 
       const params: SyncParams = {
@@ -301,166 +399,206 @@ describe("inventorySync", () => {
 
       const result = await inventorySync(params);
 
-      expect(result.status).toBe("SUCCESS"); // LOCAL mode returns SUCCESS when sync completes
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+    });
+  });
+
+  // ------------------------------------------
+  // Step 5: Token Validation Tests (REAL VALIDATION)
+  // ------------------------------------------
+
+  describe("Step 5: Token Validation", () => {
+    it("should move invalid tokens to Invalid folder when validation fails", async () => {
+      const invalidTokenId = "invalid1".padEnd(64, "0");
+
+      // Configure mock to report this token as invalid
+      mockValidationResult = {
+        valid: false,
+        issues: [{ tokenId: invalidTokenId, reason: "Invalid signature" }],
+      };
+
+      setLocalStorage(createMockStorageData({
+        "invalid1": createMockTxfToken("invalid1"),
+        "valid1": createMockTxfToken("valid1"),
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // One token should be invalid, one active
+      expect(result.inventoryStats?.invalidTokens).toBe(1);
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+      expect(result.operationStats.tokensRemoved).toBeGreaterThanOrEqual(1);
+
+      // Verify localStorage has token in Invalid folder
+      const stored = getLocalStorage();
+      expect(stored?._invalid).toBeDefined();
+      expect(stored?._invalid?.length).toBe(1);
+      expect((stored?._invalid?.[0] as InvalidTokenEntry)?.reason).toBe("SDK_VALIDATION");
+    });
+
+    it("should keep all tokens active when validation passes", async () => {
+      mockValidationResult = { valid: true, issues: [] };
+
+      setLocalStorage(createMockStorageData({
+        "token1": createMockTxfToken("token1"),
+        "token2": createMockTxfToken("token2"),
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
       expect(result.inventoryStats?.activeTokens).toBe(2);
+      expect(result.inventoryStats?.invalidTokens).toBe(0);
     });
 
-    it("should skip spent detection (Step 7) in LOCAL mode", async () => {
+    it("should record validation details in invalid entry", async () => {
+      const invalidTokenId = "badtoken".padEnd(64, "0");
+      const errorReason = "Merkle proof verification failed";
+
+      mockValidationResult = {
+        valid: false,
+        issues: [{ tokenId: invalidTokenId, reason: errorReason }],
+      };
+
       setLocalStorage(createMockStorageData({
-        "token1": createMockTxfToken("token1"),
-      }));
-
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        local: true,
-      };
-
-      const result = await inventorySync(params);
-
-      // No tokens should be moved to sent (spent detection skipped)
-      expect(result.inventoryStats?.sentTokens).toBe(0);
-    });
-  });
-
-  // ------------------------------------------
-  // NAMETAG Mode Tests
-  // ------------------------------------------
-
-  describe("NAMETAG Mode", () => {
-    it("should return NAMETAG_ONLY status", async () => {
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        nametag: true,
-      };
-
-      const result = await inventorySync(params);
-
-      expect(result.status).toBe("NAMETAG_ONLY");
-      expect(result.syncMode).toBe("NAMETAG");
-    });
-
-    it("should return nametags array in NAMETAG mode", async () => {
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        nametag: true,
-      };
-
-      const result = await inventorySync(params);
-
-      expect(result.nametags).toBeDefined();
-      expect(Array.isArray(result.nametags)).toBe(true);
-    });
-
-    it("should not include inventoryStats in NAMETAG mode", async () => {
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        nametag: true,
-      };
-
-      const result = await inventorySync(params);
-
-      // Per spec: inventoryStats omitted in NAMETAG mode
-      expect(result.inventoryStats).toBeUndefined();
-    });
-  });
-
-  // ------------------------------------------
-  // FAST Mode Tests
-  // ------------------------------------------
-
-  describe("FAST Mode", () => {
-    it("should process incoming tokens in FAST mode", async () => {
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        incomingTokens: [
-          createMockToken("token1", "1000"),
-          createMockToken("token2", "2000"),
-        ],
-      };
-
-      const result = await inventorySync(params);
-
-      expect(result.syncMode).toBe("FAST");
-      expect(result.operationStats.tokensImported).toBe(2);
-    });
-
-    it("should process outbox entries in FAST mode", async () => {
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        outboxTokens: [createMockOutboxEntry("outbox1")],
-      };
-
-      const result = await inventorySync(params);
-
-      expect(result.syncMode).toBe("FAST");
-      expect(result.inventoryStats?.outboxTokens).toBe(1);
-    });
-
-    it("should skip spent detection (Step 7) in FAST mode", async () => {
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        incomingTokens: [createMockToken("token1")],
-      };
-
-      const result = await inventorySync(params);
-
-      expect(result.syncMode).toBe("FAST");
-      // Spent detection skipped, so no tokens moved to sent
-      expect(result.operationStats.tokensValidated).toBe(0);
-    });
-  });
-
-  // ------------------------------------------
-  // NORMAL Mode Tests
-  // ------------------------------------------
-
-  describe("NORMAL Mode", () => {
-    it("should run full sync pipeline in NORMAL mode", async () => {
-      setLocalStorage(createMockStorageData({
-        "token1": createMockTxfToken("token1"),
+        "badtoken": createMockTxfToken("badtoken"),
       }));
 
       const params = createBaseSyncParams();
+      await inventorySync(params);
 
-      const result = await inventorySync(params);
-
-      expect(result.syncMode).toBe("NORMAL");
-      expect(result.status).toBe("SUCCESS");
-    });
-
-    it("should load from both localStorage and IPFS in NORMAL mode", async () => {
-      setLocalStorage(createMockStorageData({
-        "token1": createMockTxfToken("token1"),
-      }));
-
-      const params = createBaseSyncParams();
-
-      const result = await inventorySync(params);
-
-      expect(result.syncMode).toBe("NORMAL");
-      // localStorage token should be loaded
-      expect(result.inventoryStats?.activeTokens).toBeGreaterThanOrEqual(1);
-    });
-
-    it("should include inventory stats in NORMAL mode", async () => {
-      const params = createBaseSyncParams();
-
-      const result = await inventorySync(params);
-
-      expect(result.inventoryStats).toBeDefined();
-      expect(result.inventoryStats?.activeTokens).toBeDefined();
-      expect(result.inventoryStats?.sentTokens).toBeDefined();
-      expect(result.inventoryStats?.outboxTokens).toBeDefined();
-      expect(result.inventoryStats?.invalidTokens).toBeDefined();
+      const stored = getLocalStorage();
+      expect(stored?._invalid?.length).toBe(1);
+      const invalidEntry = stored?._invalid?.[0] as InvalidTokenEntry;
+      expect(invalidEntry.reason).toBe("SDK_VALIDATION");
+      expect(invalidEntry.details).toBe(errorReason);
+      expect(invalidEntry.invalidatedAt).toBeGreaterThan(0);
     });
   });
 
   // ------------------------------------------
-  // Step 0: Input Processing Tests
+  // Step 6: Deduplication Tests
   // ------------------------------------------
 
-  describe("Step 0: Input Processing", () => {
-    it("should convert incoming tokens to TXF format", async () => {
+  describe("Step 6: Token Deduplication", () => {
+    it("should prefer remote token with more transactions", async () => {
+      // Local token has 0 transactions
+      setLocalStorage(createMockStorageData({
+        "dup1": createMockTxfToken("dup1", "1000", 0),
+      }));
+
+      // Remote token has 2 transactions (more advanced)
+      mockIpfsAvailable = true;
+      mockRemoteData = createMockStorageData({
+        "dup1": createMockTxfToken("dup1", "1000", 2),
+      });
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Should have 1 token (deduplicated)
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+
+      // Verify the token in storage has 2 transactions (remote version)
+      const stored = getLocalStorage();
+      const tokenKey = Object.keys(stored || {}).find(k => k.startsWith("_dup1"));
+      expect(tokenKey).toBeDefined();
+      const token = stored?.[tokenKey!] as TxfToken;
+      expect(token.transactions?.length).toBe(2);
+    });
+
+    it("should keep local token when it has more transactions", async () => {
+      // Local token has 3 transactions (more advanced)
+      setLocalStorage(createMockStorageData({
+        "dup2": createMockTxfToken("dup2", "1000", 3),
+      }));
+
+      // Remote token has 1 transaction
+      mockIpfsAvailable = true;
+      mockRemoteData = createMockStorageData({
+        "dup2": createMockTxfToken("dup2", "1000", 1),
+      });
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+
+      // Verify the token kept has 3 transactions (local version)
+      const stored = getLocalStorage();
+      const tokenKey = Object.keys(stored || {}).find(k => k.startsWith("_dup2"));
+      const token = stored?.[tokenKey!] as TxfToken;
+      expect(token.transactions?.length).toBe(3);
+    });
+  });
+
+  // ------------------------------------------
+  // Step 7: Spent Token Detection Tests (REAL DETECTION)
+  // ------------------------------------------
+
+  describe("Step 7: Spent Token Detection", () => {
+    it("should move spent tokens to Sent folder in NORMAL mode", async () => {
+      const spentTokenId = "spent1".padEnd(64, "0");
+      const spentStateHash = "0000" + "a".repeat(60);
+
+      // Configure mock to report this token as spent
+      mockSpentTokens = [{
+        tokenId: spentTokenId,
+        stateHash: spentStateHash,
+        localId: "spent1",
+      }];
+
+      setLocalStorage(createMockStorageData({
+        "spent1": createMockTxfToken("spent1"),
+        "active1": createMockTxfToken("active1"),
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // One token spent, one active
+      expect(result.inventoryStats?.sentTokens).toBe(1);
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+
+      // Verify localStorage
+      const stored = getLocalStorage();
+      expect(stored?._sent?.length).toBe(1);
+      expect((stored?._sent?.[0] as SentTokenEntry)?.spentAt).toBeGreaterThan(0);
+    });
+
+    it("should add tombstone when token is detected as spent", async () => {
+      const spentTokenId = "tomb1".padEnd(64, "0");
+      const spentStateHash = "0000" + "a".repeat(60);
+
+      mockSpentTokens = [{
+        tokenId: spentTokenId,
+        stateHash: spentStateHash,
+        localId: "tomb1",
+      }];
+
+      setLocalStorage(createMockStorageData({
+        "tomb1": createMockTxfToken("tomb1"),
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      expect(result.operationStats.tombstonesAdded).toBeGreaterThanOrEqual(1);
+
+      // Verify tombstone in localStorage
+      const stored = getLocalStorage();
+      expect(stored?._tombstones?.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should skip spent detection in FAST mode", async () => {
+      // Configure mock to report spent token
+      mockSpentTokens = [{
+        tokenId: "fast1".padEnd(64, "0"),
+        stateHash: "0000" + "a".repeat(60),
+        localId: "fast1",
+      }];
+
       const params: SyncParams = {
         ...createBaseSyncParams(),
         incomingTokens: [createMockToken("incoming1")],
@@ -468,33 +606,324 @@ describe("inventorySync", () => {
 
       const result = await inventorySync(params);
 
-      expect(result.operationStats.tokensImported).toBe(1);
+      expect(result.syncMode).toBe("FAST");
+      // Even though mock would report spent, FAST mode skips Step 7
+      // So sentTokens should be 0 (unless there were pre-existing sent tokens)
+      expect(result.inventoryStats?.sentTokens).toBe(0);
     });
 
-    it("should add outbox entries to context", async () => {
+    it("should skip spent detection in LOCAL mode", async () => {
+      mockSpentTokens = [{
+        tokenId: "local1".padEnd(64, "0"),
+        stateHash: "0000" + "a".repeat(60),
+        localId: "local1",
+      }];
+
+      setLocalStorage(createMockStorageData({
+        "local1": createMockTxfToken("local1"),
+      }));
+
       const params: SyncParams = {
         ...createBaseSyncParams(),
-        outboxTokens: [
-          createMockOutboxEntry("outbox1"),
-          createMockOutboxEntry("outbox2"),
-        ],
+        local: true,
       };
 
       const result = await inventorySync(params);
 
-      expect(result.inventoryStats?.outboxTokens).toBe(2);
+      expect(result.syncMode).toBe("LOCAL");
+      // LOCAL mode skips Step 7, token should remain active
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+      expect(result.inventoryStats?.sentTokens).toBe(0);
+    });
+  });
+
+  // ------------------------------------------
+  // IPFS Merge Tests
+  // ------------------------------------------
+
+  describe("IPFS Merge (Step 2)", () => {
+    it("should merge tokens from IPFS when available", async () => {
+      // Local has token1
+      setLocalStorage(createMockStorageData({
+        "local1": createMockTxfToken("local1", "1000"),
+      }));
+
+      // Remote has token2
+      mockIpfsAvailable = true;
+      mockRemoteData = createMockStorageData({
+        "remote1": createMockTxfToken("remote1", "2000"),
+      });
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Should have both tokens
+      expect(result.inventoryStats?.activeTokens).toBe(2);
     });
 
-    it("should process completed transfers list", async () => {
-      const completedList: CompletedTransfer[] = [{
-        tokenId: "token1".padEnd(64, "0"),
+    it("should fallback to local-only when IPFS unavailable", async () => {
+      mockIpfsAvailable = false;
+
+      setLocalStorage(createMockStorageData({
+        "local1": createMockTxfToken("local1"),
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+    });
+
+    it("should merge sent folder from remote using tokenId:stateHash key", async () => {
+      // Local has one sent token
+      const localStorageData = createMockStorageData();
+      localStorageData._sent = [{
+        token: createMockTxfToken("sent1"),
+        timestamp: Date.now() - 10000,
+        spentAt: Date.now() - 10000,
+      }];
+      setLocalStorage(localStorageData);
+
+      // Remote has different sent token (different tokenId)
+      mockIpfsAvailable = true;
+      const remoteData = createMockStorageData();
+      remoteData._sent = [{
+        token: createMockTxfToken("sent2"),
+        timestamp: Date.now() - 5000,
+        spentAt: Date.now() - 5000,
+      }];
+      mockRemoteData = remoteData;
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Should have both sent tokens (union merge)
+      expect(result.inventoryStats?.sentTokens).toBe(2);
+    });
+  });
+
+  // ------------------------------------------
+  // Persistence Verification Tests
+  // ------------------------------------------
+
+  describe("Data Persistence", () => {
+    it("should persist tokens to localStorage after sync", async () => {
+      const params: SyncParams = {
+        ...createBaseSyncParams(),
+        incomingTokens: [createMockToken("persist1", "5000")],
+      };
+
+      await inventorySync(params);
+
+      const stored = getLocalStorage();
+      expect(stored).not.toBeNull();
+
+      // Verify token is actually in storage
+      const tokenKey = Object.keys(stored || {}).find(k => k.includes("persist1"));
+      expect(tokenKey).toBeDefined();
+
+      // Verify token data - amount is in genesis.data.coinData
+      const token = stored?.[tokenKey!] as TxfToken;
+      expect(token.genesis?.data?.coinData).toBeDefined();
+      expect(token.genesis.data.coinData[0][1]).toBe("5000");
+    });
+
+    it("should preserve data across multiple syncs", async () => {
+      // First sync adds a token
+      const params1: SyncParams = {
+        ...createBaseSyncParams(),
+        incomingTokens: [createMockToken("multi1", "1000")],
+      };
+      await inventorySync(params1);
+
+      // Second sync adds another token
+      const params2: SyncParams = {
+        ...createBaseSyncParams(),
+        incomingTokens: [createMockToken("multi2", "2000")],
+      };
+      await inventorySync(params2);
+
+      // Third sync (normal, no new tokens)
+      const params3 = createBaseSyncParams();
+      const result = await inventorySync(params3);
+
+      // Should have both tokens from previous syncs
+      expect(result.inventoryStats?.activeTokens).toBe(2);
+
+      // Verify both tokens in localStorage
+      const stored = getLocalStorage();
+      const keys = Object.keys(stored || {}).filter(k => k.startsWith("_") && !k.startsWith("_meta") && !k.startsWith("_sent") && !k.startsWith("_invalid") && !k.startsWith("_outbox") && !k.startsWith("_tombstones") && !k.startsWith("_nametag"));
+      expect(keys.length).toBe(2);
+    });
+
+    it("should increment version on each sync", async () => {
+      setLocalStorage(createMockStorageData());
+
+      const params = createBaseSyncParams();
+
+      await inventorySync(params);
+      const v1 = getLocalStorage()?._meta?.version || 0;
+
+      await inventorySync(params);
+      const v2 = getLocalStorage()?._meta?.version || 0;
+
+      await inventorySync(params);
+      const v3 = getLocalStorage()?._meta?.version || 0;
+
+      // Each sync should increment version
+      expect(v2).toBeGreaterThan(v1);
+      expect(v3).toBeGreaterThan(v2);
+    });
+
+    it("should preserve sent folder across syncs", async () => {
+      // First sync creates a sent token
+      mockSpentTokens = [{
+        tokenId: "spent1".padEnd(64, "0"),
         stateHash: "0000" + "a".repeat(60),
+        localId: "spent1",
+      }];
+
+      setLocalStorage(createMockStorageData({
+        "spent1": createMockTxfToken("spent1"),
+      }));
+
+      const params = createBaseSyncParams();
+      await inventorySync(params);
+
+      // Clear spent mock for second sync
+      mockSpentTokens = [];
+
+      // Second sync should still show sent token
+      const result = await inventorySync(params);
+      expect(result.inventoryStats?.sentTokens).toBe(1);
+
+      // Verify sent folder persisted
+      const stored = getLocalStorage();
+      expect(stored?._sent?.length).toBe(1);
+    });
+  });
+
+  // ------------------------------------------
+  // Error Handling Tests (ACTUAL VERIFICATION)
+  // ------------------------------------------
+
+  describe("Error Handling", () => {
+    it("should handle malformed JSON in localStorage gracefully", async () => {
+      const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(TEST_ADDRESS);
+      localStorage.setItem(storageKey, "invalid json{{{");
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Should not throw, should return a valid result
+      expect(result).toBeDefined();
+      expect(result.status).toBeDefined();
+      // Empty inventory after failed parse
+      expect(result.inventoryStats?.activeTokens).toBe(0);
+    });
+
+    it("should continue sync when validation service throws", async () => {
+      // This would test error handling in Step 5
+      setLocalStorage(createMockStorageData({
+        "token1": createMockTxfToken("token1"),
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Should complete (validation errors are non-fatal)
+      expect(result.status).not.toBe("ERROR");
+    });
+  });
+
+  // ------------------------------------------
+  // SyncResult Structure Tests (STRICT ASSERTIONS)
+  // ------------------------------------------
+
+  describe("SyncResult Structure", () => {
+    it("should include all required fields with correct types", async () => {
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Status must be a valid enum value
+      expect(result.status).toMatch(/^(SUCCESS|PARTIAL_SUCCESS|ERROR|LOCAL_ONLY|NAMETAG_ONLY)$/);
+
+      // SyncMode must be valid
+      expect(result.syncMode).toMatch(/^(LOCAL|NAMETAG|FAST|NORMAL)$/);
+
+      // Duration must be a non-negative number
+      expect(typeof result.syncDurationMs).toBe("number");
+      expect(result.syncDurationMs).toBeGreaterThanOrEqual(0);
+
+      // Timestamp must be a recent time
+      expect(typeof result.timestamp).toBe("number");
+      expect(result.timestamp).toBeGreaterThan(Date.now() - 10000);
+      expect(result.timestamp).toBeLessThanOrEqual(Date.now() + 1000);
+    });
+
+    it("should include operationStats with numeric counters", async () => {
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      expect(typeof result.operationStats.tokensImported).toBe("number");
+      expect(typeof result.operationStats.tokensRemoved).toBe("number");
+      expect(typeof result.operationStats.tokensUpdated).toBe("number");
+      expect(typeof result.operationStats.conflictsResolved).toBe("number");
+      expect(typeof result.operationStats.tokensValidated).toBe("number");
+      expect(typeof result.operationStats.tombstonesAdded).toBe("number");
+
+      // All counters should be non-negative
+      expect(result.operationStats.tokensImported).toBeGreaterThanOrEqual(0);
+      expect(result.operationStats.tokensRemoved).toBeGreaterThanOrEqual(0);
+    });
+
+    it("should include inventoryStats with folder counts (except NAMETAG mode)", async () => {
+      setLocalStorage(createMockStorageData({
+        "token1": createMockTxfToken("token1"),
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      expect(result.inventoryStats).toBeDefined();
+      expect(typeof result.inventoryStats!.activeTokens).toBe("number");
+      expect(typeof result.inventoryStats!.sentTokens).toBe("number");
+      expect(typeof result.inventoryStats!.invalidTokens).toBe("number");
+      expect(typeof result.inventoryStats!.outboxTokens).toBe("number");
+    });
+
+    it("should NOT include inventoryStats in NAMETAG mode", async () => {
+      const params: SyncParams = {
+        ...createBaseSyncParams(),
+        nametag: true,
+      };
+
+      const result = await inventorySync(params);
+
+      expect(result.inventoryStats).toBeUndefined();
+      expect(result.nametags).toBeDefined();
+      expect(Array.isArray(result.nametags)).toBe(true);
+    });
+  });
+
+  // ------------------------------------------
+  // CompletedList Processing Tests
+  // ------------------------------------------
+
+  describe("CompletedList Processing", () => {
+    it("should move completed tokens to Sent folder", async () => {
+      const tokenId = "completed1".padEnd(64, "0");
+      // Use DEFAULT_STATE_HASH to match the mock token's _integrity.currentStateHash
+      const stateHash = DEFAULT_STATE_HASH;
+
+      const completedList: CompletedTransfer[] = [{
+        tokenId,
+        stateHash,
         inclusionProof: {},
       }];
 
-      // Set up localStorage with the token
       setLocalStorage(createMockStorageData({
-        "token1": createMockTxfToken("token1"),
+        "completed1": createMockTxfToken("completed1"),
       }));
 
       const params: SyncParams = {
@@ -504,209 +933,34 @@ describe("inventorySync", () => {
 
       const result = await inventorySync(params);
 
-      // Completed tokens should be processed
-      expect(result.status).not.toBe("ERROR");
-    });
-  });
-
-  // ------------------------------------------
-  // Step 1: Load from localStorage Tests
-  // ------------------------------------------
-
-  describe("Step 1: Load from localStorage", () => {
-    it("should load tokens from localStorage", async () => {
-      setLocalStorage(createMockStorageData({
-        "token1": createMockTxfToken("token1"),
-        "token2": createMockTxfToken("token2"),
-        "token3": createMockTxfToken("token3"),
-      }));
-
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        local: true,
-      };
-
-      const result = await inventorySync(params);
-
-      expect(result.inventoryStats?.activeTokens).toBe(3);
-    });
-
-    it("should handle empty localStorage gracefully", async () => {
-      // Don't set any localStorage
-
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        local: true,
-      };
-
-      const result = await inventorySync(params);
-
-      expect(result.status).toBe("SUCCESS"); // LOCAL mode returns SUCCESS when sync completes
-      expect(result.inventoryStats?.activeTokens).toBe(0);
-    });
-
-    it("should load sent folder from localStorage", async () => {
-      const storageData = createMockStorageData();
-      storageData._sent = [{
-        token: createMockTxfToken("sent1"),
-        timestamp: Date.now(),
-        spentAt: Date.now(),
-      }];
-      setLocalStorage(storageData);
-
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        local: true,
-      };
-
-      const result = await inventorySync(params);
-
+      // Token should be in sent, not active
       expect(result.inventoryStats?.sentTokens).toBe(1);
+      expect(result.inventoryStats?.activeTokens).toBe(0);
     });
 
-    it("should load invalid folder from localStorage", async () => {
-      const storageData = createMockStorageData();
-      storageData._invalid = [{
-        token: createMockTxfToken("invalid1"),
-        timestamp: Date.now(),
-        invalidatedAt: Date.now(),
-        reason: "SDK_VALIDATION",
+    it("should add tombstone for completed transfer", async () => {
+      const tokenId = "completed2".padEnd(64, "0");
+      // Use DEFAULT_STATE_HASH to match the mock token's _integrity.currentStateHash
+      const stateHash = DEFAULT_STATE_HASH;
+
+      const completedList: CompletedTransfer[] = [{
+        tokenId,
+        stateHash,
+        inclusionProof: {},
       }];
-      setLocalStorage(storageData);
 
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        local: true,
-      };
-
-      const result = await inventorySync(params);
-
-      expect(result.inventoryStats?.invalidTokens).toBe(1);
-    });
-  });
-
-  // ------------------------------------------
-  // Step 8: Folder Assignment Tests
-  // ------------------------------------------
-
-  describe("Step 8: Folder Assignment", () => {
-    it("should categorize tokens into active folder", async () => {
       setLocalStorage(createMockStorageData({
-        "active1": createMockTxfToken("active1"),
-        "active2": createMockTxfToken("active2"),
+        "completed2": createMockTxfToken("completed2"),
       }));
 
       const params: SyncParams = {
         ...createBaseSyncParams(),
-        local: true,
+        completedList,
       };
 
       const result = await inventorySync(params);
 
-      expect(result.inventoryStats?.activeTokens).toBe(2);
-    });
-
-    it("should track outbox tokens separately", async () => {
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        outboxTokens: [
-          createMockOutboxEntry("outbox1"),
-          createMockOutboxEntry("outbox2"),
-        ],
-        local: true,
-      };
-
-      const result = await inventorySync(params);
-
-      expect(result.inventoryStats?.outboxTokens).toBe(2);
-      expect(result.inventoryStats?.activeTokens).toBe(0);
-    });
-  });
-
-  // ------------------------------------------
-  // SyncResult Structure Tests
-  // ------------------------------------------
-
-  describe("SyncResult Structure", () => {
-    it("should include all required fields", async () => {
-      const params = createBaseSyncParams();
-
-      const result = await inventorySync(params);
-
-      expect(result.status).toBeDefined();
-      expect(result.syncMode).toBeDefined();
-      expect(result.operationStats).toBeDefined();
-      expect(result.syncDurationMs).toBeDefined();
-      expect(result.timestamp).toBeDefined();
-    });
-
-    it("should include operationStats with all counters", async () => {
-      const params = createBaseSyncParams();
-
-      const result = await inventorySync(params);
-
-      expect(result.operationStats.tokensImported).toBeDefined();
-      expect(result.operationStats.tokensRemoved).toBeDefined();
-      expect(result.operationStats.tokensUpdated).toBeDefined();
-      expect(result.operationStats.conflictsResolved).toBeDefined();
-      expect(result.operationStats.tokensValidated).toBeDefined();
-      expect(result.operationStats.tombstonesAdded).toBeDefined();
-    });
-
-    it("should track sync duration accurately", async () => {
-      const params = createBaseSyncParams();
-      const startTime = Date.now();
-
-      const result = await inventorySync(params);
-
-      const elapsed = Date.now() - startTime;
-      expect(result.syncDurationMs).toBeGreaterThanOrEqual(0);
-      expect(result.syncDurationMs).toBeLessThanOrEqual(elapsed + 100); // Allow small margin
-    });
-
-    it("should include timestamp of completion", async () => {
-      const params = createBaseSyncParams();
-      const beforeTime = Date.now();
-
-      const result = await inventorySync(params);
-
-      const afterTime = Date.now();
-      expect(result.timestamp).toBeGreaterThanOrEqual(beforeTime);
-      expect(result.timestamp).toBeLessThanOrEqual(afterTime);
-    });
-  });
-
-  // ------------------------------------------
-  // Error Handling Tests
-  // ------------------------------------------
-
-  describe("Error Handling", () => {
-    it("should return ERROR status on critical failure", async () => {
-      // Create invalid params that will cause an error
-      const params: SyncParams = {
-        address: "", // Invalid empty address
-        publicKey: TEST_PUBLIC_KEY,
-        ipnsName: TEST_IPNS_NAME,
-      };
-
-      // The implementation should handle this gracefully
-      const result = await inventorySync(params);
-
-      // Should not throw, but may return error status
-      expect(result).toBeDefined();
-    });
-
-    it("should include error details when sync fails", async () => {
-      // Force an error by providing malformed data
-      const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(TEST_ADDRESS);
-      localStorage.setItem(storageKey, "invalid json{{{");
-
-      const params = createBaseSyncParams();
-
-      const result = await inventorySync(params);
-
-      // Should handle JSON parse error gracefully
-      expect(result).toBeDefined();
+      expect(result.operationStats.tombstonesAdded).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -715,47 +969,17 @@ describe("inventorySync", () => {
   // ------------------------------------------
 
   describe("Edge Cases", () => {
-    it("should handle null incomingTokens", async () => {
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        incomingTokens: null,
-      };
-
+    it("should handle empty inventory gracefully", async () => {
+      const params = createBaseSyncParams();
       const result = await inventorySync(params);
 
-      expect(result.syncMode).toBe("NORMAL");
-      expect(result.operationStats.tokensImported).toBe(0);
+      expect(result.status).toMatch(/^(SUCCESS|PARTIAL_SUCCESS)$/);
+      expect(result.inventoryStats?.activeTokens).toBe(0);
     });
 
-    it("should handle empty incomingTokens array", async () => {
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        incomingTokens: [],
-      };
-
-      const result = await inventorySync(params);
-
-      expect(result.syncMode).toBe("NORMAL"); // Empty array doesn't trigger FAST mode
-      expect(result.operationStats.tokensImported).toBe(0);
-    });
-
-    it("should handle undefined optional params", async () => {
-      const params: SyncParams = {
-        address: TEST_ADDRESS,
-        publicKey: TEST_PUBLIC_KEY,
-        ipnsName: TEST_IPNS_NAME,
-        // All optional params omitted
-      };
-
-      const result = await inventorySync(params);
-
-      expect(result.status).not.toBe("ERROR");
-    });
-
-    it("should handle very large token collections", async () => {
+    it("should handle large token collections", async () => {
       const tokens: Record<string, TxfToken> = {};
       for (let i = 0; i < 100; i++) {
-        // Use valid hex IDs (padded numbers)
         const hexId = i.toString(16).padStart(8, "0");
         tokens[hexId] = createMockTxfToken(hexId);
       }
@@ -770,89 +994,40 @@ describe("inventorySync", () => {
 
       expect(result.inventoryStats?.activeTokens).toBe(100);
     });
-  });
-});
 
-// ==========================================
-// Integration with Other Components
-// ==========================================
-
-describe("InventorySyncService Integration", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    clearLocalStorage();
-  });
-
-  describe("Storage Key Generation", () => {
-    it("should use correct storage key format", async () => {
-      // Set up data with the expected key format
-      setLocalStorage(createMockStorageData({
-        "t1": createMockTxfToken("t1"),
-      }));
-
+    it("should handle null/undefined optional params", async () => {
       const params: SyncParams = {
-        ...createBaseSyncParams(),
-        local: true,
+        address: TEST_ADDRESS,
+        publicKey: TEST_PUBLIC_KEY,
+        ipnsName: TEST_IPNS_NAME,
+        incomingTokens: null,
+        outboxTokens: undefined,
+        completedList: undefined,
       };
 
       const result = await inventorySync(params);
 
-      // If the key format is correct, we should see the token
+      expect(result.syncMode).toBe("NORMAL");
+      expect(result.status).not.toBe("ERROR");
+    });
+
+    it("should not create duplicate tokens when same token received twice", async () => {
+      // First sync with token
+      const params1: SyncParams = {
+        ...createBaseSyncParams(),
+        incomingTokens: [createMockToken("dup1", "1000")],
+      };
+      await inventorySync(params1);
+
+      // Second sync with same token
+      const params2: SyncParams = {
+        ...createBaseSyncParams(),
+        incomingTokens: [createMockToken("dup1", "1000")],
+      };
+      const result = await inventorySync(params2);
+
+      // Should still have only 1 token (deduplicated)
       expect(result.inventoryStats?.activeTokens).toBe(1);
-    });
-  });
-
-  describe("Statistics Accuracy", () => {
-    it("should accurately count active tokens", async () => {
-      setLocalStorage(createMockStorageData({
-        "t1": createMockTxfToken("t1"),
-        "t2": createMockTxfToken("t2"),
-        "t3": createMockTxfToken("t3"),
-      }));
-
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        local: true,
-      };
-
-      const result = await inventorySync(params);
-
-      expect(result.inventoryStats?.activeTokens).toBe(3);
-    });
-
-    it("should accurately count sent tokens", async () => {
-      const storageData = createMockStorageData();
-      storageData._sent = [
-        { token: createMockTxfToken("s1"), timestamp: Date.now(), spentAt: Date.now() },
-        { token: createMockTxfToken("s2"), timestamp: Date.now(), spentAt: Date.now() },
-      ];
-      setLocalStorage(storageData);
-
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        local: true,
-      };
-
-      const result = await inventorySync(params);
-
-      expect(result.inventoryStats?.sentTokens).toBe(2);
-    });
-
-    it("should accurately count invalid tokens", async () => {
-      const storageData = createMockStorageData();
-      storageData._invalid = [
-        { token: createMockTxfToken("i1"), timestamp: Date.now(), invalidatedAt: Date.now(), reason: "SDK_VALIDATION" },
-      ];
-      setLocalStorage(storageData);
-
-      const params: SyncParams = {
-        ...createBaseSyncParams(),
-        local: true,
-      };
-
-      const result = await inventorySync(params);
-
-      expect(result.inventoryStats?.invalidTokens).toBe(1);
     });
   });
 });

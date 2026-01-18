@@ -425,7 +425,9 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
       const remoteTxf = remoteData[key] as TxfToken;
       if (!remoteTxf || !remoteTxf.genesis?.data?.tokenId) continue;
 
-      const tokenId = tokenIdFromKey(key);
+      // Use the actual tokenId from genesis data, not the storage key
+      // This ensures consistency with Step 1 which also uses genesis.data.tokenId
+      const tokenId = remoteTxf.genesis.data.tokenId;
       const localTxf = ctx.tokens.get(tokenId);
 
       // Prefer remote if: no local, or remote has more transactions
@@ -1024,6 +1026,7 @@ function step8_mergeInventory(ctx: SyncContext): void {
             stateHash: completed.stateHash,
             timestamp: Date.now(),
           });
+          ctx.stats.tombstonesAdded++;
 
           console.log(`  ✓ Marked ${completed.tokenId.slice(0, 8)}... as SPENT`);
         } else {
