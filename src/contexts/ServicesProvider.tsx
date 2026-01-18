@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, type ReactNode } from 'react';
 import { IdentityManager } from '../components/wallet/L3/services/IdentityManager';
 import { NostrService } from '../components/wallet/L3/services/NostrService';
 import { InventoryBackgroundLoopsManager } from '../components/wallet/L3/services/InventoryBackgroundLoops';
+import { OutboxRecoveryService } from '../components/wallet/L3/services/OutboxRecoveryService';
 import { ServicesContext } from './ServicesContext';
 
 export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -51,6 +52,21 @@ export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }
         if (isMounted) {
           setIsNostrConnected(true);
           console.log("✅ Nostr service connected");
+
+          // Initialize OutboxRecoveryService (centralized, single lifecycle)
+          const recoveryService = OutboxRecoveryService.getInstance();
+          recoveryService.setIdentityManager(identityManager);
+
+          // Run initial recovery
+          const pendingCount = recoveryService.getPendingCount(identity.address);
+          if (pendingCount > 0) {
+            console.log(`📤 ServicesProvider: Found ${pendingCount} pending outbox entries, starting recovery...`);
+            const result = await recoveryService.recoverPendingTransfers(identity.address, nostrService);
+            console.log(`📤 ServicesProvider: Initial recovery - ${result.recovered} recovered, ${result.failed} failed`);
+          }
+
+          // Start periodic retry (once, centralized)
+          recoveryService.startPeriodicRetry(identity.address, nostrService);
         }
       } catch (error) {
         console.error("❌ Failed to initialize services:", error);
@@ -63,6 +79,9 @@ export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }
     // Re-initialize when wallet is created/restored
     const handleWalletLoaded = async () => {
       console.log("📢 Wallet loaded, resetting and reinitializing services...");
+
+      // Stop OutboxRecoveryService (will be restarted with new identity)
+      OutboxRecoveryService.getInstance().stopPeriodicRetry();
 
       // Shutdown existing loops manager
       if (loopsInitialized.current) {
@@ -84,6 +103,9 @@ export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }
     return () => {
       isMounted = false;
       window.removeEventListener('wallet-loaded', handleWalletLoaded);
+
+      // Stop OutboxRecoveryService
+      OutboxRecoveryService.getInstance().stopPeriodicRetry();
 
       // Shutdown background loops on unmount
       if (loopsInitialized.current) {

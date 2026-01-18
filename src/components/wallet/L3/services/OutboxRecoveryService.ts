@@ -124,8 +124,16 @@ export class OutboxRecoveryService {
   /**
    * Start periodic retry checking
    * Call after initial startup recovery completes
+   *
+   * Guard: If already running for the same address, skip redundant start
    */
   startPeriodicRetry(walletAddress: string, nostrService: NostrService): void {
+    // Skip if already running for the same address (prevents redundant restarts)
+    if (this.periodicRetryInterval && this.walletAddress === walletAddress) {
+      console.log("📤 OutboxRecovery: Periodic retry already running, skipping redundant start");
+      return;
+    }
+
     this.stopPeriodicRetry(); // Clear any existing interval
 
     this.walletAddress = walletAddress;

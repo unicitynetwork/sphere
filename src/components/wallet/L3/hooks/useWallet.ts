@@ -18,7 +18,6 @@ import { TokenSplitCalculator } from "../services/transfer/TokenSplitCalculator"
 import { IpfsStorageService, SyncPriority } from "../services/IpfsStorageService";
 import { useServices } from "../../../../contexts/useServices";
 import type { NostrService } from "../services/NostrService";
-import { OutboxRecoveryService } from "../services/OutboxRecoveryService";
 import { InventoryBackgroundLoopsManager } from "../services/InventoryBackgroundLoops";
 import type { NostrDeliveryQueueEntry } from "../services/types/QueueTypes";
 import { TokenRecoveryService } from "../services/TokenRecoveryService";
@@ -158,44 +157,9 @@ export const useWallet = () => {
     }
   }, [identityQuery.data, nametagQuery.data, identityManager]);
 
-  // Recover any incomplete transfers from outbox on startup and enable periodic retry
-  // This runs when identity is loaded and services are available
-  useEffect(() => {
-    const identity = identityQuery.data;
-    if (!identity?.address || !nostrService) return;
-
-    const recoveryService = OutboxRecoveryService.getInstance();
-    recoveryService.setIdentityManager(identityManager);
-
-    // Run initial recovery
-    const pendingCount = recoveryService.getPendingCount(identity.address);
-    if (pendingCount > 0) {
-      console.log(`📤 useWallet: Found ${pendingCount} pending outbox entries, starting recovery...`);
-    }
-
-    recoveryService.recoverPendingTransfers(identity.address, nostrService)
-      .then((result) => {
-        if (result.recovered > 0 || result.failed > 0) {
-          console.log(`📤 useWallet: Initial recovery - ${result.recovered} recovered, ${result.failed} failed`);
-          // Refresh tokens after recovery
-          queryClient.invalidateQueries({ queryKey: KEYS.TOKENS });
-          queryClient.invalidateQueries({ queryKey: KEYS.AGGREGATED });
-        }
-
-        // Start periodic retry after initial recovery
-        recoveryService.startPeriodicRetry(identity.address, nostrService);
-      })
-      .catch((error) => {
-        console.error("📤 useWallet: Initial recovery failed:", error);
-        // Still start periodic retry even if initial recovery failed
-        recoveryService.startPeriodicRetry(identity.address, nostrService);
-      });
-
-    // Cleanup on unmount or identity change
-    return () => {
-      recoveryService.stopPeriodicRetry();
-    };
-  }, [identityQuery.data, nostrService, identityManager, queryClient]);
+  // NOTE: OutboxRecoveryService lifecycle is now managed centrally in ServicesProvider.tsx
+  // This prevents the repeated start/stop cycles that occurred when multiple components
+  // using useWallet() each had their own lifecycle management.
 
   // Ensure registry is loaded before aggregating assets
   const registryQuery = useQuery({
