@@ -7,6 +7,7 @@ import type { DirectAddress } from "@unicitylabs/state-transition-sdk/lib/addres
 import { UnmaskedPredicateReference } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicateReference";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
+import { deriveIpnsNameFromPrivateKey } from "./IpnsUtils";
 const UNICITY_TOKEN_TYPE_HEX =
   "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9ef0efbe397867509";
 const DEFAULT_SESSION_KEY = "user-pin-1234";
@@ -118,6 +119,9 @@ export class IdentityManager {
     const signingService = await SigningService.createFromSecret(secret);
     const publicKey = Buffer.from(signingService.publicKey).toString("hex");
 
+    // Derive IPNS name for inventory sync (critical for IPFS initialization)
+    const ipnsName = await deriveIpnsNameFromPrivateKey(derived.privateKey);
+
     // Parse path to get index for addressIndex field
     const match = path.match(/\/(\d+)$/);
     const index = match ? parseInt(match[1], 10) : 0;
@@ -129,6 +133,7 @@ export class IdentityManager {
       mnemonic: keyManager.getMnemonic() || undefined,
       l1Address: derived.l1Address,
       addressIndex: index,
+      ipnsName: ipnsName,
     };
   }
 
@@ -144,10 +149,14 @@ export class IdentityManager {
     const signingService = await SigningService.createFromSecret(secret);
     const publicKey = Buffer.from(signingService.publicKey).toString("hex");
 
+    // Derive IPNS name for inventory sync
+    const ipnsName = await deriveIpnsNameFromPrivateKey(privateKey);
+
     return {
       privateKey,
       publicKey,
       address: l3Address,
+      ipnsName: ipnsName,
     };
   }
 
