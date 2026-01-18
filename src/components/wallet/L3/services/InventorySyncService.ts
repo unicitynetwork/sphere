@@ -650,6 +650,16 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
   let remoteData: TxfStorageData | null = null;
 
   if (transport) {
+    // Initialize transport with identity so cachedIpnsName gets set
+    // This ensures IPFS is ready even if we don't need to upload later
+    const initialized = await transport.ensureInitialized();
+    if (!initialized) {
+      console.log(`  ⚠️ Transport initialization failed, falling back to HTTP resolver`);
+      transport = null;
+    }
+  }
+
+  if (transport) {
     // Use full transport API (better sequence tracking, dual DHT+HTTP)
     console.log(`  Using IpfsTransport for IPNS resolution...`);
     const resolution = await transport.resolveIpns();
@@ -1824,10 +1834,20 @@ function step9_prepareStorage(ctx: SyncContext): void {
   // Compare content (excluding version and lastCid which change every sync)
   // Only write if content actually changed
   if (existingData && isContentEqual(existingData, storageData)) {
-    console.log(`  ⏭️ No content changes detected, skipping localStorage write`);
+    console.log(`  ⏭️ No content changes detected`);
     ctx.uploadNeeded = false;
-    // Keep the existing version since content hasn't changed
-    ctx.localVersion = existingData._meta.version;
+
+    // If remote version > local version, update local to match remote
+    // This prevents re-fetching IPFS data on every reload
+    if (ctx.remoteVersion > existingData._meta.version) {
+      console.log(`  📥 Updating local version to match remote: ${existingData._meta.version} → ${ctx.remoteVersion}`);
+      existingData._meta.version = ctx.remoteVersion;
+      localStorage.setItem(storageKey, JSON.stringify(existingData));
+      ctx.localVersion = ctx.remoteVersion;
+    } else {
+      console.log(`  ⏭️ Skipping localStorage write (version ${existingData._meta.version} is current)`);
+      ctx.localVersion = existingData._meta.version;
+    }
     return;
   }
 
