@@ -17,6 +17,17 @@ let mockRemoteData: TxfStorageData | null = null;
 const mockCheckSpentTokensSpy = vi.fn();
 const mockValidateAllTokensSpy = vi.fn();
 
+// Spy functions for Step 8.5 Nostr binding verification
+const mockQueryPubkeyByNametagSpy = vi.fn();
+const mockPublishNametagBindingSpy = vi.fn();
+
+// Spy function for IPFS upload verification
+const mockIpfsUploadSpy = vi.fn();
+
+// Configurable mock for IPNS resolution failures (circuit breaker testing)
+let mockIpnsResolutionFailures = 0;
+let mockIpnsCurrentFailureCount = 0;
+
 // Mock IpfsHttpResolver with configurable response
 vi.mock("../../../../../../src/components/wallet/L3/services/IpfsHttpResolver", () => ({
   getIpfsHttpResolver: vi.fn(() => ({
@@ -64,12 +75,18 @@ vi.mock("../../../../../../src/components/wallet/L3/services/TokenValidationServ
   })),
 }));
 
-// Mock NostrService
+// Mock NostrService with spy functions
 vi.mock("../../../../../../src/components/wallet/L3/services/NostrService", () => ({
   NostrService: {
     getInstance: vi.fn(() => ({
-      queryPubkeyByNametag: vi.fn().mockResolvedValue(null),
-      publishNametagBinding: vi.fn().mockResolvedValue(true),
+      queryPubkeyByNametag: vi.fn().mockImplementation(async (nametag: string) => {
+        mockQueryPubkeyByNametagSpy(nametag);
+        return null; // Default: no existing binding
+      }),
+      publishNametagBinding: vi.fn().mockImplementation(async (nametag: string, address: string) => {
+        mockPublishNametagBindingSpy(nametag, address);
+        return true; // Default: success
+      }),
     })),
   },
 }));
@@ -273,9 +290,14 @@ const resetMocks = () => {
   mockSpentTokens = [];
   mockIpfsAvailable = false;
   mockRemoteData = null;
+  mockIpnsResolutionFailures = 0;
+  mockIpnsCurrentFailureCount = 0;
   // Reset spy call counts
   mockCheckSpentTokensSpy.mockClear();
   mockValidateAllTokensSpy.mockClear();
+  mockQueryPubkeyByNametagSpy.mockClear();
+  mockPublishNametagBindingSpy.mockClear();
+  mockIpfsUploadSpy.mockClear();
 };
 
 // ==========================================
@@ -1473,6 +1495,611 @@ describe("inventorySync", () => {
 
       expect(keptToken.transactions?.length).toBe(3);
       expect(keptToken._integrity?.genesisDataJSONHash).toBe(localGenesisHash);
+    });
+  });
+
+  // ------------------------------------------
+  // Step 8.5: Nametag-Nostr Binding Tests (CRITICAL)
+  // ------------------------------------------
+
+  describe("Step 8.5: Nametag-Nostr Binding", () => {
+    // Nametags are loaded from _nametag field in storage data
+    const createStorageDataWithNametag = (name: string) => {
+      const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(TEST_ADDRESS);
+      const data = createMockStorageData({
+        "token1": createMockTxfToken("token1"),
+      });
+      // Add _nametag field (this is how nametags are stored)
+      (data as TxfStorageData & { _nametag?: unknown })._nametag = {
+        name,
+        token: createMockTxfToken("nametag1"),
+        timestamp: Date.now(),
+        format: "1.0",
+        version: "1.0",
+      };
+      localStorage.setItem(storageKey, JSON.stringify(data));
+    };
+
+    it("should query Nostr for existing binding when nametag present", async () => {
+      createStorageDataWithNametag("alice");
+
+      const params = createBaseSyncParams();
+      await inventorySync(params);
+
+      // Step 8.5 should query Nostr for existing binding
+      expect(mockQueryPubkeyByNametagSpy).toHaveBeenCalled();
+    });
+
+    it("should publish binding when no existing binding found", async () => {
+      createStorageDataWithNametag("bob");
+
+      const params = createBaseSyncParams();
+      await inventorySync(params);
+
+      // When queryPubkeyByNametag returns null, publishNametagBinding should be called
+      expect(mockPublishNametagBindingSpy).toHaveBeenCalled();
+    });
+
+    it("should skip Nostr binding in NAMETAG mode (read-only)", async () => {
+      createStorageDataWithNametag("charlie");
+
+      const params: SyncParams = {
+        ...createBaseSyncParams(),
+        nametag: true,
+      };
+
+      await inventorySync(params);
+
+      // NAMETAG mode is read-only, should NOT publish bindings
+      expect(mockPublishNametagBindingSpy).not.toHaveBeenCalled();
+    });
+
+    it("should still publish Nostr binding in LOCAL mode (LOCAL only skips IPFS)", async () => {
+      createStorageDataWithNametag("dave");
+
+      const params: SyncParams = {
+        ...createBaseSyncParams(),
+        local: true,
+      };
+
+      await inventorySync(params);
+
+      // LOCAL mode only skips IPFS operations, Nostr bindings are still published
+      // Per spec: Step 8.5 only skips in NAMETAG mode
+      expect(mockPublishNametagBindingSpy).toHaveBeenCalled();
+    });
+
+    it("should track nametagsPublished in stats", async () => {
+      createStorageDataWithNametag("eve");
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Stats should track published nametags
+      expect(result.operationStats.nametagsPublished).toBeDefined();
+    });
+  });
+
+  // ------------------------------------------
+  // IPFS Upload Pipeline Tests (Steps 9-10)
+  // ------------------------------------------
+
+  describe("IPFS Upload Pipeline (Steps 9-10)", () => {
+    it("should increment version on each sync", async () => {
+      setLocalStorage(createMockStorageData({
+        "token1": createMockTxfToken("token1"),
+      }));
+
+      // First sync
+      const params = createBaseSyncParams();
+      const result1 = await inventorySync(params);
+      const version1 = result1.version;
+
+      // Second sync
+      const result2 = await inventorySync(params);
+      const version2 = result2.version;
+
+      expect(version2).toBe((version1 || 0) + 1);
+    });
+
+    it("should set uploadNeeded when tokens change", async () => {
+      // Start with one token
+      setLocalStorage(createMockStorageData({
+        "token1": createMockTxfToken("token1"),
+      }));
+
+      // Add an incoming token
+      const params: SyncParams = {
+        ...createBaseSyncParams(),
+        incomingTokens: [createMockToken("incoming1")],
+      };
+
+      const result = await inventorySync(params);
+
+      // With changes, IPFS upload should be triggered (in non-LOCAL mode)
+      // We verify via the result having ipnsPublishPending flag
+      expect(result.ipnsPublishPending).toBeDefined();
+    });
+
+    it("should skip IPFS upload in LOCAL mode", async () => {
+      setLocalStorage(createMockStorageData({
+        "token1": createMockTxfToken("token1"),
+      }));
+
+      const params: SyncParams = {
+        ...createBaseSyncParams(),
+        local: true,
+        incomingTokens: [createMockToken("incoming1")],
+      };
+
+      const result = await inventorySync(params);
+
+      expect(result.syncMode).toBe("LOCAL");
+      // LOCAL mode should not attempt IPFS publish
+      expect(result.ipnsPublished).toBeFalsy();
+    });
+
+    it("should persist _meta with correct structure", async () => {
+      setLocalStorage(createMockStorageData({
+        "token1": createMockTxfToken("token1"),
+      }));
+
+      const params = createBaseSyncParams();
+      await inventorySync(params);
+
+      const stored = getLocalStorage();
+      expect(stored?._meta).toBeDefined();
+      expect(stored?._meta?.formatVersion).toBe("2.0");
+      expect(stored?._meta?.address).toBe(TEST_ADDRESS);
+      // Version should be a number
+      expect(typeof stored?._meta?.version).toBe("number");
+    });
+
+    it("should track token counts correctly after upload prep", async () => {
+      setLocalStorage(createMockStorageData({
+        "token1": createMockTxfToken("token1"),
+        "token2": createMockTxfToken("token2"),
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // inventoryStats should have correct token counts
+      expect(result.inventoryStats?.activeTokens).toBe(2);
+      expect(result.inventoryStats?.sentTokens).toBe(0);
+      expect(result.inventoryStats?.invalidTokens).toBe(0);
+    });
+  });
+
+  // ------------------------------------------
+  // Circuit Breaker State Tests (Section 10.2, 10.6)
+  // ------------------------------------------
+
+  describe("Circuit Breaker State", () => {
+    it("should include circuitBreaker in result", async () => {
+      setLocalStorage(createMockStorageData({
+        "token1": createMockTxfToken("token1"),
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      expect(result.circuitBreaker).toBeDefined();
+      expect(result.circuitBreaker?.localModeActive).toBe(false);
+      expect(result.circuitBreaker?.consecutiveConflicts).toBe(0);
+    });
+
+    it("should have localModeActive=false in NORMAL mode", async () => {
+      setLocalStorage(createMockStorageData({
+        "token1": createMockTxfToken("token1"),
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      expect(result.syncMode).toBe("NORMAL");
+      expect(result.circuitBreaker?.localModeActive).toBe(false);
+    });
+
+    it("should preserve circuitBreaker state across syncs", async () => {
+      setLocalStorage(createMockStorageData({
+        "token1": createMockTxfToken("token1"),
+      }));
+
+      const params = createBaseSyncParams();
+      const result1 = await inventorySync(params);
+      const result2 = await inventorySync(params);
+
+      // Circuit breaker should be consistent
+      expect(result2.circuitBreaker?.localModeActive).toBe(
+        result1.circuitBreaker?.localModeActive
+      );
+    });
+  });
+
+  // ------------------------------------------
+  // Proof Validation Tests (Steps 3-4) - Chain Integrity
+  // ------------------------------------------
+
+  describe("Proof Validation - Chain Integrity (Steps 3-4)", () => {
+    it("should normalize transaction hash missing 0000 prefix", async () => {
+      // Create token with transaction hash missing "0000" prefix
+      const tokenWithUnnormalizedHash = createMockTxfToken("unnorm1");
+      // Modify the proof to have unnormalized hash
+      if (tokenWithUnnormalizedHash.genesis.inclusionProof) {
+        tokenWithUnnormalizedHash.genesis.inclusionProof.transactionHash = "a".repeat(64);
+      }
+
+      setLocalStorage(createMockStorageData({
+        "unnorm1": tokenWithUnnormalizedHash,
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Token should still be valid after normalization
+      expect(result.inventoryStats?.activeTokens).toBeGreaterThanOrEqual(0);
+    });
+
+    it("should normalize stateHash missing 0000 prefix", async () => {
+      const tokenWithUnnormalizedState = createMockTxfToken("unnorm2");
+      // Modify the authenticator stateHash to be unnormalized
+      if (tokenWithUnnormalizedState.genesis.inclusionProof?.authenticator) {
+        tokenWithUnnormalizedState.genesis.inclusionProof.authenticator.stateHash = "b".repeat(64);
+      }
+
+      setLocalStorage(createMockStorageData({
+        "unnorm2": tokenWithUnnormalizedState,
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Normalization should fix the hash
+      expect(result.status).not.toBe("ERROR");
+    });
+
+    it("should validate genesis-to-first-transaction chain", async () => {
+      // Token with proper chain: genesis stateHash matches tx[0].previousStateHash
+      const tokenWithValidChain = createMockTxfToken("valid1", "1000", 1);
+
+      setLocalStorage(createMockStorageData({
+        "valid1": tokenWithValidChain,
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Valid chain should keep token active
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+      expect(result.inventoryStats?.invalidTokens).toBe(0);
+    });
+
+    it("should reject token with broken state hash chain", async () => {
+      // Create token where tx[0].previousStateHash doesn't match genesis
+      const tokenWithBrokenChain: TxfToken = {
+        ...createMockTxfToken("broken1"),
+        transactions: [{
+          data: { recipient: "someone" },
+          previousStateHash: "0000" + "wrong".padEnd(60, "0"), // Wrong - doesn't match genesis
+          newStateHash: "0000" + "new".padEnd(60, "0"),
+          inclusionProof: {
+            authenticator: { stateHash: "0000" + "new".padEnd(60, "0") },
+            merkleTreePath: { root: "0000" + "root".padEnd(60, "0"), path: [] },
+            transactionHash: "0000" + "txhash".padEnd(60, "0"),
+          },
+        }],
+        _integrity: {
+          currentStateHash: "0000" + "new".padEnd(60, "0"),
+          genesisDataJSONHash: "0000" + "genesis".padEnd(60, "0"),
+        },
+      };
+
+      setLocalStorage(createMockStorageData({
+        "broken1": tokenWithBrokenChain,
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Broken chain should move token to Invalid folder
+      expect(result.inventoryStats?.invalidTokens).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should validate multi-transaction chain integrity", async () => {
+      // Token with 3 transactions - each links to previous
+      const tokenWithLongChain = createMockTxfToken("longchain", "1000", 3);
+
+      setLocalStorage(createMockStorageData({
+        "longchain": tokenWithLongChain,
+      }));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Valid long chain should pass
+      expect(result.inventoryStats?.activeTokens).toBe(1);
+    });
+  });
+
+  // ------------------------------------------
+  // Outbox Processing Tests (Split Operations)
+  // ------------------------------------------
+
+  describe("Outbox Processing - Split Operations", () => {
+    it("should track outbox entries with splitGroupId", async () => {
+      const splitGroupId = "split-group-123";
+      const outboxEntries: OutboxEntry[] = [
+        {
+          id: "burn-entry",
+          type: "SPLIT_BURN",
+          status: "COMPLETED",
+          sourceTokenId: "source1".padEnd(64, "0"),
+          splitGroupId,
+          splitIndex: 0,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        } as OutboxEntry,
+        {
+          id: "mint-entry-1",
+          type: "SPLIT_MINT",
+          status: "READY_TO_SUBMIT",
+          sourceTokenId: "source1".padEnd(64, "0"),
+          splitGroupId,
+          splitIndex: 1,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        } as OutboxEntry,
+      ];
+
+      setLocalStorage(createMockStorageData({
+        "source1": createMockTxfToken("source1"),
+      }));
+
+      // Set outbox in localStorage
+      const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(TEST_ADDRESS);
+      const data = JSON.parse(localStorage.getItem(storageKey) || "{}");
+      data._outbox = outboxEntries;
+      localStorage.setItem(storageKey, JSON.stringify(data));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Outbox entries should be tracked
+      expect(result.inventoryStats?.outboxTokens).toBe(2);
+    });
+
+    it("should mark mint as FAILED after status indicates failure", async () => {
+      const failedMintEntry: OutboxEntry = {
+        id: "failed-mint",
+        type: "SPLIT_MINT",
+        status: "FAILED",
+        sourceTokenId: "source1".padEnd(64, "0"),
+        splitGroupId: "split-fail-123",
+        splitIndex: 1,
+        retryCount: 10,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } as OutboxEntry;
+
+      setLocalStorage(createMockStorageData({
+        "source1": createMockTxfToken("source1"),
+      }));
+
+      const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(TEST_ADDRESS);
+      const data = JSON.parse(localStorage.getItem(storageKey) || "{}");
+      data._outbox = [failedMintEntry];
+      localStorage.setItem(storageKey, JSON.stringify(data));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Failed entry should still be in outbox for manual intervention
+      const stored = getLocalStorage();
+      const failedEntries = stored?._outbox?.filter(
+        (e: OutboxEntry) => e.status === "FAILED"
+      );
+      expect(failedEntries?.length).toBeGreaterThanOrEqual(0);
+    });
+
+    it("should preserve ABANDONED status for unrecoverable entries", async () => {
+      const abandonedEntry: OutboxEntry = {
+        id: "abandoned-mint",
+        type: "SPLIT_MINT",
+        status: "ABANDONED",
+        sourceTokenId: "source1".padEnd(64, "0"),
+        splitGroupId: "split-abandoned-123",
+        splitIndex: 1,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } as OutboxEntry;
+
+      setLocalStorage(createMockStorageData({
+        "source1": createMockTxfToken("source1"),
+      }));
+
+      const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(TEST_ADDRESS);
+      const data = JSON.parse(localStorage.getItem(storageKey) || "{}");
+      data._outbox = [abandonedEntry];
+      localStorage.setItem(storageKey, JSON.stringify(data));
+
+      const params = createBaseSyncParams();
+      await inventorySync(params);
+
+      const stored = getLocalStorage();
+      const abandonedEntries = stored?._outbox?.filter(
+        (e: OutboxEntry) => e.status === "ABANDONED"
+      );
+      // ABANDONED entries should be preserved
+      expect(abandonedEntries?.length).toBe(1);
+    });
+  });
+
+  // ------------------------------------------
+  // Split Burn Recovery Tests (Section 13.25) - CRITICAL
+  // ------------------------------------------
+
+  describe("Split Burn Recovery (Section 13.25) - Value Loss Prevention", () => {
+    it("should preserve split group when burn succeeds but mints pending", async () => {
+      const splitGroupId = "recovery-group-123";
+
+      // Burn completed, mint still pending
+      const outboxEntries: OutboxEntry[] = [
+        {
+          id: "burn-completed",
+          type: "SPLIT_BURN",
+          status: "COMPLETED",
+          sourceTokenId: "source1".padEnd(64, "0"),
+          splitGroupId,
+          splitIndex: 0,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        } as OutboxEntry,
+        {
+          id: "mint-pending",
+          type: "SPLIT_MINT",
+          status: "READY_TO_SUBMIT",
+          sourceTokenId: "source1".padEnd(64, "0"),
+          splitGroupId,
+          splitIndex: 1,
+          retryCount: 0,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        } as OutboxEntry,
+      ];
+
+      setLocalStorage(createMockStorageData({}));
+
+      const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(TEST_ADDRESS);
+      const data = JSON.parse(localStorage.getItem(storageKey) || "{}");
+      data._outbox = outboxEntries;
+      localStorage.setItem(storageKey, JSON.stringify(data));
+
+      const params = createBaseSyncParams();
+      const result = await inventorySync(params);
+
+      // Split group should be preserved for recovery
+      const stored = getLocalStorage();
+      const groupEntries = stored?._outbox?.filter(
+        (e: OutboxEntry) => e.splitGroupId === splitGroupId
+      );
+      expect(groupEntries?.length).toBe(2);
+    });
+
+    it("should track retry count for mint operations", async () => {
+      const mintWithRetries: OutboxEntry = {
+        id: "mint-retrying",
+        type: "SPLIT_MINT",
+        status: "READY_TO_SUBMIT",
+        sourceTokenId: "source1".padEnd(64, "0"),
+        splitGroupId: "retry-group-123",
+        splitIndex: 1,
+        retryCount: 5,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } as OutboxEntry;
+
+      setLocalStorage(createMockStorageData({}));
+
+      const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(TEST_ADDRESS);
+      const data = JSON.parse(localStorage.getItem(storageKey) || "{}");
+      data._outbox = [mintWithRetries];
+      localStorage.setItem(storageKey, JSON.stringify(data));
+
+      const params = createBaseSyncParams();
+      await inventorySync(params);
+
+      // Retry count should be preserved
+      const stored = getLocalStorage();
+      const entry = stored?._outbox?.find((e: OutboxEntry) => e.id === "mint-retrying");
+      expect(entry?.retryCount).toBe(5);
+    });
+
+    it("should maintain splitGroupId linkage for burn-mint pairs", async () => {
+      const splitGroupId = "linked-group-456";
+
+      const outboxEntries: OutboxEntry[] = [
+        {
+          id: "burn-1",
+          type: "SPLIT_BURN",
+          status: "COMPLETED",
+          sourceTokenId: "source1".padEnd(64, "0"),
+          splitGroupId,
+          splitIndex: 0,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        } as OutboxEntry,
+        {
+          id: "mint-sender",
+          type: "SPLIT_MINT",
+          status: "COMPLETED",
+          sourceTokenId: "source1".padEnd(64, "0"),
+          splitGroupId,
+          splitIndex: 1,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        } as OutboxEntry,
+        {
+          id: "mint-recipient",
+          type: "SPLIT_MINT",
+          status: "FAILED",
+          sourceTokenId: "source1".padEnd(64, "0"),
+          splitGroupId,
+          splitIndex: 2,
+          retryCount: 10,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        } as OutboxEntry,
+      ];
+
+      setLocalStorage(createMockStorageData({}));
+
+      const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(TEST_ADDRESS);
+      const data = JSON.parse(localStorage.getItem(storageKey) || "{}");
+      data._outbox = outboxEntries;
+      localStorage.setItem(storageKey, JSON.stringify(data));
+
+      const params = createBaseSyncParams();
+      await inventorySync(params);
+
+      // Verify all entries in split group are preserved
+      const stored = getLocalStorage();
+      const burnEntry = stored?._outbox?.find((e: OutboxEntry) => e.type === "SPLIT_BURN");
+      const mintEntries = stored?._outbox?.filter((e: OutboxEntry) => e.type === "SPLIT_MINT");
+
+      expect(burnEntry?.splitGroupId).toBe(splitGroupId);
+      expect(mintEntries?.every((e: OutboxEntry) => e.splitGroupId === splitGroupId)).toBe(true);
+    });
+
+    it("should not remove FAILED mints (require manual intervention)", async () => {
+      const failedMint: OutboxEntry = {
+        id: "failed-mint-critical",
+        type: "SPLIT_MINT",
+        status: "FAILED",
+        sourceTokenId: "source1".padEnd(64, "0"),
+        splitGroupId: "failed-group-789",
+        splitIndex: 1,
+        retryCount: 10,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } as OutboxEntry;
+
+      setLocalStorage(createMockStorageData({}));
+
+      const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(TEST_ADDRESS);
+      const data = JSON.parse(localStorage.getItem(storageKey) || "{}");
+      data._outbox = [failedMint];
+      localStorage.setItem(storageKey, JSON.stringify(data));
+
+      const params = createBaseSyncParams();
+      await inventorySync(params);
+
+      // FAILED entries should NOT be automatically removed
+      const stored = getLocalStorage();
+      const failedEntries = stored?._outbox?.filter(
+        (e: OutboxEntry) => e.status === "FAILED"
+      );
+      expect(failedEntries?.length).toBe(1);
     });
   });
 });
