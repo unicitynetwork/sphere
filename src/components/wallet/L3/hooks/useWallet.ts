@@ -14,7 +14,8 @@ import {
   clearNametagForAddress,
   addToken as addTokenToInventory,
   removeToken as removeTokenFromInventory,
-  dispatchWalletUpdated
+  dispatchWalletUpdated,
+  inventorySync
 } from "../services/InventorySyncService";
 import { tokenToTxf, getCurrentStateHash } from "../services/TxfSerializer";
 import { NametagService } from "../services/NametagService";
@@ -231,22 +232,24 @@ export const useWallet = () => {
     enabled: !!identityQuery.data?.address,
   });
 
-  // Initialize IPFS storage service when identity is available
-  // CRITICAL FIX: Do NOT require nametag - the nametag is stored in IPFS and
-  // needs syncFromIpns() to recover it. Requiring nametag creates a circular dependency:
-  //   - startAutoSync() requires nametag
-  //   - But nametag needs syncFromIpns() to be recovered
-  //   - syncFromIpns() is called by startAutoSync()
-  //   - Result: Deadlock - user stuck with 0 tokens forever
+  // Initialize inventory sync when identity is available
+  // This triggers IPFS sync to recover tokens and nametag from remote storage.
+  // Uses InventorySyncService.inventorySync() instead of deprecated IpfsStorageService.startAutoSync()
   useEffect(() => {
     const identity = identityQuery.data;
 
-    // Start auto-sync when user has identity - this will recover nametag from IPFS
-    if (identity) {
-      const storageService = IpfsStorageService.getInstance(identityManager);
-      storageService.startAutoSync();
+    // Run inventory sync when user has identity - this will recover nametag and tokens from IPFS
+    if (identity?.address && identity?.publicKey && identity?.ipnsName) {
+      // Trigger sync to merge local and remote state
+      inventorySync({
+        address: identity.address,
+        publicKey: identity.publicKey,
+        ipnsName: identity.ipnsName,
+      }).catch(err => {
+        console.error('❌ [useWallet] Initial inventory sync failed:', err);
+      });
     }
-  }, [identityQuery.data, identityManager]);
+  }, [identityQuery.data]);
 
   // NOTE: OutboxRecoveryService lifecycle is now managed centrally in ServicesProvider.tsx
   // This prevents the repeated start/stop cycles that occurred when multiple components

@@ -73,10 +73,11 @@ export function useIpfsStorage() {
     };
   }, [queryClient]);
 
-  // Start auto-sync on mount (only if enabled)
+  // Mark service as ready on mount
+  // NOTE: Auto-sync is now handled by useWallet.ts via InventorySyncService.inventorySync()
+  // This hook only provides UI state and manual sync operations
   useEffect(() => {
     if (!storageService) return;
-    storageService.startAutoSync();
     setIsServiceReady(true);
 
     // Initialize sync state from service (in case sync already started before hook mounted)
