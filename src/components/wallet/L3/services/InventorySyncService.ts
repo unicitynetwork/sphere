@@ -180,6 +180,7 @@ interface SyncContext {
   uploadNeeded: boolean;
   ipnsPublished: boolean;
   hasLocalOnlyContent: boolean; // Content in local that's not in remote (needs upload)
+  preparedStorageData: TxfStorageData | null; // Storage data prepared in step 9 for step 10
 
   // Statistics
   stats: SyncOperationStats;
@@ -414,6 +415,7 @@ function initializeContext(params: SyncParams, mode: SyncMode, startTime: number
     uploadNeeded: false,
     ipnsPublished: false,
     hasLocalOnlyContent: false,
+    preparedStorageData: null,
     stats: createDefaultSyncOperationStats(),
     circuitBreaker: createDefaultCircuitBreakerState(),
     errors: []
@@ -711,6 +713,11 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
   if (remoteData._meta) {
     ctx.remoteVersion = remoteData._meta.version || 0;
     console.log(`  Remote version: ${ctx.remoteVersion}, Local version: ${ctx.localVersion}`);
+    // Log warning if remote version seems stale (much lower than expected for active wallet)
+    // This can indicate IPNS propagation issues
+    if (ctx.localVersion > 0 && ctx.remoteVersion < ctx.localVersion) {
+      console.warn(`  ⚠️ Remote version (${ctx.remoteVersion}) is LOWER than local (${ctx.localVersion}) - possible stale IPNS data`);
+    }
   }
 
   // 2. Merge remote tokens into context
@@ -763,6 +770,7 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
   // (supports boomerang scenarios where token returns at different states)
   // NOTE: If stateHash is unavailable (getCurrentStateHash returns undefined),
   // we still import the token using tokenId-only key to avoid losing sent history.
+  console.log(`  📤 IPFS _sent folder: ${remoteData._sent ? (Array.isArray(remoteData._sent) ? remoteData._sent.length : 'not-array') : 'undefined'} entries, local: ${ctx.sent.length}`);
   if (remoteData._sent && Array.isArray(remoteData._sent)) {
     const existingKeys = new Set(
       ctx.sent.map(s => {
@@ -1921,6 +1929,11 @@ function step9_prepareStorage(ctx: SyncContext): void {
   localStorage.setItem(storageKey, JSON.stringify(storageData));
   ctx.uploadNeeded = true;
 
+  // CRITICAL: Store the prepared data for step 10 to avoid double-increment bug
+  // Previously, step 10 called buildStorageDataFromContext() again which incremented version,
+  // causing localStorage to have version N but IPFS to have version N+1.
+  ctx.preparedStorageData = storageData;
+
   // Dispatch wallet-updated event so UI components refresh
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('wallet-updated'));
@@ -1954,8 +1967,29 @@ async function step10_uploadIpfs(ctx: SyncContext): Promise<void> {
     return;
   }
 
-  // Build storage data from current context
-  const storageData = buildStorageDataFromContext(ctx);
+  // CRITICAL FIX: Reuse storage data from step 9 instead of rebuilding
+  // This prevents the version double-increment bug where step 10 would call
+  // buildStorageDataFromContext() again, incrementing version a second time.
+  if (!ctx.preparedStorageData) {
+    console.error(`  ❌ BUG: preparedStorageData is null - step 9 didn't run correctly`);
+    ctx.errors.push('Internal error: preparedStorageData is null');
+    return;
+  }
+  const storageData = ctx.preparedStorageData;
+
+  // Diagnostic logging: show exactly what we're uploading
+  // Token keys are _<tokenId> (e.g., "_abc123..."), not to be confused with
+  // special keys like _meta, _sent, etc.
+  const tokenKeys = Object.keys(storageData).filter(k => isTokenKey(k));
+  const tokenCount = tokenKeys.length;
+  const sentCount = storageData._sent?.length || 0;
+  const tombstoneCount = storageData._tombstones?.length || 0;
+  console.log(`  📦 Upload payload: version=${storageData._meta?.version}, tokens=${tokenCount}, sent=${sentCount}, tombstones=${tombstoneCount}`);
+  // Log token IDs to help trace missing tokens (e.g., change tokens from splits)
+  if (tokenCount <= 15) {
+    const tokenIds = tokenKeys.map(k => tokenIdFromKey(k).slice(0, 8)).join(', ');
+    console.log(`  📦 Token IDs: ${tokenIds}`);
+  }
 
   // Upload content to IPFS
   console.log(`  📤 Uploading content to IPFS...`);
