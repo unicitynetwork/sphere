@@ -232,20 +232,23 @@ export class IpfsStorageService implements IpfsTransport {
    */
   startAutoSync(): void {
     if (this.autoSyncEnabled) {
-      return; // Already enabled
+      return;
     }
 
-    // Create bound handler to allow proper cleanup
-    this.boundSyncHandler = () => this.scheduleSync();
-    window.addEventListener("wallet-updated", this.boundSyncHandler);
+    // DEPRECATED: wallet-updated listener removed to prevent dual-publish race conditions
+    // Auto-sync is now handled by InventorySyncService.inventorySync()
+    // this.boundSyncHandler = () => this.scheduleSync();
+    // window.addEventListener("wallet-updated", this.boundSyncHandler);
+
     this.autoSyncEnabled = true;
-    console.log("📦 IPFS auto-sync enabled");
+    console.log("📦 IPFS auto-sync enabled (auto-triggers disabled - use InventorySyncService)");
+    console.warn("⚠️ [DEPRECATED] IpfsStorageService.startAutoSync() - auto-sync delegated to InventorySyncService");
 
-    // Set up IPNS polling with visibility-based control
-    this.setupVisibilityListener();
+    // DEPRECATED: IPNS polling disabled to prevent dual-publish
+    // See setupVisibilityListener() for detailed rationale
+    // this.setupVisibilityListener();
 
-    // On startup, run IPNS-based sync to discover remote state
-    // This resolves IPNS, verifies remote content, and merges if needed
+    // On startup, run IPNS-based sync once to discover remote state
     this.syncFromIpns().catch(console.error);
   }
 
@@ -253,7 +256,8 @@ export class IpfsStorageService implements IpfsTransport {
    * Graceful shutdown
    */
   async shutdown(): Promise<void> {
-    // Remove event listener
+    // NOTE: boundSyncHandler is null in new implementation (startAutoSync doesn't set it)
+    // Keeping defensive cleanup for backward compatibility
     if (this.boundSyncHandler) {
       window.removeEventListener("wallet-updated", this.boundSyncHandler);
       this.boundSyncHandler = null;
@@ -349,6 +353,14 @@ export class IpfsStorageService implements IpfsTransport {
   /**
    * Check if WebCrypto is available (required by Helia/libp2p)
    */
+  // ==========================================
+  // IpfsTransport Interface - STABLE API
+  // ==========================================
+  // These methods form the core IPFS transport layer
+  // and are called by InventorySyncService in Step 10.
+  // Do NOT deprecate - these are the canonical transport methods.
+  // ==========================================
+
   // ==========================================
   // IpfsTransport Interface - Initialization
   // ==========================================
@@ -1678,8 +1690,9 @@ export class IpfsStorageService implements IpfsTransport {
       // This handles case where local tokens were minted but remote was ahead
       // Without this sync, local-only tokens would be lost on next restart
       if (this.localDiffersFromRemote(remoteData)) {
-        console.log(`📦 Local has unique content after higher-sequence import - scheduling sync`);
-        this.scheduleSync();
+        console.log(`📦 Local has unique content after higher-sequence import - would need re-sync`);
+        console.warn(`⚠️ Skipping auto-sync to prevent dual-publish. Use syncNow() explicitly if needed.`);
+        // DEPRECATED: scheduleSync() removed - prevents dual-publish race condition
       }
     } else {
       // Local version is same or higher, BUT remote might have new tokens we don't have
@@ -1702,8 +1715,9 @@ export class IpfsStorageService implements IpfsTransport {
       // Only sync if local differs from remote (has unique tokens or better versions)
       // This prevents unnecessary re-publishing when local now matches remote
       if (this.localDiffersFromRemote(remoteData)) {
-        console.log(`📦 Local differs from remote, scheduling sync to publish merged state`);
-        this.scheduleSync();
+        console.log(`📦 Local differs from remote - would need re-sync`);
+        console.warn(`⚠️ Skipping auto-sync to prevent dual-publish. Use syncNow() explicitly if needed.`);
+        // DEPRECATED: scheduleSync() removed - prevents dual-publish race condition
 
         // Emit event to notify UI
         await this.emitEvent({
@@ -1843,7 +1857,34 @@ export class IpfsStorageService implements IpfsTransport {
 
   /**
    * Set up visibility change listener for polling control
+   *
+   * DEPRECATED IN PHASE 2 REFACTORING: This method is no longer called by startAutoSync()
+   *
+   * RATIONALE FOR DISABLING POLLING:
+   * ================================
+   * During Phase 2, we identified a race condition between:
+   * - Fast HTTP publish to backend (~100-300ms)
+   * - Slow DHT publish via browser Helia (2-5 seconds)
+   *
+   * RACE CONDITION SCENARIO:
+   * T+0ms:   Tab A saves token → triggers publish
+   * T+100ms: Tab A HTTP publish completes (seq=5)
+   * T+150ms: Tab B polling wakes up → resolves IPNS → sees seq=5
+   * T+200ms: Tab B detects local diff → calls scheduleSync()
+   * T+250ms: Tab B publishes seq=5 via HTTP (DUPLICATE)
+   *
+   * SOLUTION (Changes 6 + 7):
+   * - Remove scheduleSync() from handleHigherSequenceDiscovered() [Change 6]
+   * - Disable continuous polling by not calling this method [Change 7]
+   * - Only import remote tokens, never auto-sync
+   * - User/code must explicitly call syncNow() when ready
+   *
+   * RE-ENABLEMENT CRITERIA (Phase 3):
+   * - Single publish transport (HTTP-only OR DHT-only)
+   * - Atomic sequence number increment
+   * - Distributed lock across tabs
    */
+  // @ts-expect-error - Method kept for documentation and potential re-enablement in Phase 3
   private setupVisibilityListener(): void {
     if (this.boundVisibilityHandler) {
       return; // Already set up
@@ -3001,7 +3042,9 @@ export class IpfsStorageService implements IpfsTransport {
    * Schedule a debounced sync using the queue with LOW priority (auto-coalesced)
    * The SyncQueue handles coalescing of multiple LOW priority requests
    */
+  // @ts-expect-error - Method kept for backward compatibility and potential external callers
   private scheduleSync(): void {
+    console.warn("⚠️ [DEPRECATED] IpfsStorageService.scheduleSync() is deprecated. Use InventorySyncService.inventorySync() instead.");
     if (this.syncTimer) {
       clearTimeout(this.syncTimer);
     }
@@ -3030,6 +3073,7 @@ export class IpfsStorageService implements IpfsTransport {
    */
   async syncFromIpns(): Promise<StorageResult> {
     console.log(`📦 Starting IPNS-based sync...`);
+    console.warn("⚠️ [DEPRECATED] IpfsStorageService.syncFromIpns() is deprecated. Use InventorySyncService.inventorySync() instead.");
 
     // Set initial syncing flag for UI feedback
     this.isInitialSyncing = true;

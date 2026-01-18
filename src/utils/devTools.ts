@@ -31,6 +31,8 @@ import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/Signi
 import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
 import { IdentityManager } from "../components/wallet/L3/services/IdentityManager";
 import { IpfsStorageService } from "../components/wallet/L3/services/IpfsStorageService";
+import { getIpfsHttpResolver } from "../components/wallet/L3/services/IpfsHttpResolver";
+import { isActiveTokenKey, tokenIdFromKey, type TxfStorageData, type InvalidTokenEntry } from "../components/wallet/L3/services/types/TxfTypes";
 import { unicityIdValidator, type UnicityIdValidationResult } from "./unicityIdValidator";
 
 // Type declarations for window extension
@@ -54,6 +56,7 @@ declare global {
     devCheckNametag: (nametag: string) => Promise<string | null>;
     devRestoreNametag: (nametagName: string) => boolean;
     devDumpNametagToken: () => Promise<unknown>;
+    devInspectIpfs: () => Promise<unknown>;
   }
 }
 
@@ -2004,6 +2007,154 @@ export function devDumpLocalStorage(filter?: string): void {
 }
 
 /**
+ * Inspect remote IPFS storage data
+ * Fetches the current IPNS-resolved content and displays its structure
+ *
+ * Usage from browser console:
+ *   devInspectIpfs()
+ */
+export async function devInspectIpfs(): Promise<unknown> {
+  console.group("📦 IPFS Remote Data Inspection");
+
+  try {
+    const identityManager = IdentityManager.getInstance();
+    const identity = await identityManager.getCurrentIdentity();
+
+    if (!identity) {
+      console.error("❌ No wallet identity available");
+      console.groupEnd();
+      return { error: "No identity" };
+    }
+
+    console.log(`📋 Identity: ${identity.address.slice(0, 30)}...`);
+
+    // Get IPNS name from IpfsStorageService (it computes from identity keys)
+    const ipfsService = IpfsStorageService.getInstance(identityManager);
+    const ipnsName = ipfsService.getIpnsName();
+
+    if (!ipnsName) {
+      console.error("❌ No IPNS name available - IPFS service may not be initialized");
+      console.groupEnd();
+      return { error: "No IPNS name" };
+    }
+
+    console.log(`📋 IPNS Name: ${ipnsName}`);
+
+    // Resolve IPNS and fetch content
+    const httpResolver = getIpfsHttpResolver();
+    console.log("🔍 Resolving IPNS...");
+
+    const ipnsResult = await httpResolver.resolveIpnsName(ipnsName);
+    if (!ipnsResult.cid) {
+      console.warn("⚠️ No CID found for IPNS name - wallet may not have been synced to IPFS yet");
+      console.groupEnd();
+      return { error: "No IPNS record", ipnsName: identity.ipnsName };
+    }
+
+    console.log(`✅ IPNS resolved: CID=${ipnsResult.cid.slice(0, 20)}..., seq=${ipnsResult.sequence}`);
+
+    // Fetch content with CID verification
+    console.log("📥 Fetching content from IPFS...");
+    const content = await httpResolver.fetchContentByCid(ipnsResult.cid) as TxfStorageData | null;
+
+    if (!content) {
+      console.error("❌ Failed to fetch content from IPFS (CID verification failed)");
+      console.groupEnd();
+      return { error: "Fetch failed - CID mismatch", cid: ipnsResult.cid };
+    }
+
+    // Analyze content
+    console.log("\n═══════════════════════════════════════════════════════════════");
+    console.log("📊 IPFS STORAGE CONTENT SUMMARY");
+    console.log("═══════════════════════════════════════════════════════════════\n");
+
+    // Meta
+    if (content._meta) {
+      console.log("📋 _meta:");
+      console.log(`   Version: ${content._meta.version}`);
+      console.log(`   Address: ${content._meta.address?.slice(0, 30)}...`);
+      console.log(`   IPNS Name: ${content._meta.ipnsName}`);
+      console.log(`   Format: ${content._meta.formatVersion}`);
+      console.log(`   Last CID: ${content._meta.lastCid?.slice(0, 20) || "(none)"}...`);
+    }
+
+    // Nametag
+    if (content._nametag) {
+      console.log(`\n📛 _nametag: "${content._nametag.name}"`);
+    } else {
+      console.log("\n📛 _nametag: (none)");
+    }
+
+    // Active tokens
+    const tokenKeys = Object.keys(content).filter(isActiveTokenKey);
+    console.log(`\n🪙 Active tokens: ${tokenKeys.length}`);
+    for (const key of tokenKeys) {
+      const tokenId = tokenIdFromKey(key);
+      const token = content[key] as TxfToken;
+      console.log(`   - ${tokenId.slice(0, 16)}... (tx=${token.transactions?.length || 0})`);
+    }
+
+    // Invalid tokens
+    const invalidTokens = content._invalid as InvalidTokenEntry[] | undefined;
+    console.log(`\n❌ _invalid tokens: ${invalidTokens?.length || 0}`);
+    if (invalidTokens && invalidTokens.length > 0) {
+      for (const entry of invalidTokens) {
+        const tokenId = entry.token?.genesis?.data?.tokenId || "unknown";
+        console.log(`   - ${tokenId.slice(0, 16)}...`);
+        console.log(`     Reason: ${entry.reason}`);
+        console.log(`     Details: ${entry.details || "(none)"}`);
+        console.log(`     Invalidated: ${new Date(entry.invalidatedAt).toISOString()}`);
+      }
+    }
+
+    // Tombstones
+    const tombstones = content._tombstones;
+    console.log(`\n⚰️ _tombstones: ${tombstones?.length || 0}`);
+    if (tombstones && tombstones.length > 0) {
+      for (const ts of tombstones) {
+        console.log(`   - ${ts.tokenId.slice(0, 16)}... (state: ${ts.stateHash.slice(0, 12)}...)`);
+      }
+    }
+
+    // Sent tokens
+    const sentTokens = content._sent;
+    console.log(`\n📤 _sent tokens: ${sentTokens?.length || 0}`);
+
+    // Outbox
+    const outbox = content._outbox;
+    console.log(`\n📮 _outbox entries: ${outbox?.length || 0}`);
+
+    // Mint outbox
+    const mintOutbox = content._mintOutbox;
+    console.log(`\n🏭 _mintOutbox entries: ${mintOutbox?.length || 0}`);
+
+    // Invalidated nametags
+    const invalidatedNametags = content._invalidatedNametags;
+    console.log(`\n🚫 _invalidatedNametags: ${invalidatedNametags?.length || 0}`);
+
+    console.log("\n═══════════════════════════════════════════════════════════════");
+    console.groupEnd();
+
+    return {
+      cid: ipnsResult.cid,
+      sequence: ipnsResult.sequence,
+      meta: content._meta,
+      activeTokens: tokenKeys.length,
+      invalidTokens: invalidTokens?.length || 0,
+      tombstones: tombstones?.length || 0,
+      sentTokens: sentTokens?.length || 0,
+      outboxEntries: outbox?.length || 0,
+      rawContent: content
+    };
+
+  } catch (error) {
+    console.error("❌ Error inspecting IPFS:", error);
+    console.groupEnd();
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
  * Register developer tools on the window object
  * Call this during app initialization in development mode
  */
@@ -2089,5 +2240,6 @@ export function registerDevTools(): void {
       return { nametagData, parseError: err };
     }
   };
+  window.devInspectIpfs = devInspectIpfs;
   console.log("🛠️ Dev tools registered. Type devHelp() for available commands.");
 }
