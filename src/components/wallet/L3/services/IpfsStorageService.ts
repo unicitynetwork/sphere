@@ -816,6 +816,10 @@ export class IpfsStorageService implements IpfsTransport {
       const cidString = cid.toString();
 
       // Multi-node upload: directly upload content to all configured IPFS nodes
+      // IMPORTANT: Use the CID returned by the backend, not Helia's CID!
+      // Helia uses dag-json codec, but /api/v0/add uses raw codec.
+      // We must use a consistent CID for IPNS publishing.
+      let backendCid: string | null = null;
       const gatewayUrls = getAllBackendGatewayUrls();
       if (gatewayUrls.length > 0) {
         console.log(`📦 Uploading to ${gatewayUrls.length} IPFS node(s)...`);
@@ -842,7 +846,7 @@ export class IpfsStorageService implements IpfsTransport {
               const result = await response.json();
               const hostname = new URL(gatewayUrl).hostname;
               console.log(`📦 Uploaded to ${hostname}: ${result.Hash}`);
-              return { success: true, host: gatewayUrl, cid: result.Hash };
+              return { success: true, host: gatewayUrl, cid: result.Hash as string };
             }
             return { success: false, host: gatewayUrl, error: response.status };
           } catch (error) {
@@ -854,18 +858,63 @@ export class IpfsStorageService implements IpfsTransport {
         });
 
         const results = await Promise.allSettled(uploadPromises);
-        const successful = results.filter(
-          (r) => r.status === "fulfilled" && r.value.success
-        ).length;
-        console.log(`📦 Content uploaded to ${successful}/${gatewayUrls.length} nodes`);
+        const successfulResults = results.filter(
+          (r): r is PromiseFulfilledResult<{ success: true; host: string; cid: string }> =>
+            r.status === "fulfilled" && r.value.success === true
+        );
+        console.log(`📦 Content uploaded to ${successfulResults.length}/${gatewayUrls.length} nodes`);
+
+        // Use the first successful backend CID - this is the canonical CID
+        if (successfulResults.length > 0) {
+          backendCid = successfulResults[0].value.cid;
+          const uploadHost = successfulResults[0].value.host;
+          console.log(`📦 Using backend CID for IPNS: ${backendCid.slice(0, 16)}...`);
+
+          // Verify content is retrievable (backend might need time to index)
+          // This prevents CID mismatch issues when content is fetched immediately after upload
+          const maxRetries = 3;
+          const retryDelay = 200; // ms
+          for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+              const verifyResponse = await fetch(
+                `${uploadHost}/ipfs/${backendCid}`,
+                {
+                  method: "HEAD",
+                  signal: AbortSignal.timeout(2000),
+                }
+              );
+              if (verifyResponse.ok) {
+                console.log(`📦 Content verified retrievable (attempt ${attempt})`);
+                break;
+              }
+              if (attempt < maxRetries) {
+                await new Promise((r) => setTimeout(r, retryDelay));
+              }
+            } catch {
+              if (attempt < maxRetries) {
+                await new Promise((r) => setTimeout(r, retryDelay));
+              }
+            }
+          }
+        }
+      }
+
+      // Determine which CID to use: prefer backend CID (raw codec) over Helia CID (dag-json codec)
+      const canonicalCid = backendCid || cidString;
+      const canonicalCidSource = backendCid ? "backend (raw codec)" : "Helia (dag-json codec)";
+      if (backendCid && backendCid !== cidString) {
+        console.log(`📦 CID codec note: backend=${backendCid.slice(0, 12)}... vs helia=${cidString.slice(0, 12)}... (using ${canonicalCidSource})`);
       }
 
       // Announce content to DHT (non-blocking)
       const PROVIDE_TIMEOUT = 10000;
       try {
-        console.log(`📦 Announcing CID to network: ${cidString.slice(0, 16)}...`);
+        console.log(`📦 Announcing CID to network: ${canonicalCid.slice(0, 16)}...`);
+        // Announce the canonical CID (which may be different from Helia's)
+        const { CID: CIDClass } = await import("multiformats/cid");
+        const cidToAnnounce = CIDClass.parse(canonicalCid);
         await Promise.race([
-          this.helia.routing.provide(cid),
+          this.helia.routing.provide(cidToAnnounce),
           new Promise((_, reject) =>
             setTimeout(() => reject(new Error("DHT provide timeout")), PROVIDE_TIMEOUT)
           ),
@@ -876,7 +925,7 @@ export class IpfsStorageService implements IpfsTransport {
       }
 
       return {
-        cid: cidString,
+        cid: canonicalCid,
         success: true,
       };
     } catch (error) {

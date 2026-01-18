@@ -177,9 +177,12 @@ async function fetchContentByCidWithVerification(
   try {
     const url = `${gatewayUrl}/ipfs/${cid}`;
 
+    // Request raw bytes - DO NOT use Accept: application/json
+    // JSON content negotiation can cause gateways to re-serialize JSON,
+    // which changes property order and breaks CID verification
     const response = await fetchWithTimeout(url, timeoutMs, {
       headers: {
-        Accept: "application/json",
+        Accept: "application/octet-stream, */*",
       },
     });
 
@@ -191,16 +194,17 @@ async function fetchContentByCidWithVerification(
     const rawBytes = new Uint8Array(await response.arrayBuffer());
 
     // Verify CID from raw bytes
+    // IPFS backend uses raw codec (0x55) by default, so try that first
     const hash = await sha256.digest(rawBytes);
-    const computedCid = CID.createV1(jsonCodec.code, hash);
+    const rawCodec = 0x55; // raw codec (bafkrei... prefix)
+    const computedCidRaw = CID.createV1(rawCodec, hash);
 
-    if (computedCid.toString() !== cid) {
-      // Try with raw codec (0x55) as well - HTTP gateway may use different codec
-      const rawCodec = 0x55; // raw codec
-      const computedCidRaw = CID.createV1(rawCodec, hash);
+    if (computedCidRaw.toString() !== cid) {
+      // Also try with json codec (0x0200) for legacy Helia-created CIDs
+      const computedCidJson = CID.createV1(jsonCodec.code, hash);
 
-      if (computedCidRaw.toString() !== cid) {
-        console.warn(`⚠️ CID mismatch: expected ${cid}, got json=${computedCid.toString()}, raw=${computedCidRaw.toString()}`);
+      if (computedCidJson.toString() !== cid) {
+        console.warn(`⚠️ CID mismatch: expected ${cid}, got raw=${computedCidRaw.toString()}, json=${computedCidJson.toString()}`);
         // Don't fail - content may still be valid, just different codec
         // Log for debugging but continue with the content
       }
