@@ -16,6 +16,7 @@ import { IdentityManager } from "./IdentityManager";
 import type { Token } from "../data/model";
 import type { TxfStorageData, TxfMeta, TxfToken, TombstoneEntry } from "./types/TxfTypes";
 import { isTokenKey, tokenIdFromKey } from "./types/TxfTypes";
+import type { IpfsTransport, IpnsResolutionResult, IpfsUploadResult, IpnsPublishResult, GatewayHealth } from "./types/IpfsTransport";
 import { buildTxfStorageData, parseTxfStorageData, txfToToken, tokenToTxf, getCurrentStateHash, hasMissingNewStateHash, repairMissingStateHash, computeAndPatchStateHash } from "./TxfSerializer";
 import { getTokenValidationService } from "./TokenValidationService";
 import { getConflictResolutionService } from "./ConflictResolutionService";
@@ -149,7 +150,13 @@ const SYNC_DEBOUNCE_MS = 5000;
 // IpfsStorageService
 // ==========================================
 
-export class IpfsStorageService {
+/**
+ * IPFS Storage Service - Pure IPFS/IPNS transport layer
+ *
+ * Implements IpfsTransport interface for low-level IPFS operations.
+ * InventorySyncService orchestrates the high-level sync logic.
+ */
+export class IpfsStorageService implements IpfsTransport {
   private static instance: IpfsStorageService | null = null;
 
   private helia: Helia | null = null;
@@ -187,6 +194,9 @@ export class IpfsStorageService {
   private ipnsSyncRetryCount: number = 0;
   private readonly MAX_IPNS_RETRY_DELAY_MS = 30000; // Max 30 seconds between retries
   private readonly BASE_IPNS_RETRY_DELAY_MS = 1000; // Start with 1 second
+
+  // Gateway health tracking (for IpfsTransport interface)
+  private gatewayHealth: Map<string, GatewayHealth> = new Map();
 
   private constructor(identityManager: IdentityManager) {
     this.identityManager = identityManager;
@@ -339,7 +349,15 @@ export class IpfsStorageService {
   /**
    * Check if WebCrypto is available (required by Helia/libp2p)
    */
-  private isWebCryptoAvailable(): boolean {
+  // ==========================================
+  // IpfsTransport Interface - Initialization
+  // ==========================================
+
+  /**
+   * Check if WebCrypto API is available (required for IPNS)
+   * Part of IpfsTransport interface
+   */
+  public isWebCryptoAvailable(): boolean {
     try {
       return typeof crypto !== "undefined" &&
              crypto.subtle !== undefined &&
@@ -352,8 +370,9 @@ export class IpfsStorageService {
   /**
    * Lazy initialization of Helia and key derivation
    * Detects identity changes and re-derives keys automatically
+   * Part of IpfsTransport interface
    */
-  private async ensureInitialized(): Promise<boolean> {
+  public async ensureInitialized(): Promise<boolean> {
     // First, check if identity changed - we need to do this BEFORE the early return
     const identity = await this.identityManager.getCurrentIdentity();
     if (!identity) {
@@ -603,6 +622,290 @@ export class IpfsStorageService {
       // Allow all multiaddrs for allowed peers
       filterMultiaddrForPeer: async () => true,
     };
+  }
+
+  // ==========================================
+  // IpfsTransport Interface - IPNS Name Management
+  // ==========================================
+
+  /**
+   * Get the IPNS name for the current wallet
+   * Part of IpfsTransport interface
+   */
+  public getIpnsName(): string | null {
+    return this.cachedIpnsName;
+  }
+
+  // ==========================================
+  // IpfsTransport Interface - Version and CID Tracking
+  // ==========================================
+
+  /**
+   * Get current version counter (monotonic)
+   * Part of IpfsTransport interface
+   */
+  public getVersionCounter(): number {
+    if (!this.cachedIpnsName) return 0;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${this.cachedIpnsName}`;
+    return parseInt(localStorage.getItem(key) || "0", 10);
+  }
+
+  /**
+   * Set version counter
+   * Part of IpfsTransport interface
+   */
+  public setVersionCounter(version: number): void {
+    if (!this.cachedIpnsName) return;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${this.cachedIpnsName}`;
+    localStorage.setItem(key, String(version));
+  }
+
+  /**
+   * Get last published CID
+   * Part of IpfsTransport interface
+   */
+  public getLastCid(): string | null {
+    if (!this.cachedIpnsName) return null;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${this.cachedIpnsName}`;
+    return localStorage.getItem(key);
+  }
+
+  /**
+   * Set last published CID
+   * Part of IpfsTransport interface
+   */
+  public setLastCid(cid: string): void {
+    if (!this.cachedIpnsName) return;
+    const key = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${this.cachedIpnsName}`;
+    localStorage.setItem(key, cid);
+  }
+
+  // ==========================================
+  // IpfsTransport Interface - IPNS Sequence Tracking
+  // ==========================================
+
+  /**
+   * Get current IPNS sequence number (for conflict detection)
+   * Part of IpfsTransport interface
+   */
+  public getIpnsSequence(): bigint {
+    return this.ipnsSequenceNumber;
+  }
+
+  /**
+   * Set IPNS sequence number
+   * Part of IpfsTransport interface
+   */
+  public setIpnsSequence(seq: bigint): void {
+    this.ipnsSequenceNumber = seq;
+    this.setIpnsSequenceNumber(seq);
+  }
+
+  // ==========================================
+  // IpfsTransport Interface - Gateway Health Monitoring
+  // ==========================================
+
+  /**
+   * Get gateway health metrics
+   * Used for gateway selection and circuit breaking
+   * Part of IpfsTransport interface
+   */
+  public getGatewayHealth(): Map<string, GatewayHealth> {
+    return new Map(this.gatewayHealth);
+  }
+
+  /**
+   * Update gateway health after an operation
+   * @internal Used internally to track gateway reliability
+   */
+  private updateGatewayHealth(gateway: string, success: boolean): void {
+    const current = this.gatewayHealth.get(gateway) || {
+      lastSuccess: 0,
+      failureCount: 0,
+    };
+
+    if (success) {
+      this.gatewayHealth.set(gateway, {
+        lastSuccess: Date.now(),
+        failureCount: 0,
+      });
+    } else {
+      this.gatewayHealth.set(gateway, {
+        ...current,
+        failureCount: current.failureCount + 1,
+      });
+    }
+  }
+
+  // ==========================================
+  // IpfsTransport Interface - IPNS Resolution
+  // ==========================================
+
+  /**
+   * Resolve IPNS name to CID and fetch content
+   * Part of IpfsTransport interface
+   */
+  public async resolveIpns(): Promise<IpnsResolutionResult> {
+    const result = await this.resolveIpnsProgressively();
+
+    if (!result.best) {
+      return {
+        cid: null,
+        sequence: 0n,
+      };
+    }
+
+    return {
+      cid: result.best.cid,
+      sequence: result.best.sequence,
+      content: result.best._cachedContent,
+    };
+  }
+
+  // ==========================================
+  // IpfsTransport Interface - IPFS Content Operations
+  // ==========================================
+
+  /**
+   * Fetch content from IPFS by CID
+   * Part of IpfsTransport interface
+   */
+  public async fetchContent(cid: string): Promise<TxfStorageData | null> {
+    return this.fetchRemoteContent(cid);
+  }
+
+  /**
+   * Upload content to IPFS
+   * Part of IpfsTransport interface
+   */
+  public async uploadContent(data: TxfStorageData): Promise<IpfsUploadResult> {
+    try {
+      // Ensure initialized
+      const initialized = await this.ensureInitialized();
+      if (!initialized || !this.helia) {
+        return {
+          cid: "",
+          success: false,
+          error: "IPFS not initialized",
+        };
+      }
+
+      // Upload to local Helia node
+      const j = json(this.helia);
+      const cid = await j.add(data);
+      const cidString = cid.toString();
+
+      // Multi-node upload: directly upload content to all configured IPFS nodes
+      const gatewayUrls = getAllBackendGatewayUrls();
+      if (gatewayUrls.length > 0) {
+        console.log(`📦 Uploading to ${gatewayUrls.length} IPFS node(s)...`);
+
+        const jsonBlob = new Blob([JSON.stringify(data)], {
+          type: "application/json",
+        });
+
+        // Upload to all nodes in parallel
+        const uploadPromises = gatewayUrls.map(async (gatewayUrl) => {
+          try {
+            const formData = new FormData();
+            formData.append("file", jsonBlob, "wallet.json");
+
+            const response = await fetch(
+              `${gatewayUrl}/api/v0/add?pin=true&cid-version=1`,
+              { method: "POST", body: formData }
+            );
+
+            const success = response.ok;
+            this.updateGatewayHealth(gatewayUrl, success);
+
+            if (success) {
+              const result = await response.json();
+              const hostname = new URL(gatewayUrl).hostname;
+              console.log(`📦 Uploaded to ${hostname}: ${result.Hash}`);
+              return { success: true, host: gatewayUrl, cid: result.Hash };
+            }
+            return { success: false, host: gatewayUrl, error: response.status };
+          } catch (error) {
+            this.updateGatewayHealth(gatewayUrl, false);
+            const hostname = new URL(gatewayUrl).hostname;
+            console.warn(`📦 Upload to ${hostname} failed:`, error);
+            return { success: false, host: gatewayUrl, error };
+          }
+        });
+
+        const results = await Promise.allSettled(uploadPromises);
+        const successful = results.filter(
+          (r) => r.status === "fulfilled" && r.value.success
+        ).length;
+        console.log(`📦 Content uploaded to ${successful}/${gatewayUrls.length} nodes`);
+      }
+
+      // Announce content to DHT (non-blocking)
+      const PROVIDE_TIMEOUT = 10000;
+      try {
+        console.log(`📦 Announcing CID to network: ${cidString.slice(0, 16)}...`);
+        await Promise.race([
+          this.helia.routing.provide(cid),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("DHT provide timeout")), PROVIDE_TIMEOUT)
+          ),
+        ]);
+        console.log(`📦 CID announced to network`);
+      } catch (provideError) {
+        console.warn(`📦 Could not announce to DHT (non-fatal):`, provideError);
+      }
+
+      return {
+        cid: cidString,
+        success: true,
+      };
+    } catch (error) {
+      return {
+        cid: "",
+        success: false,
+        error: error instanceof Error ? error.message : "Upload failed",
+      };
+    }
+  }
+
+  // ==========================================
+  // IpfsTransport Interface - IPNS Publishing
+  // ==========================================
+
+  /**
+   * Publish CID to IPNS
+   * Part of IpfsTransport interface
+   */
+  public async publishIpns(cid: string): Promise<IpnsPublishResult> {
+    try {
+      const { CID } = await import("multiformats/cid");
+      const parsedCid = CID.parse(cid);
+
+      const ipnsName = await this.publishToIpns(parsedCid);
+
+      if (ipnsName) {
+        return {
+          ipnsName,
+          success: true,
+          sequence: this.ipnsSequenceNumber,
+          verified: true,
+        };
+      } else {
+        return {
+          ipnsName: this.cachedIpnsName,
+          success: false,
+          verified: false,
+          error: "IPNS publish failed or not verified",
+        };
+      }
+    } catch (error) {
+      return {
+        ipnsName: this.cachedIpnsName,
+        success: false,
+        verified: false,
+        error: error instanceof Error ? error.message : "IPNS publish failed",
+      };
+    }
   }
 
   // ==========================================
@@ -1679,12 +1982,6 @@ export class IpfsStorageService {
   /**
    * Get current version counter for this wallet
    */
-  private getVersionCounter(): number {
-    if (!this.cachedIpnsName) return 0;
-    const key = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${this.cachedIpnsName}`;
-    return parseInt(localStorage.getItem(key) || "0", 10);
-  }
-
   /**
    * Increment and return new version counter
    */
@@ -1695,33 +1992,6 @@ export class IpfsStorageService {
     const next = current + 1;
     localStorage.setItem(key, String(next));
     return next;
-  }
-
-  /**
-   * Set version counter to specific value (used after merge)
-   */
-  private setVersionCounter(version: number): void {
-    if (!this.cachedIpnsName) return;
-    const key = `${STORAGE_KEY_PREFIXES.IPFS_VERSION}${this.cachedIpnsName}`;
-    localStorage.setItem(key, String(version));
-  }
-
-  /**
-   * Get last stored CID for this wallet
-   */
-  private getLastCid(): string | null {
-    if (!this.cachedIpnsName) return null;
-    const key = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${this.cachedIpnsName}`;
-    return localStorage.getItem(key);
-  }
-
-  /**
-   * Store last CID for recovery
-   */
-  private setLastCid(cid: string): void {
-    if (!this.cachedIpnsName) return;
-    const key = `${STORAGE_KEY_PREFIXES.IPFS_LAST_CID}${this.cachedIpnsName}`;
-    localStorage.setItem(key, cid);
   }
 
   // ==========================================
@@ -1893,6 +2163,9 @@ export class IpfsStorageService {
    * Sanity check tombstones before applying deletions
    * Verifies each tombstoned token is actually spent on Unicity
    * Returns tokens that should NOT be deleted (false tombstones)
+   *
+   * @deprecated Use InventorySyncService instead. This method will be removed in a future release.
+   * Migration: Call inventorySync() which handles all merge/validation logic (Step 7 + 7.5).
    */
   private async sanityCheckTombstones(
     tombstonesToApply: TombstoneEntry[],
@@ -1902,6 +2175,7 @@ export class IpfsStorageService {
     invalidTombstones: TombstoneEntry[];
     tokensToRestore: Array<{ tokenId: string; txf: TxfToken }>;
   }> {
+    console.warn('⚠️ [DEPRECATED] sanityCheckTombstones() is deprecated. Use InventorySyncService.inventorySync() instead.');
     const validTombstones: TombstoneEntry[] = [];
     const invalidTombstones: TombstoneEntry[] = [];
     const tokensToRestore: Array<{ tokenId: string; txf: TxfToken }> = [];
@@ -1974,12 +2248,16 @@ export class IpfsStorageService {
    * Check for tokens missing from remote collection (not tombstoned, just absent)
    * This handles case where remote "jumped over" a version
    * Returns tokens that should be preserved (unspent on Unicity)
+   *
+   * @deprecated Use InventorySyncService instead. This method will be removed in a future release.
+   * Migration: Call inventorySync() which handles all merge/validation logic (Step 7 recovery).
    */
   private async sanityCheckMissingTokens(
     localTokens: Token[],
     remoteTokenIds: Set<string>,
     remoteTombstoneIds: Set<string>
   ): Promise<Array<{ tokenId: string; txf: TxfToken }>> {
+    console.warn('⚠️ [DEPRECATED] sanityCheckMissingTokens() is deprecated. Use InventorySyncService.inventorySync() instead.');
     const tokensToPreserve: Array<{ tokenId: string; txf: TxfToken }> = [];
 
     // Find tokens that are in local but missing from remote (and not tombstoned)
@@ -2230,8 +2508,12 @@ export class IpfsStorageService {
    * 3) More proofs wins (including genesis proof)
    * 4) Identical state hashes = equal
    * 5) Deterministic tiebreaker for forks
+   *
+   * @deprecated Use InventorySyncService instead. This method will be removed in a future release.
+   * Migration: InventorySyncService.shouldPreferRemote() implements the same logic.
    */
   private compareTokenVersions(localTxf: TxfToken, remoteTxf: TxfToken): "local" | "remote" | "equal" {
+    console.warn('⚠️ [DEPRECATED] compareTokenVersions() is deprecated. Use InventorySyncService.shouldPreferRemote() instead.');
     // Helper to count COMMITTED transactions (those with inclusion proof)
     const countCommitted = (txf: TxfToken): number => {
       return txf.transactions.filter(tx => tx.inclusionProof !== null).length;
@@ -2300,8 +2582,12 @@ export class IpfsStorageService {
   /**
    * Check if local differs from remote in any way that requires sync
    * Returns true if we need to sync local changes to remote
+   *
+   * @deprecated Use InventorySyncService instead. This method will be removed in a future release.
+   * Migration: InventorySyncService.inventorySync() handles version comparison internally.
    */
   private localDiffersFromRemote(remoteData: TxfStorageData): boolean {
+    console.warn('⚠️ [DEPRECATED] localDiffersFromRemote() is deprecated. Use InventorySyncService.inventorySync() instead.');
     const walletRepo = WalletRepository.getInstance();
     const localTokens = walletRepo.getTokens();
 
@@ -2368,8 +2654,12 @@ export class IpfsStorageService {
    * - Handles missing tokens (tokens in local but not in remote)
    * - Merges tombstones from remote
    * - Imports nametag if local doesn't have one
+   *
+   * @deprecated Use InventorySyncService instead. This method will be removed in a future release.
+   * Migration: Call inventorySync() which handles all merge/validation logic.
    */
   private async importRemoteData(remoteTxf: TxfStorageData): Promise<number> {
+    console.warn('⚠️ [DEPRECATED] importRemoteData() is deprecated. Use InventorySyncService.inventorySync() instead.');
     const walletRepo = WalletRepository.getInstance();
 
     // Debug: Log raw tombstones from remote data
@@ -3532,8 +3822,12 @@ export class IpfsStorageService {
   /**
    * Run sanity check to detect and remove spent tokens
    * Called during each IPNS poll cycle
+   *
+   * @deprecated Use InventorySyncService instead. This method will be removed in a future release.
+   * Migration: TokenValidationService is called directly by InventorySyncService.
    */
   private async runSpentTokenSanityCheck(): Promise<void> {
+    console.warn('⚠️ [DEPRECATED] runSpentTokenSanityCheck() is deprecated. Use InventorySyncService.inventorySync() instead.');
     console.log("📦 Running spent token sanity check...");
 
     try {
@@ -3612,8 +3906,12 @@ export class IpfsStorageService {
    * This is the inverse of runSpentTokenSanityCheck():
    * - runSpentTokenSanityCheck: finds active tokens that should be tombstoned
    * - runTombstoneRecoveryCheck: finds tombstones that should be removed
+   *
+   * @deprecated Use InventorySyncService instead. This method will be removed in a future release.
+   * Migration: Recovery flow is handled by InventorySyncService.inventorySync().
    */
   private async runTombstoneRecoveryCheck(): Promise<void> {
+    console.warn('⚠️ [DEPRECATED] runTombstoneRecoveryCheck() is deprecated. Use InventorySyncService.inventorySync() instead.');
     console.log("📦 Running tombstone recovery check...");
 
     try {
@@ -3806,10 +4104,11 @@ export class IpfsStorageService {
   // ==========================================
 
   /**
-   * Get the deterministic IPNS name for this wallet
+   * Get or compute the deterministic IPNS name for this wallet
    * Returns a proper PeerId-based IPNS name
+   * Use getIpnsName() for sync access to cached value
    */
-  async getIpnsName(): Promise<string | null> {
+  async getOrComputeIpnsName(): Promise<string | null> {
     if (this.cachedIpnsName) {
       return this.cachedIpnsName;
     }
@@ -4015,4 +4314,22 @@ export class IpfsStorageService {
       return { success: false, error: errorMessage };
     }
   }
+}
+
+// ==========================================
+// IpfsTransport Singleton Getter
+// ==========================================
+
+/**
+ * Get the IpfsTransport singleton instance
+ * This provides access to the pure IPFS/IPNS transport layer
+ * for use by InventorySyncService and other high-level services.
+ */
+let transportInstance: IpfsTransport | null = null;
+
+export function getIpfsTransport(): IpfsTransport {
+  if (!transportInstance) {
+    transportInstance = IpfsStorageService.getInstance(IdentityManager.getInstance());
+  }
+  return transportInstance;
 }

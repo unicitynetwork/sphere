@@ -99,6 +99,14 @@ vi.mock("../../../../src/config/ipfs.config", () => ({
   getAllBackendGatewayUrls: vi.fn(() => ["https://test-gateway.example.com"]),
 }));
 
+// Mock IpfsStorageService - getIpfsTransport throws to force fallback to HTTP resolver
+// This ensures the existing IpfsHttpResolver mock is used for tests
+vi.mock("../../../../src/components/wallet/L3/services/IpfsStorageService", () => ({
+  getIpfsTransport: vi.fn(() => {
+    throw new Error("Transport not available in test - using HTTP resolver fallback");
+  }),
+}));
+
 // Mock PredicateEngineService
 vi.mock("@unicitylabs/state-transition-sdk/lib/predicate/PredicateEngineService", () => ({
   PredicateEngineService: {

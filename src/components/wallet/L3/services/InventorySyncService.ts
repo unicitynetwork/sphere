@@ -27,10 +27,11 @@ import { isTokenKey, keyFromTokenId } from './types/TxfTypes';
 import type { TxfInclusionProof } from './types/TxfTypes';
 import { tokenToTxf, txfToToken, getCurrentStateHash } from './TxfSerializer';
 import { STORAGE_KEY_GENERATORS } from '../../../../config/storageKeys';
-import { getIpfsHttpResolver, computeCidFromContent } from './IpfsHttpResolver';
+import { getIpfsHttpResolver } from './IpfsHttpResolver';
+import { getIpfsTransport } from './IpfsStorageService';
+import type { IpfsTransport } from './types/IpfsTransport';
 import { getTokenValidationService } from './TokenValidationService';
 import type { InvalidReasonCode } from '../types/SyncTypes';
-import { getAllBackendGatewayUrls } from '../../../../config/ipfs.config';
 import { NostrService } from './NostrService';
 import { IdentityManager } from './IdentityManager';
 
@@ -105,6 +106,7 @@ interface SyncContext {
   remoteCid: string | null;
   remoteVersion: number;
   uploadNeeded: boolean;
+  ipnsPublished: boolean;
 
   // Statistics
   stats: SyncOperationStats;
@@ -267,6 +269,7 @@ function initializeContext(params: SyncParams, mode: SyncMode, startTime: number
     remoteCid: null,
     remoteVersion: 0,
     uploadNeeded: false,
+    ipnsPublished: false,
     stats: createDefaultSyncOperationStats(),
     circuitBreaker: createDefaultCircuitBreakerState(),
     errors: []
@@ -407,23 +410,56 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
     return; // Continue with local-only data
   }
 
-  const resolver = getIpfsHttpResolver();
-
-  // 1. Resolve IPNS name to get CID and content
-  const resolution = await resolver.resolveIpnsName(ctx.ipnsName);
-
-  if (!resolution.success) {
-    console.warn(`  IPNS resolution failed: ${resolution.error || 'unknown error'}`);
-    return; // Continue with local-only data
+  // Try to use IpfsTransport if available (provides better sequence tracking)
+  let transport: IpfsTransport | null = null;
+  try {
+    transport = getIpfsTransport();
+  } catch {
+    // Fall back to HTTP resolver only
   }
 
-  if (!resolution.content) {
-    console.log(`  IPNS resolved but no content (new wallet or empty IPNS)`);
+  let remoteData: TxfStorageData | null = null;
+
+  if (transport) {
+    // Use full transport API (better sequence tracking, dual DHT+HTTP)
+    console.log(`  Using IpfsTransport for IPNS resolution...`);
+    const resolution = await transport.resolveIpns();
+
+    if (resolution.cid) {
+      ctx.remoteCid = resolution.cid;
+      ctx.remoteVersion = resolution.content?._meta?.version || 0;
+      remoteData = resolution.content || null;
+      console.log(`  Transport resolved: CID=${resolution.cid.slice(0, 16)}..., seq=${resolution.sequence}, version=${ctx.remoteVersion}`);
+    } else {
+      console.log(`  Transport IPNS resolution returned no CID (new wallet or empty IPNS)`);
+      return;
+    }
+  } else {
+    // Fallback to HTTP resolver
+    console.log(`  Using HTTP resolver for IPNS resolution (transport not available)...`);
+    const resolver = getIpfsHttpResolver();
+
+    // 1. Resolve IPNS name to get CID and content
+    const resolution = await resolver.resolveIpnsName(ctx.ipnsName);
+
+    if (!resolution.success) {
+      console.warn(`  IPNS resolution failed: ${resolution.error || 'unknown error'}`);
+      return; // Continue with local-only data
+    }
+
+    if (!resolution.content) {
+      console.log(`  IPNS resolved but no content (new wallet or empty IPNS)`);
+      return;
+    }
+
+    ctx.remoteCid = resolution.cid || null;
+    remoteData = resolution.content;
+  }
+
+  if (!remoteData) {
+    console.log(`  No remote data available`);
     return;
   }
-
-  ctx.remoteCid = resolution.cid || null;
-  const remoteData = resolution.content;
 
   // Extract remote version
   if (remoteData._meta) {
@@ -1403,10 +1439,14 @@ async function step8_5_ensureNametagNostrBinding(ctx: SyncContext): Promise<void
   console.log(`  Nametag binding summary: ${published} published, ${skipped} skipped, ${failed} failed (total: ${ctx.nametags.length})`);
 }
 
-function step9_prepareStorage(ctx: SyncContext): void {
-  console.log(`📤 [Step 9] Prepare for Storage`);
-
+/**
+ * Build TxfStorageData from sync context
+ *
+ * Helper function to construct storage data structure from current sync state.
+ */
+function buildStorageDataFromContext(ctx: SyncContext): TxfStorageData {
   // Build TxfStorageData structure
+  // Note: timestamp is excluded from _meta for CID stability (same content = same CID)
   const storageData: TxfStorageData = {
     _meta: {
       version: ctx.localVersion + 1, // Increment version
@@ -1447,6 +1487,15 @@ function step9_prepareStorage(ctx: SyncContext): void {
     storageData[keyFromTokenId(tokenId)] = txf;
   }
 
+  return storageData;
+}
+
+function step9_prepareStorage(ctx: SyncContext): void {
+  console.log(`📤 [Step 9] Prepare for Storage`);
+
+  // Build storage data from context
+  const storageData = buildStorageDataFromContext(ctx);
+
   // Write to localStorage
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(ctx.address);
   const json = JSON.stringify(storageData);
@@ -1463,130 +1512,59 @@ function step9_prepareStorage(ctx: SyncContext): void {
 }
 
 async function step10_uploadIpfs(ctx: SyncContext): Promise<void> {
-  console.log(`☁️ [Step 10] Upload to IPFS`);
+  console.log(`📤 [Step 10] Upload to IPFS`);
 
-  // Skip upload if not needed (no changes or LOCAL mode)
   if (!ctx.uploadNeeded) {
-    console.log(`  ⏭️ No upload needed (no changes)`);
+    console.log(`  ⏭️ Skipping IPFS upload: no changes to upload`);
     return;
   }
 
-  // 1. Read the prepared TxfStorageData from localStorage
+  // Try to get transport (gracefully skip if not available)
+  let transport: IpfsTransport | null = null;
+  try {
+    transport = getIpfsTransport();
+  } catch {
+    console.log(`  ⏭️ Skipping IPFS upload: transport not available`);
+    return;
+  }
+
+  // Check if transport is initialized
+  const initialized = await transport.ensureInitialized();
+  if (!initialized) {
+    console.log(`  ⏭️ Skipping IPFS upload: transport not initialized`);
+    return;
+  }
+
+  // Build storage data from current context
+  const storageData = buildStorageDataFromContext(ctx);
+
+  // Upload content to IPFS
+  console.log(`  📤 Uploading content to IPFS...`);
+  const uploadResult = await transport.uploadContent(storageData);
+  if (!uploadResult.success) {
+    console.warn(`  ❌ IPFS upload failed: ${uploadResult.error}`);
+    ctx.errors.push(uploadResult.error || 'IPFS upload failed');
+    return;
+  }
+
+  ctx.remoteCid = uploadResult.cid;
+  transport.setLastCid(uploadResult.cid);
+  console.log(`  ✅ Content uploaded: CID=${uploadResult.cid.slice(0, 16)}...`);
+
+  // Update localStorage with new CID
+  storageData._meta.lastCid = uploadResult.cid;
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(ctx.address);
-  const json = localStorage.getItem(storageKey);
-  if (!json) {
-    console.error(`  ❌ No storage data found at ${storageKey}`);
-    ctx.errors.push('No storage data to upload');
-    return;
-  }
-
-  let storageData: TxfStorageData;
-  try {
-    storageData = JSON.parse(json) as TxfStorageData;
-  } catch (e) {
-    console.error(`  ❌ Failed to parse storage data:`, e);
-    ctx.errors.push('Failed to parse storage data for upload');
-    return;
-  }
-
-  // 2. Get configured gateways
-  const gatewayUrls = getAllBackendGatewayUrls();
-  if (gatewayUrls.length === 0) {
-    console.warn(`  ⚠️ No IPFS gateways configured - skipping upload`);
-    ctx.errors.push('No IPFS gateways configured');
-    return;
-  }
-
-  // 3. Compute expected CID for verification
-  let expectedCid: string;
-  try {
-    expectedCid = await computeCidFromContent(storageData);
-    console.log(`  📋 Expected CID: ${expectedCid.slice(0, 16)}...`);
-  } catch (e) {
-    console.error(`  ❌ Failed to compute CID:`, e);
-    ctx.errors.push('Failed to compute content CID');
-    return;
-  }
-
-  // 4. Check if CID changed from last sync
-  const previousCid = storageData._meta?.lastCid;
-  if (previousCid === expectedCid) {
-    console.log(`  ✓ CID unchanged (${expectedCid.slice(0, 16)}...) - skipping upload`);
-    ctx.remoteCid = expectedCid;
-    return;
-  }
-
-  // 5. Upload to all gateways in parallel
-  console.log(`  📤 Uploading to ${gatewayUrls.length} IPFS node(s)...`);
-
-  const jsonBlob = new Blob([json], { type: 'application/json' });
-
-  const uploadPromises = gatewayUrls.map(async (gatewayUrl) => {
-    try {
-      const formData = new FormData();
-      formData.append('file', jsonBlob, 'wallet.json');
-
-      const response = await fetch(
-        `${gatewayUrl}/api/v0/add?pin=true&cid-version=1`,
-        {
-          method: 'POST',
-          body: formData,
-          signal: AbortSignal.timeout(30000), // 30s timeout
-        }
-      );
-
-      if (response.ok) {
-        const result = await response.json();
-        const hostname = new URL(gatewayUrl).hostname;
-        const returnedCid = result.Hash || result.Cid;
-        console.log(`    ✓ Uploaded to ${hostname}: ${returnedCid?.slice(0, 16)}...`);
-        return { success: true, host: gatewayUrl, cid: returnedCid };
-      }
-
-      const errorText = await response.text().catch(() => '');
-      console.warn(`    ⚠️ Upload to ${new URL(gatewayUrl).hostname} failed: HTTP ${response.status}`);
-      return { success: false, host: gatewayUrl, error: `HTTP ${response.status}: ${errorText.slice(0, 100)}` };
-    } catch (error) {
-      const hostname = new URL(gatewayUrl).hostname;
-      console.warn(`    ⚠️ Upload to ${hostname} failed:`, error);
-      return { success: false, host: gatewayUrl, error: error instanceof Error ? error.message : String(error) };
-    }
-  });
-
-  const results = await Promise.allSettled(uploadPromises);
-  const successful = results.filter(
-    (r): r is PromiseFulfilledResult<{ success: true; host: string; cid: string }> =>
-      r.status === 'fulfilled' && r.value.success
-  );
-
-  if (successful.length === 0) {
-    console.error(`  ❌ Upload failed on all gateways`);
-    ctx.errors.push('IPFS upload failed on all gateways');
-    return;
-  }
-
-  console.log(`  ✓ Content uploaded to ${successful.length}/${gatewayUrls.length} nodes`);
-
-  // 6. Verify the returned CID matches expected
-  const returnedCid = successful[0].value.cid;
-  if (returnedCid !== expectedCid) {
-    console.warn(`  ⚠️ CID mismatch: expected ${expectedCid.slice(0, 16)}..., got ${returnedCid?.slice(0, 16)}...`);
-    // Non-fatal - use the returned CID (gateway may use different encoding)
-  }
-
-  // 7. Update context with CID
-  ctx.remoteCid = returnedCid || expectedCid;
-
-  // 8. Update localStorage meta with new CID
-  storageData._meta.lastCid = ctx.remoteCid;
   localStorage.setItem(storageKey, JSON.stringify(storageData));
 
-  console.log(`  ✓ Upload complete: CID=${ctx.remoteCid.slice(0, 16)}...`);
-
-  // NOTE: IPNS publishing is handled by IpfsStorageService's background retry loop.
-  // For now, we mark ipnsPublishPending in the result to trigger retry.
-  // Future enhancement: Integrate IPNS publishing directly here.
-  console.log(`  ℹ️ IPNS publish pending (to be handled by background retry)`);
+  // Publish to IPNS
+  console.log(`  📡 Publishing to IPNS...`);
+  const publishResult = await transport.publishIpns(uploadResult.cid);
+  if (publishResult.success) {
+    ctx.ipnsPublished = true;
+    console.log(`  ✅ IPNS published: seq=${publishResult.sequence}`);
+  } else {
+    console.warn(`  ⚠️ IPNS publish failed (will retry in background): ${publishResult.error}`);
+  }
 }
 
 // ============================================
@@ -1594,19 +1572,21 @@ async function step10_uploadIpfs(ctx: SyncContext): Promise<void> {
 // ============================================
 
 function buildSuccessResult(ctx: SyncContext): SyncResult {
-  // IPFS upload succeeded but IPNS publish is handled separately
-  // Mark as PARTIAL_SUCCESS with ipnsPublishPending=true if content was uploaded
+  // Determine status based on IPFS/IPNS state:
+  // - SUCCESS: Either no upload needed, or upload + IPNS publish both succeeded
+  // - PARTIAL_SUCCESS: Content uploaded but IPNS publish failed
   const hasUploadedContent = ctx.remoteCid !== null && ctx.uploadNeeded;
+  const ipnsPublishPending = hasUploadedContent && !ctx.ipnsPublished;
 
   return {
-    status: hasUploadedContent ? 'PARTIAL_SUCCESS' : 'SUCCESS',
+    status: ipnsPublishPending ? 'PARTIAL_SUCCESS' : 'SUCCESS',
     syncMode: ctx.mode,
     operationStats: ctx.stats,
     inventoryStats: buildInventoryStats(ctx),
     lastCid: ctx.remoteCid || undefined,
     ipnsName: ctx.ipnsName,
-    ipnsPublished: false,  // We don't publish IPNS in step10 currently
-    ipnsPublishPending: hasUploadedContent,  // IPNS publish needed if we uploaded
+    ipnsPublished: ctx.ipnsPublished,
+    ipnsPublishPending,
     syncDurationMs: Date.now() - ctx.startTime,
     timestamp: Date.now(),
     version: ctx.localVersion,
