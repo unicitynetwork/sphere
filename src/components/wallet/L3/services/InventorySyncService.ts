@@ -395,6 +395,13 @@ async function step1_loadLocalStorage(ctx: SyncContext): Promise<void> {
 async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
   console.log(`🌐 [Step 2] Load from IPFS`);
 
+  // Early validation: skip IPFS loading if IPNS name is not available
+  // This is normal for new wallets that haven't published to IPNS yet
+  if (!ctx.ipnsName || ctx.ipnsName.trim().length === 0) {
+    console.log(`  ⏭️ Skipping IPFS load: no IPNS name configured (new wallet or LOCAL mode)`);
+    return; // Continue with local-only data
+  }
+
   const resolver = getIpfsHttpResolver();
 
   // 1. Resolve IPNS name to get CID and content
@@ -769,22 +776,33 @@ function validateTransactionCommitment(txf: TxfToken, txIndex: number): { valid:
     return { valid: false, reason: 'Invalid transactionHash format' };
   }
 
-  // Verify previousStateHash format
-  if (!tx.previousStateHash || !isValidHexString(tx.previousStateHash, 64)) {
-    return { valid: false, reason: 'Invalid or missing previousStateHash' };
-  }
-
   // Verify state hash chain integrity
+  // Note: Some tokens from faucet/SDK may not have previousStateHash populated.
+  // For the first transaction, we can derive it from genesis stateHash.
+  // Full cryptographic validation is done by SDK in Step 5.
   if (txIndex === 0) {
     // First transaction should reference genesis state
     const genesisStateHash = txf.genesis?.inclusionProof?.authenticator?.stateHash;
     if (!genesisStateHash) {
       return { valid: false, reason: 'Cannot verify chain - missing genesis stateHash' };
     }
-    if (tx.previousStateHash !== genesisStateHash) {
-      return { valid: false, reason: `Chain break: previousStateHash doesn't match genesis (expected ${genesisStateHash.slice(0, 16)}..., got ${tx.previousStateHash.slice(0, 16)}...)` };
+
+    // If previousStateHash is present, validate it matches genesis
+    if (tx.previousStateHash) {
+      if (!isValidHexString(tx.previousStateHash, 64)) {
+        return { valid: false, reason: 'Invalid previousStateHash format' };
+      }
+      if (tx.previousStateHash !== genesisStateHash) {
+        return { valid: false, reason: `Chain break: previousStateHash doesn't match genesis (expected ${genesisStateHash.slice(0, 16)}..., got ${tx.previousStateHash.slice(0, 16)}...)` };
+      }
     }
+    // If previousStateHash is missing on first transaction, that's OK - we know it should be genesis stateHash
+    // Full SDK validation in Step 5 will verify the actual cryptographic proof
   } else {
+    // Subsequent transactions MUST have previousStateHash
+    if (!tx.previousStateHash || !isValidHexString(tx.previousStateHash, 64)) {
+      return { valid: false, reason: 'Invalid or missing previousStateHash' };
+    }
     // Subsequent transactions should reference previous tx's new state
     const prevTx = txf.transactions[txIndex - 1];
     if (prevTx?.newStateHash && tx.previousStateHash !== prevTx.newStateHash) {

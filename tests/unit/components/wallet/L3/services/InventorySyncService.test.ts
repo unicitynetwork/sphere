@@ -1180,9 +1180,13 @@ describe("inventorySync", () => {
       expect(invalidEntry.details).toContain("Chain break");
     });
 
-    it("should reject token with missing previousStateHash", async () => {
+    it("should ALLOW token with missing previousStateHash on first transaction", async () => {
+      // Missing previousStateHash on the first transaction is allowed because:
+      // 1. We know it should be the genesis stateHash
+      // 2. Full SDK validation in Step 5 will verify the cryptographic proof
+      // 3. This matches faucet token behavior where the SDK doesn't populate this field
       setLocalStorage(createMockStorageData({
-        "broken2": createBrokenChainToken("broken2", "missing_previous"),
+        "missing_prev": createBrokenChainToken("missing_prev", "missing_previous"),
       }));
 
       const params: SyncParams = {
@@ -1192,16 +1196,13 @@ describe("inventorySync", () => {
 
       const result = await inventorySync(params);
 
-      // Token should be invalidated
-      expect(result.inventoryStats?.invalidTokens).toBe(1);
-      expect(result.inventoryStats?.activeTokens).toBe(0);
+      // Token should remain active (missing previousStateHash on first tx is OK)
+      expect(result.inventoryStats?.invalidTokens).toBe(0);
+      expect(result.inventoryStats?.activeTokens).toBe(1);
 
-      // Verify reason mentions missing previousStateHash
+      // Verify no invalid entries
       const stored = getLocalStorage();
-      expect(stored?._invalid?.length).toBe(1);
-      const invalidEntry = stored?._invalid?.[0] as InvalidTokenEntry;
-      expect(invalidEntry.reason).toBe("PROOF_MISMATCH");
-      expect(invalidEntry.details).toContain("previousStateHash");
+      expect(stored?._invalid?.length ?? 0).toBe(0);
     });
   });
 

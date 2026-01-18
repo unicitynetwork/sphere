@@ -11,7 +11,7 @@ import { ApiService } from "../services/api";
 import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { NametagService } from "../services/NametagService";
 import { RegistryService } from "../services/RegistryService";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { TokenSplitExecutor, type SplitPersistenceCallbacks } from "../services/transfer/TokenSplitExecutor";
 import { TokenSplitCalculator } from "../services/transfer/TokenSplitCalculator";
@@ -43,16 +43,31 @@ export const useWallet = () => {
   const { identityManager, nostrService } = useServices();
   const nametagService = NametagService.getInstance(identityManager);
 
+  // Debounce timer ref for wallet-updated events
+  // This coalesces multiple rapid events (e.g., during batch token receipt) into a single refetch
+  const walletUpdateDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const WALLET_UPDATE_DEBOUNCE_MS = 200;
+
   useEffect(() => {
     const handleWalletUpdate = () => {
-      queryClient.refetchQueries({ queryKey: KEYS.TOKENS });
-      queryClient.refetchQueries({ queryKey: KEYS.AGGREGATED });
-      // Also invalidate nametag query - critical for Unicity ID invalidation flow
-      queryClient.invalidateQueries({ queryKey: KEYS.NAMETAG });
+      // Debounce: coalesce multiple wallet-updated events within 200ms window
+      // This prevents 20+ spent checks during batch token receipt
+      if (walletUpdateDebounceRef.current) {
+        clearTimeout(walletUpdateDebounceRef.current);
+      }
+
+      walletUpdateDebounceRef.current = setTimeout(() => {
+        walletUpdateDebounceRef.current = null;
+        queryClient.refetchQueries({ queryKey: KEYS.TOKENS });
+        queryClient.refetchQueries({ queryKey: KEYS.AGGREGATED });
+        // Also invalidate nametag query - critical for Unicity ID invalidation flow
+        queryClient.invalidateQueries({ queryKey: KEYS.NAMETAG });
+      }, WALLET_UPDATE_DEBOUNCE_MS);
     };
 
     // Handle wallet-loaded event (triggered after wallet creation/restoration)
     // This ensures identity, nametag, and L1 wallet queries are refreshed
+    // Note: wallet-loaded is NOT debounced as it's a one-time event
     const handleWalletLoaded = () => {
       console.log("📢 useWallet: wallet-loaded event received, refreshing queries...");
       queryClient.invalidateQueries({ queryKey: KEYS.IDENTITY });
@@ -67,6 +82,10 @@ export const useWallet = () => {
     return () => {
       window.removeEventListener("wallet-updated", handleWalletUpdate);
       window.removeEventListener("wallet-loaded", handleWalletLoaded);
+      // Clear any pending debounce timer on cleanup
+      if (walletUpdateDebounceRef.current) {
+        clearTimeout(walletUpdateDebounceRef.current);
+      }
     };
   }, [queryClient]);
 

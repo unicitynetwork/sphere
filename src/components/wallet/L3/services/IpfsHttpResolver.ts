@@ -203,6 +203,17 @@ export class IpfsHttpResolver {
    * 4. Return first success or fail after timeout
    */
   async resolveIpnsName(ipnsName: string): Promise<IpnsResolutionResult> {
+    // Step 0: Validate IPNS name is non-empty
+    // New wallets or wallets not yet published to IPNS will have empty names
+    if (!ipnsName || typeof ipnsName !== 'string' || ipnsName.trim().length === 0) {
+      return {
+        success: false,
+        error: 'IPNS name is empty - wallet not fully initialized yet',
+        source: 'none',
+        latencyMs: 0,
+      };
+    }
+
     // Step 1: Check cache first
     const cached = this.cache.getIpnsRecord(ipnsName);
     if (cached) {
