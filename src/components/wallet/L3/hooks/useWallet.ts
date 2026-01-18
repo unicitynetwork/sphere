@@ -35,8 +35,54 @@ export const KEYS = {
   NAMETAG: ["wallet", "nametag"],
 };
 
+// Sync lifecycle event names (type-safe constants)
+const SYNC_EVENTS = {
+  START: 'inventory-sync-start',
+  END: 'inventory-sync-end',
+} as const;
+
 const walletRepo = WalletRepository.getInstance();
 const registryService = RegistryService.getInstance();
+
+/**
+ * Compute deterministic hash of token list for change detection
+ * Used to avoid expensive spent checks when token list hasn't changed.
+ * Uses djb2 hash algorithm (fast, good distribution).
+ */
+function computeTokenListHash(tokens: Token[]): string {
+  // Handle empty list explicitly
+  if (tokens.length === 0) {
+    return 'EMPTY';
+  }
+
+  // Create signature of each token including state hash (critical for boomerang detection)
+  const signatures = tokens
+    .map(t => {
+      // Extract state hash from jsonData if available
+      let stateHash = '';
+      try {
+        const parsed = JSON.parse(t.jsonData || '{}');
+        stateHash = parsed.state?.stateHash || '';
+      } catch {
+        // Ignore parse errors
+      }
+
+      // Include state hash to detect token evolution (transfers, burns, etc.)
+      return `${t.id}|${t.amount}|${t.status}|${t.coinId}|${stateHash}`;
+    })
+    .sort()
+    .join('::');
+
+  // djb2 hash with unsigned 32-bit result
+  let hash = 5381;
+  for (let i = 0; i < signatures.length; i++) {
+    const char = signatures.charCodeAt(i);
+    hash = ((hash << 5) + hash) + char;
+  }
+
+  // Force unsigned 32-bit integer (prevents negative values)
+  return (hash >>> 0).toString(16);
+}
 
 export const useWallet = () => {
   const queryClient = useQueryClient();
@@ -48,8 +94,33 @@ export const useWallet = () => {
   const walletUpdateDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const WALLET_UPDATE_DEBOUNCE_MS = 200;
 
+  // Track token list hash to detect actual changes (avoid redundant spent checks)
+  const lastTokenHashRef = useRef<string>('');
+
+  // Prevent refetch during active inventory sync
+  const skipRefetchDuringSyncRef = useRef<boolean>(false);
+
+  // Rate-limit consecutive spent checks
+  const lastSpentCheckTimeRef = useRef<number>(0);
+  const MIN_SPENT_CHECK_INTERVAL_MS = 2000; // 2 second minimum between checks
+
   useEffect(() => {
     const handleWalletUpdate = () => {
+      // Skip if we're in the middle of inventory sync
+      if (skipRefetchDuringSyncRef.current) {
+        console.log('⏭️  [useWallet] Skipping wallet-updated refetch during active inventory sync');
+        return;
+      }
+
+      // Rate-limit consecutive spent checks
+      const timeSinceLastCheck = Date.now() - lastSpentCheckTimeRef.current;
+      if (timeSinceLastCheck < MIN_SPENT_CHECK_INTERVAL_MS) {
+        console.log(
+          `⏭️  [useWallet] Skipping refetch (${timeSinceLastCheck}ms < ${MIN_SPENT_CHECK_INTERVAL_MS}ms minimum)`
+        );
+        return;
+      }
+
       // Debounce: coalesce multiple wallet-updated events within 200ms window
       // This prevents 20+ spent checks during batch token receipt
       if (walletUpdateDebounceRef.current) {
@@ -58,6 +129,7 @@ export const useWallet = () => {
 
       walletUpdateDebounceRef.current = setTimeout(() => {
         walletUpdateDebounceRef.current = null;
+        lastSpentCheckTimeRef.current = Date.now(); // Record check time
         queryClient.refetchQueries({ queryKey: KEYS.TOKENS });
         queryClient.refetchQueries({ queryKey: KEYS.AGGREGATED });
         // Also invalidate nametag query - critical for Unicity ID invalidation flow
@@ -70,6 +142,12 @@ export const useWallet = () => {
     // Note: wallet-loaded is NOT debounced as it's a one-time event
     const handleWalletLoaded = () => {
       console.log("📢 useWallet: wallet-loaded event received, refreshing queries...");
+
+      // Reset token hash to force spent check on wallet load
+      // Prevents stale hash from skipping validation after identity change or IPFS sync
+      lastTokenHashRef.current = '';
+      lastSpentCheckTimeRef.current = 0; // Also reset rate limit
+
       queryClient.invalidateQueries({ queryKey: KEYS.IDENTITY });
       queryClient.invalidateQueries({ queryKey: KEYS.NAMETAG });
       queryClient.invalidateQueries({ queryKey: L1_KEYS.WALLET });
@@ -179,6 +257,43 @@ export const useWallet = () => {
   // This prevents the repeated start/stop cycles that occurred when multiple components
   // using useWallet() each had their own lifecycle management.
 
+  // Listen for inventory sync lifecycle events with failsafe timeout
+  useEffect(() => {
+    let lockTimeout: ReturnType<typeof setTimeout> | null = null;
+    const SYNC_LOCK_TIMEOUT_MS = 60000; // 60 seconds failsafe
+
+    const handleSyncStart = () => {
+      skipRefetchDuringSyncRef.current = true;
+      console.log('🔒 [useWallet] Locking refetch during active inventory sync');
+
+      // Failsafe: Auto-unlock after 60 seconds if sync crashes
+      lockTimeout = setTimeout(() => {
+        if (skipRefetchDuringSyncRef.current) {
+          console.warn('⚠️ [useWallet] Sync lock timeout - forcibly unlocking after 60s');
+          skipRefetchDuringSyncRef.current = false;
+        }
+      }, SYNC_LOCK_TIMEOUT_MS);
+    };
+
+    const handleSyncEnd = () => {
+      skipRefetchDuringSyncRef.current = false;
+      if (lockTimeout) {
+        clearTimeout(lockTimeout);
+        lockTimeout = null;
+      }
+      console.log('🔓 [useWallet] Unlocking refetch after inventory sync completes');
+    };
+
+    window.addEventListener(SYNC_EVENTS.START, handleSyncStart);
+    window.addEventListener(SYNC_EVENTS.END, handleSyncEnd);
+
+    return () => {
+      window.removeEventListener(SYNC_EVENTS.START, handleSyncStart);
+      window.removeEventListener(SYNC_EVENTS.END, handleSyncEnd);
+      if (lockTimeout) clearTimeout(lockTimeout);
+    };
+  }, []);
+
   // Ensure registry is loaded before aggregating assets
   const registryQuery = useQuery({
     queryKey: KEYS.REGISTRY,
@@ -244,10 +359,23 @@ export const useWallet = () => {
         }
       }
 
+      // Hash-based change detection to avoid redundant spent checks
+      const currentTokenHash = computeTokenListHash(tokens);
+      const tokenListUnchanged = currentTokenHash === lastTokenHashRef.current;
+
       // Check for spent tokens on aggregator (prevents zombie token resurrection)
       // This catches tokens that were spent but not properly removed from localStorage
       if (tokens.length > 0 && identity.publicKey) {
-        console.log(`📦 [tokensQuery] Running spent check for ${tokens.length} token(s)...`);
+        // Skip expensive spent check if token list hasn't changed
+        if (tokenListUnchanged) {
+          console.log(`⏩ [tokensQuery] Token list hash unchanged (${currentTokenHash}), skipping spent check`);
+          return tokens;
+        }
+
+        // Token list changed - record new hash
+        lastTokenHashRef.current = currentTokenHash;
+
+        console.log(`📦 [tokensQuery] Token list changed (hash: ${currentTokenHash}) - running spent check for ${tokens.length} token(s)...`);
         try {
           const validationService = getTokenValidationService();
 

@@ -144,6 +144,9 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
 
   console.log(`🔄 [InventorySync] Starting sync in ${mode} mode`);
 
+  // Dispatch sync start event to lock wallet refetches
+  window.dispatchEvent(new Event('inventory-sync-start'));
+
   // Initialize context
   const ctx = initializeContext(params, mode, startTime);
 
@@ -165,6 +168,9 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
   } catch (error) {
     console.error(`❌ [InventorySync] Error:`, error);
     return buildErrorResult(ctx, error);
+  } finally {
+    // CRITICAL: Always dispatch sync-end, even on error (prevent deadlock)
+    window.dispatchEvent(new Event('inventory-sync-end'));
   }
 }
 
