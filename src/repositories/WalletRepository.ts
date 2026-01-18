@@ -555,20 +555,25 @@ export class WalletRepository {
       return existing;
     }
 
-    // CRITICAL SAFEGUARD: If wallet credentials exist but wallet data doesn't,
-    // something is very wrong. DO NOT create a new empty wallet - this would lose tokens!
+    // RECOVERY SCENARIO DETECTION: If wallet credentials exist but wallet data doesn't,
+    // this is likely a "cache cleared" scenario. The user's tokens can be recovered from IPFS
+    // because the mnemonic can derive the IPNS key for fetching remote data.
+    //
+    // Previously this threw an error, but that caused an infinite loop in React Query.
+    // Now we log a warning and allow wallet creation - the IPFS sync flow will recover tokens.
     //
     // EXCEPTION: During active import flow, credentials are saved BEFORE wallet
     // data, so we check for the import flag to allow creation in that case.
     const hasMasterKey = localStorage.getItem(STORAGE_KEYS.UNIFIED_WALLET_MASTER);
     const hasMnemonic = localStorage.getItem(STORAGE_KEYS.UNIFIED_WALLET_MNEMONIC);
     const isImporting = WalletRepository.isImportInProgress();
-    if ((hasMasterKey || hasMnemonic) && !isImporting) {
-      console.error(`🚨 CRITICAL: createWallet called but wallet credentials exist without wallet data!`);
-      console.error(`🚨 Address: ${address}`);
-      console.error(`🚨 Has master key: ${!!hasMasterKey}, Has mnemonic: ${!!hasMnemonic}`);
-      console.trace(`🚨 Call stack:`);
-      throw new Error(`Cannot create wallet: wallet data missing but credentials exist. This would cause data loss. Address: ${address.slice(0, 30)}...`);
+    const isRecoveryScenario = (hasMasterKey || hasMnemonic) && !isImporting;
+
+    if (isRecoveryScenario) {
+      console.warn(`⚠️ [RECOVERY] Wallet credentials exist but wallet data is missing.`);
+      console.warn(`⚠️ [RECOVERY] Address: ${address}`);
+      console.warn(`⚠️ [RECOVERY] Has master key: ${!!hasMasterKey}, Has mnemonic: ${!!hasMnemonic}`);
+      console.warn(`⚠️ [RECOVERY] Creating empty wallet - tokens will be recovered from IPFS sync.`);
     }
 
     if (isImporting) {
