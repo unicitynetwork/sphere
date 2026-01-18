@@ -15,7 +15,6 @@ import { useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { TokenSplitExecutor, type SplitPersistenceCallbacks } from "../services/transfer/TokenSplitExecutor";
 import { TokenSplitCalculator } from "../services/transfer/TokenSplitCalculator";
-import { TokenId } from "@unicitylabs/state-transition-sdk/lib/token/TokenId";
 import { IpfsStorageService, SyncPriority } from "../services/IpfsStorageService";
 import { useServices } from "../../../../contexts/useServices";
 import type { NostrService } from "../services/NostrService";
@@ -537,8 +536,7 @@ export const useWallet = () => {
       if (!recipientPubkey)
         throw new Error(`Recipient @${recipientNametag} not found on Nostr`);
 
-      const recipientTokenId = await TokenId.fromNameTag(recipientNametag);
-      const recipientAddress = await ProxyAddress.fromTokenId(recipientTokenId);
+      const recipientAddress = await ProxyAddress.fromNameTag(recipientNametag);
 
       // 2. CALCULATE PLAN
       const calculator = new TokenSplitCalculator();
