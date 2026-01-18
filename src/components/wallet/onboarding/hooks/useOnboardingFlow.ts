@@ -121,10 +121,14 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const [firstFoundNametagPath, setFirstFoundNametagPath] = useState<string | null>(null);
   const [autoDeriveDuringIpnsCheck, setAutoDeriveDuringIpnsCheck] = useState(true);
   const [ipnsFetchingNametag, setIpnsFetchingNametag] = useState(false);
+  const [ipnsCheckCompleted, setIpnsCheckCompleted] = useState(false);
 
   // Effect: Fetch nametag from IPNS when identity exists but nametag doesn't
+  // CRITICAL FIX: Added ipnsCheckCompleted to prevent infinite loop.
+  // Without this, when no nametag is found, setting ipnsFetchingNametag=false
+  // would trigger the effect again, causing an infinite loop of IPNS checks.
   useEffect(() => {
-    if (step !== "start" || !identity || nametag || ipnsFetchingNametag) return;
+    if (step !== "start" || !identity || nametag || ipnsFetchingNametag || ipnsCheckCompleted) return;
 
     const fetchNametag = async () => {
       setIpnsFetchingNametag(true);
@@ -165,19 +169,22 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
               validationError instanceof Error ? validationError.message : validationError
             );
             setIpnsFetchingNametag(false);
+            setIpnsCheckCompleted(true);
           }
         } else {
-          console.log("🔍 [Complete Setup] No nametag found in IPNS");
+          console.log("🔍 [Complete Setup] No nametag found in IPNS - user can create new nametag");
           setIpnsFetchingNametag(false);
+          setIpnsCheckCompleted(true);
         }
       } catch (error) {
         console.warn("🔍 [Complete Setup] IPNS fetch error:", error);
         setIpnsFetchingNametag(false);
+        setIpnsCheckCompleted(true);
       }
     };
 
     fetchNametag();
-  }, [step, identity, nametag, ipnsFetchingNametag]);
+  }, [step, identity, nametag, ipnsFetchingNametag, ipnsCheckCompleted]);
 
   // Internal helper to derive next address
   const deriveNextAddressInternal = useCallback(async () => {

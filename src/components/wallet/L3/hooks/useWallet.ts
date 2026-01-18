@@ -89,13 +89,8 @@ export const useWallet = () => {
     };
   }, [queryClient]);
 
-  // Initialize IPFS storage service for automatic token sync (disabled by default)
-  useEffect(() => {
-    if (import.meta.env.VITE_ENABLE_IPFS === 'true') {
-      const storageService = IpfsStorageService.getInstance(identityManager);
-      storageService.startAutoSync();
-    }
-  }, [identityManager]);
+  // NOTE: IPFS auto-sync initialization is now in the useEffect at lines 173-181
+  // that waits for identity to be loaded (prevents race conditions)
 
   const identityQuery = useQuery({
     queryKey: KEYS.IDENTITY,
@@ -163,18 +158,22 @@ export const useWallet = () => {
     enabled: !!identityQuery.data?.address,
   });
 
-  // Initialize IPFS storage service ONLY when fully authenticated
-  // This prevents race condition where old wallet data is synced while user is on onboarding screen
+  // Initialize IPFS storage service when identity is available
+  // CRITICAL FIX: Do NOT require nametag - the nametag is stored in IPFS and
+  // needs syncFromIpns() to recover it. Requiring nametag creates a circular dependency:
+  //   - startAutoSync() requires nametag
+  //   - But nametag needs syncFromIpns() to be recovered
+  //   - syncFromIpns() is called by startAutoSync()
+  //   - Result: Deadlock - user stuck with 0 tokens forever
   useEffect(() => {
     const identity = identityQuery.data;
-    const nametag = nametagQuery.data;
 
-    // Only start auto-sync when user is fully authenticated (has both identity AND nametag)
-    if (identity && nametag) {
+    // Start auto-sync when user has identity - this will recover nametag from IPFS
+    if (identity) {
       const storageService = IpfsStorageService.getInstance(identityManager);
       storageService.startAutoSync();
     }
-  }, [identityQuery.data, nametagQuery.data, identityManager]);
+  }, [identityQuery.data, identityManager]);
 
   // NOTE: OutboxRecoveryService lifecycle is now managed centrally in ServicesProvider.tsx
   // This prevents the repeated start/stop cycles that occurred when multiple components

@@ -3327,6 +3327,32 @@ export class IpfsStorageService implements IpfsTransport {
 
       console.log(`📦 Versions match (v${remoteVersion}), remote verified accessible`);
 
+      // CRITICAL FIX: Detect missing tokens (localStorage corruption scenario)
+      // If localStorage is cleared but version counter survives, tokens would be lost.
+      // Check if local has tokens - if not but remote does, force recovery import.
+      const localWallet = WalletRepository.getInstance();
+      const localTokenCount = localWallet.getTokens().length;
+      let remoteTokenCount = 0;
+      for (const key of Object.keys(remoteData)) {
+        if (isTokenKey(key)) {
+          remoteTokenCount++;
+        }
+      }
+
+      if (localTokenCount === 0 && remoteTokenCount > 0) {
+        console.warn(`⚠️ RECOVERY: Versions match but localStorage is empty!`);
+        console.warn(`⚠️ RECOVERY: Detected tokens - local: ${localTokenCount}, remote: ${remoteTokenCount}`);
+        console.warn(`⚠️ RECOVERY: Recovering ${remoteTokenCount} token(s) from IPFS`);
+
+        const importedCount = await this.importRemoteData(remoteData);
+        if (importedCount > 0) {
+          console.log(`✅ RECOVERY: Imported ${importedCount} token(s), wallet restored`);
+          // CRITICAL: Invalidate UNSPENT cache since inventory changed
+          getTokenValidationService().clearUnspentCacheEntries();
+          window.dispatchEvent(new Event("wallet-updated"));
+        }
+      }
+
       // If IPNS needs recovery, force publish even though content is synced
       if (ipnsNeedsRecovery) {
         console.log(`📦 Content synced but IPNS needs recovery - publishing to IPNS`);
