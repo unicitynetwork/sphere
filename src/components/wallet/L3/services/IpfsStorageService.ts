@@ -3084,6 +3084,22 @@ export class IpfsStorageService implements IpfsTransport {
     });
     this.emitSyncStateChange();
 
+    // CRITICAL FIX: Detect localStorage corruption before version comparison
+    // If wallet is loaded but empty, and version counter is non-zero,
+    // we're in a localStorage corruption scenario - reset version to force recovery
+    const walletRepo = WalletRepository.getInstance();
+    const localTokens = walletRepo.getTokens();
+    const currentVersion = this.getVersionCounter();
+
+    if (localTokens.length === 0 && currentVersion > 0) {
+      console.warn(`⚠️ RECOVERY: localStorage corruption detected`);
+      console.warn(`⚠️ RECOVERY: Wallet has 0 tokens but version counter is v${currentVersion}`);
+      console.warn(`⚠️ RECOVERY: Resetting version to 0 to force IPFS import`);
+
+      this.setVersionCounter(0);
+      // Continue with normal sync flow - version comparison will now trigger import
+    }
+
     try {
       const initialized = await this.ensureInitialized();
       if (!initialized) {
