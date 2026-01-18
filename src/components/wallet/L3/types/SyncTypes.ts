@@ -4,7 +4,7 @@
  * Spec Reference: /docs/TOKEN_INVENTORY_SPEC.md v3.1
  */
 
-import type { NametagData } from '../../../../repositories/WalletRepository';
+import type { NametagData } from '../services/types/TxfTypes';
 
 /**
  * FOLDER CATEGORIZATION (Section 3.1)

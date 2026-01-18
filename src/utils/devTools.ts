@@ -5,9 +5,17 @@
  * and development purposes. Only loaded in development mode.
  */
 
-import { WalletRepository } from "../repositories/WalletRepository";
 import { Token, TokenStatus } from "../components/wallet/L3/data/model";
 import { ServiceProvider } from "../components/wallet/L3/services/ServiceProvider";
+import {
+  getTokensForAddress,
+  getNametagForAddress,
+  setNametagForAddress,
+  getArchivedTokensForAddress,
+  getInvalidatedNametagsForAddress,
+  addToken as inventoryAddToken,
+  dispatchWalletUpdated,
+} from "../components/wallet/L3/services/InventorySyncService";
 import { OutboxRepository } from "../repositories/OutboxRepository";
 import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment";
 import { MintCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/MintCommitment";
@@ -54,7 +62,7 @@ declare global {
     devValidateUnicityId: () => Promise<UnicityIdValidationResult>;
     devRepairUnicityId: () => Promise<boolean>;
     devCheckNametag: (nametag: string) => Promise<string | null>;
-    devRestoreNametag: (nametagName: string) => boolean;
+    devRestoreNametag: (nametagName: string) => Promise<boolean>;
     devDumpNametagToken: () => Promise<unknown>;
     devInspectIpfs: () => Promise<unknown>;
   }
@@ -579,9 +587,24 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
     console.warn("⚠️ Could not clear spent state cache:", err);
   }
 
-  const repo = WalletRepository.getInstance();
-  const tokens = repo.getTokens();
-  const nametag = repo.getNametag();
+  // Get current wallet address
+  const identityManager = IdentityManager.getInstance();
+  const identity = await identityManager.getCurrentIdentity();
+  if (!identity) {
+    console.error("❌ No wallet identity available");
+    console.groupEnd();
+    return {
+      totalTokens: 0,
+      refreshed: 0,
+      kept: 0,
+      failed: 0,
+      errors: [{ tokenId: "all", error: "No identity" }],
+      duration: Date.now() - startTime,
+    };
+  }
+
+  const tokens = getTokensForAddress(identity.address);
+  const nametag = getNametagForAddress(identity.address);
 
   // Include nametag token if present
   const hasNametag = !!(nametag?.token);
@@ -681,7 +704,7 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
       if (newProof) {
         // Got new proof - update and save
         nametagTxf.genesis.inclusionProof = newProof;
-        repo.setNametag({ ...nametag, token: nametagTxf });
+        setNametagForAddress(identity.address, { ...nametag, token: nametagTxf });
         refreshed++;
         console.log(`✅ Nametag proof refreshed`);
       } else if (originalProofValid) {
@@ -846,7 +869,14 @@ export async function devRefreshProofs(): Promise<RefreshProofsResult> {
         status: anyProofFailed ? token.status : TokenStatus.CONFIRMED,
       });
       try {
-        repo.updateToken(updatedToken);
+        await inventoryAddToken(
+          identity.address,
+          identity.publicKey,
+          identity.ipnsName ?? '',
+          updatedToken,
+          { local: true }
+        );
+        dispatchWalletUpdated();
         console.log(`💾 Token saved with updated proofs`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1023,8 +1053,19 @@ async function mintFungibleToken(
       timestamp: Date.now(),
     });
 
-    const walletRepo = WalletRepository.getInstance();
-    walletRepo.addToken(appToken);
+    const ownerIdentity = await identityManager.getCurrentIdentity();
+    if (!ownerIdentity) {
+      return { success: false, error: "No identity available" };
+    }
+
+    await inventoryAddToken(
+      ownerIdentity.address,
+      ownerIdentity.publicKey,
+      ownerIdentity.ipnsName ?? '',
+      appToken,
+      { local: true }
+    );
+    dispatchWalletUpdated();
 
     return {
       success: true,
@@ -1193,11 +1234,6 @@ export async function devRecoverCorruptedTokens(): Promise<RecoverCorruptedToken
   let failed = 0;
 
   try {
-    const walletRepo = WalletRepository.getInstance();
-    const archivedTokens = walletRepo.getArchivedTokens();
-
-    console.log(`📦 Found ${archivedTokens.size} archived token(s)`);
-
     // Get identity for predicate reconstruction
     const identityManager = IdentityManager.getInstance();
     const identity = await identityManager.getCurrentIdentity();
@@ -1208,13 +1244,17 @@ export async function devRecoverCorruptedTokens(): Promise<RecoverCorruptedToken
       return {
         success: false,
         recovered: 0,
-        failed: archivedTokens.size,
+        failed: 0,
         details: [{ tokenId: "all", status: "No wallet identity" }],
       };
     }
 
+    const archivedTokens = getArchivedTokensForAddress(identity.address);
+
+    console.log(`📦 Found ${archivedTokens.size} archived token(s)`);
+
     // Get my nametag token (needed for PROXY address verification)
-    const nametagData = walletRepo.getNametag();
+    const nametagData = getNametagForAddress(identity.address);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let myNametagToken: SdkToken<any> | null = null;
 
@@ -1399,16 +1439,8 @@ export async function devRecoverCorruptedTokens(): Promise<RecoverCorruptedToken
           continue;
         }
 
-        // Check if there's a tombstone for this token
-        const tombstones = walletRepo.getTombstones();
-        const hasTombstone = tombstones.some(t => t.tokenId === tokenId);
-
-        if (hasTombstone) {
-          console.log(`      - Removing tombstone for token`);
-          const updatedTombstones = tombstones.filter(t => t.tokenId !== tokenId);
-          // @ts-expect-error - accessing private method for recovery
-          walletRepo._tombstones = updatedTombstones;
-        }
+        // Note: Tombstones are managed by InventorySyncService automatically
+        // When we add the recovered token, the next sync will clean up any tombstones
 
         // Get coin info from the token
         let amount = "0";
@@ -1455,7 +1487,14 @@ export async function devRecoverCorruptedTokens(): Promise<RecoverCorruptedToken
         });
 
         // Add the recovered token to the wallet
-        walletRepo.addToken(fixedToken, true); // skipHistory = true
+        await inventoryAddToken(
+          identity.address,
+          identity.publicKey,
+          identity.ipnsName ?? '',
+          fixedToken,
+          { local: true }
+        );
+        dispatchWalletUpdated();
 
         console.log(`      ✅ Token recovered successfully`);
         details.push({ tokenId, status: "Recovered" });
@@ -1799,11 +1838,18 @@ declare global {
  * Usage from browser console:
  *   window.devDumpArchivedTokens()
  */
-export function devDumpArchivedTokens(): void {
+export async function devDumpArchivedTokens(): Promise<void> {
   console.group("📦 Archived Tokens Dump");
 
-  const walletRepo = WalletRepository.getInstance();
-  const archivedTokens = walletRepo.getArchivedTokens();
+  const identityManager = IdentityManager.getInstance();
+  const identity = await identityManager.getCurrentIdentity();
+  if (!identity) {
+    console.error("❌ No wallet identity available");
+    console.groupEnd();
+    return;
+  }
+
+  const archivedTokens = getArchivedTokensForAddress(identity.address);
 
   console.log(`Found ${archivedTokens.size} archived token(s)`);
 
@@ -2192,22 +2238,31 @@ export function registerDevTools(): void {
   window.devValidateUnicityId = unicityIdValidator.validate;
   window.devRepairUnicityId = unicityIdValidator.repair;
   window.devCheckNametag = unicityIdValidator.getNametagOwner;
-  window.devRestoreNametag = (nametagName: string) => {
-    const walletRepo = WalletRepository.getInstance();
-    const invalidated = walletRepo.getInvalidatedNametags();
+  window.devRestoreNametag = async (nametagName: string) => {
+    const identityManager = IdentityManager.getInstance();
+    const identity = await identityManager.getCurrentIdentity();
+    if (!identity) {
+      console.error("❌ No wallet identity available");
+      return false;
+    }
+    const invalidated = getInvalidatedNametagsForAddress(identity.address);
     console.log(`📋 Invalidated nametags: ${invalidated.map(e => e.name).join(", ") || "(none)"}`);
     if (nametagName) {
-      const success = walletRepo.restoreInvalidatedNametag(nametagName);
-      if (success) {
-        console.log(`✅ Restored "${nametagName}" - reload the page to see the change`);
-      }
-      return success;
+      // NOTE: restoreInvalidatedNametag requires direct WalletRepository access (dev tool only)
+      // This function would need to be implemented in InventorySyncService for full migration
+      console.error("❌ restoreInvalidatedNametag not yet migrated - requires WalletRepository");
+      return false;
     }
     return false;
   };
   window.devDumpNametagToken = async () => {
-    const walletRepo = WalletRepository.getInstance();
-    const nametagData = walletRepo.getNametag();
+    const identityManager = IdentityManager.getInstance();
+    const identity = await identityManager.getCurrentIdentity();
+    if (!identity) {
+      console.error("❌ No wallet identity available");
+      return null;
+    }
+    const nametagData = getNametagForAddress(identity.address);
     if (!nametagData) {
       console.log("❌ No nametag found");
       return null;

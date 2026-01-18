@@ -13,7 +13,13 @@
  */
 
 import { Token, TokenStatus } from "../data/model";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
+import {
+  getTokensForAddress,
+  getArchivedTokensForAddress,
+  addToken,
+  removeToken
+} from "./InventorySyncService";
+import { IdentityManager } from "./IdentityManager";
 // import { ServiceProvider } from "./ServiceProvider"; // TODO: Uncomment when aggregator token lookup is implemented
 import type { TxfToken, TxfTransaction } from "./types/TxfTypes";
 import { getCurrentStateHash, tokenToTxf } from "./TxfSerializer";
@@ -105,11 +111,11 @@ export interface OrphanCandidate {
 
 export class TokenRecoveryService {
   private static instance: TokenRecoveryService | null = null;
-  private walletRepo: WalletRepository;
+  private identityManager: IdentityManager;
   private isRecovering: boolean = false;
 
   private constructor() {
-    this.walletRepo = WalletRepository.getInstance();
+    this.identityManager = IdentityManager.getInstance();
   }
 
   static getInstance(): TokenRecoveryService {
@@ -146,8 +152,14 @@ export class TokenRecoveryService {
     try {
       console.log("🔧 Starting orphaned split token recovery scan...");
 
+      // Get identity context
+      const identity = await this.identityManager.getCurrentIdentity();
+      if (!identity) {
+        throw new Error("No identity available");
+      }
+
       // 1. Get all archived tokens
-      const archivedTokens = this.walletRepo.getArchivedTokens();
+      const archivedTokens = getArchivedTokensForAddress(identity.address);
       result.scannedArchived = archivedTokens.size;
 
       if (archivedTokens.size === 0) {
@@ -156,7 +168,7 @@ export class TokenRecoveryService {
       }
 
       // 2. Get current wallet tokens for comparison
-      const currentTokens = this.walletRepo.getTokens();
+      const currentTokens = await getTokensForAddress(identity.address);
       const currentTokenIds = this.extractCurrentTokenIds(currentTokens);
 
       // 3. Find orphan candidates (archived tokens that look like they were split)
@@ -172,7 +184,7 @@ export class TokenRecoveryService {
       // 4. For each candidate, try to recover change tokens
       for (const candidate of orphanCandidates) {
         try {
-          const recovered = await this.attemptRecovery(candidate, currentTokenIds);
+          const recovered = await this.attemptRecovery(candidate, currentTokenIds, identity);
           if (recovered) {
             result.recoveredTokens.push(recovered);
             // Update currentTokenIds to prevent re-recovery
@@ -410,22 +422,41 @@ export class TokenRecoveryService {
       }
 
       // Token is valid, save the reverted state
-      const updated = this.walletRepo.revertTokenToCommittedState(token.id, revertedToken);
-      if (updated) {
-        console.log(`📦 Recovery: Token ${tokenId.slice(0, 8)}... reverted and saved`);
+      // Get identity context
+      const identity = await this.identityManager.getCurrentIdentity();
+      if (!identity) {
         return {
-          success: true,
-          action: "REVERT_AND_KEEP",
+          success: false,
+          action: "NO_ACTION",
           tokenId,
-          tokenRestored: true,
+          error: "No identity available",
         };
       }
 
+      // Add the reverted token back to inventory
+      if (!identity.ipnsName) {
+        console.warn('No IPNS name available for token recovery');
+        return {
+          success: false,
+          action: "NO_ACTION",
+          tokenId,
+          error: "No IPNS name available",
+        };
+      }
+      await addToken(
+        identity.address,
+        identity.publicKey,
+        identity.ipnsName,
+        revertedToken,
+        { local: true } // skipHistory equivalent
+      );
+
+      console.log(`📦 Recovery: Token ${tokenId.slice(0, 8)}... reverted and saved`);
       return {
-        success: false,
-        action: "NO_ACTION",
+        success: true,
+        action: "REVERT_AND_KEEP",
         tokenId,
-        error: "Failed to save reverted token",
+        tokenRestored: true,
       };
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -470,14 +501,61 @@ export class TokenRecoveryService {
   /**
    * Remove a token and add tombstone for its current state
    */
-  private removeAndTombstoneToken(token: Token): FailureRecoveryResult {
+  private async removeAndTombstoneToken(token: Token): Promise<FailureRecoveryResult> {
     const tokenId = token.id;
 
     console.log(`📦 Recovery: Removing spent token ${tokenId.slice(0, 8)}... and adding tombstone`);
 
+    // Get identity context
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (!identity) {
+      return {
+        success: false,
+        action: "NO_ACTION",
+        tokenId,
+        error: "No identity available",
+      };
+    }
+
+    // Extract state hash from token
+    const txf = tokenToTxf(token);
+    if (!txf) {
+      return {
+        success: false,
+        action: "NO_ACTION",
+        tokenId,
+        error: "Cannot convert token to TXF format",
+      };
+    }
+
+    const stateHash = getCurrentStateHash(txf);
+    if (!stateHash) {
+      return {
+        success: false,
+        action: "NO_ACTION",
+        tokenId,
+        error: "Cannot extract state hash from token",
+      };
+    }
+
     // Remove token - this will archive it AND add tombstone automatically
-    // The removeToken method extracts the state hash and adds tombstone internally
-    this.walletRepo.removeToken(tokenId, undefined, true); // skipHistory=true
+    if (!identity.ipnsName) {
+      console.warn('No IPNS name available for tombstone');
+      return {
+        success: false,
+        action: "NO_ACTION",
+        tokenId,
+        error: "No IPNS name available",
+      };
+    }
+    await removeToken(
+      identity.address,
+      identity.publicKey,
+      identity.ipnsName,
+      tokenId,
+      stateHash,
+      { local: true } // skipHistory equivalent
+    );
 
     return {
       success: true,
@@ -628,8 +706,12 @@ export class TokenRecoveryService {
    */
   private async attemptRecovery(
     candidate: OrphanCandidate,
-    currentTokenIds: Set<string>
+    currentTokenIds: Set<string>,
+    identity: Awaited<ReturnType<typeof IdentityManager.prototype.getCurrentIdentity>>
   ): Promise<RecoveredToken | null> {
+    if (!identity) {
+      return null;
+    }
     const { archivedTokenId, archivedTxf } = candidate;
 
     console.log(`🔧 Attempting recovery for archived token ${archivedTokenId.slice(0, 8)}...`);
@@ -692,7 +774,17 @@ export class TokenRecoveryService {
 
         if (reconstructed) {
           // Add to wallet
-          this.walletRepo.addToken(reconstructed, true); // skipHistory
+          if (!identity.ipnsName) {
+            console.warn('No IPNS name available for recovered token');
+            return null;
+          }
+          await addToken(
+            identity.address,
+            identity.publicKey,
+            identity.ipnsName,
+            reconstructed,
+            { local: true } // skipHistory equivalent
+          );
 
           return {
             tokenId: changeTokenId,
@@ -844,11 +936,18 @@ export class TokenRecoveryService {
   ): Promise<RecoveredToken | null> {
     console.log(`🔧 Attempting specific recovery for split of ${sourceTokenId.slice(0, 8)}...`);
 
+    // Get identity context
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (!identity) {
+      console.log(`🔧 No identity available`);
+      return null;
+    }
+
     const seedString = `${sourceTokenId}_${splitAmount}_${remainderAmount}`;
     const changeTokenId = await this.sha256Hex(seedString + "_sender");
 
     // Check current wallet
-    const currentTokens = this.walletRepo.getTokens();
+    const currentTokens = await getTokensForAddress(identity.address);
     const currentIds = this.extractCurrentTokenIds(currentTokens);
 
     if (currentIds.has(changeTokenId)) {
@@ -865,7 +964,7 @@ export class TokenRecoveryService {
     }
 
     // Get source token info from archive
-    const archivedTokens = this.walletRepo.getArchivedTokens();
+    const archivedTokens = getArchivedTokensForAddress(identity.address);
     const sourceTxf = archivedTokens.get(sourceTokenId);
 
     if (!sourceTxf) {
@@ -885,7 +984,17 @@ export class TokenRecoveryService {
     );
 
     if (reconstructed) {
-      this.walletRepo.addToken(reconstructed, true);
+      if (!identity.ipnsName) {
+        console.warn('No IPNS name available for recovered token');
+        return null;
+      }
+      await addToken(
+        identity.address,
+        identity.publicKey,
+        identity.ipnsName,
+        reconstructed,
+        { local: true } // skipHistory equivalent
+      );
 
       return {
         tokenId: changeTokenId,

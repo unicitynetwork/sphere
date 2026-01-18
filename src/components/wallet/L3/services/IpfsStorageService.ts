@@ -10,10 +10,18 @@ import { sha512 } from "@noble/hashes/sha512";
 import * as ed from "@noble/ed25519";
 import type { CID } from "multiformats/cid";
 import type { PrivateKey, ConnectionGater, PeerId } from "@libp2p/interface";
-import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
+import type { NametagData } from "./types/TxfTypes";
 import { OutboxRepository } from "../../../../repositories/OutboxRepository";
+import { WalletRepository } from "../../../../repositories/WalletRepository"; // For deprecated methods only
 import { IdentityManager } from "./IdentityManager";
 import type { Token } from "../data/model";
+import {
+  getTokensForAddress,
+  getArchivedTokensForAddress,
+  getTombstonesForAddress,
+  getNametagForAddress,
+  clearNametagForAddress,
+} from "./InventorySyncService";
 import type { TxfStorageData, TxfMeta, TxfToken, TombstoneEntry } from "./types/TxfTypes";
 import { isTokenKey, tokenIdFromKey } from "./types/TxfTypes";
 import type { IpfsTransport, IpnsResolutionResult, IpfsUploadResult, IpnsPublishResult, GatewayHealth } from "./types/IpfsTransport";
@@ -1689,7 +1697,7 @@ export class IpfsStorageService implements IpfsTransport {
       // CRITICAL: Check if local has unique tokens that weren't in remote
       // This handles case where local tokens were minted but remote was ahead
       // Without this sync, local-only tokens would be lost on next restart
-      if (this.localDiffersFromRemote(remoteData)) {
+      if (await this.localDiffersFromRemote(remoteData)) {
         console.log(`📦 Local has unique content after higher-sequence import - would need re-sync`);
         console.warn(`⚠️ Skipping auto-sync to prevent dual-publish. Use syncNow() explicitly if needed.`);
         // DEPRECATED: scheduleSync() removed - prevents dual-publish race condition
@@ -1714,7 +1722,7 @@ export class IpfsStorageService implements IpfsTransport {
 
       // Only sync if local differs from remote (has unique tokens or better versions)
       // This prevents unnecessary re-publishing when local now matches remote
-      if (this.localDiffersFromRemote(remoteData)) {
+      if (await this.localDiffersFromRemote(remoteData)) {
         console.log(`📦 Local differs from remote - would need re-sync`);
         console.warn(`⚠️ Skipping auto-sync to prevent dual-publish. Use syncNow() explicitly if needed.`);
         // DEPRECATED: scheduleSync() removed - prevents dual-publish race condition
@@ -2210,7 +2218,7 @@ export class IpfsStorageService implements IpfsTransport {
    */
   private async sanityCheckTombstones(
     tombstonesToApply: TombstoneEntry[],
-    walletRepo: WalletRepository
+    address: string
   ): Promise<{
     validTombstones: TombstoneEntry[];
     invalidTombstones: TombstoneEntry[];
@@ -2234,8 +2242,9 @@ export class IpfsStorageService implements IpfsTransport {
 
     // Build Map of tokenId -> TxfToken from archived versions
     const tokensToCheck = new Map<string, TxfToken>();
+    const archivedTokens = getArchivedTokensForAddress(address);
     for (const tombstone of tombstonesToApply) {
-      const archivedVersion = walletRepo.getBestArchivedVersion(tombstone.tokenId);
+      const archivedVersion = archivedTokens.get(tombstone.tokenId);
       if (archivedVersion) {
         tokensToCheck.set(tombstone.tokenId, archivedVersion);
       }
@@ -2266,7 +2275,7 @@ export class IpfsStorageService implements IpfsTransport {
         invalidTombstones.push(tombstone);
 
         // Find best version to restore
-        const bestVersion = walletRepo.getBestArchivedVersion(tombstone.tokenId);
+        const bestVersion = archivedTokens.get(tombstone.tokenId);
         if (bestVersion) {
           tokensToRestore.push({ tokenId: tombstone.tokenId, txf: bestVersion });
         }
@@ -2390,9 +2399,9 @@ export class IpfsStorageService implements IpfsTransport {
     // Get tombstone keys (tokenId:stateHash)
     const tombstones = walletRepo.getTombstones();
     const tombstoneKeys = new Set(
-      tombstones.map(t => `${t.tokenId}:${t.stateHash}`)
+      tombstones.map((t: TombstoneEntry) => `${t.tokenId}:${t.stateHash}`)
     );
-    const tombstoneTokenIds = new Set(tombstones.map(t => t.tokenId));
+    const tombstoneTokenIds = new Set(tombstones.map((t: TombstoneEntry) => t.tokenId));
 
     // Find candidates: ALL archived tokens not in active set
     // IMPORTANT: Include tombstoned tokens - tombstones may be invalid and need verification
@@ -2485,10 +2494,10 @@ export class IpfsStorageService implements IpfsTransport {
    * Verify integrity invariants after sync operations
    * All spent tokens should have both tombstone and archive entry
    */
-  private verifyIntegrityInvariants(walletRepo: WalletRepository): void {
-    const tombstones = walletRepo.getTombstones();
-    const archivedTokens = walletRepo.getArchivedTokens();
-    const activeTokens = walletRepo.getTokens();
+  private verifyIntegrityInvariants(address: string): void {
+    const tombstones = getTombstonesForAddress(address);
+    const archivedTokens = getArchivedTokensForAddress(address);
+    const activeTokens = getTokensForAddress(address);
 
     let issues = 0;
 
@@ -2627,13 +2636,15 @@ export class IpfsStorageService implements IpfsTransport {
    * @deprecated Use InventorySyncService instead. This method will be removed in a future release.
    * Migration: InventorySyncService.inventorySync() handles version comparison internally.
    */
-  private localDiffersFromRemote(remoteData: TxfStorageData): boolean {
+  private async localDiffersFromRemote(remoteData: TxfStorageData): Promise<boolean> {
     console.warn('⚠️ [DEPRECATED] localDiffersFromRemote() is deprecated. Use InventorySyncService.inventorySync() instead.');
-    const walletRepo = WalletRepository.getInstance();
-    const localTokens = walletRepo.getTokens();
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (!identity) return false;
+
+    const localTokens = getTokensForAddress(identity.address);
 
     // Check if local nametag differs from remote
-    const localNametag = walletRepo.getNametag();
+    const localNametag = getNametagForAddress(identity.address);
     const remoteNametag = remoteData._nametag;
 
     if (localNametag && !remoteNametag) {
@@ -2741,7 +2752,7 @@ export class IpfsStorageService implements IpfsTransport {
     const localTombstones = walletRepo.getTombstones();
 
     // Debug: Log local token IDs for comparison
-    console.log(`📦 Local token IDs (${localTokenIds.size}):`, [...localTokenIds].map(id => id.slice(0, 8) + '...'));
+    console.log(`📦 Local token IDs (${localTokenIds.size}):`, [...localTokenIds].map((id: string) => id.slice(0, 8) + '...'));
 
     let importedCount = 0;
 
@@ -2768,10 +2779,10 @@ export class IpfsStorageService implements IpfsTransport {
 
     // 4. Get new tombstones that would be applied
     const localTombstoneKeys = new Set(
-      localTombstones.map(t => `${t.tokenId}:${t.stateHash}`)
+      localTombstones.map((t: TombstoneEntry) => `${t.tokenId}:${t.stateHash}`)
     );
     const newTombstones = remoteTombstones.filter(
-      t => !localTombstoneKeys.has(`${t.tokenId}:${t.stateHash}`)
+      (t: TombstoneEntry) => !localTombstoneKeys.has(`${t.tokenId}:${t.stateHash}`)
     );
 
     // 5. Sanity check new tombstones with Unicity
@@ -2780,7 +2791,8 @@ export class IpfsStorageService implements IpfsTransport {
 
     if (newTombstones.length > 0) {
       console.log(`📦 Sanity checking ${newTombstones.length} new tombstone(s) with Unicity...`);
-      const result = await this.sanityCheckTombstones(newTombstones, walletRepo);
+      const walletAddress = walletRepo.getWallet()?.address ?? '';
+      const result = await this.sanityCheckTombstones(newTombstones, walletAddress);
       validTombstones = result.validTombstones;
       tokensToRestore = result.tokensToRestore;
 
@@ -2960,7 +2972,7 @@ export class IpfsStorageService implements IpfsTransport {
         // Check if this nametag was invalidated (e.g., Nostr pubkey mismatch)
         // If so, don't re-import it - user needs to create a new nametag
         const invalidatedNametags = walletRepo.getInvalidatedNametags();
-        const isInvalidated = invalidatedNametags.some(inv => inv.name === nametag.name);
+        const isInvalidated = invalidatedNametags.some((inv: { name: string }) => inv.name === nametag.name);
         if (isInvalidated) {
           console.warn(`📦 Skipping invalidated nametag "${nametag.name}" import from IPFS - user must create new nametag`);
         } else {
@@ -2992,7 +3004,8 @@ export class IpfsStorageService implements IpfsTransport {
     // ==========================================
     // INTEGRITY VERIFICATION
     // ==========================================
-    this.verifyIntegrityInvariants(walletRepo);
+    const currentAddress = walletRepo.getWallet()?.address ?? '';
+    this.verifyIntegrityInvariants(currentAddress);
 
     // ==========================================
     // POST-IMPORT SPENT TOKEN VALIDATION
@@ -3259,7 +3272,7 @@ export class IpfsStorageService implements IpfsTransport {
       // CRITICAL: Check if local has unique tokens that weren't in remote
       // This handles the case where new tokens were minted locally but remote was ahead
       // Without this, local-only tokens would never be synced to IPNS and could be lost
-      if (this.localDiffersFromRemote(remoteData)) {
+      if (await this.localDiffersFromRemote(remoteData)) {
         console.log(`📦 Local has unique content after import - syncing merged state to IPNS`);
         return this.syncNow({ forceIpnsPublish: false });
       }
@@ -3290,7 +3303,7 @@ export class IpfsStorageService implements IpfsTransport {
       }
 
       // Only sync if local differs from remote (has unique tokens or better versions)
-      if (this.localDiffersFromRemote(remoteData)) {
+      if (await this.localDiffersFromRemote(remoteData)) {
         console.log(`📦 Local differs from remote, syncing merged state...`);
         return this.syncNow({ forceIpnsPublish: ipnsNeedsRecovery });
       } else {
@@ -3633,7 +3646,7 @@ export class IpfsStorageService implements IpfsTransport {
                 } else {
                   // Check if this nametag was invalidated (e.g., Nostr pubkey mismatch)
                   const invalidatedNametags = walletRepo.getInvalidatedNametags();
-                  const isInvalidated = invalidatedNametags.some(inv => inv.name === mergeResult.merged._nametag!.name);
+                  const isInvalidated = invalidatedNametags.some((inv: { name: string }) => inv.name === mergeResult.merged._nametag!.name);
                   if (isInvalidated) {
                     console.warn(`📦 Skipping invalidated nametag "${mergeResult.merged._nametag.name}" from conflict resolution - user must create new nametag`);
                   } else {
@@ -4010,7 +4023,8 @@ export class IpfsStorageService implements IpfsTransport {
       }
 
       // Reuse existing sanityCheckTombstones() logic
-      const result = await this.sanityCheckTombstones(tombstones, walletRepo);
+      const walletAddress = walletRepo.getWallet()?.address ?? '';
+      const result = await this.sanityCheckTombstones(tombstones, walletAddress);
 
       if (result.invalidTombstones.length === 0) {
         console.log(`📦 Tombstone recovery: all ${tombstones.length} tombstone(s) are valid`);
@@ -4289,10 +4303,16 @@ export class IpfsStorageService implements IpfsTransport {
   async clearCorruptedNametagAndSync(): Promise<void> {
     console.log("🧹 Clearing corrupted nametag from local and IPFS storage...");
 
+    // Get current identity
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (!identity) {
+      console.error("No identity available for clearing nametag");
+      return;
+    }
+
     // 1. Clear from local storage
-    const walletRepo = WalletRepository.getInstance();
     try {
-      walletRepo.clearNametag();
+      clearNametagForAddress(identity.address);
       console.log("✅ Cleared corrupted nametag from local storage");
     } catch (error) {
       console.error("Failed to clear local nametag:", error);
@@ -4318,19 +4338,24 @@ export class IpfsStorageService implements IpfsTransport {
    */
   async exportAsTxf(): Promise<{ success: boolean; data?: string; filename?: string; error?: string }> {
     try {
-      const wallet = WalletRepository.getInstance().getWallet();
-      if (!wallet) {
-        return { success: false, error: "No wallet found" };
+      const identity = await this.identityManager.getCurrentIdentity();
+      if (!identity) {
+        return { success: false, error: "No identity available" };
+      }
+
+      const tokens = getTokensForAddress(identity.address);
+      if (tokens.length === 0) {
+        return { success: false, error: "No tokens found" };
       }
 
       // Import serializer
       const { buildTxfExportFile } = await import("./TxfSerializer");
-      const txfData = buildTxfExportFile(wallet.tokens);
+      const txfData = buildTxfExportFile(tokens);
 
-      const filename = `tokens-${wallet.address.slice(0, 8)}-${Date.now()}.txf`;
+      const filename = `tokens-${identity.address.slice(0, 8)}-${Date.now()}.txf`;
       const jsonString = JSON.stringify(txfData, null, 2);
 
-      console.log(`📦 Exported ${wallet.tokens.length} tokens as TXF`);
+      console.log(`📦 Exported ${tokens.length} tokens as TXF`);
 
       return {
         success: true,

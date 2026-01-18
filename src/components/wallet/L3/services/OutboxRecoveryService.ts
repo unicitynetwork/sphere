@@ -33,7 +33,8 @@ import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/Signi
 import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
 import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
 import { OutboxRepository } from "../../../../repositories/OutboxRepository";
-import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
+import type { NametagData } from "./types/TxfTypes";
+import { getTokensForAddress, setNametagForAddress } from "./InventorySyncService";
 import { ServiceProvider } from "./ServiceProvider";
 import { NostrService } from "./NostrService";
 import { ProxyAddress } from "@unicitylabs/state-transition-sdk/lib/address/ProxyAddress";
@@ -395,9 +396,11 @@ export class OutboxRecoveryService {
           if (entry.retryCount < MAX_RETRIES_PER_ENTRY) {
             const publicKey = await this.getOwnerPublicKey();
             if (publicKey) {
-              const walletRepo = WalletRepository.getInstance();
-              const sourceToken = walletRepo.getTokens().find(t => t.id === entry.sourceTokenId);
-              if (sourceToken) {
+              const identity = await this.getIdentityFromManager();
+              if (identity) {
+                const tokens = await getTokensForAddress(identity.address);
+                const sourceToken = tokens.find(t => t.id === entry.sourceTokenId);
+                if (sourceToken) {
                 try {
                   const recoveryService = TokenRecoveryService.getInstance();
                   const spentCheck = await recoveryService.checkTokenSpent(sourceToken, publicKey);
@@ -434,6 +437,7 @@ export class OutboxRecoveryService {
                 }
               }
             }
+          }
           }
           // If we get here, entry remains FAILED
           console.warn(`📤 OutboxRecovery: Entry ${entry.id.slice(0, 8)}... is FAILED, skipping`);
@@ -504,9 +508,11 @@ export class OutboxRecoveryService {
     const publicKey = await this.getOwnerPublicKey();
     if (publicKey && entry.sourceTokenJson) {
       try {
-        const walletRepo = WalletRepository.getInstance();
-        const sourceToken = walletRepo.getTokens().find(t => t.id === entry.sourceTokenId);
-        if (sourceToken) {
+        const identity = await this.getIdentityFromManager();
+        if (identity) {
+          const tokens = await getTokensForAddress(identity.address);
+          const sourceToken = tokens.find(t => t.id === entry.sourceTokenId);
+          if (sourceToken) {
           const recoveryService = TokenRecoveryService.getInstance();
           const spentCheck = await recoveryService.checkTokenSpent(sourceToken, publicKey);
           if (spentCheck.isSpent) {
@@ -519,6 +525,7 @@ export class OutboxRecoveryService {
             });
             window.dispatchEvent(new Event("wallet-updated"));
             return; // Don't retry
+          }
           }
         }
       } catch (spentCheckError) {
@@ -537,9 +544,11 @@ export class OutboxRecoveryService {
     if (response.status !== "SUCCESS" && response.status !== "REQUEST_ID_EXISTS") {
       // Handle failure with recovery
       if (publicKey && entry.sourceTokenJson) {
-        const walletRepo = WalletRepository.getInstance();
-        const sourceToken = walletRepo.getTokens().find(t => t.id === entry.sourceTokenId);
-        if (sourceToken) {
+        const identity = await this.getIdentityFromManager();
+        if (identity) {
+          const tokens = await getTokensForAddress(identity.address);
+          const sourceToken = tokens.find(t => t.id === entry.sourceTokenId);
+          if (sourceToken) {
           try {
             const recoveryService = TokenRecoveryService.getInstance();
             const recovery = await recoveryService.handleTransferFailure(
@@ -553,6 +562,7 @@ export class OutboxRecoveryService {
             }
           } catch (recoveryErr) {
             console.error(`📤 OutboxRecovery: Token recovery failed:`, recoveryErr);
+          }
           }
         }
       }
@@ -573,6 +583,26 @@ export class OutboxRecoveryService {
     try {
       const identity = await this.identityManager.getCurrentIdentity();
       return identity?.publicKey || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Get identity context from identity manager
+   */
+  private async getIdentityFromManager(): Promise<{ address: string; publicKey: string; ipnsName: string } | null> {
+    if (!this.identityManager) return null;
+    try {
+      const identity = await this.identityManager.getCurrentIdentity();
+      if (!identity || !identity.address || !identity.publicKey || !identity.ipnsName) {
+        return null;
+      }
+      return {
+        address: identity.address,
+        publicKey: identity.publicKey,
+        ipnsName: identity.ipnsName,
+      };
     } catch {
       return null;
     }
@@ -1006,8 +1036,15 @@ export class OutboxRecoveryService {
         format: "txf",
         version: "2.0",
       };
-      const walletRepo = WalletRepository.getInstance();
-      walletRepo.setNametag(nametagData);
+
+      // Get current identity for address context
+      const identity = await this.getIdentityFromManager();
+      if (!identity) {
+        console.warn(`📤 OutboxRecovery: Cannot save nametag - no identity available`);
+        return;
+      }
+
+      setNametagForAddress(identity.address, nametagData);
       console.log(`📤 OutboxRecovery: Recovered nametag "${entry.nametag}" and saved to storage`);
 
       // CRITICAL: Publish Nostr binding after recovery

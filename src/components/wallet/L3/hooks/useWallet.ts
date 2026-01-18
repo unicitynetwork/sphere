@@ -8,7 +8,15 @@ import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transa
 import { ServiceProvider } from "../services/ServiceProvider";
 import { waitInclusionProofWithDevBypass } from "../../../../utils/devTools";
 import { ApiService } from "../services/api";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
+import {
+  getTokensForAddress,
+  getNametagForAddress,
+  clearNametagForAddress,
+  addToken as addTokenToInventory,
+  removeToken as removeTokenFromInventory,
+  dispatchWalletUpdated
+} from "../services/InventorySyncService";
+import { tokenToTxf, getCurrentStateHash } from "../services/TxfSerializer";
 import { NametagService } from "../services/NametagService";
 import { RegistryService } from "../services/RegistryService";
 import { useEffect, useRef } from "react";
@@ -25,6 +33,7 @@ import { L1_KEYS } from "../../L1/hooks/useL1Wallet";
 import { isNametagCorrupted } from "../../../../utils/tokenValidation";
 import { getTokenValidationService } from "../services/TokenValidationService";
 import { OutboxRepository } from "../../../../repositories/OutboxRepository";
+import { addSentTransaction } from "../../../../services/TransactionHistoryService";
 
 export const KEYS = {
   IDENTITY: ["wallet", "identity"],
@@ -41,7 +50,6 @@ const SYNC_EVENTS = {
   END: 'inventory-sync-end',
 } as const;
 
-const walletRepo = WalletRepository.getInstance();
 const registryService = RegistryService.getInstance();
 
 /**
@@ -185,22 +193,9 @@ export const useWallet = () => {
       const identity = identityQuery.data;
       if (!identity?.address) return null;
 
-      // Ensure wallet is loaded/created for current identity (loads nametag from storage)
-      console.log(`📦 [nametagQuery] Checking wallet for identity: ${identity.address.slice(0, 30)}...`);
-      const currentWallet = walletRepo.getWallet();
-      console.log(`📦 [nametagQuery] Current in-memory wallet: ${currentWallet ? `id=${currentWallet.id.slice(0, 8)}..., address=${currentWallet.address.slice(0, 30)}...` : 'null'}`);
-      if (!currentWallet || currentWallet.address !== identity.address) {
-        console.log(`📦 [nametagQuery] Need to load/create wallet (currentWallet=${!!currentWallet}, addressMatch=${currentWallet?.address === identity.address})`);
-        const loaded = walletRepo.loadWalletForAddress(identity.address);
-        if (!loaded) {
-          // No existing wallet, create one (same as tokensQuery does)
-          console.log(`📦 [nametagQuery] loadWalletForAddress returned null, creating new wallet`);
-          walletRepo.createWallet(identity.address);
-        }
-      }
-
-      // Get nametag from repository
-      const nametagData = walletRepo.getNametag();
+      // Get nametag from InventorySyncService (no wallet concept needed)
+      console.log(`📦 [nametagQuery] Loading nametag for address: ${identity.address.slice(0, 30)}...`);
+      const nametagData = getNametagForAddress(identity.address);
 
       // CRITICAL: Check for corrupted nametag and treat as "no nametag exists"
       // This allows the user to create a new Unicity ID if their data is corrupted
@@ -214,7 +209,7 @@ export const useWallet = () => {
         // Clear from both local and IPFS storage (breaks import loop)
         // Note: This is a sync queryFn - IPFS clear happens in background
         try {
-          walletRepo.clearNametag(); // Clear local immediately
+          clearNametagForAddress(identity.address); // Clear local immediately
 
           // Trigger IPFS clear in background (don't await in queryFn)
           // This publishes clean state to IPFS, overwriting the corrupted nametag
@@ -318,28 +313,9 @@ export const useWallet = () => {
       const identity = identityQuery.data;
       if (!identity?.address) return [];
 
-      // Load wallet for current address if not already loaded
-      console.log(`📦 [tokensQuery] Checking wallet for identity: ${identity.address.slice(0, 30)}...`);
-      const currentWallet = walletRepo.getWallet();
-      console.log(`📦 [tokensQuery] Current in-memory wallet: ${currentWallet ? `id=${currentWallet.id.slice(0, 8)}..., tokens=${currentWallet.tokens.length}` : 'null'}`);
-      if (!currentWallet || currentWallet.address !== identity.address) {
-        console.log(`📦 [tokensQuery] Need to load/create wallet`);
-        const loaded = walletRepo.loadWalletForAddress(identity.address);
-        if (!loaded) {
-          // No existing wallet, create one
-          console.log(`📦 [tokensQuery] loadWalletForAddress returned null, creating new wallet`);
-          walletRepo.createWallet(identity.address);
-        }
-      }
-
-      // Verify wallet still matches identity after load
-      const wallet = walletRepo.getWallet();
-      if (!wallet || wallet.address !== identity.address) {
-        console.warn(`📦 [tokensQuery] Wallet address mismatch after load: wallet=${wallet?.address}, identity=${identity.address}`);
-        return [];
-      }
-
-      let tokens = walletRepo.getTokens();
+      // Get tokens directly from InventorySyncService (no wallet concept needed)
+      console.log(`📦 [tokensQuery] Loading tokens for address: ${identity.address.slice(0, 30)}...`);
+      let tokens = getTokensForAddress(identity.address);
 
       // Check for tokens with pending outbox entries (in-transit transfers)
       // These should be filtered out as they're being transferred
@@ -395,10 +371,22 @@ export const useWallet = () => {
             console.warn(`⚠️ Found ${spentCheck.spentTokens.length} spent token(s) on aggregator during wallet load`);
             for (const spent of spentCheck.spentTokens) {
               console.log(`  💀 Archiving spent token: ${spent.tokenId.slice(0, 16)}... (state: ${spent.stateHash.slice(0, 8)}...)`);
-              walletRepo.removeToken(spent.localId, 'spent-on-aggregator');
+
+              // Remove token via InventorySyncService
+              if (identity.publicKey && identity.ipnsName) {
+                await removeTokenFromInventory(
+                  identity.address,
+                  identity.publicKey,
+                  identity.ipnsName,
+                  spent.tokenId,
+                  spent.stateHash
+                ).catch(err => {
+                  console.error(`Failed to remove spent token ${spent.tokenId.slice(0, 8)}:`, err);
+                });
+              }
             }
             // Return updated token list after removing spent tokens
-            return walletRepo.getTokens();
+            return getTokensForAddress(identity.address);
           }
         } catch (err) {
           // Don't fail wallet load if spent check fails - just log warning
@@ -499,7 +487,7 @@ export const useWallet = () => {
   const createWalletMutation = useMutation({
     mutationFn: async () => {
       const identity = await identityManager.generateNewIdentity();
-      walletRepo.createWallet(identity.address);
+      // No need to create wallet - InventorySyncService handles storage automatically
       return identity;
     },
     onSuccess: async () => {
@@ -517,7 +505,7 @@ export const useWallet = () => {
   const restoreWalletMutation = useMutation({
     mutationFn: async (mnemonic: string) => {
       const identity = await identityManager.deriveIdentityFromMnemonic(mnemonic);
-      walletRepo.createWallet(identity.address);
+      // No need to create wallet - InventorySyncService handles storage automatically
       return identity;
     },
     onSuccess: () => {
@@ -608,8 +596,22 @@ export const useWallet = () => {
 
       if (!sent) throw new Error("Failed to send p2p message via Nostr");
 
-      // Remove the token from the wallet repository
-      walletRepo.removeToken(token.id);
+      // Remove the token from inventory
+      const txf = tokenToTxf(token);
+      if (!txf) {
+        console.warn('Cannot convert token to TXF for inventory removal');
+      } else {
+        const stateHash = getCurrentStateHash(txf) ?? '';
+        if (stateHash && identity.publicKey && identity.ipnsName) {
+          await removeTokenFromInventory(
+            identity.address,
+            identity.publicKey,
+            identity.ipnsName,
+            token.id,
+            stateHash
+          );
+        }
+      }
 
       return true;
     },
@@ -650,7 +652,7 @@ export const useWallet = () => {
 
       // 2. CALCULATE PLAN
       const calculator = new TokenSplitCalculator();
-      const allTokens = walletRepo.getTokens();
+      const allTokens = getTokensForAddress(identity.address);
 
       const plan = await calculator.calculateOptimalSplit(
         allTokens,
@@ -690,20 +692,17 @@ export const useWallet = () => {
         const { OutboxRepository } = await import("../../../../repositories/OutboxRepository");
         const outboxRepo = OutboxRepository.getInstance();
 
-        // Get wallet address for outbox context
-        const wallet = walletRepo.getWallet();
-        const walletAddress = wallet?.address || "";
-        if (walletAddress) {
-          outboxRepo.setCurrentAddress(walletAddress);
-        }
+        // Use identity address for outbox context (no wallet concept)
+        const walletAddress = identity.address;
+        outboxRepo.setCurrentAddress(walletAddress);
 
         // Create outbox context for tracking
-        const outboxContext = walletAddress ? {
+        const outboxContext = {
           walletAddress,
           recipientNametag,
           recipientPubkey,
           ownerPublicKey: identity.publicKey,
-        } : undefined;
+        };
 
         const executor = new TokenSplitExecutor();
 
@@ -713,15 +712,18 @@ export const useWallet = () => {
         const ipfsService = IpfsStorageService.getInstance(identityManager);
         const persistenceCallbacks: SplitPersistenceCallbacks = {
           onTokenMinted: async (sdkToken: SdkToken<any>, isChangeToken: boolean) => {
-            if (isChangeToken) {
+            if (isChangeToken && identity.ipnsName) {
               // Save change token IMMEDIATELY after mint proof received
               // This is the critical safety point - token is now persisted locally
-              saveChangeTokenToWallet(sdkToken, params.coinId);
+              await saveChangeTokenToWallet(sdkToken, params.coinId, {
+                address: identity.address,
+                publicKey: identity.publicKey,
+                ipnsName: identity.ipnsName,
+              });
 
-              // CRITICAL: Force immediate cache refresh to ensure IPFS sync sees this token
-              // Without this, the 100ms debounce in refreshWallet() can cause the token
-              // to be missed if onPreTransferSync is called immediately after
-              walletRepo.forceRefreshCache();
+              // CRITICAL: Dispatch wallet-updated to ensure UI and IPFS sync sees this token
+              // Without this, the token may be missed if onPreTransferSync is called immediately after
+              dispatchWalletUpdated();
 
               console.log(`🔒 Change token saved immediately after mint (crash-safe)`);
             }
@@ -755,7 +757,29 @@ export const useWallet = () => {
           plan,
           recipientAddress,
           signingService,
-          (burnedId) => walletRepo.removeToken(burnedId, undefined, true), // Skip history for split
+          async (burnedId) => {
+            // Remove burned token from inventory
+            const burnedToken = allTokens.find(t => t.id === burnedId);
+            if (burnedToken) {
+              const txf = tokenToTxf(burnedToken);
+              if (!txf) {
+                console.warn(`Cannot convert burned token ${burnedId.slice(0, 8)} to TXF`);
+              } else {
+                const stateHash = getCurrentStateHash(txf) ?? '';
+                if (stateHash && identity.publicKey && identity.ipnsName) {
+                  await removeTokenFromInventory(
+                    identity.address,
+                    identity.publicKey,
+                    identity.ipnsName,
+                    burnedId,
+                    stateHash
+                  ).catch(err => {
+                    console.error(`Failed to remove burned token ${burnedId.slice(0, 8)}:`, err);
+                  });
+                }
+              }
+            }
+          },
           outboxContext,
           persistenceCallbacks
         );
@@ -764,7 +788,7 @@ export const useWallet = () => {
         if (plan.splitAmount) {
           const def = registryService.getCoinDefinition(params.coinId);
           const iconUrl = def ? registryService.getIconUrl(def) || undefined : undefined;
-          walletRepo.addSentTransaction(
+          addSentTransaction(
             plan.splitAmount.toString(),
             params.coinId,
             def?.symbol || 'UNK',
@@ -881,11 +905,11 @@ export const useWallet = () => {
     const { createOutboxEntry } = await import("../services/types/OutboxTypes");
     const outboxRepo = OutboxRepository.getInstance();
 
-    // Get wallet address for outbox repository
-    const wallet = walletRepo.getWallet();
-    if (wallet?.address) {
-      outboxRepo.setCurrentAddress(wallet.address);
-    }
+    // Get identity for outbox repository (no wallet concept)
+    const identity = await identityManager.getCurrentIdentity();
+    if (!identity) throw new Error("Wallet locked");
+
+    outboxRepo.setCurrentAddress(identity.address);
 
     // 1. Generate salt and create commitment
     const salt = Buffer.alloc(32);
@@ -969,8 +993,8 @@ export const useWallet = () => {
     if (res.status !== "SUCCESS" && res.status !== "REQUEST_ID_EXISTS") {
       // Recover token before marking outbox as failed
       try {
-        const uiToken = walletRepo.getTokens().find(t => t.id === uiId);
-        const identity = await identityManager.getCurrentIdentity();
+        const allTokens = getTokensForAddress(identity.address);
+        const uiToken = allTokens.find(t => t.id === uiId);
         if (uiToken && identity?.publicKey) {
           const recoveryService = TokenRecoveryService.getInstance();
           const recovery = await recoveryService.handleTransferFailure(
@@ -982,7 +1006,7 @@ export const useWallet = () => {
 
           // Refresh wallet UI if token was modified
           if (recovery.tokenRestored || recovery.tokenRemoved) {
-            window.dispatchEvent(new Event("wallet-updated"));
+            dispatchWalletUpdated();
           }
         }
       } catch (recoveryErr) {
@@ -1030,8 +1054,28 @@ export const useWallet = () => {
     outboxRepo.updateEntry(outboxEntry.id, { status: "NOSTR_SENT" });
     console.log(`📤 Token sent via Nostr to ${recipientNametag}`);
 
-    // 13. Archive and remove token from active wallet
-    walletRepo.removeToken(uiId, recipientNametag);
+    // 13. Archive and remove token from active inventory
+    const allTokens = getTokensForAddress(identity.address);
+    const tokenToRemove = allTokens.find(t => t.id === uiId);
+    if (tokenToRemove && identity.publicKey && identity.ipnsName) {
+      const txf = tokenToTxf(tokenToRemove);
+      if (!txf) {
+        console.warn(`Cannot convert transferred token ${uiId.slice(0, 8)} to TXF`);
+      } else {
+        const stateHash = getCurrentStateHash(txf) ?? '';
+        if (stateHash) {
+          await removeTokenFromInventory(
+            identity.address,
+            identity.publicKey,
+            identity.ipnsName,
+            uiId,
+            stateHash
+          ).catch(err => {
+            console.error(`Failed to remove transferred token ${uiId.slice(0, 8)}:`, err);
+          });
+        }
+      }
+    }
 
     // 14. Mark outbox entry as completed
     outboxRepo.updateEntry(outboxEntry.id, { status: "COMPLETED" });
@@ -1050,7 +1094,7 @@ export const useWallet = () => {
     }
   };
 
-  const saveChangeTokenToWallet = (sdkToken: SdkToken<any>, coinId: string) => {
+  const saveChangeTokenToWallet = async (sdkToken: SdkToken<any>, coinId: string, identity: { address: string; publicKey: string; ipnsName: string }) => {
     let amount = "0";
     const coinsOpt = sdkToken.coins;
     const coinData = coinsOpt;
@@ -1142,7 +1186,18 @@ export const useWallet = () => {
     });
 
     console.log(`💾 Saving change token: ${amount} ${def?.symbol}, tokenId: ${genesisTokenId?.slice(0, 8) || 'unknown'}...`);
-    walletRepo.addToken(uiToken, true); // Skip history for change token
+
+    // Add token via InventorySyncService
+    await addTokenToInventory(
+      identity.address,
+      identity.publicKey,
+      identity.ipnsName,
+      uiToken,
+      { local: true } // Local-only to prevent IPFS sync during split (will sync after)
+    ).catch(err => {
+      console.error(`Failed to save change token:`, err);
+      throw err; // Re-throw to fail the split if token save fails
+    });
   };
 
   const getSeedPhrase = async (): Promise<string[] | null> => {

@@ -175,6 +175,10 @@ const syncMockWalletFromStorage = (address: string) => {
 // Mock WalletRepository
 vi.mock("../../../../../../src/repositories/WalletRepository", () => ({
   WalletRepository: {
+    // Static methods for sync lock (Phase 0 of WalletRepository elimination)
+    setSyncInProgress: vi.fn(),
+    isSyncInProgress: vi.fn(() => false),
+    getPendingTokens: vi.fn(() => []),
     getInstance: vi.fn(() => ({
       getWallet: vi.fn(() => {
         // Return wallet if address is set (either from loadWalletForAddress or directly)
@@ -211,7 +215,7 @@ vi.mock("../../../../../../src/repositories/WalletRepository", () => ({
       setNametag: vi.fn((nametag: NametagData) => {
         mockWalletRepoNametag = nametag;
       }),
-      addToken: vi.fn((token: MockToken, skipHistory?: boolean) => {
+      addToken: vi.fn((token: MockToken) => {
         // Check for duplicates
         const existingIndex = mockWalletRepoTokens.findIndex(t => {
           try {

@@ -8,9 +8,10 @@ import {
   type StorageStatus,
 } from "../services/IpfsStorageService";
 import { IdentityManager } from "../services/IdentityManager";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { addToken, getTokensForAddress, removeToken, setNametagForAddress } from "../services/InventorySyncService";
 import { getTokenValidationService } from "../services/TokenValidationService";
 import type { Token } from "../data/model";
+import { tokenToTxf, getCurrentStateHash } from "../services/TxfSerializer";
 
 // Query keys
 export const IPFS_STORAGE_KEYS = {
@@ -119,34 +120,49 @@ export function useIpfsStorage() {
 
       // If successful, add tokens to wallet and restore nametag
       if (result.success && result.tokens) {
-        const walletRepo = WalletRepository.getInstance();
-        for (const token of result.tokens) {
-          walletRepo.addToken(token);
+        // Get identity context for InventorySyncService
+        const identity = await identityManager.getCurrentIdentity();
+        if (!identity?.address || !identity?.publicKey || !identity?.ipnsName) {
+          console.error(`📦 Cannot restore: missing identity context`);
+          return result;
         }
+
+        // Add tokens using InventorySyncService
+        for (const token of result.tokens) {
+          await addToken(identity.address, identity.publicKey, identity.ipnsName, token, { local: true });
+        }
+
         // Restore nametag if present
         if (result.nametag) {
-          walletRepo.setNametag(result.nametag);
+          setNametagForAddress(identity.address, result.nametag);
         }
 
         // CRITICAL: Validate restored tokens against aggregator to detect spent tokens
         // that bypassed tombstone checks (e.g., tokens with different state hashes)
-        const identity = await identityManager.getCurrentIdentity();
-        if (identity?.publicKey) {
-          console.log(`📦 Running post-restore spent token validation...`);
-          const validationService = getTokenValidationService();
-          const allTokens = walletRepo.getTokens();
-          const validationResult = await validationService.checkSpentTokens(allTokens, identity.publicKey);
+        console.log(`📦 Running post-restore spent token validation...`);
+        const validationService = getTokenValidationService();
+        const allTokens = await getTokensForAddress(identity.address);
+        const validationResult = await validationService.checkSpentTokens(allTokens, identity.publicKey);
 
-          if (validationResult.spentTokens.length > 0) {
-            console.log(`📦 Found ${validationResult.spentTokens.length} spent token(s) during restore validation:`);
-            for (const spent of validationResult.spentTokens) {
-              console.log(`📦   - Removing spent token ${spent.tokenId.slice(0, 8)}...`);
-              walletRepo.removeToken(spent.localId, undefined, true); // skipHistory
+        if (validationResult.spentTokens.length > 0) {
+          console.log(`📦 Found ${validationResult.spentTokens.length} spent token(s) during restore validation:`);
+          for (const spent of validationResult.spentTokens) {
+            console.log(`📦   - Removing spent token ${spent.tokenId.slice(0, 8)}...`);
+            // Find the actual token from localStorage using localId
+            const token = allTokens.find(t => t.id === spent.localId);
+            if (token) {
+              const txf = tokenToTxf(token);
+              if (txf) {
+                const stateHash = getCurrentStateHash(txf);
+                if (stateHash) {
+                  await removeToken(identity.address, identity.publicKey, identity.ipnsName, spent.localId, stateHash);
+                }
+              }
             }
-            window.dispatchEvent(new Event("wallet-updated"));
-          } else {
-            console.log(`📦 Post-restore validation: all ${allTokens.length} token(s) are valid`);
           }
+          window.dispatchEvent(new Event("wallet-updated"));
+        } else {
+          console.log(`📦 Post-restore validation: all ${allTokens.length} token(s) are valid`);
         }
       }
 
@@ -167,33 +183,49 @@ export function useIpfsStorage() {
 
       // If successful, add tokens to wallet
       if (result.success && result.tokens) {
-        const walletRepo = WalletRepository.getInstance();
-        for (const token of result.tokens) {
-          walletRepo.addToken(token);
+        // Get identity context for InventorySyncService
+        const identity = await identityManager.getCurrentIdentity();
+        if (!identity?.address || !identity?.publicKey || !identity?.ipnsName) {
+          console.error(`📦 Cannot restore: missing identity context`);
+          return result;
         }
+
+        // Add tokens using InventorySyncService
+        for (const token of result.tokens) {
+          await addToken(identity.address, identity.publicKey, identity.ipnsName, token, { local: true });
+        }
+
+        // Restore nametag if present
         if (result.nametag) {
-          walletRepo.setNametag(result.nametag);
+          setNametagForAddress(identity.address, result.nametag);
         }
 
         // CRITICAL: Validate restored tokens against aggregator to detect spent tokens
         // that bypassed tombstone checks (e.g., tokens with different state hashes)
-        const identity = await identityManager.getCurrentIdentity();
-        if (identity?.publicKey) {
-          console.log(`📦 Running post-restore spent token validation...`);
-          const validationService = getTokenValidationService();
-          const allTokens = walletRepo.getTokens();
-          const validationResult = await validationService.checkSpentTokens(allTokens, identity.publicKey);
+        console.log(`📦 Running post-restore spent token validation...`);
+        const validationService = getTokenValidationService();
+        const allTokens = await getTokensForAddress(identity.address);
+        const validationResult = await validationService.checkSpentTokens(allTokens, identity.publicKey);
 
-          if (validationResult.spentTokens.length > 0) {
-            console.log(`📦 Found ${validationResult.spentTokens.length} spent token(s) during restore validation:`);
-            for (const spent of validationResult.spentTokens) {
-              console.log(`📦   - Removing spent token ${spent.tokenId.slice(0, 8)}...`);
-              walletRepo.removeToken(spent.localId, undefined, true); // skipHistory
+        if (validationResult.spentTokens.length > 0) {
+          console.log(`📦 Found ${validationResult.spentTokens.length} spent token(s) during restore validation:`);
+          for (const spent of validationResult.spentTokens) {
+            console.log(`📦   - Removing spent token ${spent.tokenId.slice(0, 8)}...`);
+            // Find the actual token from localStorage using localId
+            const token = allTokens.find(t => t.id === spent.localId);
+            if (token) {
+              const txf = tokenToTxf(token);
+              if (txf) {
+                const stateHash = getCurrentStateHash(txf);
+                if (stateHash) {
+                  await removeToken(identity.address, identity.publicKey, identity.ipnsName, spent.localId, stateHash);
+                }
+              }
             }
-            window.dispatchEvent(new Event("wallet-updated"));
-          } else {
-            console.log(`📦 Post-restore validation: all ${allTokens.length} token(s) are valid`);
           }
+          window.dispatchEvent(new Event("wallet-updated"));
+        } else {
+          console.log(`📦 Post-restore validation: all ${allTokens.length} token(s) are valid`);
         }
       }
 
@@ -241,9 +273,16 @@ export function useIpfsStorage() {
 
       // If successful, add tokens to wallet
       if (result.success && result.tokens) {
-        const walletRepo = WalletRepository.getInstance();
+        // Get identity context for InventorySyncService
+        const identity = await identityManager.getCurrentIdentity();
+        if (!identity?.address || !identity?.publicKey || !identity?.ipnsName) {
+          console.error(`📦 Cannot import: missing identity context`);
+          return result;
+        }
+
+        // Add tokens using InventorySyncService
         for (const token of result.tokens) {
-          walletRepo.addToken(token);
+          await addToken(identity.address, identity.publicKey, identity.ipnsName, token, { local: true });
         }
       }
 

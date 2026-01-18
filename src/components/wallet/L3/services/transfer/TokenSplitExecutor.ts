@@ -19,10 +19,10 @@ import { MintTransactionData } from "@unicitylabs/state-transition-sdk/lib/trans
 import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
 import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenState";
 import { OutboxRepository } from "../../../../../repositories/OutboxRepository";
-import { WalletRepository } from "../../../../../repositories/WalletRepository";
 import type { OutboxSplitGroup } from "../types/OutboxTypes";
 import { createOutboxEntry } from "../types/OutboxTypes";
 import { TokenRecoveryService } from "../TokenRecoveryService";
+import { getTokensForAddress, dispatchWalletUpdated } from "../InventorySyncService";
 
 // === Helper Types ===
 
@@ -307,9 +307,9 @@ export class TokenSplitExecutor {
       console.warn("Token already burned, attempting recovery...");
     } else if (burnResponse.status !== "SUCCESS") {
       // Burn failed - original token may still be valid, attempt recovery
-      if (outboxContext?.ownerPublicKey) {
-        const walletRepo = WalletRepository.getInstance();
-        const uiToken = walletRepo.getTokens().find(t => t.id === uiTokenId);
+      if (outboxContext?.ownerPublicKey && outboxContext?.walletAddress) {
+        const tokens = getTokensForAddress(outboxContext.walletAddress);
+        const uiToken = tokens.find(t => t.id === uiTokenId);
         if (uiToken) {
           try {
             const recoveryService = TokenRecoveryService.getInstance();
@@ -320,7 +320,7 @@ export class TokenSplitExecutor {
             );
             console.log(`📤 Burn failed: ${burnResponse.status}, recovery: ${recovery.action}`);
             if (recovery.tokenRestored || recovery.tokenRemoved) {
-              window.dispatchEvent(new Event("wallet-updated"));
+              dispatchWalletUpdated();
             }
           } catch (recoveryErr) {
             console.error(`📤 Token recovery after burn failure failed:`, recoveryErr);
@@ -449,9 +449,9 @@ export class TokenSplitExecutor {
         // Mint failed after burn succeeded - original token is burned, but split not complete
         // Attempt to recover: since burn already went through, original token is gone
         // The best we can do is log and let user know
-        if (outboxContext?.ownerPublicKey) {
-          const walletRepo = WalletRepository.getInstance();
-          const uiToken = walletRepo.getTokens().find(t => t.id === uiTokenId);
+        if (outboxContext?.ownerPublicKey && outboxContext?.walletAddress) {
+          const tokens = getTokensForAddress(outboxContext.walletAddress);
+          const uiToken = tokens.find(t => t.id === uiTokenId);
           if (uiToken) {
             try {
               const recoveryService = TokenRecoveryService.getInstance();
@@ -464,7 +464,7 @@ export class TokenSplitExecutor {
               );
               console.log(`📤 Mint failed: ${res.status}, recovery: ${recovery.action}`);
               if (recovery.tokenRestored || recovery.tokenRemoved) {
-                window.dispatchEvent(new Event("wallet-updated"));
+                dispatchWalletUpdated();
               }
             } catch (recoveryErr) {
               console.error(`📤 Token recovery after mint failure failed:`, recoveryErr);
@@ -622,11 +622,11 @@ export class TokenSplitExecutor {
       // Transfer of split token failed - the minted recipient token may still be valid
       // This is different from burn failure: original token is gone, but we have minted tokens
       // The recipient token in our wallet can be recovered by reverting to committed state
-      if (outboxContext?.ownerPublicKey) {
-        const walletRepo = WalletRepository.getInstance();
+      if (outboxContext?.ownerPublicKey && outboxContext?.walletAddress) {
         // Find the minted recipient token that we just persisted
         const recipientTokenIdHex = Buffer.from(recipientTokenBeforeTransfer.id.bytes).toString("hex");
-        const mintedToken = walletRepo.getTokens().find(t => {
+        const tokens = getTokensForAddress(outboxContext.walletAddress);
+        const mintedToken = tokens.find(t => {
           // Check if this token's SDK token ID matches the recipient token we're trying to transfer
           if (!t.jsonData) return false;
           try {
@@ -648,7 +648,7 @@ export class TokenSplitExecutor {
             );
             console.log(`📤 Split transfer failed: ${transferRes.status}, recovery: ${recovery.action}`);
             if (recovery.tokenRestored || recovery.tokenRemoved) {
-              window.dispatchEvent(new Event("wallet-updated"));
+              dispatchWalletUpdated();
             }
           } catch (recoveryErr) {
             console.error(`📤 Token recovery after split transfer failure failed:`, recoveryErr);

@@ -4,7 +4,7 @@
  */
 
 import { Token, TokenStatus } from "../data/model";
-import type { NametagData } from "../../../../repositories/WalletRepository";
+import type { NametagData } from "./types/TxfTypes";
 import {
   type TxfStorageData,
   type TxfMeta,

@@ -14,7 +14,7 @@
  * - Any other entry/exit point for token data
  */
 
-import type { NametagData } from "../repositories/WalletRepository";
+import type { NametagData } from "../components/wallet/L3/services/types/TxfTypes";
 
 /**
  * Result of token validation

@@ -3,13 +3,24 @@
  * Based on TXF Format Specification v2.0
  */
 
-import type { NametagData } from "../../../../../repositories/WalletRepository";
 import type { OutboxEntry, MintOutboxEntry } from "./OutboxTypes";
 import type { InvalidReasonCode } from "../../types/SyncTypes";
 
 // ==========================================
 // Storage Format (for IPFS)
 // ==========================================
+
+/**
+ * Nametag data (one per identity)
+ * Represents a Unicity ID (human-readable address)
+ */
+export interface NametagData {
+  name: string;           // e.g., "cryptohog"
+  token: object;          // SDK Token JSON
+  timestamp: number;
+  format: string;
+  version: string;
+}
 
 /**
  * Tombstone entry for tracking spent token states

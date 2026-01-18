@@ -20,7 +20,7 @@ import { useL1Wallet } from '../../L1/hooks/useL1Wallet';
 import { UnifiedKeyManager } from '../../shared/services/UnifiedKeyManager';
 import { SaveWalletModal } from '../../L1/components/modals';
 import { validateUnicityId, invalidateUnicityId, repairUnicityId, type UnicityIdValidationResult } from '../../../../utils/unicityIdValidator';
-import { WalletRepository } from '../../../../repositories/WalletRepository';
+import { getInvalidatedNametagsForAddress } from '../services/InventorySyncService';
 import { SyncModeSelector } from '../components/SyncModeSelector';
 import { SyncProgressIndicator } from '../components/SyncProgressIndicator';
 import { useInventorySync } from '../hooks/useInventorySync';
@@ -119,9 +119,8 @@ export function L3WalletView({
       return;
     }
 
-    // Also check if this nametag is in the invalidated list in WalletRepository
-    const walletRepo = WalletRepository.getInstance();
-    const invalidatedList = walletRepo.getInvalidatedNametags();
+    // Also check if this nametag is in the invalidated list in storage
+    const invalidatedList = getInvalidatedNametagsForAddress(identity.address);
     if (invalidatedList.some(inv => inv.name === nametag)) {
       console.log(`⏭️ Skipping validation for "${nametag}" - already invalidated in storage`);
       invalidatedNametags.add(validationKey);

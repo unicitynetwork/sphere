@@ -4,10 +4,19 @@
 import { useState, useCallback, useEffect } from "react";
 import { useWallet } from "../../L3/hooks/useWallet";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
+import {
+  setImportInProgress,
+  clearImportInProgress,
+} from "../../L3/services/InventorySyncService";
 import { IdentityManager } from "../../L3/services/IdentityManager";
 import { fetchNametagFromIpns } from "../../L3/services/IpnsNametagFetcher";
 import { IpfsStorageService } from "../../L3/services/IpfsStorageService";
+import {
+  checkNametagForAddress,
+  hasTokensForAddress,
+  setNametagForAddress,
+  getInvalidatedNametagsForAddress,
+} from "../../L3/services/InventorySyncService";
 import {
   saveWalletToStorage,
   loadWalletFromStorage,
@@ -142,8 +151,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
           // CRITICAL: Check if this nametag was invalidated (e.g., owned by someone else on Nostr)
           // If so, DO NOT restore it - user must create a new nametag
-          const walletRepo = WalletRepository.getInstance();
-          const invalidatedNametags = walletRepo.getInvalidatedNametags();
+          const invalidatedNametags = getInvalidatedNametagsForAddress(identity.address);
           const isInvalidated = invalidatedNametags.some(inv => inv.name === result.nametag);
 
           if (isInvalidated) {
@@ -153,7 +161,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
           }
 
           try {
-            WalletRepository.saveNametagForAddress(identity.address, {
+            setNametagForAddress(identity.address, {
               name: result.nametagData.name,
               token: result.nametagData.token,
               timestamp: result.nametagData.timestamp || Date.now(),
@@ -194,7 +202,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     const path = `${basePath}/0/${nextIndex}`;
     const derived = keyManager.deriveAddressFromPath(path);
     const l3Identity = await identityManager.deriveIdentityFromPath(path);
-    const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+    const existingNametag = checkNametagForAddress(l3Identity.address);
     const hasLocalNametag = !!existingNametag;
 
     setDerivedAddresses((prev) => [
@@ -303,7 +311,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
       // Gap limit logic: continue deriving if address has nametag OR L1 balance OR L3 tokens
       // Stop deriving if address has NO activity at all (gap detected)
-      const hasL3Tokens = WalletRepository.checkTokensForAddress(addr.l3Address);
+      const hasL3Tokens = hasTokensForAddress(addr.l3Address);
       const hasActivity = !!foundNametag || l1Balance > 0 || hasL3Tokens;
 
       if (autoDeriveDuringIpnsCheck && hasActivity && derivedAddresses.length < 20) {
@@ -328,7 +336,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         const path = `${basePath}/0/${i}`;
         const derived = keyManager.deriveAddressFromPath(path);
         const l3Identity = await identityManager.deriveIdentityFromPath(path);
-        const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+        const existingNametag = checkNametagForAddress(l3Identity.address);
         const hasLocalNametag = !!existingNametag;
 
         results.push({
@@ -399,8 +407,8 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     try {
       // Mark that we're in an active wallet creation flow
       // This allows wallet creation even though credentials will exist after generateNewIdentity()
-      // (because generateNewIdentity saves mnemonic BEFORE walletRepo.createWallet is called)
-      WalletRepository.setImportInProgress();
+      // (because generateNewIdentity saves mnemonic BEFORE wallet creation)
+      setImportInProgress();
 
       UnifiedKeyManager.clearAll();
       await createWallet();
@@ -431,10 +439,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       setStep("nametag");
 
       // Clear import flag - wallet creation complete
-      WalletRepository.clearImportInProgress();
+      clearImportInProgress();
     } catch (e) {
       // Clear import flag on error
-      WalletRepository.clearImportInProgress();
+      clearImportInProgress();
       const message = e instanceof Error ? e.message : "Failed to generate keys";
       setError(message);
     } finally {
@@ -458,7 +466,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     try {
       // Mark that we're in an active import flow
       // This allows wallet creation even though credentials exist
-      WalletRepository.setImportInProgress();
+      setImportInProgress();
 
       UnifiedKeyManager.clearAll();
       const mnemonic = words.join(" ");
@@ -469,7 +477,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       await goToAddressSelection();
     } catch (e) {
       // Clear import flag on error
-      WalletRepository.clearImportInProgress();
+      clearImportInProgress();
       const message = e instanceof Error ? e.message : "Invalid recovery phrase";
       setError(message);
       setIsBusy(false);
@@ -557,7 +565,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       const path = `${basePath}/0/${nextIndex}`;
       const derived = keyManager.deriveAddressFromPath(path);
       const l3Identity = await identityManager.deriveIdentityFromPath(path);
-      const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+      const existingNametag = checkNametagForAddress(l3Identity.address);
       const hasLocalNametag = !!existingNametag;
 
       setDerivedAddresses([
@@ -610,7 +618,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
             }
 
             const l3Identity = await identityManager.deriveIdentityFromPath(addr.path);
-            const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+            const existingNametag = checkNametagForAddress(l3Identity.address);
 
             const isChange = addr.isChange ?? false;
             const chainLabel = isChange ? "change" : "external";
@@ -723,7 +731,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         if (addr.hasNametag && addr.nametagData && addr.l3Address) {
           console.log(`💾 Saving nametag for ${addr.l3Address.slice(0, 20)}...`);
           try {
-            WalletRepository.saveNametagForAddress(addr.l3Address, {
+            setNametagForAddress(addr.l3Address, {
               name: addr.nametagData.name,
               token: addr.nametagData.token,
               timestamp: addr.nametagData.timestamp || Date.now(),
@@ -754,7 +762,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       setError(message);
     } finally {
       // Clear import flag - import is complete (success or failure)
-      WalletRepository.clearImportInProgress();
+      clearImportInProgress();
       setIsBusy(false);
     }
   }, [derivedAddresses, selectedAddressPath, getUnifiedKeyManager]);

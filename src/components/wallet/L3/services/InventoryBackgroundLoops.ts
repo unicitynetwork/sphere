@@ -62,7 +62,7 @@ export class ReceiveTokensToInventoryLoop {
    * Queue a token received from Nostr for batch processing
    * NOTE: Token should already be saved to localStorage BEFORE calling this
    *
-   * @param token - UI token from WalletRepository (already saved)
+   * @param token - UI token (already saved to localStorage)
    * @param eventId - Nostr event ID
    * @param senderPubkey - Sender's public key
    */

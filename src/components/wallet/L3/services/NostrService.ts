@@ -32,7 +32,8 @@ import { TransferTransaction } from "@unicitylabs/state-transition-sdk/lib/trans
 import { AddressScheme } from "@unicitylabs/state-transition-sdk/lib/address/AddressScheme";
 import { NametagService } from "./NametagService";
 import { ProxyAddress } from "@unicitylabs/state-transition-sdk/lib/address/ProxyAddress";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { addToken as addTokenToInventory } from "./InventorySyncService";
+import { deriveIpnsNameFromPrivateKey } from "./IpnsUtils";
 import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
 import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
 import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
@@ -629,7 +630,7 @@ export class NostrService {
         }
 
         console.log("Token finalized successfully!");
-        return this.saveReceivedToken(finalizedToken, senderPubkey);
+        return await this.saveReceivedToken(finalizedToken, senderPubkey);
       } else {
         console.log(
           "Transfer is to DIRECT address - finalizing with direct predicate"
@@ -703,7 +704,7 @@ export class NostrService {
         }
 
         console.log("Token finalized successfully (DIRECT address)!");
-        return this.saveReceivedToken(finalizedToken, senderPubkey);
+        return await this.saveReceivedToken(finalizedToken, senderPubkey);
       }
     } catch (error) {
       console.error("Error occured while finalizing transfer:", error);
@@ -711,7 +712,7 @@ export class NostrService {
     }
   }
 
-  private saveReceivedToken(token: Token<any>, senderPubkey: string): UiToken | null {
+  private async saveReceivedToken(token: Token<any>, senderPubkey: string): Promise<UiToken | null> {
     let amount = undefined;
     let coinId = undefined;
     let symbol = undefined;
@@ -771,8 +772,6 @@ export class NostrService {
       }
     }
 
-    const walletRepo = WalletRepository.getInstance();
-
     const uiToken = new UiToken({
       id: uuidv4(),
       name: symbol ? symbol : "Unicity Token",
@@ -787,8 +786,30 @@ export class NostrService {
       senderPubkey: senderPubkey,
     });
 
-    walletRepo.addToken(uiToken);
-    console.log(`💾 Token saved to wallet: ${uiToken.id}`);
+    // Save token via InventorySyncService (per TOKEN_INVENTORY_SPEC.md Section 6.1)
+    // Use local mode for fast storage - background sync will handle IPFS upload
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (identity) {
+      try {
+        const ipnsName = await deriveIpnsNameFromPrivateKey(identity.privateKey);
+        await addTokenToInventory(
+          identity.address,
+          identity.publicKey,
+          ipnsName,
+          uiToken,
+          { local: true } // Quick local storage, IPFS sync handled by background loop
+        );
+        console.log(`💾 Token saved via InventorySyncService: ${uiToken.id}`);
+      } catch (syncError) {
+        console.error(`❌ Failed to save token via InventorySyncService:`, syncError);
+        // Token creation succeeded but storage failed - this is a critical error
+        throw syncError;
+      }
+    } else {
+      console.error(`❌ No identity available to save token`);
+      throw new Error("No identity available to save received token");
+    }
+
     return uiToken;
   }
 

@@ -10,9 +10,9 @@ import type {
   SyncMode, SyncResult,
   SyncOperationStats, TokenInventoryStats, CircuitBreakerState,
 } from '../types/SyncTypes';
-import type { TxfToken, TxfStorageData, TxfMeta, SentTokenEntry, InvalidTokenEntry, TombstoneEntry } from './types/TxfTypes';
+import type { TxfToken, TxfStorageData, TxfMeta, SentTokenEntry, InvalidTokenEntry, TombstoneEntry, InvalidatedNametagEntry } from './types/TxfTypes';
 import type { OutboxEntry } from './types/OutboxTypes';
-import type { NametagData } from '../../../../repositories/WalletRepository';
+import type { NametagData } from './types/TxfTypes';
 import {
   detectSyncMode,
   shouldSkipIpfs,
@@ -23,7 +23,12 @@ import {
   createDefaultSyncOperationStats,
   createDefaultCircuitBreakerState
 } from '../types/SyncTypes';
-import { isTokenKey, keyFromTokenId, tokenIdFromKey } from './types/TxfTypes';
+import {
+  isTokenKey, keyFromTokenId, tokenIdFromKey,
+  isArchivedKey, isForkedKey,
+  archivedKeyFromTokenId, tokenIdFromArchivedKey,
+  forkedKeyFromTokenIdAndState, parseForkedKey
+} from './types/TxfTypes';
 import type { TxfInclusionProof } from './types/TxfTypes';
 import { tokenToTxf, txfToToken, getCurrentStateHash } from './TxfSerializer';
 import { STORAGE_KEY_GENERATORS } from '../../../../config/storageKeys';
@@ -34,7 +39,54 @@ import { getTokenValidationService } from './TokenValidationService';
 import type { InvalidReasonCode } from '../types/SyncTypes';
 import { NostrService } from './NostrService';
 import { IdentityManager } from './IdentityManager';
-// Note: WalletRepository is imported dynamically in attemptTokenRecovery() for archived token lookup
+
+// ============================================
+// Sync Lock State (moved from WalletRepository)
+// ============================================
+// Per TOKEN_INVENTORY_SPEC.md Section 6.1: "Only inventorySync should be allowed to access the inventory in localStorage!"
+// This module-level state manages the sync lock to prevent concurrent writes.
+
+/** Flag indicating sync is in progress */
+let _syncInProgress = false;
+
+/** Tokens queued during sync for next sync cycle */
+let _pendingTokens: Token[] = [];
+
+/**
+ * Set the sync-in-progress flag.
+ * Called at the start of inventorySync().
+ * While set, external token additions will be queued for next sync.
+ */
+export function setSyncInProgress(value: boolean): void {
+  console.log(`🔒 [SYNC LOCK] setSyncInProgress(${value})`);
+  _syncInProgress = value;
+}
+
+/**
+ * Check if sync is currently in progress.
+ */
+export function isSyncInProgress(): boolean {
+  return _syncInProgress;
+}
+
+/**
+ * Get tokens that were queued during sync.
+ * Called at the start of inventorySync to include pending tokens.
+ */
+export function getPendingTokens(): Token[] {
+  const tokens = [..._pendingTokens];
+  _pendingTokens = [];  // Clear after retrieval
+  return tokens;
+}
+
+/**
+ * Queue a token for the next sync cycle.
+ * Called when addToken is blocked by sync lock.
+ */
+export function queuePendingToken(token: Token): void {
+  console.log(`📥 [SYNC LOCK] Queuing token ${token.id.slice(0, 8)}... for next sync`);
+  _pendingTokens.push(token);
+}
 
 // ============================================
 // Types
@@ -92,6 +144,14 @@ interface SyncContext {
   // Token collections (keyed by tokenId)
   tokens: Map<string, TxfToken>;
 
+  // Archived tokens: tokens that were spent/transferred (keyed by tokenId)
+  // Used for recovery if a tombstone is found to be incorrect (BFT rollback)
+  archivedTokens: Map<string, TxfToken>;
+
+  // Forked tokens: tokens saved at specific states for conflict resolution
+  // Keyed by `${tokenId}_${stateHash}` for exact state matching
+  forkedTokens: Map<string, TxfToken>;
+
   // Folder collections
   sent: SentTokenEntry[];
   invalid: InvalidTokenEntry[];
@@ -148,10 +208,23 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
   // Dispatch sync start event to lock wallet refetches
   window.dispatchEvent(new Event('inventory-sync-start'));
 
+  // SYNC LOCK: Prevent concurrent writes during sync
+  // Per TOKEN_INVENTORY_SPEC.md Section 6.1: "Only inventorySync should be allowed to access the inventory in localStorage!"
+  setSyncInProgress(true);
+
   // Initialize context
   const ctx = initializeContext(params, mode, startTime);
 
   try {
+    // Collect any tokens that were queued during previous sync
+    const pendingTokens = getPendingTokens();
+    if (pendingTokens.length > 0) {
+      console.log(`📥 [InventorySync] Processing ${pendingTokens.length} pending token(s) from queue`);
+      // Add pending tokens to incoming tokens
+      const existingIncoming = params.incomingTokens || [];
+      params.incomingTokens = [...existingIncoming, ...pendingTokens];
+    }
+
     // NAMETAG mode: simplified flow (Steps 1, 2, 8.4 only)
     if (mode === 'NAMETAG') {
       return await executeNametagSync(ctx, params);
@@ -170,6 +243,8 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
     console.error(`❌ [InventorySync] Error:`, error);
     return buildErrorResult(ctx, error);
   } finally {
+    // CRITICAL: Always release sync lock, even on error (prevent deadlock)
+    setSyncInProgress(false);
     // CRITICAL: Always dispatch sync-end, even on error (prevent deadlock)
     window.dispatchEvent(new Event('inventory-sync-end'));
   }
@@ -266,6 +341,8 @@ function initializeContext(params: SyncParams, mode: SyncMode, startTime: number
     ipnsName: params.ipnsName,
     startTime,
     tokens: new Map(),
+    archivedTokens: new Map(),  // Archived tokens for recovery
+    forkedTokens: new Map(),    // Forked tokens at specific states
     sent: [],
     invalid: [],
     outbox: [],
@@ -413,6 +490,40 @@ async function loadFromTxfStorageDataFormat(ctx: SyncContext, data: Record<strin
   if (data._outbox && Array.isArray(data._outbox)) {
     ctx.outbox.push(...(data._outbox as OutboxEntry[]));
     console.log(`  Loaded ${ctx.outbox.length} outbox entries`);
+  }
+
+  // Load archived tokens from _archived_<tokenId> keys
+  // These are tokens that were spent/transferred but kept for recovery
+  let archivedCount = 0;
+  for (const key of Object.keys(data)) {
+    if (isArchivedKey(key)) {
+      const txf = data[key] as TxfToken;
+      const tokenId = tokenIdFromArchivedKey(key);
+      ctx.archivedTokens.set(tokenId, txf);
+      archivedCount++;
+    }
+  }
+  if (archivedCount > 0) {
+    console.log(`  Loaded ${archivedCount} archived tokens from localStorage`);
+  }
+
+  // Load forked tokens from _forked_<tokenId>_<stateHash> keys
+  // These are tokens saved at specific states for conflict resolution
+  let forkedCount = 0;
+  for (const key of Object.keys(data)) {
+    if (isForkedKey(key)) {
+      const txf = data[key] as TxfToken;
+      // Store with the full key (includes tokenId and stateHash)
+      const parsed = parseForkedKey(key);
+      if (parsed) {
+        const forkedKey = `${parsed.tokenId}_${parsed.stateHash}`;
+        ctx.forkedTokens.set(forkedKey, txf);
+        forkedCount++;
+      }
+    }
+  }
+  if (forkedCount > 0) {
+    console.log(`  Loaded ${forkedCount} forked tokens from localStorage`);
   }
 }
 
@@ -1211,29 +1322,29 @@ async function step7_5_verifyTombstones(ctx: SyncContext): Promise<void> {
 /**
  * Attempt to recover a token that was falsely tombstoned
  *
- * Checks archived and forked token storage for a matching token.
+ * Checks archived and forked token storage in SyncContext for a matching token.
  * If found, returns the token for restoration to active inventory.
+ *
+ * NOTE: Per TOKEN_INVENTORY_SPEC.md Section 6.1, we now read from SyncContext
+ * instead of WalletRepository, eliminating the dual-ownership race condition.
  */
 async function attemptTokenRecovery(ctx: SyncContext, tombstone: TombstoneEntry): Promise<TxfToken | null> {
-  // Try to find token in archived or forked storage
-  const { WalletRepository } = await import('../../../../repositories/WalletRepository');
-  const walletRepo = WalletRepository.getInstance();
-
-  // Check if we have the token stored somewhere
-  const archivedToken = walletRepo.getArchivedToken(ctx.address, tombstone.tokenId);
+  // Check archived tokens in SyncContext (loaded in Step 1)
+  const archivedToken = ctx.archivedTokens.get(tombstone.tokenId);
   if (archivedToken) {
     console.log(`    ♻️ Recovered from archived: ${tombstone.tokenId.slice(0, 8)}...`);
     return archivedToken;
   }
 
-  // Check forked tokens
-  const forkedToken = walletRepo.getForkedToken(ctx.address, tombstone.tokenId, tombstone.stateHash);
+  // Check forked tokens with exact state match
+  const forkedKey = `${tombstone.tokenId}_${tombstone.stateHash}`;
+  const forkedToken = ctx.forkedTokens.get(forkedKey);
   if (forkedToken) {
-    console.log(`    ♻️ Recovered from forked: ${tombstone.tokenId.slice(0, 8)}...`);
+    console.log(`    ♻️ Recovered from forked: ${tombstone.tokenId.slice(0, 8)}... (state: ${tombstone.stateHash.slice(0, 12)}...)`);
     return forkedToken;
   }
 
-  console.log(`    ⚠️ Cannot recover token ${tombstone.tokenId.slice(0, 8)}... - not found in archives`);
+  console.log(`    ⚠️ Cannot recover token ${tombstone.tokenId.slice(0, 8)}... - not found in SyncContext archives`);
   return null;
 }
 
@@ -1547,6 +1658,20 @@ function buildStorageDataFromContext(ctx: SyncContext): TxfStorageData {
     storageData[keyFromTokenId(tokenId)] = txf;
   }
 
+  // Add archived tokens with _archived_<tokenId> keys
+  for (const [tokenId, txf] of ctx.archivedTokens) {
+    storageData[archivedKeyFromTokenId(tokenId)] = txf;
+  }
+
+  // Add forked tokens with _forked_<tokenId>_<stateHash> keys
+  for (const [forkedKey, txf] of ctx.forkedTokens) {
+    // forkedKey is already in format: tokenId_stateHash
+    const [tokenId, stateHash] = forkedKey.split('_');
+    if (tokenId && stateHash) {
+      storageData[forkedKeyFromTokenIdAndState(tokenId, stateHash)] = txf;
+    }
+  }
+
   return storageData;
 }
 
@@ -1702,4 +1827,360 @@ function buildInventoryStats(ctx: SyncContext): TokenInventoryStats {
     nametagTokens: ctx.nametags.length,
     tombstoneCount: ctx.tombstones.length
   };
+}
+
+// ============================================
+// READ-ONLY QUERY API
+// ============================================
+// These functions provide direct read access to localStorage in TxfStorageData format.
+// Per TOKEN_INVENTORY_SPEC.md Section 6.1, all writes should go through inventorySync().
+// However, read-only queries can access localStorage directly for UI display purposes.
+
+/**
+ * Get all active tokens for an address
+ * Read-only query - does not trigger sync
+ */
+export function getTokensForAddress(address: string): Token[] {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  if (!json) return [];
+
+  try {
+    const data = JSON.parse(json) as Record<string, unknown>;
+    const tokens: Token[] = [];
+
+    for (const key of Object.keys(data)) {
+      if (isTokenKey(key)) {
+        const txf = data[key] as TxfToken;
+        const token = txfToToken(tokenIdFromKey(key), txf);
+        if (token) {
+          tokens.push(token);
+        }
+      }
+    }
+
+    return tokens;
+  } catch {
+    console.warn(`[getTokensForAddress] Failed to parse localStorage data for ${address.slice(0, 20)}...`);
+    return [];
+  }
+}
+
+/**
+ * Get nametag data for an address
+ * Read-only query - does not trigger sync
+ */
+export function getNametagForAddress(address: string): NametagData | null {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  if (!json) return null;
+
+  try {
+    const data = JSON.parse(json) as TxfStorageData;
+    return data._nametag || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get tombstones for an address
+ * Read-only query - does not trigger sync
+ */
+export function getTombstonesForAddress(address: string): TombstoneEntry[] {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  if (!json) return [];
+
+  try {
+    const data = JSON.parse(json) as TxfStorageData;
+    return data._tombstones || [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get invalidated nametags for an address
+ * These are nametags that failed Nostr validation (owned by different pubkey)
+ * Read-only query - does not trigger sync
+ */
+export function getInvalidatedNametagsForAddress(address: string): InvalidatedNametagEntry[] {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  if (!json) return [];
+
+  try {
+    const data = JSON.parse(json) as TxfStorageData;
+    return data._invalidatedNametags || [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Check if an address has any tokens
+ * Read-only query - does not trigger sync
+ */
+export function hasTokensForAddress(address: string): boolean {
+  return getTokensForAddress(address).length > 0;
+}
+
+/**
+ * Check if an address has a nametag
+ * Read-only query - does not trigger sync
+ */
+export function checkNametagForAddress(address: string): NametagData | null {
+  return getNametagForAddress(address);
+}
+
+/**
+ * Get metadata version for an address
+ * Read-only query - useful for version comparison
+ */
+export function getVersionForAddress(address: string): number {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  if (!json) return 0;
+
+  try {
+    const data = JSON.parse(json) as TxfStorageData;
+    return data._meta?.version || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Get archived tokens for an address
+ * Archived tokens are spent tokens kept for recovery purposes
+ * Read-only query - does not trigger sync
+ */
+export function getArchivedTokensForAddress(address: string): Map<string, TxfToken> {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  const result = new Map<string, TxfToken>();
+
+  if (!json) return result;
+
+  try {
+    const data = JSON.parse(json) as Record<string, unknown>;
+
+    for (const key of Object.keys(data)) {
+      if (isArchivedKey(key)) {
+        const txf = data[key] as TxfToken;
+        const tokenId = tokenIdFromArchivedKey(key);
+        result.set(tokenId, txf);
+      }
+    }
+
+    return result;
+  } catch {
+    return result;
+  }
+}
+
+/**
+ * Get forked tokens for an address
+ * Forked tokens are tokens saved at specific states for conflict resolution
+ * Read-only query - does not trigger sync
+ */
+export function getForkedTokensForAddress(address: string): Map<string, TxfToken> {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  const result = new Map<string, TxfToken>();
+
+  if (!json) return result;
+
+  try {
+    const data = JSON.parse(json) as Record<string, unknown>;
+
+    for (const key of Object.keys(data)) {
+      if (isForkedKey(key)) {
+        const txf = data[key] as TxfToken;
+        const parsed = parseForkedKey(key);
+        if (parsed) {
+          const forkedKey = `${parsed.tokenId}_${parsed.stateHash}`;
+          result.set(forkedKey, txf);
+        }
+      }
+    }
+
+    return result;
+  } catch {
+    return result;
+  }
+}
+
+/**
+ * Get a specific archived token by tokenId
+ * Read-only query - does not trigger sync
+ */
+export function getArchivedTokenForAddress(address: string, tokenId: string): TxfToken | null {
+  const archived = getArchivedTokensForAddress(address);
+  return archived.get(tokenId) || null;
+}
+
+/**
+ * Get a specific forked token by tokenId and stateHash
+ * Read-only query - does not trigger sync
+ */
+export function getForkedTokenForAddress(
+  address: string,
+  tokenId: string,
+  stateHash: string
+): TxfToken | null {
+  const forked = getForkedTokensForAddress(address);
+  return forked.get(`${tokenId}_${stateHash}`) || null;
+}
+
+// ============================================
+// WRITE API (Wrappers around inventorySync)
+// ============================================
+// These functions provide convenient write operations that delegate to inventorySync().
+// All writes go through the centralized sync pipeline to prevent race conditions.
+
+/**
+ * Add a token to the inventory
+ * Triggers inventorySync with the token as incoming
+ */
+export async function addToken(
+  address: string,
+  publicKey: string,
+  ipnsName: string,
+  token: Token,
+  options?: { local?: boolean }
+): Promise<SyncResult> {
+  return inventorySync({
+    address,
+    publicKey,
+    ipnsName,
+    incomingTokens: [token],
+    local: options?.local ?? false,
+  });
+}
+
+/**
+ * Remove a token from the inventory (mark as spent)
+ * Triggers inventorySync with the completed transfer info
+ */
+export async function removeToken(
+  address: string,
+  publicKey: string,
+  ipnsName: string,
+  tokenId: string,
+  stateHash: string,
+  options?: { local?: boolean }
+): Promise<SyncResult> {
+  return inventorySync({
+    address,
+    publicKey,
+    ipnsName,
+    completedList: [{
+      tokenId,
+      stateHash,
+      inclusionProof: {}, // Minimal proof for removal
+    }],
+    local: options?.local ?? false,
+  });
+}
+
+/**
+ * Set nametag for an address
+ * This is a direct localStorage write since nametag is not part of token sync
+ */
+export function setNametagForAddress(address: string, nametag: NametagData): void {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+
+  let data: TxfStorageData;
+  if (json) {
+    try {
+      data = JSON.parse(json) as TxfStorageData;
+    } catch {
+      data = {
+        _meta: {
+          version: 1,
+          address,
+          ipnsName: '',
+          formatVersion: '2.0',
+        },
+      };
+    }
+  } else {
+    data = {
+      _meta: {
+        version: 1,
+        address,
+        ipnsName: '',
+        formatVersion: '2.0',
+      },
+    };
+  }
+
+  data._nametag = nametag;
+  localStorage.setItem(storageKey, JSON.stringify(data));
+
+  // Dispatch wallet-updated event so UI refreshes
+  window.dispatchEvent(new Event('wallet-updated'));
+}
+
+/**
+ * Clear nametag for an address
+ */
+export function clearNametagForAddress(address: string): void {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  if (!json) return;
+
+  try {
+    const data = JSON.parse(json) as TxfStorageData;
+    delete data._nametag;
+    localStorage.setItem(storageKey, JSON.stringify(data));
+    window.dispatchEvent(new Event('wallet-updated'));
+  } catch {
+    // Ignore parse errors
+  }
+}
+
+/**
+ * Dispatch wallet-updated event to notify UI components of changes
+ * Use this when wallet state has changed and components need to refresh
+ */
+export function dispatchWalletUpdated(): void {
+  window.dispatchEvent(new Event('wallet-updated'));
+}
+
+// ============================================
+// IMPORT FLOW FLAGS
+// ============================================
+// Session flags for import flow management
+
+const IMPORT_SESSION_FLAG = "sphere_import_in_progress";
+
+/**
+ * Mark that we're in an active import flow.
+ * During import, credentials are saved BEFORE wallet data, so the safeguard
+ * that prevents wallet creation when credentials exist needs to be bypassed.
+ * This flag is stored in sessionStorage so it's cleared on browser close.
+ */
+export function setImportInProgress(): void {
+  console.log("📦 [IMPORT] Setting import-in-progress flag");
+  sessionStorage.setItem(IMPORT_SESSION_FLAG, "true");
+}
+
+/**
+ * Clear the import-in-progress flag.
+ * Should be called when import completes (success or failure).
+ */
+export function clearImportInProgress(): void {
+  console.log("📦 [IMPORT] Clearing import-in-progress flag");
+  sessionStorage.removeItem(IMPORT_SESSION_FLAG);
+}
+
+/**
+ * Check if we're currently in an import flow.
+ */
+export function isImportInProgress(): boolean {
+  return sessionStorage.getItem(IMPORT_SESSION_FLAG) === "true";
 }

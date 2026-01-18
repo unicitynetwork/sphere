@@ -24,7 +24,7 @@ import {
   isValidMnemonicFormat,
 } from "../../shared/utils/walletFileParser";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { setImportInProgress, clearImportInProgress } from "../../../wallet/L3/services/InventorySyncService";
 
 export interface UseWalletImportReturn {
   // Modal state
@@ -153,7 +153,7 @@ export function useWalletImport({
       setError(null);
 
       // Mark that we're in an active import flow to allow wallet creation
-      WalletRepository.setImportInProgress();
+      setImportInProgress();
 
       try {
         // Clear any existing wallet data
@@ -324,7 +324,7 @@ export function useWalletImport({
         await goToAddressSelection();
       } catch (e) {
         // Clear import flag on error
-        WalletRepository.clearImportInProgress();
+        clearImportInProgress();
         const message = e instanceof Error ? e.message : "Failed to import wallet from file";
         setError(message);
         setIsBusy(false);
@@ -339,7 +339,7 @@ export function useWalletImport({
       if (!pendingWallet) return;
 
       // Mark that we're in an active import flow to allow wallet creation
-      WalletRepository.setImportInProgress();
+      setImportInProgress();
 
       try {
         setIsBusy(true);
@@ -390,7 +390,7 @@ export function useWalletImport({
         await goToAddressSelection(true);
       } catch (e) {
         // Clear import flag on error
-        WalletRepository.clearImportInProgress();
+        clearImportInProgress();
         const message = e instanceof Error ? e.message : "Failed to import wallet";
         setError(message);
         setIsBusy(false);
@@ -405,7 +405,7 @@ export function useWalletImport({
       if (!pendingWallet || scannedAddresses.length === 0) return;
 
       // Mark that we're in an active import flow to allow wallet creation
-      WalletRepository.setImportInProgress();
+      setImportInProgress();
 
       try {
         setIsBusy(true);
@@ -455,7 +455,7 @@ export function useWalletImport({
         await goToAddressSelection(true);
       } catch (e) {
         // Clear import flag on error
-        WalletRepository.clearImportInProgress();
+        clearImportInProgress();
         const message = e instanceof Error ? e.message : "Failed to import wallet";
         setError(message);
         setIsBusy(false);
@@ -467,7 +467,7 @@ export function useWalletImport({
   // Cancel scan modal
   const onCancelScan = useCallback(() => {
     // Clear import flag when user cancels
-    WalletRepository.clearImportInProgress();
+    clearImportInProgress();
     setShowScanModal(false);
     setPendingWallet(null);
   }, []);
@@ -478,7 +478,7 @@ export function useWalletImport({
       if (!pendingFile) return;
 
       // Mark that we're in an active import flow to allow wallet creation
-      WalletRepository.setImportInProgress();
+      setImportInProgress();
 
       try {
         setIsBusy(true);
@@ -567,7 +567,7 @@ export function useWalletImport({
         }
       } catch (e) {
         // Clear import flag on error
-        WalletRepository.clearImportInProgress();
+        clearImportInProgress();
         const message = e instanceof Error ? e.message : "Failed to decrypt wallet";
         setError(message);
         setIsBusy(false);

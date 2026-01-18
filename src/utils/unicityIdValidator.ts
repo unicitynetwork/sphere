@@ -20,8 +20,9 @@ import { IdentityManager, type UserIdentity } from "../components/wallet/L3/serv
 import { NostrService } from "../components/wallet/L3/services/NostrService";
 import { NostrKeyManager } from "@unicitylabs/nostr-js-sdk";
 import { IpfsStorageService, SyncPriority } from "../components/wallet/L3/services/IpfsStorageService";
-import { WalletRepository } from "../repositories/WalletRepository";
-import type { NametagData } from "../repositories/WalletRepository";
+import { getNametagForAddress } from "../components/wallet/L3/services/InventorySyncService";
+import { STORAGE_KEY_GENERATORS } from "../config/storageKeys";
+import type { NametagData } from "../components/wallet/L3/services/types/TxfTypes";
 import type { InvalidatedNametagEntry } from "../components/wallet/L3/services/types/TxfTypes";
 
 export interface UnicityIdValidationResult {
@@ -142,8 +143,7 @@ export async function validateUnicityId(): Promise<UnicityIdValidationResult> {
   let nametagName: string | null = null;
 
   try {
-    const walletRepo = WalletRepository.getInstance();
-    nametagData = walletRepo.getNametag();
+    nametagData = getNametagForAddress(identity.address);
 
     if (!nametagData) {
       errors.push("No nametag registered locally");
@@ -313,8 +313,16 @@ export async function repairUnicityId(): Promise<boolean> {
  * @returns true if invalidation was successful, false if no nametag to invalidate
  */
 export async function invalidateUnicityId(reason: string): Promise<boolean> {
-  const walletRepo = WalletRepository.getInstance();
-  const currentNametag = walletRepo.getNametag();
+  // Get current identity for address-scoped operations
+  const identityManager = IdentityManager.getInstance();
+  const identity = await identityManager.getCurrentIdentity();
+
+  if (!identity) {
+    console.log("No identity available - cannot invalidate nametag");
+    return false;
+  }
+
+  const currentNametag = getNametagForAddress(identity.address);
 
   if (!currentNametag) {
     console.log("No nametag to invalidate");
@@ -334,13 +342,29 @@ export async function invalidateUnicityId(reason: string): Promise<boolean> {
     invalidationReason: reason,
   };
 
-  // Add to invalidated list (this also saves to localStorage)
-  walletRepo.addInvalidatedNametag(invalidatedEntry);
+  // Add to invalidated list and clear current nametag in localStorage
+  // NOTE: This directly manipulates TxfStorageData format per spec
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(identity.address);
+  const json = localStorage.getItem(storageKey);
 
-  // Clear current nametag (this triggers CreateWalletFlow)
-  walletRepo.clearNametag();
+  if (json) {
+    try {
+      const data = JSON.parse(json);
+      if (!data._invalidatedNametags) {
+        data._invalidatedNametags = [];
+      }
+      data._invalidatedNametags.push(invalidatedEntry);
 
-  console.log(`Invalidated Unicity ID "${nametagName}": ${reason}`);
+      // Clear current nametag (this triggers CreateWalletFlow)
+      delete data._nametag;
+
+      localStorage.setItem(storageKey, JSON.stringify(data));
+      console.log(`Invalidated Unicity ID "${nametagName}": ${reason}`);
+    } catch (err) {
+      console.error("Failed to invalidate nametag:", err);
+      return false;
+    }
+  }
 
   // Trigger wallet refresh so UI updates
   window.dispatchEvent(new Event("wallet-updated"));

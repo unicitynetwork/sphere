@@ -14,7 +14,11 @@ import { waitInclusionProof } from "@unicitylabs/state-transition-sdk/lib/util/I
 import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
 import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
 import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenState";
-import { WalletRepository, type NametagData } from "../../../../repositories/WalletRepository";
+import type { NametagData } from "./types/TxfTypes";
+import {
+  getNametagForAddress,
+  setNametagForAddress,
+} from "./InventorySyncService";
 import { OutboxRepository } from "../../../../repositories/OutboxRepository";
 import { createMintOutboxEntry, type MintOutboxEntry } from "./types/OutboxTypes";
 import { IpfsStorageService, SyncPriority } from "./IpfsStorageService";
@@ -94,9 +98,12 @@ export class NametagService {
       const cleanTag = nametag.replace("@unicity", "").replace("@", "").trim();
       console.log(`Starting mint process for: ${cleanTag}`);
 
+      const identity = await this.identityManager.getCurrentIdentity();
+      if (!identity)
+        return { status: "error", message: "Wallet identity not found" };
+
       // Check if identity already has a nametag (prevent duplicates)
-      const walletRepo = WalletRepository.getInstance();
-      const existingNametag = walletRepo.getNametag();
+      const existingNametag = getNametagForAddress(identity.address);
       if (existingNametag) {
         return {
           status: "error",
@@ -112,10 +119,6 @@ export class NametagService {
           message: `A mint for nametag "${cleanTag}" is already in progress`,
         };
       }
-
-      const identity = await this.identityManager.getCurrentIdentity();
-      if (!identity)
-        return { status: "error", message: "Wallet identity not found" };
 
       const secret = Buffer.from(identity.privateKey, "hex");
 
@@ -371,24 +374,16 @@ export class NametagService {
       return;
     }
 
-    const walletRepo = WalletRepository.getInstance();
-
-    // Load or create wallet for this identity's address
-    let wallet = walletRepo.getWallet();
-    if (!wallet || wallet.address !== identity.address) {
-      wallet = walletRepo.loadWalletForAddress(identity.address);
-      if (!wallet) {
-        wallet = walletRepo.createWallet(identity.address, "My Wallet");
-      }
-    }
-
-    // Store nametag via WalletRepository (per-identity, not global)
-    walletRepo.setNametag(nametagData);
+    // Store nametag via InventorySyncService (per-identity, per TOKEN_INVENTORY_SPEC.md Section 6.1)
+    setNametagForAddress(identity.address, nametagData);
   }
 
-  getActiveNametag(): string | null {
-    // Get nametag from WalletRepository (per-identity)
-    const nametag = WalletRepository.getInstance().getNametag();
+  async getActiveNametag(): Promise<string | null> {
+    // Get nametag via InventorySyncService (per-identity, per TOKEN_INVENTORY_SPEC.md Section 6.1)
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (!identity) return null;
+
+    const nametag = getNametagForAddress(identity.address);
     return nametag?.name || null;
   }
 
@@ -400,9 +395,13 @@ export class NametagService {
    * @returns The refreshed token, or null if refresh failed
    */
   async refreshNametagProof(): Promise<Token<any> | null> {
-    const walletRepo = WalletRepository.getInstance();
-    const nametagData = walletRepo.getNametag();
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (!identity) {
+      console.log("📦 No identity - cannot refresh nametag proof");
+      return null;
+    }
 
+    const nametagData = getNametagForAddress(identity.address);
     if (!nametagData || !nametagData.token) {
       console.log("📦 No nametag token to refresh");
       return null;
@@ -458,8 +457,8 @@ export class NametagService {
       const newProofJson = response.inclusionProof.toJSON();
       nametagTxf.genesis.inclusionProof = newProofJson;
 
-      // Save updated token back to storage
-      walletRepo.setNametag({ ...nametagData, token: nametagTxf });
+      // Save updated token back to storage via InventorySyncService
+      setNametagForAddress(identity.address, { ...nametagData, token: nametagTxf });
 
       console.log(`✅ Nametag proof refreshed successfully`);
 
@@ -481,7 +480,10 @@ export class NametagService {
    * Returns at most one token (one nametag per identity)
    */
   async getNametagToken(): Promise<Token<any> | null> {
-    const nametagData = WalletRepository.getInstance().getNametag();
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (!identity) return null;
+
+    const nametagData = getNametagForAddress(identity.address);
     if (!nametagData) return null;
 
     try {

@@ -11,6 +11,7 @@ import type {
   MergeResult,
   TxfTransaction,
   TombstoneEntry,
+  NametagData,
 } from "./types/TxfTypes";
 import {
   isTokenKey,
@@ -24,7 +25,6 @@ import {
   forkedKeyFromTokenIdAndState,
 } from "./types/TxfTypes";
 import { getCurrentStateHash } from "./TxfSerializer";
-import type { NametagData } from "../../../../repositories/WalletRepository";
 import { isNametagCorrupted, sanitizeNametagForLogging } from "../../../../utils/tokenValidation";
 
 // ==========================================

@@ -1,8 +1,11 @@
 import { Token, Wallet, TokenStatus } from "../components/wallet/L3/data/model";
-import type { TombstoneEntry, TxfToken, TxfTransaction, InvalidatedNametagEntry } from "../components/wallet/L3/services/types/TxfTypes";
+import type { TombstoneEntry, TxfToken, TxfTransaction, InvalidatedNametagEntry, NametagData } from "../components/wallet/L3/services/types/TxfTypes";
 import { v4 as uuidv4 } from "uuid";
 import { STORAGE_KEYS, STORAGE_KEY_GENERATORS, STORAGE_KEY_PREFIXES } from "../config/storageKeys";
 import { assertValidNametagData, sanitizeNametagForLogging, validateTokenJson } from "../utils/tokenValidation";
+
+// Re-export NametagData for backwards compatibility
+export type { NametagData } from "../components/wallet/L3/services/types/TxfTypes";
 
 // Session flag to indicate active import flow
 // This allows wallet creation during import even when credentials exist
@@ -43,17 +46,6 @@ const IMPORT_SESSION_FLAG = "sphere_active_import";
 })();
 
 /**
- * Interface for nametag data (one per identity)
- */
-export interface NametagData {
-  name: string;           // e.g., "cryptohog"
-  token: object;          // SDK Token JSON
-  timestamp: number;
-  format: string;
-  version: string;
-}
-
-/**
  * Interface for transaction history entries
  */
 export interface TransactionHistoryEntry {
@@ -85,6 +77,11 @@ interface StoredWallet {
 
 export class WalletRepository {
   private static instance: WalletRepository;
+
+  // Sync lock: prevents direct writes during InventorySyncService execution
+  // Per TOKEN_INVENTORY_SPEC.md Section 6.1: "Only inventorySync should be allowed to access the inventory in localStorage!"
+  private static _syncInProgress: boolean = false;
+  private static _pendingTokens: Token[] = [];  // Tokens queued during sync for next sync cycle
 
   private _wallet: Wallet | null = null;
   private _currentAddress: string | null = null;
@@ -176,6 +173,46 @@ export class WalletRepository {
    */
   static isImportInProgress(): boolean {
     return sessionStorage.getItem(IMPORT_SESSION_FLAG) === "true";
+  }
+
+  // ==========================================
+  // Sync Lock Methods (InventorySyncService integration)
+  // ==========================================
+
+  /**
+   * Set the sync-in-progress flag.
+   * Called by InventorySyncService at the start of inventorySync().
+   * While set, direct addToken/removeToken calls will queue tokens for next sync.
+   */
+  static setSyncInProgress(value: boolean): void {
+    console.log(`🔒 [SYNC LOCK] setSyncInProgress(${value})`);
+    WalletRepository._syncInProgress = value;
+  }
+
+  /**
+   * Check if sync is currently in progress.
+   */
+  static isSyncInProgress(): boolean {
+    return WalletRepository._syncInProgress;
+  }
+
+  /**
+   * Get tokens that were queued during sync.
+   * Called by InventorySyncService to include pending tokens in next sync.
+   */
+  static getPendingTokens(): Token[] {
+    const tokens = [...WalletRepository._pendingTokens];
+    WalletRepository._pendingTokens = [];  // Clear after retrieval
+    return tokens;
+  }
+
+  /**
+   * Queue a token for the next sync cycle.
+   * Called internally when addToken is blocked by sync lock.
+   */
+  private static queuePendingToken(token: Token): void {
+    console.log(`📥 [SYNC LOCK] Queuing token ${token.id.slice(0, 8)}... for next sync`);
+    WalletRepository._pendingTokens.push(token);
   }
 
   /**
@@ -892,6 +929,15 @@ export class WalletRepository {
 
   addToken(token: Token, skipHistory: boolean = false): void {
     console.log("💾 Repository: Adding token...", token.id);
+
+    // SYNC LOCK: If InventorySyncService is running, queue token for next sync
+    // This prevents race conditions where direct writes overwrite sync results
+    if (WalletRepository._syncInProgress) {
+      console.warn(`⚠️ [SYNC LOCK] Sync in progress, queuing token ${token.id.slice(0, 8)}...`);
+      WalletRepository.queuePendingToken(token);
+      return;
+    }
+
     if (!this._wallet) {
       console.error("💾 Repository: Wallet not initialized!");
       return;
