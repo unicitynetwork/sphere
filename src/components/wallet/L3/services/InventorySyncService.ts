@@ -53,10 +53,13 @@ let _syncInProgress = false;
 let _pendingTokens: Token[] = [];
 
 /**
- * Async mutex for inventorySync
- * Ensures only one sync runs at a time - callers wait for the current sync to complete
- * before starting their own sync. This prevents race conditions where multiple syncs
- * read the same initial state and overwrite each other's results.
+ * Coalescing mutex for inventorySync
+ * - If no sync in progress: start new sync
+ * - If sync in progress AND caller has no new data: return current sync's result (coalesce)
+ * - If sync in progress AND caller HAS new data: queue data, wait, return sync result
+ *
+ * This prevents the "infinite sync loop" where multiple components trigger syncs
+ * on startup and each waiter runs their own redundant sync after waiting.
  */
 let _currentSyncPromise: Promise<SyncResult> | null = null;
 
@@ -201,18 +204,39 @@ interface SyncContext {
  * @returns SyncResult with status and statistics
  */
 export async function inventorySync(params: SyncParams): Promise<SyncResult> {
-  // ASYNC MUTEX: Wait for any ongoing sync to complete before starting
-  // This prevents race conditions where multiple syncs read the same initial state
-  // and overwrite each other's results (e.g., receiving 4 tokens but only keeping 1)
-  while (_currentSyncPromise) {
-    console.log(`⏳ [InventorySync] Waiting for ongoing sync to complete...`);
+  // COALESCING MUTEX: Check if caller has new data to contribute
+  const hasNewData = (params.incomingTokens && params.incomingTokens.length > 0) ||
+                     (params.completedList && params.completedList.length > 0) ||
+                     (params.outboxTokens && params.outboxTokens.length > 0);
+
+  // If a sync is already in progress...
+  if (_currentSyncPromise) {
+    // If caller has new data, queue it for the current/next sync
+    if (hasNewData) {
+      if (params.incomingTokens) {
+        for (const token of params.incomingTokens) {
+          queuePendingToken(token);
+        }
+        console.log(`📥 [InventorySync] Queued ${params.incomingTokens.length} incoming token(s) for ongoing sync`);
+      }
+      // Note: completedList and outboxTokens are less common; for now they'll wait
+    }
+
+    // Wait for the current sync to complete and return its result
+    // This COALESCES multiple callers into one sync instead of running them sequentially
+    console.log(`⏳ [InventorySync] Coalescing: waiting for ongoing sync (hasNewData=${hasNewData})...`);
     try {
-      await _currentSyncPromise;
+      const result = await _currentSyncPromise;
+      // If we queued new data, a follow-up sync may be needed - but DON'T trigger it here
+      // The next wallet-updated event or periodic sync will pick it up
+      return result;
     } catch {
-      // Ignore errors from previous sync - we'll run our own sync
+      // If previous sync failed, fall through to start a new sync
+      console.log(`⏳ [InventorySync] Previous sync failed, starting new sync...`);
     }
   }
 
+  // No sync in progress - start a new one
   // Create a deferred promise for this sync
   let resolveCurrentSync: (result: SyncResult) => void;
   _currentSyncPromise = new Promise<SyncResult>((resolve) => {

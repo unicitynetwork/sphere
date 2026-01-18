@@ -1,0 +1,118 @@
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          CID MISMATCH FLOW DIAGRAM                              │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+                         ┌───────────────────────────────┐
+                         │  Token Data (JS Object)       │
+                         │  { tokens: [],                │
+                         │    meta: { version: 1 },      │
+                         │    tombstones: [] }           │
+                         └───────────────┬───────────────┘
+                                         │
+                         ┌───────────────▼───────────────┐
+                         │  UPLOAD TO IPFS               │
+                         │  (IpfsPublisher.ts:97-102)    │
+                         │                               │
+                         │  JSON.stringify(content)      │
+                         │  => SERIALIZED BYTES          │
+                         │  '{"tokens":[],"meta":...}'   │
+                         └───────────────┬───────────────┘
+                                         │
+                         ┌───────────────▼───────────────┐
+                         │  POST /api/v0/add             │
+                         │  FormData with JSON blob      │
+                         │                               │
+                         │  IPFS stores as-is with       │
+                         │  json codec (0x0200)          │
+                         └───────────────┬───────────────┘
+                                         │
+                         ┌───────────────▼───────────────┐
+                         │  IPFS Returns CID             │
+                         │  bagaaiera5tb3ebbkj...        │ ◄─── Expected CID
+                         │  (SHA-256 of JSON bytes)      │
+                         └───────────────┬───────────────┘
+                                         │
+                                         │  Time passes...
+                                         │
+                         ┌───────────────▼───────────────┐
+                         │  FETCH FROM IPFS              │
+                         │  (IpfsHttpResolver.ts:172)    │
+                         │                               │
+                         │  GET /ipfs/{cid}              │
+                         │  Accept: application/json     │
+                         └───────────────┬───────────────┘
+                                         │
+                         ┌───────────────▼───────────────┐
+                         │  Gateway returns bytes        │
+                         │  '{"tokens":[],"meta":...}'   │
+                         └───────────────┬───────────────┘
+                                         │
+                         ┌───────────────▼───────────────┐
+                         │  JSON.parse(response)         │
+                         │  => JS Object                 │
+                         │                               │
+                         │  ⚠️  KEY ORDER MAY CHANGE!    │
+                         │  { meta: { version: 1 },      │
+                         │    tombstones: [],            │
+                         │    tokens: [] }               │ ◄─── Different key order!
+                         └───────────────┬───────────────┘
+                                         │
+                         ┌───────────────▼───────────────┐
+                         │  CID VERIFICATION             │
+                         │  (IpfsHttpResolver.ts:417)    │
+                         │                               │
+                         │  computeCidFromContent()      │
+                         │  => JSON.stringify()          │
+                         │  => '{"meta":{"version":...}' │ ◄─── Different bytes!
+                         └───────────────┬───────────────┘
+                                         │
+                         ┌───────────────▼───────────────┐
+                         │  SHA-256 hash of new bytes    │
+                         │                               │
+                         │  CID: bagaaiera6s5yxka...     │ ◄─── Computed CID
+                         └───────────────┬───────────────┘
+                                         │
+                         ┌───────────────▼───────────────┐
+                         │  ❌ CID MISMATCH!             │
+                         │                               │
+                         │  Expected: bagaaiera5tb3...   │
+                         │  Got:      bagaaiera6s5y...   │
+                         │                               │
+                         │  ⚠️  Line 419 error logged    │
+                         └───────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                                 THE PROBLEM                                     │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  JSON.stringify() does NOT guarantee consistent key ordering!                  │
+│                                                                                 │
+│  Upload:  {"tokens":[],"meta":{"version":1},"tombstones":[]}                   │
+│           ↓                                                                     │
+│  Parse:   Object { tokens: [], meta: {...}, tombstones: [] }                   │
+│           ↓                                                                     │
+│  Stringify: {"meta":{"version":1},"tombstones":[],"tokens":[]}  ← DIFFERENT!   │
+│                                                                                 │
+│  Different bytes → Different SHA-256 → Different CID                            │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                                THE SOLUTION                                     │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  Use DAG-JSON codec for DETERMINISTIC encoding:                                │
+│                                                                                 │
+│  Upload:   @ipld/dag-json.encode() → Sorted keys alphabetically                │
+│            {"meta":{"version":1},"tokens":[],"tombstones":[]}                  │
+│                                                                                 │
+│  Compute:  @ipld/dag-json.encode() → SAME sorted output                        │
+│            {"meta":{"version":1},"tokens":[],"tombstones":[]}                  │
+│                                                                                 │
+│  ✅ Same bytes → Same SHA-256 → Same CID                                        │
+│                                                                                 │
+│  Changes needed:                                                                │
+│  1. IpfsPublisher: Use /api/v0/dag/put with dag-json codec                     │
+│  2. IpfsHttpResolver: Use dagJson.encode() for CID computation                 │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
