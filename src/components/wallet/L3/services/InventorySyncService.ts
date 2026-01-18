@@ -53,6 +53,14 @@ let _syncInProgress = false;
 let _pendingTokens: Token[] = [];
 
 /**
+ * Async mutex for inventorySync
+ * Ensures only one sync runs at a time - callers wait for the current sync to complete
+ * before starting their own sync. This prevents race conditions where multiple syncs
+ * read the same initial state and overwrite each other's results.
+ */
+let _currentSyncPromise: Promise<SyncResult> | null = null;
+
+/**
  * Set the sync-in-progress flag.
  * Called at the start of inventorySync().
  * While set, external token additions will be queued for next sync.
@@ -193,6 +201,24 @@ interface SyncContext {
  * @returns SyncResult with status and statistics
  */
 export async function inventorySync(params: SyncParams): Promise<SyncResult> {
+  // ASYNC MUTEX: Wait for any ongoing sync to complete before starting
+  // This prevents race conditions where multiple syncs read the same initial state
+  // and overwrite each other's results (e.g., receiving 4 tokens but only keeping 1)
+  while (_currentSyncPromise) {
+    console.log(`⏳ [InventorySync] Waiting for ongoing sync to complete...`);
+    try {
+      await _currentSyncPromise;
+    } catch {
+      // Ignore errors from previous sync - we'll run our own sync
+    }
+  }
+
+  // Create a deferred promise for this sync
+  let resolveCurrentSync: (result: SyncResult) => void;
+  _currentSyncPromise = new Promise<SyncResult>((resolve) => {
+    resolveCurrentSync = resolve;
+  });
+
   const startTime = Date.now();
 
   // Detect sync mode based on inputs
@@ -227,7 +253,9 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
 
     // NAMETAG mode: simplified flow (Steps 1, 2, 8.4 only)
     if (mode === 'NAMETAG') {
-      return await executeNametagSync(ctx, params);
+      const result = await executeNametagSync(ctx, params);
+      resolveCurrentSync!(result);
+      return result;
     }
 
     // All other modes: acquire sync lock
@@ -237,12 +265,18 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
     }
 
     // Execute full sync pipeline
-    return await executeFullSync(ctx, params);
+    const result = await executeFullSync(ctx, params);
+    resolveCurrentSync!(result);
+    return result;
 
   } catch (error) {
     console.error(`❌ [InventorySync] Error:`, error);
-    return buildErrorResult(ctx, error);
+    const errorResult = buildErrorResult(ctx, error);
+    resolveCurrentSync!(errorResult);
+    return errorResult;
   } finally {
+    // CRITICAL: Clear the mutex promise so next sync can proceed
+    _currentSyncPromise = null;
     // CRITICAL: Always release sync lock, even on error (prevent deadlock)
     setSyncInProgress(false);
     // CRITICAL: Always dispatch sync-end, even on error (prevent deadlock)
