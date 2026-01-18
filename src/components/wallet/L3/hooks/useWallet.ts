@@ -280,6 +280,17 @@ export const useWallet = () => {
         lockTimeout = null;
       }
       console.log('🔓 [useWallet] Unlocking refetch after inventory sync completes');
+
+      // CRITICAL: Trigger refetch after sync completes
+      // This catches any wallet-updated events that were skipped during sync
+      // Using small delay to let any final writes settle
+      setTimeout(() => {
+        console.log('🔄 [useWallet] Post-sync refetch triggered');
+        lastSpentCheckTimeRef.current = Date.now(); // Record check time
+        queryClient.refetchQueries({ queryKey: KEYS.TOKENS });
+        queryClient.refetchQueries({ queryKey: KEYS.AGGREGATED });
+        queryClient.invalidateQueries({ queryKey: KEYS.NAMETAG });
+      }, 100);
     };
 
     window.addEventListener(SYNC_EVENTS.START, handleSyncStart);
