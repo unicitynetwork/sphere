@@ -105,6 +105,157 @@ vi.mock("../../../../../../src/components/wallet/L3/services/IdentityManager", (
   },
 }));
 
+// Storage for mock WalletRepository state
+let mockWalletRepoTokens: Token[] = [];
+let mockWalletRepoNametag: NametagData | null = null;
+let mockWalletRepoTombstones: TombstoneEntry[] = [];
+let mockWalletRepoAddress: string = "";
+
+// Import Token and TombstoneEntry types for the mock
+import type { Token as MockToken } from "../../../../../../src/components/wallet/L3/data/model";
+import type { TombstoneEntry } from "../../../../../../src/components/wallet/L3/services/types/TxfTypes";
+import type { NametagData } from "../../../../../../src/repositories/WalletRepository";
+
+// Helper to convert TxfToken to Token (simplified for tests)
+const txfToMockToken = (tokenId: string, txf: TxfToken): MockToken => ({
+  id: tokenId,
+  name: "Test Token",
+  type: "UCT",
+  timestamp: Date.now(),
+  jsonData: JSON.stringify(txf),
+  status: 0,
+  amount: txf.genesis?.data?.coinData?.[0]?.[1] || "0",
+  coinId: txf.genesis?.data?.coinId || "ALPHA",
+  symbol: txf.genesis?.data?.coinId || "ALPHA",
+  sizeBytes: 100,
+} as MockToken);
+
+// Reset mock wallet state
+const resetMockWalletRepo = () => {
+  mockWalletRepoTokens = [];
+  mockWalletRepoNametag = null;
+  mockWalletRepoTombstones = [];
+  mockWalletRepoAddress = "";
+};
+
+// Sync mock wallet repo state FROM localStorage TxfStorageData
+const syncMockWalletFromStorage = (address: string) => {
+  try {
+    const storageKey = `sphere_wallet_${address}`;
+    const json = localStorage.getItem(storageKey);
+    if (!json) return;
+
+    const data = JSON.parse(json);
+
+    // If it's TxfStorageData format (has _meta or _<tokenId> keys)
+    mockWalletRepoTokens = [];
+    mockWalletRepoNametag = data._nametag || null;
+    mockWalletRepoTombstones = data._tombstones || [];
+    mockWalletRepoAddress = address;
+
+    // Extract tokens from _<tokenId> keys
+    for (const key of Object.keys(data)) {
+      if (key.startsWith("_") && !key.startsWith("_meta") && !key.startsWith("_nametag") &&
+          !key.startsWith("_tombstones") && !key.startsWith("_sent") && !key.startsWith("_invalid") &&
+          !key.startsWith("_outbox") && !key.startsWith("_archived") && !key.startsWith("_forked") &&
+          !key.startsWith("_mintOutbox") && !key.startsWith("_invalidatedNametags")) {
+        const txf = data[key] as TxfToken;
+        if (txf && txf.genesis?.data?.tokenId) {
+          // Use the actual tokenId from genesis data (important for proper ID matching)
+          const actualTokenId = txf.genesis.data.tokenId;
+          mockWalletRepoTokens.push(txfToMockToken(actualTokenId, txf));
+        }
+      }
+    }
+  } catch {
+    // Ignore parse errors
+  }
+};
+
+// Mock WalletRepository
+vi.mock("../../../../../../src/repositories/WalletRepository", () => ({
+  WalletRepository: {
+    getInstance: vi.fn(() => ({
+      getWallet: vi.fn(() => {
+        // Return wallet if address is set (either from loadWalletForAddress or directly)
+        if (!mockWalletRepoAddress) return null;
+        return {
+          id: "test-wallet-id",
+          name: "Test Wallet",
+          address: mockWalletRepoAddress,
+          tokens: mockWalletRepoTokens,
+          nametag: mockWalletRepoNametag,
+          tombstones: mockWalletRepoTombstones,
+        };
+      }),
+      loadWalletForAddress: vi.fn((address: string) => {
+        // Only sync from localStorage if address changes or wallet hasn't been loaded yet.
+        // Once loaded, mockWalletRepoTokens becomes the authoritative store.
+        if (mockWalletRepoAddress !== address) {
+          syncMockWalletFromStorage(address);
+        }
+        // If still no address set after sync attempt, set it now (new wallet case)
+        if (!mockWalletRepoAddress) {
+          mockWalletRepoAddress = address;
+        }
+        return {
+          id: "test-wallet-id",
+          name: "Test Wallet",
+          address: mockWalletRepoAddress,
+          tokens: mockWalletRepoTokens,
+        };
+      }),
+      getTokens: vi.fn(() => mockWalletRepoTokens),
+      getNametag: vi.fn(() => mockWalletRepoNametag),
+      getTombstones: vi.fn(() => mockWalletRepoTombstones),
+      setNametag: vi.fn((nametag: NametagData) => {
+        mockWalletRepoNametag = nametag;
+      }),
+      addToken: vi.fn((token: MockToken, skipHistory?: boolean) => {
+        // Check for duplicates
+        const existingIndex = mockWalletRepoTokens.findIndex(t => {
+          try {
+            const existing = JSON.parse(t.jsonData || "{}");
+            const incoming = JSON.parse(token.jsonData || "{}");
+            return existing.genesis?.data?.tokenId === incoming.genesis?.data?.tokenId;
+          } catch { return false; }
+        });
+        if (existingIndex === -1) {
+          mockWalletRepoTokens.push(token);
+        }
+      }),
+      updateToken: vi.fn((token: MockToken) => {
+        const index = mockWalletRepoTokens.findIndex(t => {
+          try {
+            const existing = JSON.parse(t.jsonData || "{}");
+            const incoming = JSON.parse(token.jsonData || "{}");
+            return existing.genesis?.data?.tokenId === incoming.genesis?.data?.tokenId;
+          } catch { return false; }
+        });
+        if (index >= 0) {
+          mockWalletRepoTokens[index] = token;
+        }
+      }),
+      removeToken: vi.fn((tokenId: string) => {
+        mockWalletRepoTokens = mockWalletRepoTokens.filter(t => t.id !== tokenId);
+      }),
+      mergeTombstones: vi.fn((tombstones: TombstoneEntry[]) => {
+        for (const t of tombstones) {
+          if (!mockWalletRepoTombstones.some(existing =>
+            existing.tokenId === t.tokenId && existing.stateHash === t.stateHash
+          )) {
+            mockWalletRepoTombstones.push(t);
+          }
+        }
+        return 0; // Return removed count (simplified)
+      }),
+      // Methods used by attemptTokenRecovery in Step 7.5
+      getArchivedToken: vi.fn(() => null), // No archived tokens in tests
+      getForkedToken: vi.fn(() => null),   // No forked tokens in tests
+    })),
+  },
+}));
+
 // Mock IPFS config
 vi.mock("../../../../../../src/config/ipfs.config", () => ({
   getAllBackendGatewayUrls: vi.fn(() => ["https://test-gateway.example.com"]),
@@ -290,7 +441,14 @@ const clearLocalStorage = () => {
 const getLocalStorage = (): TxfStorageData | null => {
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(TEST_ADDRESS);
   const json = localStorage.getItem(storageKey);
-  return json ? JSON.parse(json) : null;
+
+  if (!json) {
+    return null;
+  }
+
+  // InventorySyncService now writes TxfStorageData directly to localStorage,
+  // including tokens with _<tokenId> keys. Just parse and return.
+  return JSON.parse(json) as TxfStorageData;
 };
 
 // Reset all mock configurations
@@ -305,6 +463,8 @@ const resetMocks = () => {
   mockQueryPubkeyByNametagSpy.mockClear();
   mockPublishNametagBindingSpy.mockClear();
   mockIpfsUploadSpy.mockClear();
+  // Reset mock WalletRepository state
+  resetMockWalletRepo();
 };
 
 // ==========================================
@@ -447,7 +607,8 @@ describe("inventorySync", () => {
 
   describe("Step 5: Token Validation", () => {
     it("should move invalid tokens to Invalid folder when validation fails", async () => {
-      const invalidTokenId = "invalid1".padEnd(64, "0");
+      // The Token.id used in InventorySyncService matches the storage key, not the padded genesis tokenId
+      const invalidTokenId = "invalid1";
 
       // Configure mock to report this token as invalid
       mockValidationResult = {
@@ -491,7 +652,8 @@ describe("inventorySync", () => {
     });
 
     it("should record validation details in invalid entry", async () => {
-      const invalidTokenId = "badtoken".padEnd(64, "0");
+      // The Token.id used in InventorySyncService matches the storage key, not the padded genesis tokenId
+      const invalidTokenId = "badtoken";
       const errorReason = "Merkle proof verification failed";
 
       mockValidationResult = {
@@ -989,7 +1151,8 @@ describe("inventorySync", () => {
 
   describe("CompletedList Processing", () => {
     it("should move completed tokens to Sent folder", async () => {
-      const tokenId = "completed1".padEnd(64, "0");
+      // Use storage key format (unpadded) since ctx.tokens uses storage keys
+      const tokenId = "completed1";
       // Use DEFAULT_STATE_HASH to match the mock token's _integrity.currentStateHash
       const stateHash = DEFAULT_STATE_HASH;
 
@@ -1016,7 +1179,8 @@ describe("inventorySync", () => {
     });
 
     it("should add tombstone for completed transfer", async () => {
-      const tokenId = "completed2".padEnd(64, "0");
+      // Use storage key format (unpadded) since ctx.tokens uses storage keys
+      const tokenId = "completed2";
       // Use DEFAULT_STATE_HASH to match the mock token's _integrity.currentStateHash
       const stateHash = DEFAULT_STATE_HASH;
 
@@ -1355,7 +1519,8 @@ describe("inventorySync", () => {
 
   describe("Boomerang Token Detection (Step 8.2)", () => {
     it("should detect and remove outbox entry when token returns at different state", async () => {
-      const tokenId = "boomerang1".padEnd(64, "0");
+      // Use storage key format (unpadded) since ctx.tokens uses storage keys
+      const tokenId = "boomerang1";
       const originalStateHash = DEFAULT_STATE_HASH;
 
       // Create token that "returned" with different state (has 1 transaction, so state changed)
@@ -1400,7 +1565,8 @@ describe("inventorySync", () => {
     });
 
     it("should keep outbox entry when token state matches (send still pending)", async () => {
-      const tokenId = "pending1".padEnd(64, "0");
+      // Use storage key format (unpadded) since ctx.tokens uses storage keys
+      const tokenId = "pending1";
 
       // Token still at original state (send didn't happen yet)
       const localStorageData = createMockStorageData({
@@ -2108,9 +2274,10 @@ describe("inventorySync", () => {
 
     it("should complete sync successfully after validation errors (non-fatal)", async () => {
       // Configure validation to fail for one token
+      // Token.id matches storage key, not the padded genesis tokenId
       mockValidationResult = {
         valid: false,
-        issues: [{ tokenId: "invalid1".padEnd(64, "0"), reason: "Test validation error" }],
+        issues: [{ tokenId: "invalid1", reason: "Test validation error" }],
       };
 
       setLocalStorage(createMockStorageData({
@@ -2146,9 +2313,10 @@ describe("inventorySync", () => {
 
     it("should preserve all tokens when recovering from SDK validation error", async () => {
       // One token fails, one passes
+      // Token.id matches storage key, not the padded genesis tokenId
       mockValidationResult = {
         valid: false,
-        issues: [{ tokenId: "fail1".padEnd(64, "0"), reason: "SDK error" }],
+        issues: [{ tokenId: "fail1", reason: "SDK error" }],
       };
 
       setLocalStorage(createMockStorageData({

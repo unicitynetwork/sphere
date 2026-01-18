@@ -10,7 +10,7 @@ import type {
   SyncMode, SyncResult,
   SyncOperationStats, TokenInventoryStats, CircuitBreakerState,
 } from '../types/SyncTypes';
-import type { TxfToken, TxfStorageData, SentTokenEntry, InvalidTokenEntry, TombstoneEntry } from './types/TxfTypes';
+import type { TxfToken, TxfStorageData, TxfMeta, SentTokenEntry, InvalidTokenEntry, TombstoneEntry } from './types/TxfTypes';
 import type { OutboxEntry } from './types/OutboxTypes';
 import type { NametagData } from '../../../../repositories/WalletRepository';
 import {
@@ -23,7 +23,7 @@ import {
   createDefaultSyncOperationStats,
   createDefaultCircuitBreakerState
 } from '../types/SyncTypes';
-import { isTokenKey, keyFromTokenId } from './types/TxfTypes';
+import { isTokenKey, keyFromTokenId, tokenIdFromKey } from './types/TxfTypes';
 import type { TxfInclusionProof } from './types/TxfTypes';
 import { tokenToTxf, txfToToken, getCurrentStateHash } from './TxfSerializer';
 import { STORAGE_KEY_GENERATORS } from '../../../../config/storageKeys';
@@ -34,6 +34,7 @@ import { getTokenValidationService } from './TokenValidationService';
 import type { InvalidReasonCode } from '../types/SyncTypes';
 import { NostrService } from './NostrService';
 import { IdentityManager } from './IdentityManager';
+// Note: WalletRepository is imported dynamically in attemptTokenRecovery() for archived token lookup
 
 // ============================================
 // Types
@@ -318,92 +319,145 @@ function step0_inputProcessing(ctx: SyncContext, params: SyncParams): void {
 async function step1_loadLocalStorage(ctx: SyncContext): Promise<void> {
   console.log(`💾 [Step 1] Load from localStorage`);
 
+  // Per TOKEN_INVENTORY_SPEC.md Section 6.1:
+  // "Only inventorySync should be allowed to access the inventory in localStorage!"
+  //
+  // We load directly from localStorage in TxfStorageData format (the canonical format).
+  // However, we also detect StoredWallet format (from legacy WalletRepository) and convert it.
+  // This ensures backward compatibility while maintaining spec compliance.
+
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(ctx.address);
   const json = localStorage.getItem(storageKey);
 
   if (!json) {
-    console.log(`  No localStorage data found for address ${ctx.address.slice(0, 20)}...`);
+    console.log(`  No wallet data found for address ${ctx.address.slice(0, 20)}...`);
     return;
   }
 
+  let data: Record<string, unknown>;
   try {
-    const data = JSON.parse(json) as TxfStorageData;
+    data = JSON.parse(json);
+  } catch {
+    console.warn(`  Failed to parse localStorage data`);
+    return;
+  }
 
-    // NAMETAG mode: only load nametag
+  // Detect format: TxfStorageData has _meta and _<tokenId> keys
+  //                StoredWallet has tokens: Token[] array
+  const isTxfFormat = data._meta !== undefined || Object.keys(data).some(k => isTokenKey(k));
+  const isStoredWalletFormat = Array.isArray(data.tokens);
+
+  if (isStoredWalletFormat && !isTxfFormat) {
+    console.log(`  Detected StoredWallet format, converting...`);
+    // Convert StoredWallet format to TxfStorageData format
+    await loadFromStoredWalletFormat(ctx, data);
+  } else {
+    // Load from TxfStorageData format (the canonical format)
+    await loadFromTxfStorageDataFormat(ctx, data);
+  }
+}
+
+// Load from TxfStorageData format (canonical format per spec)
+async function loadFromTxfStorageDataFormat(ctx: SyncContext, data: Record<string, unknown>): Promise<void> {
+  // Load metadata
+  const meta = data._meta as TxfMeta | undefined;
+  if (meta?.version) {
+    ctx.localVersion = meta.version;
+    console.log(`  Loaded metadata: version=${ctx.localVersion}`);
+  }
+
+  // Load nametag
+  if (data._nametag) {
+    const nametag = data._nametag as NametagData;
+    ctx.nametags.push(nametag);
+    console.log(`  Loaded nametag: ${nametag.name}`);
+
+    // NAMETAG mode: only load nametag, skip rest
     if (ctx.mode === 'NAMETAG') {
-      if (data._nametag) {
-        ctx.nametags.push(data._nametag);
-        console.log(`  Loaded nametag: ${data._nametag.name}`);
-      }
       return;
     }
+  } else if (ctx.mode === 'NAMETAG') {
+    return; // NAMETAG mode but no nametag found
+  }
 
-    // Load metadata
-    if (data._meta) {
-      ctx.localVersion = data._meta.version || 0;
-      console.log(`  Loaded metadata: version=${ctx.localVersion}`);
-    }
+  // Load tombstones
+  if (data._tombstones && Array.isArray(data._tombstones)) {
+    ctx.tombstones.push(...(data._tombstones as TombstoneEntry[]));
+    console.log(`  Loaded ${ctx.tombstones.length} tombstones`);
+  }
 
-    // Load nametag
-    if (data._nametag) {
-      ctx.nametags.push(data._nametag);
-      console.log(`  Loaded nametag: ${data._nametag.name}`);
-    }
-
-    // Load tombstones (state-hash-aware)
-    if (data._tombstones && Array.isArray(data._tombstones)) {
-      for (const entry of data._tombstones) {
-        // Only load TombstoneEntry objects (new format with stateHash)
-        if (
-          typeof entry === 'object' &&
-          entry !== null &&
-          'tokenId' in entry &&
-          'stateHash' in entry &&
-          'timestamp' in entry
-        ) {
-          ctx.tombstones.push(entry as TombstoneEntry);
-        }
-        // Discard legacy string format (no state hash info)
+  // Load active tokens from _<tokenId> keys
+  let tokenCount = 0;
+  for (const key of Object.keys(data)) {
+    if (isTokenKey(key)) {
+      const txf = data[key] as TxfToken;
+      const tokenId = tokenIdFromKey(key);
+      // Don't overwrite incoming tokens from Step 0
+      if (!ctx.tokens.has(tokenId)) {
+        ctx.tokens.set(tokenId, txf);
+        tokenCount++;
       }
-      console.log(`  Loaded ${ctx.tombstones.length} tombstones`);
     }
+  }
+  console.log(`  Loaded ${tokenCount} active tokens from localStorage`);
 
-    // Load sent tokens
-    if (data._sent && Array.isArray(data._sent)) {
-      ctx.sent.push(...(data._sent as SentTokenEntry[]));
-      console.log(`  Loaded ${ctx.sent.length} sent tokens`);
+  // Load sent, invalid, outbox (for IPFS round-trip)
+  if (data._sent && Array.isArray(data._sent)) {
+    ctx.sent.push(...(data._sent as SentTokenEntry[]));
+    console.log(`  Loaded ${ctx.sent.length} sent tokens`);
+  }
+  if (data._invalid && Array.isArray(data._invalid)) {
+    ctx.invalid.push(...(data._invalid as InvalidTokenEntry[]));
+    console.log(`  Loaded ${ctx.invalid.length} invalid tokens`);
+  }
+  if (data._outbox && Array.isArray(data._outbox)) {
+    ctx.outbox.push(...(data._outbox as OutboxEntry[]));
+    console.log(`  Loaded ${ctx.outbox.length} outbox entries`);
+  }
+}
+
+// Load from StoredWallet format (legacy WalletRepository format) and convert to TxfStorageData
+async function loadFromStoredWalletFormat(ctx: SyncContext, data: Record<string, unknown>): Promise<void> {
+  // Load nametag
+  if (data.nametag) {
+    const nametag = data.nametag as NametagData;
+    ctx.nametags.push(nametag);
+    console.log(`  Loaded nametag: ${nametag.name}`);
+
+    // NAMETAG mode: only load nametag, skip rest
+    if (ctx.mode === 'NAMETAG') {
+      return;
     }
+  } else if (ctx.mode === 'NAMETAG') {
+    return;
+  }
 
-    // Load invalid tokens
-    if (data._invalid && Array.isArray(data._invalid)) {
-      ctx.invalid.push(...(data._invalid as InvalidTokenEntry[]));
-      console.log(`  Loaded ${ctx.invalid.length} invalid tokens`);
-    }
+  // Load tombstones
+  if (data.tombstones && Array.isArray(data.tombstones)) {
+    ctx.tombstones.push(...(data.tombstones as TombstoneEntry[]));
+    console.log(`  Loaded ${ctx.tombstones.length} tombstones`);
+  }
 
-    // Load outbox entries (merge with input from Step 0)
-    if (data._outbox && Array.isArray(data._outbox)) {
-      ctx.outbox.push(...(data._outbox as OutboxEntry[]));
-      console.log(`  Loaded ${data._outbox.length} outbox entries`);
-    }
-
-    // Load active tokens
+  // Load tokens from tokens: Token[] array and convert to TxfToken format
+  const tokens = data.tokens as Token[] | undefined;
+  if (tokens && Array.isArray(tokens)) {
     let tokenCount = 0;
-    for (const key of Object.keys(data)) {
-      if (isTokenKey(key)) {
-        const txfToken = data[key] as TxfToken;
-        if (txfToken && txfToken.genesis?.data?.tokenId) {
-          const tokenId = txfToken.genesis.data.tokenId;
-          ctx.tokens.set(tokenId, txfToken);
+    for (const token of tokens) {
+      const txf = tokenToTxf(token);
+      if (txf && txf.genesis?.data?.tokenId) {
+        const tokenId = txf.genesis.data.tokenId;
+        // Don't overwrite incoming tokens from Step 0
+        if (!ctx.tokens.has(tokenId)) {
+          ctx.tokens.set(tokenId, txf);
           tokenCount++;
         }
       }
     }
-    console.log(`  Loaded ${tokenCount} active tokens from localStorage`);
-
-  } catch (err) {
-    console.error(`  Failed to parse localStorage data:`, err);
-    ctx.errors.push(`localStorage parse error: ${err}`);
+    console.log(`  Loaded ${tokenCount} active tokens (converted from StoredWallet format)`);
   }
+
+  // Note: StoredWallet format doesn't have _sent, _invalid, _outbox
+  // These will be loaded from IPFS in Step 2
 }
 
 async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
@@ -480,9 +534,9 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
       const remoteTxf = remoteData[key] as TxfToken;
       if (!remoteTxf || !remoteTxf.genesis?.data?.tokenId) continue;
 
-      // Use the actual tokenId from genesis data, not the storage key
-      // This ensures consistency with Step 1 which also uses genesis.data.tokenId
-      const tokenId = remoteTxf.genesis.data.tokenId;
+      // Use the storage key (tokenIdFromKey) for consistency with Step 1
+      // Step 1 uses tokenIdFromKey(key) to extract tokenId, so we must match that
+      const tokenId = tokenIdFromKey(key);
       const localTxf = ctx.tokens.get(tokenId);
 
       // Prefer remote if: no local, or remote has more transactions
@@ -1499,22 +1553,34 @@ function buildStorageDataFromContext(ctx: SyncContext): TxfStorageData {
 function step9_prepareStorage(ctx: SyncContext): void {
   console.log(`📤 [Step 9] Prepare for Storage`);
 
-  // Build storage data from context
+  // Per TOKEN_INVENTORY_SPEC.md Section 6.1:
+  // "Only inventorySync should be allowed to access the inventory in localStorage!"
+  //
+  // We write directly to localStorage in TxfStorageData format (the canonical format).
+  // WalletRepository should NOT be used here - it uses a different format (StoredWallet)
+  // that would conflict with the TxfStorageData format we need for IPFS sync.
+
+  // Build TxfStorageData from context
+  // Note: buildStorageDataFromContext increments version internally (ctx.localVersion + 1)
   const storageData = buildStorageDataFromContext(ctx);
+
+  // Update ctx.localVersion to match what was written
+  ctx.localVersion = storageData._meta.version;
 
   // Write to localStorage
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(ctx.address);
-  const json = JSON.stringify(storageData);
-  localStorage.setItem(storageKey, json);
+  localStorage.setItem(storageKey, JSON.stringify(storageData));
 
-  // Update local version in context
-  ctx.localVersion = storageData._meta.version;
-
-  // Set upload flag if tokens changed
+  // Set upload flag
   ctx.uploadNeeded = true;
 
-  console.log(`  ✓ Prepared storage: version=${ctx.localVersion}, ${ctx.tokens.size} tokens, ${json.length} bytes`);
-  console.log(`  📝 Written to localStorage: ${storageKey}`);
+  // Dispatch wallet-updated event so UI components refresh
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('wallet-updated'));
+  }
+
+  console.log(`  ✓ Wrote to localStorage: version=${storageData._meta.version}, ${ctx.tokens.size} tokens`);
+  console.log(`  ✓ Folders: ${ctx.sent.length} sent, ${ctx.invalid.length} invalid, ${ctx.tombstones.length} tombstones`);
 }
 
 async function step10_uploadIpfs(ctx: SyncContext): Promise<void> {
@@ -1557,10 +1623,9 @@ async function step10_uploadIpfs(ctx: SyncContext): Promise<void> {
   transport.setLastCid(uploadResult.cid);
   console.log(`  ✅ Content uploaded: CID=${uploadResult.cid.slice(0, 16)}...`);
 
-  // Update localStorage with new CID
-  storageData._meta.lastCid = uploadResult.cid;
-  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(ctx.address);
-  localStorage.setItem(storageKey, JSON.stringify(storageData));
+  // NOTE: We do NOT overwrite localStorage here.
+  // WalletRepository is the authoritative local store (StoredWallet format).
+  // The CID is tracked by the transport layer and context.
 
   // Publish to IPNS
   console.log(`  📡 Publishing to IPNS...`);

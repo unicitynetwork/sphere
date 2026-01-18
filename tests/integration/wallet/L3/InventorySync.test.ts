@@ -566,7 +566,9 @@ describe("Token Inventory Sync Integration", () => {
     });
 
     it("should move newly invalid tokens to Invalid folder", async () => {
-      const invalidTokenId = "willbeinvalid".padEnd(64, "0");
+      // Use unpadded tokenId to match storage key format
+      // ctx.tokens uses tokenIdFromKey(key) which strips underscore but keeps unpadded ID
+      const invalidTokenId = "willbeinvalid";
 
       // Configure mock to report this token as invalid
       mockValidationResult = {
