@@ -219,6 +219,11 @@ async function executeFullSync(ctx: SyncContext, params: SyncParams): Promise<Sy
     await step7_detectSpentTokens(ctx);
   }
 
+  // Step 7.5: Verify Tombstones (skip in FAST/LOCAL mode)
+  if (!shouldSkipSpentDetection(ctx.mode)) {
+    await step7_5_verifyTombstones(ctx);
+  }
+
   // Step 8: Folder Assignment / Merge Inventory
   step8_mergeInventory(ctx);
 
@@ -675,9 +680,20 @@ function isValidHexString(value: string, minLength: number = 64): boolean {
  * - Structural integrity: All required fields present and properly formatted
  * - State hash chain: Genesis stateHash establishes chain root
  * - Format validation: Transaction hash and state hash are valid hex strings
+ * - Genesis tokenId derivation: Verify hash(genesis.data) === tokenId (TODO)
+ * - Proof payload integrity: Verify hash(proof.transaction) === transactionHash (TODO)
  *
  * Note: Full cryptographic proof verification (signature validation, merkle path)
  * is performed by the Unicity SDK in Step 5 via TokenValidationService.
+ *
+ * TODO (AMENDMENT 2): Enhanced validation requires SDK integration:
+ * - Use Token.fromJSON() to reconstruct genesis transaction
+ * - Calculate hash of genesis transaction data
+ * - Verify calculated hash matches txf.genesis.data.tokenId
+ * - Verify proof.transactionHash matches calculated transaction hash
+ *
+ * For now, we perform structural validation only. Full cryptographic validation
+ * happens in Step 5 via SDK's token.verify(trustBase).
  */
 function validateGenesisCommitment(txf: TxfToken): { valid: boolean; reason?: string } {
   if (!txf.genesis) {
@@ -724,6 +740,17 @@ function validateGenesisCommitment(txf: TxfToken): { valid: boolean; reason?: st
     return { valid: false, reason: 'Missing genesis data tokenId' };
   }
 
+  // TODO (AMENDMENT 2): Add cryptographic validation
+  // 1. Verify hash(genesis.data) === tokenId (genesis tokenId derivation)
+  // 2. Verify hash(proof.transaction) === transactionHash (inclusion proof payload)
+  //
+  // This requires SDK integration:
+  // - const sdkToken = await Token.fromJSON(txf);
+  // - const genesisTransaction = sdkToken.getGenesisTransaction();
+  // - const calculatedHash = await genesisTransaction.calculateHash();
+  // - if (calculatedHash.toJSON() !== txf.genesis.data.tokenId) return false;
+  // - if (proof.transactionHash !== calculatedHash.toJSON()) return false;
+
   return { valid: true };
 }
 
@@ -734,9 +761,18 @@ function validateGenesisCommitment(txf: TxfToken): { valid: boolean; reason?: st
  * - State hash chain integrity: previousStateHash links correctly
  * - Format validation: All hashes are valid hex strings
  * - Structural integrity: Required proof fields present
+ * - Transaction hash integrity: Verify hash(proof.transaction) === tx.transactionHash (TODO)
  *
  * Note: Full cryptographic proof verification (signature validation, merkle path)
  * is performed by the Unicity SDK in Step 5 via TokenValidationService.
+ *
+ * TODO (AMENDMENT 2): Enhanced validation requires SDK integration:
+ * - Use Token.fromJSON() to reconstruct transaction object
+ * - Calculate hash of transaction data
+ * - Verify proof.transactionHash matches calculated transaction hash
+ *
+ * For now, we perform structural validation only. Full cryptographic validation
+ * happens in Step 5 via SDK's token.verify(trustBase).
  */
 function validateTransactionCommitment(txf: TxfToken, txIndex: number): { valid: boolean; reason?: string } {
   const tx = txf.transactions[txIndex];
@@ -1016,6 +1052,93 @@ async function step7_detectSpentTokens(ctx: SyncContext): Promise<void> {
     console.warn(`  Spent detection error (non-fatal):`, error);
     ctx.errors.push(`Spent detection error: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+/**
+ * Step 7.5: Verify Tombstones Against Aggregator
+ *
+ * Tombstones track spent states (tokenId:stateHash).
+ * Multi-device sync requires tombstone verification to prevent:
+ * - False tombstones from network forks
+ * - BFT finality rollbacks before PoW finality
+ *
+ * For each tombstone:
+ * 1. Query aggregator for inclusion proof
+ * 2. If NO proof found: remove tombstone, recover token to Active
+ * 3. If proof found: tombstone is valid, keep
+ */
+async function step7_5_verifyTombstones(ctx: SyncContext): Promise<void> {
+  console.log(`🔍 [Step 7.5] Verify tombstones against aggregator`);
+
+  if (ctx.tombstones.length === 0) {
+    console.log(`  No tombstones to verify`);
+    return;
+  }
+
+  const validationService = getTokenValidationService();
+  const tombstonesToRemove: number[] = [];
+
+  for (let i = 0; i < ctx.tombstones.length; i++) {
+    const tombstone = ctx.tombstones[i];
+
+    // Query aggregator to verify this state was actually spent
+    const isSpent = await validationService.isTokenStateSpent(
+      tombstone.tokenId,
+      tombstone.stateHash,
+      ctx.publicKey
+    );
+
+    if (!isSpent) {
+      console.warn(`  🔄 False tombstone detected: ${tombstone.tokenId.slice(0, 8)}... stateHash=${tombstone.stateHash.slice(0, 16)}...`);
+      tombstonesToRemove.push(i);
+
+      // Attempt to recover token from archived/forked storage
+      const recoveredToken = await attemptTokenRecovery(ctx, tombstone);
+      if (recoveredToken) {
+        ctx.tokens.set(tombstone.tokenId, recoveredToken);
+        if (!ctx.stats.tokensRecovered) {
+          ctx.stats.tokensRecovered = 0;
+        }
+        ctx.stats.tokensRecovered++;
+      }
+    }
+  }
+
+  // Remove invalid tombstones (reverse order to maintain indices)
+  for (const idx of tombstonesToRemove.reverse()) {
+    ctx.tombstones.splice(idx, 1);
+  }
+
+  console.log(`  ✓ Verified ${ctx.tombstones.length} tombstones, removed ${tombstonesToRemove.length} false positives`);
+}
+
+/**
+ * Attempt to recover a token that was falsely tombstoned
+ *
+ * Checks archived and forked token storage for a matching token.
+ * If found, returns the token for restoration to active inventory.
+ */
+async function attemptTokenRecovery(ctx: SyncContext, tombstone: TombstoneEntry): Promise<TxfToken | null> {
+  // Try to find token in archived or forked storage
+  const { WalletRepository } = await import('../../../../repositories/WalletRepository');
+  const walletRepo = WalletRepository.getInstance();
+
+  // Check if we have the token stored somewhere
+  const archivedToken = walletRepo.getArchivedToken(ctx.address, tombstone.tokenId);
+  if (archivedToken) {
+    console.log(`    ♻️ Recovered from archived: ${tombstone.tokenId.slice(0, 8)}...`);
+    return archivedToken;
+  }
+
+  // Check forked tokens
+  const forkedToken = walletRepo.getForkedToken(ctx.address, tombstone.tokenId, tombstone.stateHash);
+  if (forkedToken) {
+    console.log(`    ♻️ Recovered from forked: ${tombstone.tokenId.slice(0, 8)}...`);
+    return forkedToken;
+  }
+
+  console.log(`    ⚠️ Cannot recover token ${tombstone.tokenId.slice(0, 8)}... - not found in archives`);
+  return null;
 }
 
 function step8_mergeInventory(ctx: SyncContext): void {

@@ -63,6 +63,11 @@ vi.mock("../../../../src/components/wallet/L3/services/TokenValidationService", 
         errors: [],
       };
     }),
+    // Mock for Step 7.5: isTokenStateSpent
+    // Returns true if tokenId+stateHash is in mockSpentTokens
+    isTokenStateSpent: vi.fn().mockImplementation(async (tokenId: string, stateHash: string) => {
+      return mockSpentTokens.some(s => s.tokenId === tokenId && s.stateHash === stateHash);
+    }),
   })),
 }));
 

@@ -1728,6 +1728,16 @@ export class WalletRepository {
   }
 
   /**
+   * Get a specific archived token by tokenId
+   * Returns null if not found
+   */
+  getArchivedToken(_address: string, tokenId: string): TxfToken | null {
+    // Note: _address parameter is for API consistency but not used since
+    // WalletRepository is already scoped to current wallet
+    return this._archivedTokens.get(tokenId) || null;
+  }
+
+  /**
    * Get the best archived version of a token (most committed transactions)
    * Checks both _archivedTokens and _forkedTokens
    * Used for sanity check restoration when tombstones are invalid
@@ -1846,6 +1856,17 @@ export class WalletRepository {
    */
   getForkedTokens(): Map<string, TxfToken> {
     return new Map(this._forkedTokens);
+  }
+
+  /**
+   * Get a specific forked token by tokenId and stateHash
+   * Returns null if not found
+   */
+  getForkedToken(_address: string, tokenId: string, stateHash: string): TxfToken | null {
+    // Note: _address parameter is for API consistency but not used since
+    // WalletRepository is already scoped to current wallet
+    const key = `${tokenId}_${stateHash}`;
+    return this._forkedTokens.get(key) || null;
   }
 
   /**

@@ -137,6 +137,9 @@ export interface SyncOperationStats {
 
   /** Nametag bindings published to Nostr (Step 8.5) */
   nametagsPublished: number;
+
+  /** Tokens recovered from false tombstones (Step 7.5) */
+  tokensRecovered?: number;
 }
 
 /**
