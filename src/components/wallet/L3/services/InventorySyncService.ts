@@ -761,6 +761,8 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
   // 4. Merge remote sent tokens (union merge by tokenId:stateHash)
   // Multiple entries with same tokenId but different stateHash are allowed
   // (supports boomerang scenarios where token returns at different states)
+  // NOTE: If stateHash is unavailable (getCurrentStateHash returns undefined),
+  // we still import the token using tokenId-only key to avoid losing sent history.
   if (remoteData._sent && Array.isArray(remoteData._sent)) {
     const existingKeys = new Set(
       ctx.sent.map(s => {
@@ -769,20 +771,40 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
         return `${tokenId}:${stateHash}`;
       })
     );
+    // Also track by tokenId-only for fallback deduplication
+    const existingTokenIds = new Set(
+      ctx.sent.map(s => s.token.genesis?.data?.tokenId || '')
+    );
+    let sentImported = 0;
     for (const sentEntry of remoteData._sent as SentTokenEntry[]) {
       const tokenId = sentEntry.token?.genesis?.data?.tokenId;
+      if (!tokenId) continue;  // Skip invalid entries
+
       const stateHash = getCurrentStateHash(sentEntry.token);
-      const key = `${tokenId}:${stateHash}`;
-      if (tokenId && stateHash && !existingKeys.has(key)) {
+      const key = `${tokenId}:${stateHash || 'unknown'}`;
+
+      // Primary dedup: tokenId:stateHash (when stateHash available)
+      // Fallback dedup: tokenId-only (when stateHash unavailable)
+      const isDuplicate = stateHash
+        ? existingKeys.has(key)
+        : existingTokenIds.has(tokenId);
+
+      if (!isDuplicate) {
         ctx.sent.push(sentEntry);
-        existingKeys.add(key);  // Track newly added to avoid duplicates
+        existingKeys.add(key);
+        existingTokenIds.add(tokenId);
+        sentImported++;
       }
+    }
+    if (sentImported > 0) {
+      console.log(`  📤 Imported ${sentImported} sent token(s) from IPFS`);
     }
   }
 
   // 5. Merge remote invalid tokens (union merge by tokenId:stateHash)
   // Multiple entries with same tokenId but different stateHash are allowed
   // (a token may fail validation at different states for different reasons)
+  // NOTE: If stateHash is unavailable, we still import using tokenId-only key.
   if (remoteData._invalid && Array.isArray(remoteData._invalid)) {
     const existingKeys = new Set(
       ctx.invalid.map(i => {
@@ -791,14 +813,33 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
         return `${tokenId}:${stateHash}`;
       })
     );
+    // Also track by tokenId-only for fallback deduplication
+    const existingTokenIds = new Set(
+      ctx.invalid.map(i => i.token.genesis?.data?.tokenId || '')
+    );
+    let invalidImported = 0;
     for (const invalidEntry of remoteData._invalid as InvalidTokenEntry[]) {
       const tokenId = invalidEntry.token?.genesis?.data?.tokenId;
+      if (!tokenId) continue;  // Skip invalid entries
+
       const stateHash = getCurrentStateHash(invalidEntry.token);
-      const key = `${tokenId}:${stateHash}`;
-      if (tokenId && stateHash && !existingKeys.has(key)) {
+      const key = `${tokenId}:${stateHash || 'unknown'}`;
+
+      // Primary dedup: tokenId:stateHash (when stateHash available)
+      // Fallback dedup: tokenId-only (when stateHash unavailable)
+      const isDuplicate = stateHash
+        ? existingKeys.has(key)
+        : existingTokenIds.has(tokenId);
+
+      if (!isDuplicate) {
         ctx.invalid.push(invalidEntry);
-        existingKeys.add(key);  // Track newly added to avoid duplicates
+        existingKeys.add(key);
+        existingTokenIds.add(tokenId);
+        invalidImported++;
       }
+    }
+    if (invalidImported > 0) {
+      console.log(`  ⚠️ Imported ${invalidImported} invalid token(s) from IPFS`);
     }
   }
 
