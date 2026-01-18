@@ -418,7 +418,12 @@ const createBaseSyncParams = (): SyncParams => ({
 });
 
 const createMockStorageData = (tokens: Record<string, TxfToken> = {}): TxfStorageData => ({
-  _meta: { version: 1, lastSync: Date.now() },
+  _meta: {
+    version: 1,
+    address: TEST_ADDRESS,
+    ipnsName: TEST_IPNS_NAME,
+    formatVersion: '2.0',
+  },
   _sent: [],
   _invalid: [],
   _outbox: [],
@@ -999,7 +1004,7 @@ describe("inventorySync", () => {
       expect(keys.length).toBe(2);
     });
 
-    it("should increment version on each sync", async () => {
+    it("should NOT increment version when content unchanged", async () => {
       setLocalStorage(createMockStorageData());
 
       const params = createBaseSyncParams();
@@ -1013,7 +1018,35 @@ describe("inventorySync", () => {
       await inventorySync(params);
       const v3 = getLocalStorage()?._meta?.version || 0;
 
-      // Each sync should increment version
+      // Version should stay the same when content hasn't changed
+      // This prevents unnecessary IPFS uploads on reload
+      expect(v2).toBe(v1);
+      expect(v3).toBe(v1);
+    });
+
+    it("should increment version when content changes", async () => {
+      setLocalStorage(createMockStorageData());
+
+      const params = createBaseSyncParams();
+
+      await inventorySync(params);
+      const v1 = getLocalStorage()?._meta?.version || 0;
+
+      // Add a new token - this changes content
+      await inventorySync({
+        ...params,
+        incomingTokens: [createMockToken("newtoken1")],
+      });
+      const v2 = getLocalStorage()?._meta?.version || 0;
+
+      // Add another token - this changes content again
+      await inventorySync({
+        ...params,
+        incomingTokens: [createMockToken("newtoken2")],
+      });
+      const v3 = getLocalStorage()?._meta?.version || 0;
+
+      // Version should increment when content changes
       expect(v2).toBeGreaterThan(v1);
       expect(v3).toBeGreaterThan(v2);
     });
@@ -1763,7 +1796,7 @@ describe("inventorySync", () => {
   // ------------------------------------------
 
   describe("IPFS Upload Pipeline (Steps 9-10)", () => {
-    it("should increment version on each sync", async () => {
+    it("should increment version when content changes", async () => {
       setLocalStorage(createMockStorageData({
         "token1": createMockTxfToken("token1"),
       }));
@@ -1773,11 +1806,32 @@ describe("inventorySync", () => {
       const result1 = await inventorySync(params);
       const version1 = result1.version;
 
-      // Second sync
+      // Second sync WITH new token (content changes)
+      const result2 = await inventorySync({
+        ...params,
+        incomingTokens: [createMockToken("newtoken")],
+      });
+      const version2 = result2.version;
+
+      // Version should increment when content changes
+      expect(version2).toBe((version1 || 0) + 1);
+    });
+
+    it("should NOT increment version when content unchanged", async () => {
+      setLocalStorage(createMockStorageData({
+        "token1": createMockTxfToken("token1"),
+      }));
+
+      const params = createBaseSyncParams();
+      const result1 = await inventorySync(params);
+      const version1 = result1.version;
+
+      // Second sync with same content
       const result2 = await inventorySync(params);
       const version2 = result2.version;
 
-      expect(version2).toBe((version1 || 0) + 1);
+      // Version should stay the same when content unchanged
+      expect(version2).toBe(version1);
     });
 
     it("should set uploadNeeded when tokens change", async () => {

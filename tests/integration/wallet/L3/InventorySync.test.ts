@@ -219,7 +219,12 @@ const createMockToken = (id: string, amount = "1000"): Token => ({
 } as Token);
 
 const createMockStorageData = (tokens: Record<string, TxfToken> = {}): TxfStorageData => ({
-  _meta: { version: 1, lastSync: Date.now() },
+  _meta: {
+    version: 1,
+    address: TEST_ADDRESS,
+    ipnsName: TEST_IPNS_NAME,
+    formatVersion: '2.0',
+  },
   _sent: [],
   _invalid: [],
   _outbox: [],
@@ -717,23 +722,48 @@ describe("Token Inventory Sync Integration", () => {
       expect(token.genesis?.data?.coinData[0][1]).toBe("5000");
     });
 
-    it("should increment version by 1 on each sync", async () => {
+    it("should NOT increment version when content unchanged", async () => {
       setLocalStorage(createMockStorageData());
       const initialVersion = getLocalStorage()?._meta?.version || 0;
 
       const params = createBaseSyncParams();
 
+      // First sync - version stays same (content matches existing localStorage)
       await inventorySync(params);
       const v1 = getLocalStorage()?._meta?.version || 0;
-      expect(v1).toBe(initialVersion + 1);
+      expect(v1).toBe(initialVersion);
 
+      // Subsequent syncs - version still unchanged (no content changes)
       await inventorySync(params);
       const v2 = getLocalStorage()?._meta?.version || 0;
-      expect(v2).toBe(v1 + 1);
+      expect(v2).toBe(v1);
 
       await inventorySync(params);
       const v3 = getLocalStorage()?._meta?.version || 0;
-      expect(v3).toBe(v2 + 1);
+      expect(v3).toBe(v2);
+    });
+
+    it("should increment version when content changes", async () => {
+      setLocalStorage(createMockStorageData());
+      const initialVersion = getLocalStorage()?._meta?.version || 0;
+
+      const params = createBaseSyncParams();
+
+      // Add token - version should increment
+      await inventorySync({
+        ...params,
+        incomingTokens: [createMockToken("token1")],
+      });
+      const v1 = getLocalStorage()?._meta?.version || 0;
+      expect(v1).toBe(initialVersion + 1);
+
+      // Add another token - version should increment again
+      await inventorySync({
+        ...params,
+        incomingTokens: [createMockToken("token2")],
+      });
+      const v2 = getLocalStorage()?._meta?.version || 0;
+      expect(v2).toBe(v1 + 1);
     });
   });
 
@@ -870,10 +900,11 @@ describe("Concurrent Sync Behavior", () => {
     // All should complete successfully
     expect(results.every(r => r.status === "SUCCESS" || r.status === "PARTIAL_SUCCESS")).toBe(true);
 
-    // VERIFY: Version incremented correctly
+    // VERIFY: Version is maintained (doesn't increment when content unchanged)
     const stored = getLocalStorage();
-    // Initial version 1, plus 5 syncs = at least 6 (could be higher if creates initial)
-    expect(stored?._meta?.version).toBeGreaterThanOrEqual(5);
+    // With no content changes, version should stay the same after initial sync
+    // This is correct behavior - prevents unnecessary IPFS uploads on reload
+    expect(stored?._meta?.version).toBeGreaterThanOrEqual(1);
   });
 
   it("should maintain data integrity across multiple syncs", async () => {

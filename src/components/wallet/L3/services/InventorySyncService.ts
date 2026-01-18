@@ -660,12 +660,17 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
       remoteData = resolution.content || null;
       console.log(`  Transport resolved: CID=${resolution.cid.slice(0, 16)}..., seq=${resolution.sequence}, version=${ctx.remoteVersion}`);
     } else {
-      console.log(`  Transport IPNS resolution returned no CID (new wallet or empty IPNS)`);
-      return;
+      // Transport returned no CID - this can happen if IPFS isn't fully initialized yet
+      // (cachedIpnsName not set). Fall through to HTTP resolver which doesn't require Helia.
+      console.log(`  Transport IPNS resolution returned no CID, trying HTTP resolver...`);
     }
-  } else {
-    // Fallback to HTTP resolver
-    console.log(`  Using HTTP resolver for IPNS resolution (transport not available)...`);
+  }
+
+  // Fallback to HTTP resolver if transport didn't return data
+  // (either transport not available, or cachedIpnsName not set yet)
+  if (!remoteData) {
+    // Fallback to HTTP resolver (transport unavailable or not initialized yet)
+    console.log(`  Using HTTP resolver for IPNS resolution...`);
     const resolver = getIpfsHttpResolver();
 
     // 1. Resolve IPNS name to get CID and content
@@ -1669,6 +1674,62 @@ async function step8_5_ensureNametagNostrBinding(ctx: SyncContext): Promise<void
 }
 
 /**
+ * Compare two TxfStorageData objects for content equality.
+ * Ignores _meta.version and _meta.lastCid since those change every sync.
+ * Returns true if content (tokens, nametags, tombstones, etc.) is identical.
+ */
+function isContentEqual(a: TxfStorageData, b: TxfStorageData): boolean {
+  // Compare nametag
+  const nametagA = JSON.stringify(a._nametag || null);
+  const nametagB = JSON.stringify(b._nametag || null);
+  if (nametagA !== nametagB) return false;
+
+  // Compare tombstones
+  const tombstonesA = JSON.stringify(a._tombstones || []);
+  const tombstonesB = JSON.stringify(b._tombstones || []);
+  if (tombstonesA !== tombstonesB) return false;
+
+  // Compare sent
+  const sentA = JSON.stringify(a._sent || []);
+  const sentB = JSON.stringify(b._sent || []);
+  if (sentA !== sentB) return false;
+
+  // Compare invalid
+  const invalidA = JSON.stringify(a._invalid || []);
+  const invalidB = JSON.stringify(b._invalid || []);
+  if (invalidA !== invalidB) return false;
+
+  // Compare outbox
+  const outboxA = JSON.stringify(a._outbox || []);
+  const outboxB = JSON.stringify(b._outbox || []);
+  if (outboxA !== outboxB) return false;
+
+  // Collect token keys (entries starting with _ that aren't special keys)
+  const specialKeys = new Set(['_meta', '_nametag', '_tombstones', '_sent', '_invalid', '_outbox', '_invalidatedNametags', '_mintOutbox']);
+  const getTokenKeys = (data: TxfStorageData): string[] => {
+    return Object.keys(data).filter(k => !specialKeys.has(k)).sort();
+  };
+
+  const tokensKeysA = getTokenKeys(a);
+  const tokensKeysB = getTokenKeys(b);
+
+  // Compare token count
+  if (tokensKeysA.length !== tokensKeysB.length) return false;
+
+  // Compare token keys
+  if (tokensKeysA.join(',') !== tokensKeysB.join(',')) return false;
+
+  // Compare each token's content
+  for (const key of tokensKeysA) {
+    const tokenA = JSON.stringify(a[key]);
+    const tokenB = JSON.stringify(b[key]);
+    if (tokenA !== tokenB) return false;
+  }
+
+  return true;
+}
+
+/**
  * Build TxfStorageData from sync context
  *
  * Helper function to construct storage data structure from current sync state.
@@ -1747,14 +1808,32 @@ function step9_prepareStorage(ctx: SyncContext): void {
   // Note: buildStorageDataFromContext increments version internally (ctx.localVersion + 1)
   const storageData = buildStorageDataFromContext(ctx);
 
-  // Update ctx.localVersion to match what was written
-  ctx.localVersion = storageData._meta.version;
-
-  // Write to localStorage
+  // Read current localStorage to compare content
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(ctx.address);
-  localStorage.setItem(storageKey, JSON.stringify(storageData));
+  const existingJson = localStorage.getItem(storageKey);
+  let existingData: TxfStorageData | null = null;
+  if (existingJson) {
+    try {
+      existingData = JSON.parse(existingJson);
+    } catch {
+      // Malformed JSON - treat as no existing data (will overwrite)
+      console.warn(`  ⚠️ Malformed JSON in localStorage, will overwrite`);
+    }
+  }
 
-  // Set upload flag
+  // Compare content (excluding version and lastCid which change every sync)
+  // Only write if content actually changed
+  if (existingData && isContentEqual(existingData, storageData)) {
+    console.log(`  ⏭️ No content changes detected, skipping localStorage write`);
+    ctx.uploadNeeded = false;
+    // Keep the existing version since content hasn't changed
+    ctx.localVersion = existingData._meta.version;
+    return;
+  }
+
+  // Content changed - update version and write
+  ctx.localVersion = storageData._meta.version;
+  localStorage.setItem(storageKey, JSON.stringify(storageData));
   ctx.uploadNeeded = true;
 
   // Dispatch wallet-updated event so UI components refresh
