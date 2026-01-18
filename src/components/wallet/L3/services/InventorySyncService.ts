@@ -800,7 +800,11 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
       if (!isDuplicate) {
         ctx.sent.push(sentEntry);
         existingKeys.add(key);
-        existingTokenIds.add(tokenId);
+        // Only add to tokenId-only set when using fallback (stateHash unavailable)
+        // This prevents incorrectly blocking entries with same tokenId but different stateHash
+        if (!stateHash) {
+          existingTokenIds.add(tokenId);
+        }
         sentImported++;
       }
     }
@@ -842,7 +846,10 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
       if (!isDuplicate) {
         ctx.invalid.push(invalidEntry);
         existingKeys.add(key);
-        existingTokenIds.add(tokenId);
+        // Only add to tokenId-only set when using fallback (stateHash unavailable)
+        if (!stateHash) {
+          existingTokenIds.add(tokenId);
+        }
         invalidImported++;
       }
     }
@@ -1829,19 +1836,61 @@ function buildStorageDataFromContext(ctx: SyncContext): TxfStorageData {
     storageData._nametag = ctx.nametags[0];
   }
 
-  // Add tombstones
+  // Add tombstones - deduplicate by tokenId:stateHash to prevent duplicates
+  // Duplicates can accumulate from multiple sync cycles detecting the same spent token
   if (ctx.tombstones.length > 0) {
-    storageData._tombstones = ctx.tombstones;
+    const seenKeys = new Set<string>();
+    const deduped: TombstoneEntry[] = [];
+    for (const t of ctx.tombstones) {
+      const key = `${t.tokenId}:${t.stateHash}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        deduped.push(t);
+      }
+    }
+    storageData._tombstones = deduped;
+    if (deduped.length < ctx.tombstones.length) {
+      console.log(`  🧹 Deduplicated tombstones: ${ctx.tombstones.length} → ${deduped.length}`);
+    }
   }
 
-  // Add sent tokens
+  // Add sent tokens - deduplicate by tokenId:stateHash to prevent duplicates
+  // Uses getCurrentStateHash to get state from token structure
   if (ctx.sent.length > 0) {
-    storageData._sent = ctx.sent;
+    const seenKeys = new Set<string>();
+    const deduped: SentTokenEntry[] = [];
+    for (const s of ctx.sent) {
+      const tokenId = s.token?.genesis?.data?.tokenId || '';
+      const stateHash = getCurrentStateHash(s.token) || 'unknown';
+      const key = `${tokenId}:${stateHash}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        deduped.push(s);
+      }
+    }
+    storageData._sent = deduped;
+    if (deduped.length < ctx.sent.length) {
+      console.log(`  🧹 Deduplicated sent tokens: ${ctx.sent.length} → ${deduped.length}`);
+    }
   }
 
-  // Add invalid tokens
+  // Add invalid tokens - deduplicate by tokenId:stateHash to prevent duplicates
   if (ctx.invalid.length > 0) {
-    storageData._invalid = ctx.invalid;
+    const seenKeys = new Set<string>();
+    const deduped: InvalidTokenEntry[] = [];
+    for (const i of ctx.invalid) {
+      const tokenId = i.token?.genesis?.data?.tokenId || '';
+      const stateHash = getCurrentStateHash(i.token) || 'unknown';
+      const key = `${tokenId}:${stateHash}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        deduped.push(i);
+      }
+    }
+    storageData._invalid = deduped;
+    if (deduped.length < ctx.invalid.length) {
+      console.log(`  🧹 Deduplicated invalid tokens: ${ctx.invalid.length} → ${deduped.length}`);
+    }
   }
 
   // Add outbox entries
