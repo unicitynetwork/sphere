@@ -3474,7 +3474,18 @@ export class IpfsStorageService implements IpfsTransport {
       // 1. Get current tokens
       const wallet = WalletRepository.getInstance().getWallet();
       if (!wallet) {
-        throw new Error("No wallet found");
+        // For new wallets, WalletRepository._wallet may not be set yet
+        // This is OK - inventorySync() handles the real storage
+        // Return success since there's nothing to sync via this legacy path
+        console.log(`📦 [SYNC] No WalletRepository wallet loaded (new wallet?) - skipping legacy sync`);
+        this.isSyncing = false;
+        this.emitSyncStateChange();
+        coordinator.releaseLock();
+        return {
+          success: true,
+          timestamp: Date.now(),
+          version: 0,
+        };
       }
 
       // Validate wallet belongs to current identity

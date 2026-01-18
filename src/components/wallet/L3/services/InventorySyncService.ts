@@ -179,6 +179,7 @@ interface SyncContext {
   remoteVersion: number;
   uploadNeeded: boolean;
   ipnsPublished: boolean;
+  hasLocalOnlyContent: boolean; // Content in local that's not in remote (needs upload)
 
   // Statistics
   stats: SyncOperationStats;
@@ -412,6 +413,7 @@ function initializeContext(params: SyncParams, mode: SyncMode, startTime: number
     remoteVersion: 0,
     uploadNeeded: false,
     ipnsPublished: false,
+    hasLocalOnlyContent: false,
     stats: createDefaultSyncOperationStats(),
     circuitBreaker: createDefaultCircuitBreakerState(),
     errors: []
@@ -712,6 +714,9 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
   }
 
   // 2. Merge remote tokens into context
+  // Track which tokens were only in local (for upload detection)
+  const localOnlyTokenIds = new Set(ctx.tokens.keys());
+
   let tokensImported = 0;
   for (const key of Object.keys(remoteData)) {
     if (isTokenKey(key)) {
@@ -723,12 +728,21 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
       const tokenId = tokenIdFromKey(key);
       const localTxf = ctx.tokens.get(tokenId);
 
+      // Mark this token as not local-only (exists in remote)
+      localOnlyTokenIds.delete(tokenId);
+
       // Prefer remote if: no local, or remote has more transactions
       if (!localTxf || shouldPreferRemote(localTxf, remoteTxf)) {
         ctx.tokens.set(tokenId, remoteTxf);
         if (!localTxf) tokensImported++;
       }
     }
+  }
+
+  // Any tokens still in localOnlyTokenIds are local-only (not in remote)
+  if (localOnlyTokenIds.size > 0) {
+    ctx.hasLocalOnlyContent = true;
+    console.log(`  📤 ${localOnlyTokenIds.size} local-only token(s) not in remote - will upload`);
   }
 
   // 3. Merge remote tombstones (union merge)
@@ -792,6 +806,10 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
   if (remoteData._nametag && ctx.nametags.length === 0) {
     ctx.nametags.push(remoteData._nametag);
     console.log(`  Imported nametag: ${remoteData._nametag.name}`);
+  } else if (!remoteData._nametag && ctx.nametags.length > 0) {
+    // Local has nametag, remote doesn't - need to upload
+    ctx.hasLocalOnlyContent = true;
+    console.log(`  📤 Local nametag "${ctx.nametags[0].name}" not in remote - will upload`);
   }
 
   ctx.stats.tokensImported = tokensImported;
@@ -1834,21 +1852,27 @@ function step9_prepareStorage(ctx: SyncContext): void {
   // Compare content (excluding version and lastCid which change every sync)
   // Only write if content actually changed
   if (existingData && isContentEqual(existingData, storageData)) {
-    console.log(`  ⏭️ No content changes detected`);
-    ctx.uploadNeeded = false;
-
-    // If remote version > local version, update local to match remote
-    // This prevents re-fetching IPFS data on every reload
-    if (ctx.remoteVersion > existingData._meta.version) {
-      console.log(`  📥 Updating local version to match remote: ${existingData._meta.version} → ${ctx.remoteVersion}`);
-      existingData._meta.version = ctx.remoteVersion;
-      localStorage.setItem(storageKey, JSON.stringify(existingData));
-      ctx.localVersion = ctx.remoteVersion;
+    // Content same as localStorage, but check if we have local-only content that needs upload
+    if (ctx.hasLocalOnlyContent) {
+      console.log(`  📤 Local-only content detected - forcing upload to IPFS`);
+      // Fall through to write localStorage and mark upload needed
     } else {
-      console.log(`  ⏭️ Skipping localStorage write (version ${existingData._meta.version} is current)`);
-      ctx.localVersion = existingData._meta.version;
+      console.log(`  ⏭️ No content changes detected`);
+      ctx.uploadNeeded = false;
+
+      // If remote version > local version, update local to match remote
+      // This prevents re-fetching IPFS data on every reload
+      if (ctx.remoteVersion > existingData._meta.version) {
+        console.log(`  📥 Updating local version to match remote: ${existingData._meta.version} → ${ctx.remoteVersion}`);
+        existingData._meta.version = ctx.remoteVersion;
+        localStorage.setItem(storageKey, JSON.stringify(existingData));
+        ctx.localVersion = ctx.remoteVersion;
+      } else {
+        console.log(`  ⏭️ Skipping localStorage write (version ${existingData._meta.version} is current)`);
+        ctx.localVersion = existingData._meta.version;
+      }
+      return;
     }
-    return;
   }
 
   // Content changed - update version and write
