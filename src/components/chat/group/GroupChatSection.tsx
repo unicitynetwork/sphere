@@ -106,7 +106,15 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
   };
 
   const handleJoinGroup = async (groupId: string, inviteCode?: string): Promise<boolean> => {
-    return joinGroup(groupId, inviteCode);
+    const success = await joinGroup(groupId, inviteCode);
+    if (success) {
+      // Find the group and select it to open immediately
+      const group = availableGroups.find((g) => g.id === groupId);
+      if (group) {
+        selectGroup(group);
+      }
+    }
+    return success;
   };
 
   const handleLeaveGroup = async (groupId: string) => {
