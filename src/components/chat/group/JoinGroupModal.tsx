@@ -67,7 +67,7 @@ export function JoinGroupModal({
       } else {
         setError('Failed to join group. Please try again.');
       }
-    } catch (err) {
+    } catch {
       setError('An error occurred. Please try again.');
     } finally {
       setIsJoining(false);
@@ -92,7 +92,7 @@ export function JoinGroupModal({
       } else {
         setError('Failed to join group. Check your invite link and try again.');
       }
-    } catch (err) {
+    } catch {
       setError('An error occurred. Please try again.');
     } finally {
       setIsJoining(false);

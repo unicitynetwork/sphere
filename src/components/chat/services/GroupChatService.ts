@@ -675,25 +675,24 @@ export class GroupChatService {
 
       this.client!.subscribe(filter, {
         onEvent: (event) => {
-          if (!this.repository.isEventProcessed(event.id)) {
-            // Unwrap message content to extract sender's nametag if embedded
-            const { text: content, senderNametag } = this.unwrapMessageContent(event.content);
+          // Don't check isEventProcessed here - we want to reload history on rejoin
+          // Unwrap message content to extract sender's nametag if embedded
+          const { text: content, senderNametag } = this.unwrapMessageContent(event.content);
 
-            const message = new GroupMessage({
-              id: event.id,
-              groupId,
-              content: content,
-              timestamp: event.created_at * 1000,
-              senderPubkey: event.pubkey,
-              senderNametag: senderNametag || undefined,
-              replyToId: this.extractReplyTo(event),
-              previousIds: this.extractPreviousIds(event),
-            });
+          const message = new GroupMessage({
+            id: event.id,
+            groupId,
+            content: content,
+            timestamp: event.created_at * 1000,
+            senderPubkey: event.pubkey,
+            senderNametag: senderNametag || undefined,
+            replyToId: this.extractReplyTo(event),
+            previousIds: this.extractPreviousIds(event),
+          });
 
-            messages.push(message);
-            this.repository.saveMessage(message);
-            this.repository.addProcessedEventId(event.id);
-          }
+          messages.push(message);
+          this.repository.saveMessage(message);
+          this.repository.addProcessedEventId(event.id);
         },
         onEndOfStoredEvents: () => {
           console.log(`Fetched ${messages.length} messages for group ${groupId}`);

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Hash, Menu, PanelLeft, ChevronDown, Users } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useGroupChat } from '../hooks/useGroupChat';
+import { useServices } from '../../../contexts/useServices';
 import { GroupList } from './GroupList';
 import { GroupMessageList } from './GroupMessageList';
 import { DMChatInput } from '../dm/DMChatInput';
@@ -61,8 +62,8 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
   }, [searchParams, setSearchParams]);
 
   // Get my pubkey for message display
-  const { groupChatService } = useGroupChat() as any;
-  const myPubkey = groupChatService?.getMyPublicKey?.() || null;
+  const { groupChatService } = useServices();
+  const myPubkey = groupChatService?.getMyPublicKey() || null;
 
   // Close picker when clicking outside
   useEffect(() => {
