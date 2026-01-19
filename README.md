@@ -53,6 +53,51 @@ A multifunctional Web3 platform with integrated crypto wallet, specialized AI ag
 - Seed phrase management
 - Real-time market data
 
+### 💬 NIP-29 Group Chat
+
+Sphere implements [NIP-29](https://github.com/nostr-protocol/nips/blob/master/29.md) for relay-based group chat functionality, providing Discord-like group messaging.
+
+**Features:**
+- Public and private groups with invite codes
+- Real-time messaging via WebSocket
+- Group discovery and browsing
+- Member count display
+- Unread message tracking
+- Join/leave group functionality
+- Message history persistence
+
+**Architecture:**
+- Dedicated Zooid relay (NIP-29 compliant) at `ws://localhost:3334`
+- `GroupChatService` — manages relay connection, subscriptions, and message sending
+- `GroupChatRepository` — local storage for groups, messages, and members
+- `useGroupChat` hook — React Query integration for state management
+
+**Event Kinds (NIP-29):**
+- Kind 9: Group chat message
+- Kind 9021: Join request
+- Kind 9022: Leave request
+- Kind 39000: Group metadata (relay-signed)
+- Kind 39002: Group members (relay-signed)
+
+**Files:**
+```
+src/components/chat/
+├── data/
+│   ├── groupModels.ts        # Group, GroupMessage, GroupMember classes
+│   └── GroupChatRepository.ts # Local storage operations
+├── services/
+│   └── GroupChatService.ts   # NIP-29 relay communication
+├── hooks/
+│   └── useGroupChat.ts       # React Query hook
+└── group/
+    ├── GroupChatSection.tsx  # Main container
+    ├── GroupList.tsx         # Sidebar with joined groups
+    ├── GroupItem.tsx         # Single group row
+    ├── GroupMessageList.tsx  # Message display
+    ├── GroupMessageBubble.tsx # Individual message
+    └── JoinGroupModal.tsx    # Browse/join groups
+```
+
 ### 🔐 Security
 
 - Cryptographic identification
@@ -135,6 +180,9 @@ VITE_AGENT_API_URL=https://api.example.com
 
 # Base path for deployment
 BASE_PATH=/
+
+# NIP-29 Group Chat Relay URL (Zooid)
+VITE_GROUP_CHAT_RELAY_URL=ws://localhost:3334
 ```
 
 ## Project Structure
