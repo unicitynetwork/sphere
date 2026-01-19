@@ -1,4 +1,4 @@
-import { MessageSquare, Gamepad2, Trophy, ShoppingBag, Shirt, Brain, Sparkles, Dices, TrendingUp, Banknote, CreditCard, ArrowRightLeft, Cpu, Package, Tag, Coins } from 'lucide-react';
+import { MessageSquare, Gamepad2, Trophy, ShoppingBag, Shirt, Brain, Sparkles, Dices, TrendingUp, Banknote, CreditCard, ArrowRightLeft, Cpu, Package, Tag, Coins, Repeat, Pill, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // Agent types for different UI layouts
@@ -253,6 +253,36 @@ export const agents: AgentConfig[] = [
     color: 'from-yellow-400 to-amber-500',
     type: 'simple-ai',
     greetingMessage: "Welcome! I can help you acquire UCT (Unicity Tokens). How would you like to proceed?",
+  },
+  {
+    id: 'p2p-swaps',
+    name: 'P2P Swaps',
+    description: 'Swap tokens directly',
+    Icon: Repeat,
+    category: 'Trading',
+    color: 'from-purple-500 to-fuchsia-500',
+    type: 'simple-ai',
+    greetingMessage: "Welcome to P2P Swaps! Exchange tokens directly with other users.",
+  },
+  {
+    id: 'medication',
+    name: 'Medication',
+    description: 'Health & wellness',
+    Icon: Pill,
+    category: 'Health',
+    color: 'from-red-500 to-rose-500',
+    type: 'simple-ai',
+    greetingMessage: "Welcome to Medication! I can help you with health and wellness information.",
+  },
+  {
+    id: 'pokemon',
+    name: 'Pokemon',
+    description: 'Catch em all',
+    Icon: Zap,
+    category: 'Entertainment',
+    color: 'from-yellow-500 to-red-500',
+    type: 'simple-ai',
+    greetingMessage: "Welcome to Pokemon! Ready to start your adventure?",
   },
 ];
 
