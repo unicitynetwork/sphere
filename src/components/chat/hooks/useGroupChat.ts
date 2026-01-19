@@ -164,9 +164,11 @@ export const useGroupChat = (): UseGroupChatReturn => {
       if (!groupChatService) throw new Error('Group chat service not available');
       return groupChatService.joinGroup(groupId, inviteCode);
     },
-    onSuccess: () => {
+    onSuccess: (_, { groupId }) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.GROUPS });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.AVAILABLE_GROUPS });
+      // Invalidate messages for the joined group so history is loaded
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.MESSAGES(groupId) });
     },
   });
 
@@ -205,14 +207,21 @@ export const useGroupChat = (): UseGroupChatReturn => {
 
   // Select group
   const selectGroup = useCallback(
-    (group: Group | null) => {
+    async (group: Group | null) => {
       setSelectedGroup(group);
       if (group) {
         groupRepository.markGroupAsRead(group.id);
         queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
+
+        // Fetch messages from relay if none exist locally (handles new joins)
+        const localMessages = groupRepository.getMessagesForGroup(group.id);
+        if (localMessages.length === 0 && groupChatService) {
+          await groupChatService.fetchMessages(group.id);
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.MESSAGES(group.id) });
+        }
       }
     },
-    [queryClient]
+    [queryClient, groupChatService]
   );
 
   // Join group
