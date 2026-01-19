@@ -24,7 +24,7 @@ function parseRelayUrls(envValue: string | undefined, defaults: string[]): strin
 /**
  * Default relay URLs for group chat (Zooid with NIP-29 support)
  */
-const DEFAULT_GROUP_CHAT_RELAYS = ['ws://localhost:3334'];
+const DEFAULT_GROUP_CHAT_RELAYS = ['wss://sphere-relay.unicity.network'];
 
 export const GROUP_CHAT_CONFIG = {
   /**

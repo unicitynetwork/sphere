@@ -67,7 +67,7 @@ Sphere implements [NIP-29](https://github.com/nostr-protocol/nips/blob/master/29
 - Message history persistence
 
 **Architecture:**
-- Dedicated Zooid relay (NIP-29 compliant) at `ws://localhost:3334`
+- Dedicated Zooid relay (NIP-29 compliant) at `wss://sphere-relay.unicity.network`
 - `GroupChatService` — manages relay connection, subscriptions, and message sending
 - `GroupChatRepository` — local storage for groups, messages, and members
 - `useGroupChat` hook — React Query integration for state management
@@ -181,8 +181,8 @@ VITE_AGENT_API_URL=https://api.example.com
 # Base path for deployment
 BASE_PATH=/
 
-# NIP-29 Group Chat Relay URL (Zooid)
-VITE_GROUP_CHAT_RELAY_URL=ws://localhost:3334
+# NIP-29 Group Chat Relays (Zooid, comma-separated)
+VITE_GROUP_CHAT_RELAYS=wss://sphere-relay.unicity.network
 ```
 
 ## Project Structure
