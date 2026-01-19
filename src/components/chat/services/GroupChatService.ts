@@ -16,6 +16,7 @@ import {
 } from '../data/groupModels';
 import { GROUP_CHAT_CONFIG } from '../../../config/groupChat.config';
 import { Buffer } from 'buffer';
+import { NametagService } from '../../wallet/L3/services/NametagService';
 
 /**
  * Extended filter interface for NIP-29 group queries.
@@ -275,15 +276,18 @@ export class GroupChatService {
       return;
     }
 
-    console.log(`📩 Group message in ${groupId}: ${event.content.slice(0, 50)}...`);
+    // Unwrap message content to extract sender's nametag if embedded
+    const { text: content, senderNametag } = this.unwrapMessageContent(event.content);
+
+    console.log(`📩 Group message in ${groupId} from ${senderNametag || event.pubkey.slice(0, 8)}: ${content.slice(0, 50)}...`);
 
     const message = new GroupMessage({
       id: event.id,
       groupId: groupId,
-      content: event.content,
+      content: content,
       timestamp: event.created_at * 1000,
       senderPubkey: event.pubkey,
-      senderNametag: this.extractNametag(event),
+      senderNametag: senderNametag || undefined,
       replyToId: this.extractReplyTo(event),
       previousIds: this.extractPreviousIds(event),
     });
@@ -350,9 +354,28 @@ export class GroupChatService {
 
     return new Promise((resolve) => {
       const groupsMap = new Map<string, Group>();
-      const filter = new Filter({ kinds: [NIP29_KINDS.GROUP_METADATA] });
+      const memberCountsMap = new Map<string, number>();
+      let metadataComplete = false;
+      let membersComplete = false;
 
-      this.client!.subscribe(filter, {
+      const tryResolve = () => {
+        if (metadataComplete && membersComplete) {
+          // Apply member counts to groups
+          for (const [groupId, count] of memberCountsMap) {
+            const group = groupsMap.get(groupId);
+            if (group) {
+              group.memberCount = count;
+            }
+          }
+          const groups = Array.from(groupsMap.values());
+          console.log(`Found ${groups.length} available groups`);
+          resolve(groups);
+        }
+      };
+
+      // Fetch group metadata
+      const metadataFilter = new Filter({ kinds: [NIP29_KINDS.GROUP_METADATA] });
+      this.client!.subscribe(metadataFilter, {
         onEvent: (event) => {
           const group = this.parseGroupMetadata(event);
           if (group && group.visibility === GroupVisibility.PUBLIC) {
@@ -364,14 +387,34 @@ export class GroupChatService {
           }
         },
         onEndOfStoredEvents: () => {
-          const groups = Array.from(groupsMap.values());
-          console.log(`Found ${groups.length} available groups`);
-          resolve(groups);
+          metadataComplete = true;
+          tryResolve();
+        },
+      });
+
+      // Fetch group members to get counts
+      const membersFilter = new Filter({ kinds: [NIP29_KINDS.GROUP_MEMBERS] });
+      this.client!.subscribe(membersFilter, {
+        onEvent: (event) => {
+          const groupId = this.getGroupIdFromMetadataEvent(event);
+          if (groupId) {
+            const pTags = event.tags.filter((t) => t[0] === 'p');
+            // Keep the most recent member count (events can be updated)
+            memberCountsMap.set(groupId, pTags.length);
+          }
+        },
+        onEndOfStoredEvents: () => {
+          membersComplete = true;
+          tryResolve();
         },
       });
 
       // Timeout after 10 seconds
-      setTimeout(() => resolve(Array.from(groupsMap.values())), 10000);
+      setTimeout(() => {
+        metadataComplete = true;
+        membersComplete = true;
+        tryResolve();
+      }, 10000);
     });
   }
 
@@ -439,6 +482,19 @@ export class GroupChatService {
     });
   }
 
+  /**
+   * Fetch group members and save them to the repository.
+   * This updates the group's memberCount via repository.saveMember().
+   */
+  private async fetchAndSaveMembers(groupId: string): Promise<void> {
+    const members = await this.fetchGroupMembers(groupId);
+    console.log(`📋 Fetched ${members.length} members for group ${groupId}`);
+
+    for (const member of members) {
+      this.repository.saveMember(member);
+    }
+  }
+
   // ==========================================
   // Join/Leave Operations
   // ==========================================
@@ -476,8 +532,11 @@ export class GroupChatService {
         // Subscribe to this group's events
         this.subscribeToGroup(groupId);
 
-        // Fetch existing messages
-        await this.fetchMessages(groupId);
+        // Fetch existing messages and members
+        await Promise.all([
+          this.fetchMessages(groupId),
+          this.fetchAndSaveMembers(groupId),
+        ]);
 
         return true;
       }
@@ -532,6 +591,9 @@ export class GroupChatService {
       const identity = await this.identityManager.getCurrentIdentity();
       if (!identity) throw new Error('No identity for sending group message');
 
+      // Get sender's nametag to include in message
+      const senderNametag = await this.getMyNametag();
+
       const kind = replyToId ? NIP29_KINDS.THREAD_REPLY : NIP29_KINDS.CHAT_MESSAGE;
 
       // Build tags
@@ -551,10 +613,13 @@ export class GroupChatService {
         tags.push(['e', replyToId, '', 'reply']);
       }
 
+      // Wrap content with sender's nametag for recipients to see who sent it
+      const wrappedContent = this.wrapMessageContent(content, senderNametag);
+
       const eventId = await this.client.createAndPublishEvent({
         kind,
         tags,
-        content,
+        content: wrappedContent,
       });
 
       if (eventId) {
@@ -564,6 +629,7 @@ export class GroupChatService {
           content,
           timestamp: Date.now(),
           senderPubkey: identity.publicKey,
+          senderNametag: senderNametag || undefined,
           replyToId,
           previousIds,
         });
@@ -605,17 +671,21 @@ export class GroupChatService {
       }
 
       const filter = createNip29Filter(filterData);
+      console.log('📡 Message filter:', JSON.stringify(filter.toJSON()));
 
       this.client!.subscribe(filter, {
         onEvent: (event) => {
           if (!this.repository.isEventProcessed(event.id)) {
+            // Unwrap message content to extract sender's nametag if embedded
+            const { text: content, senderNametag } = this.unwrapMessageContent(event.content);
+
             const message = new GroupMessage({
               id: event.id,
               groupId,
-              content: event.content,
+              content: content,
               timestamp: event.created_at * 1000,
               senderPubkey: event.pubkey,
-              senderNametag: this.extractNametag(event),
+              senderNametag: senderNametag || undefined,
               replyToId: this.extractReplyTo(event),
               previousIds: this.extractPreviousIds(event),
             });
@@ -683,6 +753,39 @@ export class GroupChatService {
   // Helper Methods
   // ==========================================
 
+  /**
+   * Wrapper format for messages that includes sender's nametag.
+   * Messages are sent as JSON: {"senderNametag": "name", "text": "message"}
+   * Same pattern as DM chat for consistency.
+   */
+  private wrapMessageContent(content: string, senderNametag: string | null): string {
+    if (senderNametag) {
+      return JSON.stringify({
+        senderNametag: senderNametag,
+        text: content,
+      });
+    }
+    return content;
+  }
+
+  /**
+   * Unwrap message content and extract sender's nametag if present.
+   */
+  private unwrapMessageContent(content: string): { text: string; senderNametag: string | null } {
+    try {
+      const parsed = JSON.parse(content);
+      if (typeof parsed === 'object' && parsed.text !== undefined) {
+        return {
+          text: parsed.text,
+          senderNametag: parsed.senderNametag || null,
+        };
+      }
+    } catch {
+      // Not JSON, return original content
+    }
+    return { text: content, senderNametag: null };
+  }
+
   private getGroupIdFromEvent(event: Event): string | null {
     const hTag = event.tags.find((t) => t[0] === 'h');
     return hTag ? hTag[1] : null;
@@ -691,12 +794,6 @@ export class GroupChatService {
   private getGroupIdFromMetadataEvent(event: Event): string | null {
     const dTag = event.tags.find((t) => t[0] === 'd');
     return dTag ? dTag[1] : null;
-  }
-
-  private extractNametag(event: Event): string | undefined {
-    // Some relays may include nametag in a tag
-    const nametagTag = event.tags.find((t) => t[0] === 'nametag');
-    return nametagTag ? nametagTag[1] : undefined;
   }
 
   private extractReplyTo(event: Event): string | undefined {
@@ -780,6 +877,11 @@ export class GroupChatService {
   getMyPublicKey(): string | null {
     const keyManager = this.client?.getKeyManager();
     return keyManager?.getPublicKeyHex() || null;
+  }
+
+  async getMyNametag(): Promise<string | null> {
+    const nametagService = NametagService.getInstance(this.identityManager);
+    return nametagService.getActiveNametag();
   }
 
   getRelayUrls(): string[] {
