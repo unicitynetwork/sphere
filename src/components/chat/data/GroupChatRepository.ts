@@ -301,4 +301,44 @@ export class GroupChatRepository {
     localStorage.removeItem(STORAGE_KEYS.GROUP_CHAT_PROCESSED_EVENTS);
     this.notifyUpdate();
   }
+
+  /**
+   * Check if the relay URL has changed since last use.
+   * If changed, clear all cached group chat data to avoid stale data from old relay.
+   * Also clears if any stored groups have a different relay URL than the current one.
+   * @param currentRelayUrl The current configured relay URL
+   * @returns true if data was cleared due to relay change, false otherwise
+   */
+  checkAndClearOnRelayChange(currentRelayUrl: string): boolean {
+    const storedRelayUrl = localStorage.getItem(STORAGE_KEYS.GROUP_CHAT_RELAY_URL);
+
+    // Check if stored relay URL differs
+    if (storedRelayUrl && storedRelayUrl !== currentRelayUrl) {
+      console.log(
+        `🔄 Group chat relay URL changed from ${storedRelayUrl} to ${currentRelayUrl}, clearing cached data`
+      );
+      this.clearAllData();
+      localStorage.setItem(STORAGE_KEYS.GROUP_CHAT_RELAY_URL, currentRelayUrl);
+      return true;
+    }
+
+    // Also check if any stored groups have a different relay URL (handles edge cases)
+    const groups = this.getGroups();
+    const hasStaleGroups = groups.some((g) => g.relayUrl && g.relayUrl !== currentRelayUrl);
+    if (hasStaleGroups) {
+      console.log(
+        `🔄 Found groups from different relay, clearing cached data for ${currentRelayUrl}`
+      );
+      this.clearAllData();
+      localStorage.setItem(STORAGE_KEYS.GROUP_CHAT_RELAY_URL, currentRelayUrl);
+      return true;
+    }
+
+    // Store current relay URL if not set
+    if (!storedRelayUrl) {
+      localStorage.setItem(STORAGE_KEYS.GROUP_CHAT_RELAY_URL, currentRelayUrl);
+    }
+
+    return false;
+  }
 }

@@ -150,6 +150,10 @@ export class GroupChatService {
   }
 
   private async doConnect(): Promise<void> {
+    // Check if relay URL changed and clear stale data if so
+    const primaryRelay = this.relayUrls[0];
+    this.repository.checkAndClearOnRelayChange(primaryRelay);
+
     const identity = await this.identityManager.getCurrentIdentity();
     if (!identity) throw new Error('No identity found for group chat');
 
