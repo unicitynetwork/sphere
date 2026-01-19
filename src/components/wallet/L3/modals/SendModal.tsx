@@ -33,6 +33,16 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
   const [splitPlan, setSplitPlan] = useState<SplitPlan | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
 
+  // Nametag validation - same as in NametagScreen
+  const handleRecipientChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.toLowerCase();
+    // Allow only valid nametag characters: lowercase letters, numbers, underscore, dash, plus, dot
+    if (/^[a-z0-9_\-+.]*$/.test(value)) {
+      setRecipient(value);
+      setRecipientError(null);
+    }
+  };
+
   const reset = () => {
     setStep('recipient');
     setRecipient('');
@@ -175,7 +185,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
                     <input
                       autoFocus
                       value={recipient}
-                      onChange={(e) => setRecipient(e.target.value)}
+                      onChange={handleRecipientChange}
                       onKeyDown={(e) => e.key === 'Enter' && handleRecipientNext()}
                       className="w-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-xl py-3 pl-8 pr-4 text-neutral-900 dark:text-white focus:border-orange-500 outline-none"
                       placeholder="Unicity ID"

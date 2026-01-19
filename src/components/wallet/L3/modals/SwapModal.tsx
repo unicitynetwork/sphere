@@ -1,11 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ArrowDownUp, Loader2, TrendingUp, CheckCircle, ArrowDown } from 'lucide-react';
 import { useWallet } from '../hooks/useWallet';
 import { AggregatedAsset } from '../data/model';
 import { CurrencyUtils } from '../utils/currency';
 import { FaucetService } from '../services/FaucetService';
+import { RegistryService } from '../services/RegistryService';
+import { ApiService } from '../services/api';
 
 type Step = 'swap' | 'processing' | 'success';
 
@@ -25,6 +27,59 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
   const [showFromDropdown, setShowFromDropdown] = useState(false);
   const [showToDropdown, setShowToDropdown] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [allSwappableAssets, setAllSwappableAssets] = useState<AggregatedAsset[]>([]);
+
+  // Load all available swappable coins from registry
+  useEffect(() => {
+    const loadSwappableCoins = async () => {
+      const registryService = RegistryService.getInstance();
+      await registryService.ensureInitialized();
+      const prices = await ApiService.fetchPrices();
+
+      const definitions = registryService.getAllDefinitions();
+
+      // Only include coins supported by the faucet for swapping
+      const SUPPORTED_SWAP_COINS = ['bitcoin', 'ethereum', 'solana', 'unicity', 'tether', 'usd-coin'];
+
+      // Filter only fungible assets that are supported by faucet
+      const fungibleDefs = definitions.filter(def =>
+        def.assetKind === 'fungible' && SUPPORTED_SWAP_COINS.includes(def.name.toLowerCase())
+      );
+
+      const swappableAssets = fungibleDefs.map(def => {
+        const symbol = def.symbol || def.name.toUpperCase();
+        const priceKey = def.name.toLowerCase()
+
+        const priceData = prices[priceKey];
+        const iconUrl = registryService.getIconUrl(def);
+
+        return new AggregatedAsset({
+          coinId: def.id,
+          symbol: symbol,
+          name: def.name,
+          totalAmount: '0', // No balance - just for display in "To" dropdown
+          decimals: def.decimals || 0,
+          tokenCount: 0,
+          iconUrl: iconUrl,
+          priceUsd: priceData?.priceUsd || 1.0,
+          priceEur: priceData?.priceEur || 0.92,
+          change24h: priceData?.change24h || 0,
+        });
+      });
+
+      setAllSwappableAssets(swappableAssets);
+    };
+
+    if (isOpen) {
+      loadSwappableCoins();
+    }
+  }, [isOpen]);
+
+  // Get user's balance for a specific coin (from their owned assets)
+  const getUserBalance = (coinId: string): string => {
+    const userAsset = assets.find(a => a.coinId === coinId);
+    return userAsset ? userAsset.getFormattedAmount() : '0';
+  };
 
   // Calculate exchange rate and output amount
   const exchangeInfo = useMemo(() => {
@@ -96,9 +151,23 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
   };
 
   const handleFlipAssets = () => {
-    const temp = fromAsset;
-    setFromAsset(toAsset);
-    setToAsset(temp);
+    if (!fromAsset || !toAsset) return;
+
+    // When flipping, we need to:
+    // 1. Find the user's actual asset for the "to" coin (to become new "from")
+    // 2. Find the swappable asset for the "from" coin (to become new "to")
+    const newFromAsset = assets.find(a => a.coinId === toAsset.coinId);
+    const newToAsset = allSwappableAssets.find(a => a.coinId === fromAsset.coinId);
+
+    // Only allow flip if user has the "to" asset in their wallet
+    if (!newFromAsset) {
+      setError(`You don't have any ${toAsset.symbol} to swap from`);
+      return;
+    }
+
+    setFromAsset(newFromAsset);
+    setToAsset(newToAsset || fromAsset);
+    setError(null);
 
     // Transfer the "to" amount to "from" field (max 6 decimal places)
     if (exchangeInfo && exchangeInfo.toAmount > 0) {
@@ -250,7 +319,7 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
                     <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">To</span>
                     {toAsset && (
                       <span className="text-xs text-neutral-500 dark:text-neutral-400 truncate ml-2">
-                        Balance: <span className="text-neutral-900 dark:text-white">{toAsset.getFormattedAmount()}</span>
+                        Balance: <span className="text-neutral-900 dark:text-white">{getUserBalance(toAsset.coinId)}</span>
                       </span>
                     )}
                   </div>
@@ -274,10 +343,10 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
                         <ArrowDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-neutral-400 shrink-0" />
                       </button>
 
-                      {/* To Dropdown */}
+                      {/* To Dropdown - Shows ALL available coins for swap */}
                       {showToDropdown && (
                         <div className="absolute bottom-full left-0 mb-2 w-48 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl shadow-xl z-60 max-h-48 overflow-y-auto">
-                          {assets.map(asset => (
+                          {allSwappableAssets.map(asset => (
                             <button
                               key={asset.coinId}
                               onClick={() => {
@@ -289,7 +358,7 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
                               <img src={asset.iconUrl || ''} className="w-6 h-6 rounded-full" alt="" />
                               <div className="flex-1 min-w-0">
                                 <div className="text-neutral-900 dark:text-white font-medium text-sm truncate">{asset.symbol}</div>
-                                <div className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{asset.getFormattedAmount()}</div>
+                                <div className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{getUserBalance(asset.coinId)}</div>
                               </div>
                             </button>
                           ))}

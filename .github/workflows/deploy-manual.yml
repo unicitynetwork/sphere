@@ -1,0 +1,31 @@
+name: Deploy to Server
+
+run-name: Deploy ${{ github.sha }}
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            cd ~/sphere
+            echo "=== Previous commit ==="
+            git rev-parse HEAD
+            git rev-parse --short HEAD
+            git pull origin main
+            echo "=== Current commit ==="
+            git rev-parse HEAD
+            git rev-parse --short HEAD
+            docker compose build
+            docker compose up -d
+            docker compose ps

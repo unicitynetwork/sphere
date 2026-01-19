@@ -6,6 +6,12 @@ import { useAddressNametags } from '../../L1/hooks/useAddressNametags';
 import { generateAddress, loadWalletFromStorage } from '../../L1/sdk';
 import { STORAGE_KEYS } from '../../../../config/storageKeys';
 
+/** Truncate long nametags: show first 6 chars + ... + last 3 chars */
+function truncateNametag(nametag: string, maxLength: number = 12): string {
+  if (nametag.length <= maxLength) return nametag;
+  return `${nametag.slice(0, 6)}...${nametag.slice(-3)}`;
+}
+
 interface AddressSelectorProps {
   /** Current nametag to display when collapsed */
   currentNametag?: string;
@@ -113,7 +119,7 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
             {isLoading ? (
               <Loader2 className="w-3 h-3 animate-spin" />
             ) : displayNametag ? (
-              <span className="font-medium">@{displayNametag}</span>
+              <span className="font-medium" title={`@${displayNametag}`}>@{truncateNametag(displayNametag)}</span>
             ) : (
               <span className="font-mono">{currentAddress?.address.slice(0, 8)}...</span>
             )}
