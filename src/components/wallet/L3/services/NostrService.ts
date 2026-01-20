@@ -50,6 +50,7 @@ import { v4 as uuidv4 } from "uuid";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 import { normalizeSdkTokenToStorage } from "./TxfSerializer";
 import { NOSTR_CONFIG } from "../../../../config/nostr.config";
+import { recordActivity } from "../../../../services/ActivityService";
 
 export class NostrService {
   private static instance: NostrService;
@@ -780,7 +781,7 @@ export class NostrService {
       senderPubkey: senderPubkey,
     });
 
-    // Save token via InventorySyncService (per TOKEN_INVENTORY_SPEC.md Section 6.1)
+// Save token via InventorySyncService (per TOKEN_INVENTORY_SPEC.md Section 6.1)
     // Use local mode for fast storage - background sync will handle IPFS upload
     const identity = await this.identityManager.getCurrentIdentity();
     if (identity) {
@@ -794,6 +795,12 @@ export class NostrService {
           { local: true } // Quick local storage, IPFS sync handled by background loop
         );
         console.log(`💾 Token saved via InventorySyncService: ${uiToken.id}`);
+
+        // Record token transfer activity (fire and forget)
+        recordActivity("token_transfer", {
+          isPublic: false,
+          data: { amount, symbol },
+        });
       } catch (syncError) {
         console.error(`❌ Failed to save token via InventorySyncService:`, syncError);
         // Token creation succeeded but storage failed - this is a critical error
