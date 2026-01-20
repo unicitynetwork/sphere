@@ -145,8 +145,11 @@ export function AgentPage() {
         <div className="absolute bottom-0 right-0 w-32 h-32 border-r-2 border-b-2 border-orange-500/50 rounded-br-2xl" />
 
         <div className="relative">
-          <div className="grid grid-cols-7 gap-4">
-            {/* First 7 agents - no animation */}
+          <div
+            className="grid gap-4"
+            style={{ gridTemplateColumns: `repeat(${Math.min(visibleAgents.length, DEFAULT_VISIBLE_AGENTS)}, 1fr)` }}
+          >
+            {/* First N agents - no animation */}
             {visibleAgents.slice(0, DEFAULT_VISIBLE_AGENTS).map((agent) => (
               <AgentCard
                 key={agent.id}
