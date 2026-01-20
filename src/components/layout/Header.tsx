@@ -23,7 +23,7 @@ const DiscordIcon = ({ className }: { className?: string }) => (
 const navItems = [
   { label: 'Home', path: '/agents/chat' },
   { label: 'Developers', path: '/developers' },
-  { label: 'Mine Alpha', path: null, external: true }, // External URL to be provided later
+  { label: 'Mine Alpha', path: 'https://dashboard.friendly-miners.com/auth/login', external: true },
 ];
 
 export function Header({ onActivityClick, isActivityPanelOpen }: HeaderProps) {
@@ -113,7 +113,19 @@ export function Header({ onActivityClick, isActivityPanelOpen }: HeaderProps) {
           {/* Navigation Tabs - next to logo */}
           <nav className="hidden lg:flex items-center h-full ml-8 gap-1">
             {navItems.map((item) => (
-              item.path ? (
+              item.external ? (
+                <a
+                  key={item.label}
+                  href={item.path!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="relative px-5 py-2.5 flex items-center text-sm font-medium transition-colors duration-300 group"
+                >
+                  <span className="relative transition-colors duration-300 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-300">
+                    {item.label}
+                  </span>
+                </a>
+              ) : item.path ? (
                 <Link
                   key={item.label}
                   to={item.path}
@@ -274,7 +286,18 @@ export function Header({ onActivityClick, isActivityPanelOpen }: HeaderProps) {
           >
           <nav className="px-4 py-3 space-y-1">
             {navItems.map((item) => (
-              item.path ? (
+              item.external ? (
+                <a
+                  key={item.label}
+                  href={item.path!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="w-full flex items-center px-4 py-3 rounded-xl text-base font-medium text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all"
+                >
+                  {item.label}
+                </a>
+              ) : item.path ? (
                 <button
                   key={item.label}
                   onClick={() => handleMobileNavigation(item.path!)}
