@@ -54,8 +54,8 @@ export function Header() {
       {/* Animated gradient line on top */}
       <div className="absolute top-0 left-0 right-0 h-0.5 bg-linear-to-r from-transparent via-orange-500 to-transparent opacity-50" />
 
-      <div className="max-w-[1800px] mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-14 lg:h-14 flex items-center justify-between relative z-10">
-        <div className="flex items-center gap-2 sm:gap-4 lg:gap-6">
+      <div className="max-w-[1800px] mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-14 lg:h-14 flex items-stretch justify-between relative z-10">
+        <div className="flex items-stretch gap-2 sm:gap-4 lg:gap-6">
           {/* Logo with enhanced effects - entire block is clickable */}
           <Link to="/agents/chat" className="flex items-center gap-2 sm:gap-4 lg:gap-6 group">
             <div className="relative">
@@ -84,30 +84,46 @@ export function Header() {
           </Link>
 
           {/* Navigation Tabs - next to logo */}
-          <nav className="hidden lg:flex items-center gap-1 ml-8">
+          <nav className="hidden lg:flex items-center h-full ml-8 gap-1">
             {navItems.map((item) => (
               item.path ? (
                 <Link
                   key={item.label}
                   to={item.path}
-                  className={`relative px-4 lg:px-5 py-2 text-sm font-medium transition-all ${
+                  className="relative px-5 py-2.5 flex items-center text-sm font-medium transition-colors duration-300 group"
+                >
+                  {/* Active indicator - line at header bottom edge */}
+                  <AnimatePresence mode="wait">
+                    {isActive(item.path) && (
+                      <motion.span
+                        key={item.path}
+                        initial={{ scaleX: 0, opacity: 0 }}
+                        animate={{ scaleX: 1, opacity: 1 }}
+                        exit={{ scaleX: 0, opacity: 0 }}
+                        transition={{ duration: 0.2, ease: 'easeOut' }}
+                        className="absolute left-0 right-0 -bottom-2 h-0.5 bg-linear-to-r from-orange-400 via-orange-500 to-amber-500 origin-center"
+                      />
+                    )}
+                  </AnimatePresence>
+                  {/* Text */}
+                  <span className={`relative transition-colors duration-300 ${
                     isActive(item.path)
                       ? 'text-neutral-900 dark:text-white'
-                      : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                  }`}
-                >
-                  <span className={`absolute left-1 lg:left-1.5 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-linear-to-br from-orange-400 to-amber-500 shadow-[0_0_6px_rgba(249,115,22,0.6)] transition-opacity ${
-                    isActive(item.path) ? 'opacity-100' : 'opacity-0'
-                  }`} />
-                  {item.label}
+                      : 'text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-300'
+                  }`}>
+                    {item.label}
+                  </span>
                 </Link>
               ) : (
                 <button
                   key={item.label}
-                  className="px-4 lg:px-5 py-2 text-sm font-medium text-neutral-400 dark:text-neutral-500 cursor-not-allowed"
+                  className="relative px-5 py-2.5 flex items-center text-sm font-medium text-neutral-400 dark:text-neutral-500 cursor-not-allowed"
                   title="Coming soon"
                 >
-                  {item.label}
+                  <span>{item.label}</span>
+                  <span className="ml-2 px-1.5 py-0.5 text-[10px] rounded bg-neutral-200/60 dark:bg-neutral-700/40 text-neutral-500 dark:text-neutral-500">
+                    Soon
+                  </span>
                 </button>
               )
             ))}
