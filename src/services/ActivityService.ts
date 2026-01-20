@@ -5,7 +5,7 @@ import type {
   GetActivitiesResponse,
 } from '../types/activity';
 
-const ACTIVITY_API_URL = import.meta.env.VITE_ACTIVITY_API_URL || 'http://localhost:3001';
+const ACTIVITY_API_URL = import.meta.env.VITE_ACTIVITY_API_URL || 'http://localhost:3001/activities';
 
 interface GetActivitiesOptions {
   limit?: number;
@@ -51,7 +51,7 @@ export class ActivityService {
       params.set('kind', options.kind);
     }
 
-    const url = `${ACTIVITY_API_URL}/activities${params.toString() ? `?${params}` : ''}`;
+    const url = `${ACTIVITY_API_URL}${params.toString() ? `?${params}` : ''}`;
 
     const response = await fetch(url);
 
@@ -65,7 +65,7 @@ export class ActivityService {
   static async postActivity(request: CreateActivityRequest): Promise<CreateActivityResponse> {
     // Browser requests are authenticated via Origin header on the backend
     // No API key needed for allowed origins
-    const response = await fetch(`${ACTIVITY_API_URL}/activities`, {
+    const response = await fetch(ACTIVITY_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -83,7 +83,7 @@ export class ActivityService {
 
   static createEventSource(lastId?: string): EventSource {
     const params = lastId ? `?lastId=${lastId}` : '';
-    return new EventSource(`${ACTIVITY_API_URL}/activities/stream${params}`);
+    return new EventSource(`${ACTIVITY_API_URL}/stream${params}`);
   }
 }
 
