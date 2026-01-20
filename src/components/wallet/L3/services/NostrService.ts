@@ -48,6 +48,7 @@ import {
 import { v4 as uuidv4 } from "uuid";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 import { NOSTR_CONFIG } from "../../../../config/nostr.config";
+import { recordActivity } from "../../../../services/ActivityService";
 
 export class NostrService {
   private static instance: NostrService;
@@ -679,6 +680,13 @@ export class NostrService {
 
     walletRepo.addToken(uiToken);
     console.log(`💾 Token saved to wallet: ${uiToken.id}`);
+
+    // Record token transfer activity (fire and forget)
+    recordActivity("token_transfer", {
+      isPublic: false,
+      data: { amount, symbol },
+    });
+
     return true;
   }
 

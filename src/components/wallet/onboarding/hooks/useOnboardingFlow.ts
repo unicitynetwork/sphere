@@ -8,6 +8,7 @@ import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { IdentityManager } from "../../L3/services/IdentityManager";
 import { fetchNametagFromIpns } from "../../L3/services/IpnsNametagFetcher";
 import { IpfsStorageService } from "../../L3/services/IpfsStorageService";
+import { recordActivity } from "../../../../services/ActivityService";
 import {
   saveWalletToStorage,
   loadWalletFromStorage,
@@ -481,8 +482,12 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         console.log(`✅ Verified nametag "${cleanTag}" available via IPNS`);
       }
 
-      // Step 4: Notify app that wallet is ready (instead of reload)
-      console.log("🏷️ Step 4: All steps completed, notifying app...");
+      // Step 4: Record wallet creation activity
+      console.log("🏷️ Step 4: Recording wallet creation activity...");
+      recordActivity("wallet_created", { isPublic: false });
+
+      // Step 5: Notify app that wallet is ready (instead of reload)
+      console.log("🏷️ Step 5: All steps completed, notifying app...");
 
       // Signal wallet creation - this triggers Nostr service initialization
       window.dispatchEvent(new Event("wallet-loaded"));
