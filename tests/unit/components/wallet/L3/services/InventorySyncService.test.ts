@@ -2464,8 +2464,11 @@ describe("inventorySync", () => {
       expect(result.inventoryStats?.activeTokens).toBe(1);
     });
 
-    it("should invalidate token with missing transactionHash", async () => {
+    it("should accept token with missing transactionHash (optional field)", async () => {
       // Create token without transactionHash
+      // This is valid because:
+      // 1. Some SDK versions/faucet tokens don't populate this field
+      // 2. Full cryptographic validation happens in Step 5 via SDK's token.verify()
       const tokenWithoutTxHash: TxfToken = {
         ...createMockTxfToken("notxhash"),
         genesis: {
@@ -2473,7 +2476,7 @@ describe("inventorySync", () => {
           inclusionProof: {
             authenticator: { stateHash: "0000" + "a".repeat(60) },
             merkleTreePath: { root: "0000" + "b".repeat(60), path: [] },
-            // Missing transactionHash!
+            // Missing transactionHash - this is OK, it's optional
           } as TxfToken["genesis"]["inclusionProof"],
         },
       };
@@ -2485,9 +2488,9 @@ describe("inventorySync", () => {
       const params = createBaseSyncParams();
       const result = await inventorySync(params);
 
-      // Should be moved to Invalid folder
-      expect(result.inventoryStats?.invalidTokens).toBe(1);
-      expect(result.inventoryStats?.activeTokens).toBe(0);
+      // Should remain in Active folder (transactionHash is optional)
+      expect(result.inventoryStats?.invalidTokens).toBe(0);
+      expect(result.inventoryStats?.activeTokens).toBe(1);
     });
 
     it("should validate merkle root format", async () => {

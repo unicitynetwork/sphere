@@ -1080,12 +1080,12 @@ function validateGenesisCommitment(txf: TxfToken): { valid: boolean; reason?: st
     return { valid: false, reason: 'Invalid merkle root format' };
   }
 
-  // Verify transactionHash is present and properly formatted
-  if (!proof.transactionHash) {
-    return { valid: false, reason: 'Missing transactionHash' };
-  }
-
-  if (!isValidHexString(proof.transactionHash, 64)) {
+  // Verify transactionHash format if present (optional field)
+  // Note: transactionHash is not required because:
+  // 1. Some SDK versions/faucet tokens don't populate this field
+  // 2. Full cryptographic validation happens in Step 5 via SDK's token.verify()
+  // 3. Making this required causes valid tokens to be incorrectly invalidated
+  if (proof.transactionHash && !isValidHexString(proof.transactionHash, 64)) {
     return { valid: false, reason: 'Invalid transactionHash format' };
   }
 
