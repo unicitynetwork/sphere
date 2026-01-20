@@ -547,6 +547,24 @@ export class GroupChatService {
 
       return false;
     } catch (error) {
+      // Handle "already a member" as success - just sync the local state
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('already a member')) {
+        console.log(`ℹ️ Already a member of group ${groupId}, syncing local state...`);
+
+        // Fetch and save group metadata
+        const group = await this.fetchGroupMetadata(groupId);
+        if (group) {
+          this.repository.saveGroup(group);
+          this.subscribeToGroup(groupId);
+          await Promise.all([
+            this.fetchMessages(groupId),
+            this.fetchAndSaveMembers(groupId),
+          ]);
+          return true;
+        }
+      }
+
       console.error('Failed to join group', error);
       return false;
     }
