@@ -226,15 +226,17 @@ export function Header() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={{ duration: 0.35, ease: 'easeInOut' }}
             onClick={() => setMobileMenuOpen(false)}
             className="lg:hidden fixed inset-0 top-14 bg-black/20 backdrop-blur-sm z-40"
           />
           {/* Menu */}
           <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="lg:hidden fixed left-0 right-0 top-14 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800 z-50 shadow-xl"
+            initial={{ height: 0 }}
+            animate={{ height: 'auto' }}
+            exit={{ height: 0 }}
+            transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+            className="lg:hidden fixed left-0 right-0 top-14 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800 z-50 shadow-xl overflow-hidden"
           >
           <nav className="px-4 py-3 space-y-1">
             {navItems.map((item) => (
@@ -242,14 +244,20 @@ export function Header() {
                 <button
                   key={item.label}
                   onClick={() => handleMobileNavigation(item.path!)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-base font-medium transition-all text-left ${
+                  className={`relative w-full flex items-center px-4 py-3 rounded-xl text-base font-medium transition-all text-left ${
                     isActive(item.path)
-                      ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                      ? 'text-neutral-900 dark:text-white'
                       : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
                   }`}
                 >
+                  {/* Active indicator - vertical line on left edge */}
                   {isActive(item.path) && (
-                    <span className="w-2 h-2 rounded-full bg-linear-to-br from-orange-400 to-amber-500 shadow-[0_0_6px_rgba(249,115,22,0.6)]" />
+                    <motion.span
+                      initial={{ scaleY: 0, opacity: 0 }}
+                      animate={{ scaleY: 1, opacity: 1 }}
+                      transition={{ duration: 0.2, ease: 'easeOut' }}
+                      className="absolute left-0 top-2 bottom-2 w-0.5 bg-linear-to-b from-orange-400 via-orange-500 to-amber-500 origin-center rounded-full"
+                    />
                   )}
                   {item.label}
                 </button>
