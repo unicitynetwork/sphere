@@ -89,17 +89,21 @@ All routes except intro are wrapped in `WalletGate` and use `DashboardLayout` wh
 - `NostrService` - P2P messaging and token transfer via Nostr protocol
 - `NametagService` - human-readable address resolution (@username lookup)
 - `IpfsStorageService` - IPFS/IPNS storage with Helia, supports bidirectional sync
+- `IpfsPublisher` - handles IPFS content publishing with dual HTTP/DHT strategy
+- `IpfsHttpResolver` - HTTP-based IPFS/IPNS resolution via gateway
+- `IpfsCache` / `IpfsMetrics` - caching layer and metrics for IPFS operations
 - `SyncCoordinator` - tab coordination for IPFS sync with tombstone support
+- `SyncQueue` - queue management for serializing sync operations
 - `TokenValidationService` - validates tokens against aggregator
 - `ConflictResolutionService` - handles token conflicts during sync
+- `TokenBackupService` / `TokenRecoveryService` - backup and recovery operations
+- `OutboxRecoveryService` - recovers failed outbound transfers
 - `FaucetService` - obtains test tokens from faucet
 - `NostrPinPublisher` - broadcasts token pins for discovery
 - `TxfSerializer` - serializes token transfer files (.txf format)
 - `IpnsNametagFetcher` - resolves nametags via IPNS during wallet import
-- `OutboxRecoveryService` - recovers failed outbound transfers
-- `TokenBackupService` - handles token backup operations
-- `RegistryService` - token registry management
-- `IpnsUtils` - IPNS utility functions
+- `RegistryService` - nametag registry operations
+- `IpnsUtils` - IPNS utility functions for key derivation and name resolution
 
 **Shared Services:**
 - `UnifiedKeyManager` - cross-layer key management (L1/L3 key derivation)
@@ -140,6 +144,7 @@ class Token {
 - Base path: configurable via `BASE_PATH` env var (default `/`)
 - Node polyfills enabled for crypto libraries
 - Proxy `/rpc` to `https://goggregator-test.unicity.network` for L3 aggregator
+- Proxy `/dev-rpc` to `https://dev-aggregator.dyndns.org` for dev aggregator
 - Optional HTTPS support via `SSL_CERT_PATH` env var
 - Remote HMR support via `HMR_HOST` env var
 
@@ -166,7 +171,7 @@ Copy `.env.example` to `.env` and configure:
 VITE_AGENT_API_URL=http://localhost:3000  # Agentic chatbot backend
 VITE_USE_MOCK_AGENTS=true                  # Use mock agents (for local dev without backend)
 VITE_AGGREGATOR_URL=/rpc                   # Unicity aggregator (proxied in dev)
-VITE_ENABLE_IPFS=true                      # Enable IPFS storage for wallet backup
+VITE_ENABLE_IPFS=true                      # Enable IPFS storage for wallet backup (default: false)
 
 # Optional: HTTPS for dev server (e.g., for WebCrypto APIs)
 SSL_CERT_PATH=/path/to/certs              # Path to SSL certificate directory
@@ -179,8 +184,14 @@ BASE_PATH=/                                # Base path for deployment (default: 
 Tests are located in `tests/` directory and run with Vitest:
 - Test files: `tests/**/*.test.ts`, `tests/**/*.test.tsx`
 - Environment: jsdom
-- Path alias: `@` maps to `/src`
+- Path alias: `@` maps to `/src` (only available in tests via vitest.config.ts)
 - Globals enabled: `describe`, `it`, `expect`, `vi` are available without imports
+
+## TypeScript Configuration
+
+- Strict mode enabled with `noUnusedLocals` and `noUnusedParameters`
+- Target: ES2022, Module: ESNext with bundler resolution
+- Type checking: `npx tsc --noEmit` (build runs tsc before vite build)
 
 ## Developer Notes
 

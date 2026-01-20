@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useL1Wallet } from '../../L1/hooks/useL1Wallet';
 import { useAddressNametags } from '../../L1/hooks/useAddressNametags';
 import { generateAddress, loadWalletFromStorage } from '../../L1/sdk';
-import { WalletRepository } from '../../../../repositories/WalletRepository';
 import { STORAGE_KEYS } from '../../../../config/storageKeys';
 
 /** Truncate long nametags: show first 6 chars + ... + last 3 chars */
@@ -63,7 +62,6 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
     } else {
       localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
     }
-    WalletRepository.getInstance().resetInMemoryState();
     setShowDropdown(false);
     window.location.reload();
   };
@@ -79,7 +77,6 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
       if (updated && addr.path) {
         invalidateWallet();
         localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, addr.path);
-        WalletRepository.getInstance().resetInMemoryState();
         setShowDropdown(false);
         window.location.reload();
       }

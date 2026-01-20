@@ -1,4 +1,4 @@
-import { Plus, ArrowUpRight, ArrowDownUp, Sparkles, Loader2, Coins, Layers, CheckCircle, XCircle, Download, Upload, Eye, EyeOff } from 'lucide-react';
+import { Plus, ArrowUpRight, ArrowDownUp, Sparkles, Loader2, Coins, Layers, CheckCircle, XCircle, Download, Upload, Eye, EyeOff, AlertTriangle, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
 import { AggregatedAsset } from '../data/model';
@@ -19,6 +19,16 @@ import { BackupWalletModal, LogoutConfirmModal } from '../../shared/modals';
 import { useL1Wallet } from '../../L1/hooks/useL1Wallet';
 import { UnifiedKeyManager } from '../../shared/services/UnifiedKeyManager';
 import { SaveWalletModal } from '../../L1/components/modals';
+import { validateUnicityId, invalidateUnicityId, repairUnicityId, type UnicityIdValidationResult } from '../../../../utils/unicityIdValidator';
+import { getInvalidatedNametagsForAddress } from '../services/InventorySyncService';
+import { SyncModeSelector } from '../components/SyncModeSelector';
+import { SyncProgressIndicator } from '../components/SyncProgressIndicator';
+import { useInventorySync } from '../hooks/useInventorySync';
+
+// Module-level tracking to prevent validation loops across component remounts
+// Key format: "address:nametag" - tracks which nametags have been validated for which addresses
+const validatedNametags = new Set<string>();
+const invalidatedNametags = new Set<string>(); // Track invalidated nametags to never restore them
 
 type Tab = 'assets' | 'tokens';
 
@@ -48,8 +58,18 @@ export function L3WalletView({
 }: L3WalletViewProps) {
   const navigate = useNavigate();
   const { identity, assets, tokens, isLoadingAssets, isLoadingIdentity, nametag, getSeedPhrase } = useWallet();
-  const { exportTxf, importTxf, isExportingTxf, isImportingTxf, isSyncing, isEnabled: isIpfsEnabled } = useIpfsStorage();
+  const { exportTxf, importTxf, isExportingTxf, isImportingTxf, isSyncing: isIpfsSyncing, isEnabled: isIpfsEnabled } = useIpfsStorage();
   const { balance: l1Balance, deleteWallet } = useL1Wallet();
+  const {
+    isSyncing: isInventorySyncing,
+    mode: syncMode,
+    lastResult: lastSyncResult,
+    circuitBreaker,
+    retryIpfsSync
+  } = useInventorySync();
+
+  // Combined syncing state
+  const isSyncing = isIpfsSyncing || isInventorySyncing;
 
   const [activeTab, setActiveTab] = useState<Tab>('assets');
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
@@ -70,19 +90,122 @@ export function L3WalletView({
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
   const [isSaveWalletOpen, setIsSaveWalletOpen] = useState(false);
 
+  // Unicity ID validation state
+  const [unicityIdWarning, setUnicityIdWarning] = useState<string | null>(null);
+
   // Track when initial IPFS sync completes (latches true after first sync has ended)
   useEffect(() => {
     // Track when sync starts
     if (isSyncing && isIpfsEnabled) {
       hasSyncStarted.current = true;
-      console.log(`🔄 L3WalletView: sync started, hasSyncStarted=true`);
     }
     // Only mark complete after sync has started AND then stopped
     if (!isSyncing && isIpfsEnabled && !initialSyncComplete && hasSyncStarted.current) {
-      console.log(`🔄 L3WalletView: sync completed, marking initialSyncComplete=true`);
       setInitialSyncComplete(true);
     }
   }, [isSyncing, isIpfsEnabled, initialSyncComplete]);
+
+  // Validate Unicity ID when wallet loads
+  useEffect(() => {
+    // Only validate once we have identity and nametag
+    if (!identity || !nametag) {
+      return;
+    }
+
+    // Use module-level Set to prevent re-validation across component remounts
+    const validationKey = `${identity.address}:${nametag}`;
+    if (validatedNametags.has(validationKey) || invalidatedNametags.has(validationKey)) {
+      console.log(`⏭️ Skipping validation for "${nametag}" - already processed`);
+      return;
+    }
+
+    // Also check if this nametag is in the invalidated list in storage
+    const invalidatedList = getInvalidatedNametagsForAddress(identity.address);
+    if (invalidatedList.some(inv => inv.name === nametag)) {
+      console.log(`⏭️ Skipping validation for "${nametag}" - already invalidated in storage`);
+      invalidatedNametags.add(validationKey);
+      return;
+    }
+
+    validatedNametags.add(validationKey);
+
+    const runValidation = async () => {
+      try {
+        console.log('🔍 Validating Unicity ID...');
+        const result: UnicityIdValidationResult = await validateUnicityId();
+
+        if (!result.isValid) {
+          // Check for critical errors (nametag owned by someone else on Nostr)
+          const nostrMismatch = result.nostrBinding?.resolvedPubkey &&
+            !result.nostrBinding.matchesIdentity;
+
+          if (nostrMismatch) {
+            // CRITICAL: Nametag is owned by a different pubkey on Nostr
+            // User will never receive transfers sent to this nametag
+            // Invalidate immediately and redirect to creation page
+            console.error(`CRITICAL: Nametag "${nametag}" owned by different Nostr pubkey`);
+            console.error(`  Expected: ${result.identity?.expectedNostrPubkey}`);
+            console.error(`  Actual:   ${result.nostrBinding?.resolvedPubkey}`);
+
+            // Track as invalidated to prevent re-validation loops
+            invalidatedNametags.add(validationKey);
+
+            await invalidateUnicityId(
+              `Nametag "${nametag}" is registered to a different Nostr pubkey. ` +
+              `You cannot receive transfers sent to this nametag.`
+            );
+            // After invalidation, nametag will be null, triggering CreateWalletFlow
+            return;
+          } else if (result.nostrBinding?.resolvedPubkey === null) {
+            // Nametag not published to Nostr - auto-repair silently
+            console.log(`🔧 Nametag "${nametag}" not on Nostr, auto-repairing...`);
+            try {
+              const repaired = await repairUnicityId();
+              if (repaired) {
+                console.log(`✅ Auto-repair successful: "${nametag}" now published to Nostr`);
+                setUnicityIdWarning(null);
+              } else {
+                // Repair failed - re-validate to check if owned by someone else
+                const recheck = await validateUnicityId();
+                const ownedByOther = recheck.nostrBinding?.resolvedPubkey &&
+                  !recheck.nostrBinding.matchesIdentity;
+
+                if (ownedByOther) {
+                  // Nametag is owned by someone else - invalidate
+                  console.error(`CRITICAL: Nametag "${nametag}" is owned by different Nostr pubkey`);
+
+                  // Track as invalidated to prevent re-validation loops
+                  invalidatedNametags.add(validationKey);
+
+                  await invalidateUnicityId(
+                    `Nametag "${nametag}" is already registered to someone else. ` +
+                    `You cannot receive transfers sent to this nametag.`
+                  );
+                  return;
+                }
+                // Other failure - don't show warning, will retry on next load
+                console.warn(`⚠️ Auto-repair failed for "${nametag}" - will retry`);
+              }
+            } catch (repairErr) {
+              console.warn(`⚠️ Auto-repair error for "${nametag}":`, repairErr);
+              // Don't show warning for transient errors - will retry on next load
+            }
+          } else if (result.errors.length > 0) {
+            // Other non-critical errors
+            setUnicityIdWarning(result.errors[0]);
+          }
+        } else {
+          console.log('✅ Unicity ID validation passed');
+          setUnicityIdWarning(null);
+        }
+      } catch (err) {
+        console.error('❌ Unicity ID validation error:', err);
+        // Don't show error for validation failures - just log
+      }
+    };
+
+    runValidation();
+  }, [identity, nametag]);
 
 
   // Create L1 ALPHA asset
@@ -108,10 +231,6 @@ export function L3WalletView({
     const l1Value = l1AlphaAsset.getTotalFiatValue('USD');
     return l3Value + l1Value;
   }, [assets, l1AlphaAsset]);
-
-  // Debug: Log spinner visibility conditions
-  const shouldShowSpinner = isSyncing && isIpfsEnabled && !initialSyncComplete;
-  console.log(`🔄 L3WalletView render: isSyncing=${isSyncing}, isIpfsEnabled=${isIpfsEnabled}, initialSyncComplete=${initialSyncComplete}, shouldShowSpinner=${shouldShowSpinner}`);
 
   const handleTopUp = async () => {
     if (!nametag) {
@@ -266,8 +385,15 @@ export function L3WalletView({
             >
               {showBalances ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
             </motion.button>
-            {isSyncing && isIpfsEnabled && (
-              <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+            {isIpfsEnabled && (
+              <SyncModeSelector
+                mode={syncMode}
+                circuitBreaker={circuitBreaker ?? undefined}
+                lastSyncResult={lastSyncResult}
+                isSyncing={isSyncing}
+                onRetrySync={async () => { await retryIpfsSync(); }}
+                compact={true}
+              />
             )}
           </div>
         </div>
@@ -331,6 +457,30 @@ export function L3WalletView({
             >
               <XCircle className="w-4 h-4 text-red-500 dark:text-red-400 shrink-0 mt-0.5" />
               <p className="text-xs text-red-600 dark:text-red-400">{faucetError}</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Unicity ID warning */}
+        <AnimatePresence>
+          {unicityIdWarning && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="mt-3 flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl"
+            >
+              <AlertTriangle className="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-xs font-medium text-amber-600 dark:text-amber-400">Unicity ID Issue</p>
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">{unicityIdWarning}</p>
+              </div>
+              <button
+                onClick={() => setUnicityIdWarning(null)}
+                className="text-amber-500 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </motion.div>
           )}
         </AnimatePresence>
@@ -560,6 +710,15 @@ export function L3WalletView({
         onCancel={() => setIsSaveWalletOpen(false)}
         hasMnemonic={hasMnemonic}
       />
+
+      {/* Sync Progress Indicator - floating notification */}
+      {isIpfsEnabled && (
+        <SyncProgressIndicator
+          lastSyncResult={lastSyncResult}
+          isSyncing={isSyncing}
+          autoDismissMs={5000}
+        />
+      )}
     </div>
   );
 }

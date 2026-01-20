@@ -8,7 +8,7 @@ import { NostrService } from '../services/NostrService';
 import { IdentityManager } from '../services/IdentityManager';
 import { CurrencyUtils } from '../utils/currency';
 import { TokenSplitCalculator, type SplitPlan } from '../services/transfer/TokenSplitCalculator';
-import { WalletRepository } from '../../../../repositories/WalletRepository';
+import { getTokensForAddress } from '../services/InventorySyncService';
 
 type Step = 'recipient' | 'asset' | 'amount' | 'confirm' | 'processing' | 'success';
 
@@ -93,8 +93,14 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
     setIsCalculating(true);
     try {
       const calculator = new TokenSplitCalculator();
-      const walletRepo = WalletRepository.getInstance();
-      const allTokens = walletRepo.getTokens();
+      const identityManager = IdentityManager.getInstance();
+      const identity = await identityManager.getCurrentIdentity();
+      if (!identity) {
+        setRecipientError("No wallet identity found");
+        setIsCalculating(false);
+        return;
+      }
+      const allTokens = getTokensForAddress(identity.address);
 
       const plan = await calculator.calculateOptimalSplit(
         allTokens,

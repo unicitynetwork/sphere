@@ -157,6 +157,16 @@ export const STORAGE_KEYS = {
 
   // Processed Nostr event IDs
   NOSTR_PROCESSED_EVENTS: 'sphere_nostr_processed_events',
+
+  // ============================================================================
+  // DEV SETTINGS
+  // ============================================================================
+
+  // Custom aggregator URL (dev mode)
+  DEV_AGGREGATOR_URL: 'sphere_dev_aggregator_url',
+
+  // Trust base verification skip flag (dev mode)
+  DEV_SKIP_TRUST_BASE: 'sphere_dev_skip_trust_base',
 } as const;
 
 // ============================================================================

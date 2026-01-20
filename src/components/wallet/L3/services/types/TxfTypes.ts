@@ -3,12 +3,24 @@
  * Based on TXF Format Specification v2.0
  */
 
-import type { NametagData } from "../../../../../repositories/WalletRepository";
-import type { OutboxEntry } from "./OutboxTypes";
+import type { OutboxEntry, MintOutboxEntry } from "./OutboxTypes";
+import type { InvalidReasonCode } from "../../types/SyncTypes";
 
 // ==========================================
 // Storage Format (for IPFS)
 // ==========================================
+
+/**
+ * Nametag data (one per identity)
+ * Represents a Unicity ID (human-readable address)
+ */
+export interface NametagData {
+  name: string;           // e.g., "cryptohog"
+  token: object;          // SDK Token JSON
+  timestamp: number;
+  format: string;
+  version: string;
+}
 
 /**
  * Tombstone entry for tracking spent token states
@@ -21,16 +33,56 @@ export interface TombstoneEntry {
 }
 
 /**
+ * Entry for invalidated nametags (Unicity IDs)
+ * Stored when a nametag is found to be owned by a different Nostr pubkey
+ */
+export interface InvalidatedNametagEntry {
+  name: string;              // The invalidated nametag name
+  token: object;             // Original token data
+  timestamp: number;         // Original creation timestamp
+  format: string;
+  version: string;
+  invalidatedAt: number;     // When invalidated (epoch ms)
+  invalidationReason: string;
+}
+
+/**
+ * Entry for tokens moved to Sent folder (Section 3.2)
+ * Stored when a token's latest state is SPENT with inclusion proof
+ */
+export interface SentTokenEntry {
+  token: TxfToken;           // Complete token data
+  timestamp: number;         // When moved to Sent (epoch ms)
+  spentAt: number;           // When token was spent (epoch ms, from inclusion proof)
+}
+
+/**
+ * Entry for tokens moved to Invalid folder (Section 3.3)
+ * Stored when a token fails validation but is kept for investigation
+ */
+export interface InvalidTokenEntry {
+  token: TxfToken;           // Complete token data (may be partial)
+  timestamp: number;         // When moved to Invalid (epoch ms)
+  invalidatedAt: number;     // When invalidated (epoch ms)
+  reason: InvalidReasonCode; // Structured reason code
+  details?: string;          // Optional human-readable details
+}
+
+/**
  * Complete storage data structure for IPFS
- * Contains metadata, nametag, tombstones, outbox, and all tokens keyed by their IDs
+ * Contains metadata, nametag, tombstones, outbox, invalidated nametags, and all tokens keyed by their IDs
  */
 export interface TxfStorageData {
   _meta: TxfMeta;
   _nametag?: NametagData;
-  _tombstones?: TombstoneEntry[];  // State-hash-aware tombstones (spent token states)
-  _outbox?: OutboxEntry[];         // Pending transfers (CRITICAL for recovery)
+  _tombstones?: TombstoneEntry[];              // State-hash-aware tombstones (spent token states)
+  _invalidatedNametags?: InvalidatedNametagEntry[]; // Nametags that failed Nostr validation
+  _outbox?: OutboxEntry[];                     // Pending transfers (CRITICAL for recovery)
+  _mintOutbox?: MintOutboxEntry[];             // Pending mints (CRITICAL for recovery)
+  _sent?: SentTokenEntry[];                    // Sent tokens (SPENT with inclusion proof)
+  _invalid?: InvalidTokenEntry[];              // Invalid tokens (failed validation, kept for investigation)
   // Dynamic keys for tokens: _<tokenId>
-  [key: string]: TxfToken | TxfMeta | NametagData | TombstoneEntry[] | OutboxEntry[] | undefined;
+  [key: string]: TxfToken | TxfMeta | NametagData | TombstoneEntry[] | InvalidatedNametagEntry[] | OutboxEntry[] | MintOutboxEntry[] | SentTokenEntry[] | InvalidTokenEntry[] | undefined;
 }
 
 /**
@@ -58,8 +110,8 @@ export interface TxfToken {
   genesis: TxfGenesis;
   state: TxfState;
   transactions: TxfTransaction[];
-  nametags: string[];
-  _integrity: TxfIntegrity;
+  nametags?: string[];           // Optional for backwards compatibility
+  _integrity?: TxfIntegrity;     // Optional for backwards compatibility
 }
 
 /**
@@ -97,7 +149,7 @@ export interface TxfState {
  */
 export interface TxfTransaction {
   previousStateHash: string;
-  newStateHash: string;
+  newStateHash?: string;     // Optional for backwards compatibility with older tokens
   predicate: string;         // New owner's predicate
   inclusionProof: TxfInclusionProof | null; // null = uncommitted
   data?: Record<string, unknown>; // Optional transfer metadata
@@ -144,6 +196,7 @@ export interface TxfMerkleStep {
  */
 export interface TxfIntegrity {
   genesisDataJSONHash: string; // SHA-256 hash with "0000" prefix
+  currentStateHash?: string;   // Current state hash (computed for genesis-only tokens)
 }
 
 // ==========================================
@@ -218,7 +271,11 @@ export function isActiveTokenKey(key: string): boolean {
          key !== "_meta" &&
          key !== "_nametag" &&
          key !== "_tombstones" &&
+         key !== "_invalidatedNametags" &&
          key !== "_outbox" &&
+         key !== "_mintOutbox" &&
+         key !== "_sent" &&
+         key !== "_invalid" &&
          key !== "_integrity";
 }
 

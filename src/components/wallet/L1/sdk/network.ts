@@ -60,7 +60,6 @@ const CONNECTION_TIMEOUT = 30000; // 30 seconds
 // ----------------------------------------
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
-    console.log('[L1] Disposing WebSocket before HMR');
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.close();
     }
@@ -124,29 +123,21 @@ export function waitForConnection(): Promise<void> {
 // SINGLETON CONNECT — prevents double connect
 // ----------------------------------------
 export function connect(endpoint: string = DEFAULT_ENDPOINT): Promise<void> {
-  console.log("[L1] connect() called, endpoint:", endpoint);
-  console.log("[L1] connect() state - isConnected:", isConnected, "isConnecting:", isConnecting);
-
   if (isConnected) {
-    console.log("[L1] Already connected, returning immediately");
     return Promise.resolve();
   }
 
   if (isConnecting) {
-    console.log("[L1] Already connecting, waiting for connection...");
     return waitForConnection();
   }
 
   isConnecting = true;
-  console.log("[L1] Starting new connection to:", endpoint);
 
   return new Promise((resolve, reject) => {
     let hasResolved = false;
 
-    console.log("[L1] Creating WebSocket object...");
     try {
       ws = new WebSocket(endpoint);
-      console.log("[L1] WebSocket object created, readyState:", ws.readyState);
     } catch (err) {
       console.error("[L1] WebSocket constructor threw exception:", err);
       isConnecting = false;
@@ -155,7 +146,6 @@ export function connect(endpoint: string = DEFAULT_ENDPOINT): Promise<void> {
     }
 
     ws.onopen = () => {
-      console.log("[L1] WebSocket connected:", endpoint);
       isConnected = true;
       isConnecting = false;
       reconnectAttempts = 0; // Reset reconnect counter on successful connection
@@ -183,7 +173,6 @@ export function connect(endpoint: string = DEFAULT_ENDPOINT): Promise<void> {
 
       // Don't reconnect if this was an intentional close
       if (intentionalClose) {
-        console.log("[L1] WebSocket closed intentionally");
         intentionalClose = false;
         isConnecting = false;
         reconnectAttempts = 0;
@@ -284,13 +273,11 @@ function handleMessage(event: MessageEvent) {
 export async function rpc(method: string, params: unknown[] = []): Promise<unknown> {
   // Auto-connect if not connected
   if (!isConnected && !isConnecting) {
-    console.log("[L1] RPC: Auto-connecting to WebSocket...");
     await connect();
   }
 
   // Wait for connection if connecting
   if (!isWebSocketConnected()) {
-    console.log("[L1] RPC: Waiting for WebSocket connection...");
     await waitForConnection();
   }
 
