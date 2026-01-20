@@ -539,20 +539,20 @@ export function L3WalletView({
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={isImportingTxf}
+              disabled={true}
               className="flex items-center gap-1 text-xs text-orange-500 dark:text-orange-400 hover:text-orange-600 dark:hover:text-orange-300 disabled:opacity-50"
               title="Import tokens from TXF file"
             >
-              {isImportingTxf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+              {isImportingTxf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
               <span>Import</span>
             </button>
             <button
               onClick={handleExportTxf}
-              disabled={isExportingTxf}
+              disabled={true}
               className="flex items-center gap-1 text-xs text-orange-500 dark:text-orange-400 hover:text-orange-600 dark:hover:text-orange-300 disabled:opacity-50"
               title="Export tokens as TXF file"
             >
-              {isExportingTxf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+              {isExportingTxf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
               <span>Export</span>
             </button>
           </div>

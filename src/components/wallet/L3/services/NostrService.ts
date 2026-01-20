@@ -49,13 +49,7 @@ import {
 import { v4 as uuidv4 } from "uuid";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 import { normalizeSdkTokenToStorage } from "./TxfSerializer";
-
-const UNICITY_RELAYS = [
-  "wss://nostr-relay.testnet.unicity.network",
-  // "ws://unicity-nostr-relay-20250927-alb-1919039002.me-central-1.elb.amazonaws.com:8080",
-];
-
-const MAX_PROCESSED_EVENTS = 100; // Maximum number of processed event IDs to store
+import { NOSTR_CONFIG } from "../../../../config/nostr.config";
 
 export class NostrService {
   private static instance: NostrService;
@@ -141,7 +135,7 @@ export class NostrService {
 
     console.log("📡 Connecting to Nostr relays...");
     try {
-      await this.client.connect(...UNICITY_RELAYS);
+      await this.client.connect(...NOSTR_CONFIG.RELAYS);
       this.isConnected = true;
       console.log("✅ Connected to Nostr relays");
 
@@ -291,9 +285,9 @@ export class NostrService {
     try {
       let ids = Array.from(this.processedEventIds);
 
-      // Keep only the last MAX_PROCESSED_EVENTS entries (FIFO)
-      if (ids.length > MAX_PROCESSED_EVENTS) {
-        ids = ids.slice(-MAX_PROCESSED_EVENTS);
+      // Keep only the last NOSTR_CONFIG.MAX_PROCESSED_EVENTS entries (FIFO)
+      if (ids.length > NOSTR_CONFIG.MAX_PROCESSED_EVENTS) {
+        ids = ids.slice(-NOSTR_CONFIG.MAX_PROCESSED_EVENTS);
         this.processedEventIds = new Set(ids);
       }
 
@@ -307,7 +301,7 @@ export class NostrService {
     this.processedEventIds.add(eventId);
 
     // If exceeding limit, remove oldest entry
-    if (this.processedEventIds.size > MAX_PROCESSED_EVENTS) {
+    if (this.processedEventIds.size > NOSTR_CONFIG.MAX_PROCESSED_EVENTS) {
       const firstId = this.processedEventIds.values().next().value;
       if (firstId) {
         this.processedEventIds.delete(firstId);

@@ -3,15 +3,18 @@ import { IdentityManager } from '../components/wallet/L3/services/IdentityManage
 import { NostrService } from '../components/wallet/L3/services/NostrService';
 import { InventoryBackgroundLoopsManager } from '../components/wallet/L3/services/InventoryBackgroundLoops';
 import { OutboxRecoveryService } from '../components/wallet/L3/services/OutboxRecoveryService';
+import { GroupChatService } from '../components/chat/services/GroupChatService';
 import { ServicesContext } from './ServicesContext';
 
 export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isNostrConnected, setIsNostrConnected] = useState(false);
   const [loopsManager, setLoopsManager] = useState<InventoryBackgroundLoopsManager | null>(null);
+  const [isGroupChatConnected, setIsGroupChatConnected] = useState(false);
 
   // Create singleton instances once
   const identityManager = IdentityManager.getInstance();
   const nostrService = NostrService.getInstance(identityManager);
+  const groupChatService = GroupChatService.getInstance(identityManager);
 
   // Track initialization state to prevent double-init
   const loopsInitialized = useRef(false);
@@ -29,6 +32,7 @@ export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }
         }
 
         // Initialize background loops (for token receive batching and delivery queue)
+        // CRITICAL: Must initialize BEFORE NostrService can receive tokens
         if (!loopsInitialized.current) {
           console.log("⚡ Initializing background loops from ServicesProvider...");
           const manager = InventoryBackgroundLoopsManager.getInstance(identityManager);
@@ -45,7 +49,7 @@ export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }
           }
         }
 
-        // Start Nostr service
+        // Start Nostr service (for DMs and token transfers)
         console.log("🚀 Starting Nostr service from ServicesProvider...");
         await nostrService.start();
 
@@ -68,6 +72,8 @@ export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }
           // Start periodic retry (once, centralized)
           recoveryService.startPeriodicRetry(identity.address, nostrService);
         }
+
+        // GroupChatService starts lazily when user opens group chat
       } catch (error) {
         console.error("❌ Failed to initialize services:", error);
       }
@@ -90,9 +96,11 @@ export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }
         setLoopsManager(null);
       }
 
-      // Reset Nostr to use new identity's keypair
+      // Reset services to use new identity's keypair
       await nostrService.reset();
+      await groupChatService.reset();
       setIsNostrConnected(false);
+      setIsGroupChatConnected(false);
 
       // Re-initialize all services
       initializeServices();
@@ -116,10 +124,19 @@ export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }
 
       console.log("🛑 ServicesProvider cleanup complete");
     };
-  }, [identityManager, nostrService]);
+  }, [identityManager, nostrService, groupChatService]);
 
   return (
-    <ServicesContext.Provider value={{ identityManager, nostrService, isNostrConnected, loopsManager }}>
+    <ServicesContext.Provider
+      value={{
+        identityManager,
+        nostrService,
+        isNostrConnected,
+        loopsManager,
+        groupChatService,
+        isGroupChatConnected,
+      }}
+    >
       {children}
     </ServicesContext.Provider>
   );
