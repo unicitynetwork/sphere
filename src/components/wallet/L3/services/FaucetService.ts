@@ -68,6 +68,9 @@ export class FaucetService {
       { coin: 'bitcoin', amount: 1 },
       { coin: 'solana', amount: 1000 },
       { coin: 'ethereum', amount: 42 },
+      { coin: 'tether', amount: 1000 },
+      { coin: 'usd-coin', amount: 1000 },
+      { coin: 'unicity-usd', amount: 1000 },
     ];
 
     console.log(`🚀 Starting parallel faucet requests for @${unicityId}...`);

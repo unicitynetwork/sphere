@@ -39,7 +39,7 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
       const definitions = registryService.getAllDefinitions();
 
       // Only include coins supported by the faucet for swapping
-      const SUPPORTED_SWAP_COINS = ['bitcoin', 'ethereum', 'solana', 'unicity', 'tether', 'usd-coin'];
+      const SUPPORTED_SWAP_COINS = ['bitcoin', 'ethereum', 'solana', 'unicity', 'tether', 'usd-coin', 'unicity-usd'];
 
       // Filter only fungible assets that are supported by faucet
       const fungibleDefs = definitions.filter(def =>
