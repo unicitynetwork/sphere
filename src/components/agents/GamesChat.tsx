@@ -3,6 +3,7 @@ import type { AgentConfig } from '../../config/activities';
 import { mockGames, type GameInfo } from '../../data/agentsMockData';
 import { AgentChat, type AgentMessage } from './shared';
 import { isMock } from '../../hooks/useAgentChat';
+import { recordActivity } from '../../services/ActivityService';
 
 interface GamesChatProps {
   agent: AgentConfig;
@@ -64,6 +65,12 @@ export function GamesChat({ agent }: GamesChatProps) {
                   href={game.url}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={() => {
+                    recordActivity('game_started', {
+                      isPublic: true,
+                      data: { gameName: game.name, gameId: game.id },
+                    });
+                  }}
                   className={`mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-linear-to-r ${agent.color} text-white text-sm font-medium`}
                 >
                   Play Now <ExternalLink className="w-3 h-3" />

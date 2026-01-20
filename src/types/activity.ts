@@ -1,4 +1,11 @@
-export type ActivityKind = 'marketplace_post' | 'token_transfer' | 'wallet_created';
+export type ActivityKind =
+  | 'marketplace_post'
+  | 'token_transfer'
+  | 'wallet_created'
+  | 'game_started'
+  | 'bet_placed'
+  | 'otc_purchase'
+  | 'merch_order';
 
 export interface Activity {
   id: number;

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../config/activities';
 import { mockMatches, type Match } from '../../data/agentsMockData';
 import { AgentChat } from './shared';
+import { recordActivity } from '../../services/ActivityService';
 
 // Match card data
 interface MatchCardData {
@@ -63,7 +64,18 @@ export function SportChat({ agent }: SportChatProps) {
 
     setBetStep('success');
 
-    // TODO: Add bet to backend when ready
+    // Record bet activity
+    recordActivity('bet_placed', {
+      isPublic: true,
+      data: {
+        matchId: pendingMatch.id,
+        teams: `${pendingMatch.team1} vs ${pendingMatch.team2}`,
+        betChoice: betChoice.choice,
+        odds: betChoice.odds,
+        amount: parseFloat(betAmount),
+        currency: 'USDT',
+      },
+    });
 
     await new Promise(resolve => setTimeout(resolve, 1500));
     setShowBetModal(false);

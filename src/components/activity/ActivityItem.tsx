@@ -15,6 +15,14 @@ function getActivityTitle(kind: ActivityKind): string {
       return 'Token Transfer';
     case 'wallet_created':
       return 'New Wallet';
+    case 'game_started':
+      return 'Game Started';
+    case 'bet_placed':
+      return 'Bet Placed';
+    case 'otc_purchase':
+      return 'OTC Trade';
+    case 'merch_order':
+      return 'Merch Order';
     default:
       return 'Activity';
   }
@@ -36,6 +44,26 @@ function getActivityDescription(activity: Activity): string {
       return 'Tokens were transferred';
     case 'wallet_created':
       return 'A new wallet joined the network';
+    case 'game_started':
+      if (data.gameName) {
+        return `Someone started playing ${data.gameName}`;
+      }
+      return 'A game session started';
+    case 'bet_placed':
+      if (data.teams && data.betChoice) {
+        return `Bet on ${data.betChoice} (${data.teams})`;
+      }
+      return 'A prediction was made';
+    case 'otc_purchase':
+      if (data.productName) {
+        return `"${data.productName}" purchased for ${data.price} ALPHA`;
+      }
+      return 'An OTC trade completed';
+    case 'merch_order':
+      if (data.itemName) {
+        return `"${data.itemName}" ordered for ${data.price} ALPHA`;
+      }
+      return 'Merch was ordered';
     default:
       return 'Network activity';
   }
