@@ -1,7 +1,10 @@
+import { useState } from 'react';
 import { Sparkles, Github } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { Link, useLocation } from 'react-router-dom';
 import { isMock } from '../../hooks/useAgentChat';
 import { ThemeToggle } from '../theme';
+import { ComingSoonModal } from '../ui/ComingSoonModal';
 import logoUrl from '/Union.svg';
 
 const DiscordIcon = ({ className }: { className?: string }) => (
@@ -10,9 +13,28 @@ const DiscordIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+const navItems = [
+  { label: 'Home', path: '/agents/chat' },
+  { label: 'Developers', path: '/developers' },
+  { label: 'Mine Alpha', path: null, external: true }, // External URL to be provided later
+];
+
 export function Header() {
+  const location = useLocation();
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const isDevelopersPage = location.pathname === '/developers';
+
+  const isActive = (path: string | null) => {
+    if (!path) return false;
+    if (path === '/agents/chat') {
+      return location.pathname.startsWith('/agents/');
+    }
+    return location.pathname === path;
+  };
+
   return (
-    <header className="border-b border-neutral-200 dark:border-neutral-800/50 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-2xl sticky top-0 z-50 overflow-hidden theme-transition">
+    <>
+    <header className="border-b border-neutral-200 dark:border-neutral-800/50 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-2xl sticky top-0 z-50 overflow-hidden theme-transition w-screen">
       {/* Background decorative elements */}
       <div className="absolute top-0 left-0 w-96 h-full bg-linear-to-r from-orange-500/5 dark:from-orange-500/10 to-transparent blur-3xl" />
       <div className="absolute top-0 right-0 w-96 h-full bg-linear-to-l from-purple-500/5 dark:from-purple-500/10 to-transparent blur-3xl" />
@@ -21,37 +43,76 @@ export function Header() {
       <div className="absolute top-0 left-0 right-0 h-0.5 bg-linear-to-r from-transparent via-orange-500 to-transparent opacity-50" />
 
       <div className="max-w-[1800px] mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-14 lg:h-14 flex items-center justify-between relative z-10">
-        <div className="flex items-center gap-2 sm:gap-3 lg:gap-4">
-          {/* Logo with enhanced effects */}
-          <motion.div
-            whileHover={{ scale: 1.05, rotate: 5 }}
-            className="relative"
-          >
+        <div className="flex items-center gap-2 sm:gap-4 lg:gap-6">
+          {/* Logo with enhanced effects - entire block is clickable */}
+          <Link to="/agents/chat" className="flex items-center gap-2 sm:gap-4 lg:gap-6 group">
+            <div className="relative">
               <img
                 src={logoUrl}
                 alt="Logo"
-                className="relative z-10 w-7 h-7 sm:w-9 sm:h-9 lg:w-11 lg:h-11"
+                className="relative z-10 w-7 h-7 sm:w-9 sm:h-9 lg:w-11 lg:h-11 transition-transform duration-200 group-hover:scale-110 group-hover:rotate-6"
               />
-          </motion.div>
-
-          <div className="relative">
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <h1 className="text-base sm:text-lg lg:text-xl text-neutral-900 dark:text-white bg-clip-text">AgentSphere</h1>
-              <Sparkles className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500 animate-pulse" />
-              {isMock() && (
-                <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 border border-yellow-500/30">
-                  DEMO
-                </span>
-              )}
             </div>
-            <p className="text-[10px] sm:text-xs text-neutral-500 dark:text-neutral-400">AI-Powered Agent Platform</p>
 
-            {/* Decorative underline */}
-            <div className="absolute -bottom-1 left-0 w-16 sm:w-20 h-0.5 bg-linear-to-r from-orange-500 to-transparent rounded-full" />
-          </div>
+            <div className="relative">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <h1 className="text-base sm:text-lg lg:text-xl text-neutral-900 dark:text-white bg-clip-text">AgentSphere</h1>
+                <Sparkles className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500 animate-pulse" />
+                {isMock() && (
+                  <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 border border-yellow-500/30">
+                    DEMO
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] sm:text-xs text-neutral-500 dark:text-neutral-400">AI-Powered Agent Platform</p>
+
+              {/* Decorative underline */}
+              <div className="absolute -bottom-1 left-0 w-16 sm:w-20 h-0.5 bg-linear-to-r from-orange-500 to-transparent rounded-full" />
+            </div>
+          </Link>
+
+          {/* Navigation Tabs - next to logo */}
+          <nav className="hidden sm:flex items-center gap-1 ml-4 lg:ml-8">
+            {navItems.map((item) => (
+              item.path ? (
+                <Link
+                  key={item.label}
+                  to={item.path}
+                  className={`relative px-4 lg:px-5 py-2 text-sm font-medium transition-all ${
+                    isActive(item.path)
+                      ? 'text-neutral-900 dark:text-white'
+                      : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+                  }`}
+                >
+                  <span className={`absolute left-1 lg:left-1.5 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-linear-to-br from-orange-400 to-amber-500 shadow-[0_0_6px_rgba(249,115,22,0.6)] transition-opacity ${
+                    isActive(item.path) ? 'opacity-100' : 'opacity-0'
+                  }`} />
+                  {item.label}
+                </Link>
+              ) : (
+                <button
+                  key={item.label}
+                  className="px-4 lg:px-5 py-2 text-sm font-medium text-neutral-400 dark:text-neutral-500 cursor-not-allowed"
+                  title="Coming soon"
+                >
+                  {item.label}
+                </button>
+              )
+            ))}
+          </nav>
         </div>
 
         <div className="flex items-center gap-1 sm:gap-2 lg:gap-3">
+          {/* Get API Key Button - visible only on Developers page */}
+          <button
+            onClick={() => setShowApiKeyModal(true)}
+            className={`hidden sm:flex items-center gap-2 px-4 py-2 bg-linear-to-r from-orange-500 to-amber-500 text-white text-sm font-medium rounded-xl transition-all shadow-lg shadow-orange-500/25 ${
+              isDevelopersPage ? 'visible opacity-100 hover:opacity-90' : 'invisible opacity-0 pointer-events-none'
+            }`}
+          >
+            Get API Key
+          </button>
+
           {/* Social Links */}
           <motion.a
             href="https://github.com/unicitynetwork"
@@ -115,5 +176,13 @@ export function Header() {
       {/* Bottom gradient line */}
       <div className="absolute bottom-0 left-0 right-0 h-px bg-linear-to-r from-transparent via-neutral-300 dark:via-neutral-700 to-transparent" />
     </header>
+
+    {/* API Key Modal - outside header to avoid overflow:hidden */}
+    <ComingSoonModal
+      isOpen={showApiKeyModal}
+      onClose={() => setShowApiKeyModal(false)}
+      title="Get API Key"
+    />
+    </>
   );
 }

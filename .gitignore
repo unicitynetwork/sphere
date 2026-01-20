@@ -25,3 +25,4 @@ agentic-chatbot-main
 *.sw?
 .env
 .env.production
+*.pdf
