@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { Sparkles, Github } from 'lucide-react';
-import { motion } from 'framer-motion';
-import { Link, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Sparkles, Github, Menu, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { isMock } from '../../hooks/useAgentChat';
 import { ThemeToggle } from '../theme';
 import { ComingSoonModal } from '../ui/ComingSoonModal';
@@ -21,8 +21,20 @@ const navItems = [
 
 export function Header() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isDevelopersPage = location.pathname === '/developers';
+
+  // Close mobile menu on route change
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
+
+  const handleMobileNavigation = (path: string) => {
+    // Navigate first, menu will close via useEffect when location changes
+    navigate(path);
+  };
 
   const isActive = (path: string | null) => {
     if (!path) return false;
@@ -72,7 +84,7 @@ export function Header() {
           </Link>
 
           {/* Navigation Tabs - next to logo */}
-          <nav className="hidden sm:flex items-center gap-1 ml-4 lg:ml-8">
+          <nav className="hidden lg:flex items-center gap-1 ml-8">
             {navItems.map((item) => (
               item.path ? (
                 <Link
@@ -106,7 +118,7 @@ export function Header() {
           {/* Get API Key Button - visible only on Developers page */}
           <button
             onClick={() => setShowApiKeyModal(true)}
-            className={`hidden sm:flex items-center gap-2 px-4 py-2 bg-linear-to-r from-orange-500 to-amber-500 text-white text-sm font-medium rounded-xl transition-all shadow-lg shadow-orange-500/25 ${
+            className={`hidden lg:flex items-center gap-2 px-4 py-2 bg-linear-to-r from-orange-500 to-amber-500 text-white text-sm font-medium rounded-xl transition-all shadow-lg shadow-orange-500/25 ${
               isDevelopersPage ? 'visible opacity-100 hover:opacity-90' : 'invisible opacity-0 pointer-events-none'
             }`}
           >
@@ -143,6 +155,18 @@ export function Header() {
           {/* Theme Toggle */}
           <ThemeToggle />
 
+          {/* Mobile Menu Button */}
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="lg:hidden p-2 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg transition-all"
+          >
+            {mobileMenuOpen ? (
+              <X className="w-5 h-5 text-neutral-500 dark:text-neutral-400" />
+            ) : (
+              <Menu className="w-5 h-5 text-neutral-500 dark:text-neutral-400" />
+            )}
+          </button>
+
           {/* Notification Button */}
           {/* <motion.button
             whileHover={{ scale: 1.05, y: -2 }}
@@ -176,6 +200,71 @@ export function Header() {
       {/* Bottom gradient line */}
       <div className="absolute bottom-0 left-0 right-0 h-px bg-linear-to-r from-transparent via-neutral-300 dark:via-neutral-700 to-transparent" />
     </header>
+
+    {/* Mobile Menu - overlay */}
+    <AnimatePresence>
+      {mobileMenuOpen && (
+        <>
+          {/* Backdrop */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setMobileMenuOpen(false)}
+            className="lg:hidden fixed inset-0 top-14 bg-black/20 backdrop-blur-sm z-40"
+          />
+          {/* Menu */}
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="lg:hidden fixed left-0 right-0 top-14 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800 z-50 shadow-xl"
+          >
+          <nav className="px-4 py-3 space-y-1">
+            {navItems.map((item) => (
+              item.path ? (
+                <button
+                  key={item.label}
+                  onClick={() => handleMobileNavigation(item.path!)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-base font-medium transition-all text-left ${
+                    isActive(item.path)
+                      ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                      : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                  }`}
+                >
+                  {isActive(item.path) && (
+                    <span className="w-2 h-2 rounded-full bg-linear-to-br from-orange-400 to-amber-500 shadow-[0_0_6px_rgba(249,115,22,0.6)]" />
+                  )}
+                  {item.label}
+                </button>
+              ) : (
+                <button
+                  key={item.label}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-base font-medium text-neutral-400 dark:text-neutral-500 cursor-not-allowed"
+                >
+                  {item.label}
+                  <span className="text-xs bg-neutral-200 dark:bg-neutral-700 px-2 py-0.5 rounded-full">Soon</span>
+                </button>
+              )
+            ))}
+
+            {/* Get API Key - mobile */}
+            {isDevelopersPage && (
+              <button
+                onClick={() => {
+                  setShowApiKeyModal(true);
+                  setMobileMenuOpen(false);
+                }}
+                className="w-full mt-2 px-4 py-3 bg-linear-to-r from-orange-500 to-amber-500 text-white text-base font-medium rounded-xl hover:opacity-90 transition shadow-lg shadow-orange-500/25"
+              >
+                Get API Key
+              </button>
+            )}
+          </nav>
+        </motion.div>
+        </>
+      )}
+    </AnimatePresence>
 
     {/* API Key Modal - outside header to avoid overflow:hidden */}
     <ComingSoonModal
