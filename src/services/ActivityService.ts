@@ -6,7 +6,6 @@ import type {
 } from '../types/activity';
 
 const ACTIVITY_API_URL = import.meta.env.VITE_ACTIVITY_API_URL || 'http://localhost:3001';
-const ACTIVITY_API_KEY = import.meta.env.VITE_ACTIVITY_API_KEY || '';
 
 interface GetActivitiesOptions {
   limit?: number;
@@ -64,16 +63,12 @@ export class ActivityService {
   }
 
   static async postActivity(request: CreateActivityRequest): Promise<CreateActivityResponse> {
-    if (!ACTIVITY_API_KEY) {
-      console.warn('VITE_ACTIVITY_API_KEY not set, skipping activity post');
-      return { id: 0, createdAt: new Date().toISOString() };
-    }
-
+    // Browser requests are authenticated via Origin header on the backend
+    // No API key needed for allowed origins
     const response = await fetch(`${ACTIVITY_API_URL}/activities`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${ACTIVITY_API_KEY}`,
       },
       body: JSON.stringify(request),
     });
