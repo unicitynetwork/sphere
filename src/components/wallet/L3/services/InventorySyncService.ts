@@ -1,0 +1,2554 @@
+/**
+ * Inventory Sync Service
+ *
+ * Implements the 10-step sync flow per TOKEN_INVENTORY_SPEC.md Section 6.1
+ * This is the central orchestrator for all token inventory operations.
+ */
+
+import type { Token } from '../data/model';
+import type {
+  SyncMode, SyncResult,
+  SyncOperationStats, TokenInventoryStats, CircuitBreakerState,
+} from '../types/SyncTypes';
+import type { TxfToken, TxfStorageData, TxfMeta, SentTokenEntry, InvalidTokenEntry, TombstoneEntry, InvalidatedNametagEntry } from './types/TxfTypes';
+import type { OutboxEntry } from './types/OutboxTypes';
+import type { NametagData } from './types/TxfTypes';
+import {
+  detectSyncMode,
+  shouldSkipIpfs,
+  shouldSkipSpentDetection,
+  shouldAcquireSyncLock
+} from './utils/SyncModeDetector';
+import {
+  createDefaultSyncOperationStats,
+  createDefaultCircuitBreakerState
+} from '../types/SyncTypes';
+import {
+  isTokenKey, keyFromTokenId, tokenIdFromKey,
+  isArchivedKey, isForkedKey,
+  archivedKeyFromTokenId, tokenIdFromArchivedKey,
+  forkedKeyFromTokenIdAndState, parseForkedKey
+} from './types/TxfTypes';
+import type { TxfInclusionProof } from './types/TxfTypes';
+import { tokenToTxf, txfToToken, getCurrentStateHash } from './TxfSerializer';
+import { STORAGE_KEY_GENERATORS } from '../../../../config/storageKeys';
+import { getIpfsHttpResolver } from './IpfsHttpResolver';
+import { getIpfsTransport } from './IpfsStorageService';
+import type { IpfsTransport } from './types/IpfsTransport';
+import { getTokenValidationService } from './TokenValidationService';
+import type { InvalidReasonCode } from '../types/SyncTypes';
+import { NostrService } from './NostrService';
+import { IdentityManager } from './IdentityManager';
+
+// ============================================
+// Sync Lock State (moved from WalletRepository)
+// ============================================
+// Per TOKEN_INVENTORY_SPEC.md Section 6.1: "Only inventorySync should be allowed to access the inventory in localStorage!"
+// This module-level state manages the sync lock to prevent concurrent writes.
+
+/** Flag indicating sync is in progress */
+let _syncInProgress = false;
+
+/** Tokens queued during sync for next sync cycle */
+let _pendingTokens: Token[] = [];
+
+/**
+ * Coalescing mutex for inventorySync
+ * - If no sync in progress: start new sync
+ * - If sync in progress AND caller has no new data: return current sync's result (coalesce)
+ * - If sync in progress AND caller HAS new data: queue data, wait, return sync result
+ *
+ * This prevents the "infinite sync loop" where multiple components trigger syncs
+ * on startup and each waiter runs their own redundant sync after waiting.
+ */
+let _currentSyncPromise: Promise<SyncResult> | null = null;
+
+/**
+ * Set the sync-in-progress flag.
+ * Called at the start of inventorySync().
+ * While set, external token additions will be queued for next sync.
+ */
+export function setSyncInProgress(value: boolean): void {
+  console.log(`🔒 [SYNC LOCK] setSyncInProgress(${value})`);
+  _syncInProgress = value;
+}
+
+/**
+ * Check if sync is currently in progress.
+ */
+export function isSyncInProgress(): boolean {
+  return _syncInProgress;
+}
+
+/**
+ * Get tokens that were queued during sync.
+ * Called at the start of inventorySync to include pending tokens.
+ */
+export function getPendingTokens(): Token[] {
+  const tokens = [..._pendingTokens];
+  _pendingTokens = [];  // Clear after retrieval
+  return tokens;
+}
+
+/**
+ * Queue a token for the next sync cycle.
+ * Called when addToken is blocked by sync lock.
+ */
+export function queuePendingToken(token: Token): void {
+  console.log(`📥 [SYNC LOCK] Queuing token ${token.id.slice(0, 8)}... for next sync`);
+  _pendingTokens.push(token);
+}
+
+// ============================================
+// Types
+// ============================================
+
+/**
+ * Parameters for inventorySync() call
+ */
+export interface SyncParams {
+  /** Force LOCAL mode */
+  local?: boolean;
+
+  /** Force NAMETAG mode */
+  nametag?: boolean;
+
+  /** Incoming tokens from Nostr/peer transfer */
+  incomingTokens?: Token[] | null;
+
+  /** Outbox tokens pending send */
+  outboxTokens?: OutboxEntry[] | null;
+
+  /** Completed transfers to mark as SPENT */
+  completedList?: CompletedTransfer[] | null;
+
+  /** Wallet address (required) */
+  address: string;
+
+  /** Public key (required) */
+  publicKey: string;
+
+  /** IPNS name (required) */
+  ipnsName: string;
+}
+
+/**
+ * Completed transfer to mark as SPENT
+ */
+export interface CompletedTransfer {
+  tokenId: string;
+  stateHash: string;
+  inclusionProof: object;
+}
+
+/**
+ * Internal sync context - accumulated state passed through pipeline
+ */
+interface SyncContext {
+  // Configuration
+  mode: SyncMode;
+  address: string;
+  publicKey: string;
+  ipnsName: string;
+  startTime: number;
+
+  // Token collections (keyed by tokenId)
+  tokens: Map<string, TxfToken>;
+
+  // Archived tokens: tokens that were spent/transferred (keyed by tokenId)
+  // Used for recovery if a tombstone is found to be incorrect (BFT rollback)
+  archivedTokens: Map<string, TxfToken>;
+
+  // Forked tokens: tokens saved at specific states for conflict resolution
+  // Keyed by `${tokenId}_${stateHash}` for exact state matching
+  forkedTokens: Map<string, TxfToken>;
+
+  // Folder collections
+  sent: SentTokenEntry[];
+  invalid: InvalidTokenEntry[];
+  outbox: OutboxEntry[];
+  tombstones: TombstoneEntry[];
+  nametags: NametagData[];
+
+  // Completed transfers to mark as SPENT (from Step 0)
+  completedList: CompletedTransfer[];
+
+  // Sync state
+  localVersion: number;
+  remoteCid: string | null;
+  remoteVersion: number;
+  uploadNeeded: boolean;
+  ipnsPublished: boolean;
+  hasLocalOnlyContent: boolean; // Content in local that's not in remote (needs upload)
+  preparedStorageData: TxfStorageData | null; // Storage data prepared in step 9 for step 10
+
+  // Statistics
+  stats: SyncOperationStats;
+
+  // Circuit breaker
+  circuitBreaker: CircuitBreakerState;
+
+  // Errors
+  errors: string[];
+}
+
+// ============================================
+// Main Entry Point
+// ============================================
+
+/**
+ * Performs inventory sync operation
+ *
+ * This is the central function that orchestrates the 10-step sync flow.
+ * Only one instance may run at a time (except NAMETAG mode).
+ *
+ * @param params - Sync parameters
+ * @returns SyncResult with status and statistics
+ */
+export async function inventorySync(params: SyncParams): Promise<SyncResult> {
+  // COALESCING MUTEX: Check if caller has new data to contribute
+  const hasNewData = (params.incomingTokens && params.incomingTokens.length > 0) ||
+                     (params.completedList && params.completedList.length > 0) ||
+                     (params.outboxTokens && params.outboxTokens.length > 0);
+
+  // If a sync is already in progress...
+  if (_currentSyncPromise) {
+    // If caller has new data, queue it for the current/next sync
+    if (hasNewData) {
+      if (params.incomingTokens) {
+        for (const token of params.incomingTokens) {
+          queuePendingToken(token);
+        }
+        console.log(`📥 [InventorySync] Queued ${params.incomingTokens.length} incoming token(s) for ongoing sync`);
+      }
+      // Note: completedList and outboxTokens are less common; for now they'll wait
+    }
+
+    // Wait for the current sync to complete and return its result
+    // This COALESCES multiple callers into one sync instead of running them sequentially
+    console.log(`⏳ [InventorySync] Coalescing: waiting for ongoing sync (hasNewData=${hasNewData})...`);
+    try {
+      const result = await _currentSyncPromise;
+      // If we queued new data, a follow-up sync may be needed - but DON'T trigger it here
+      // The next wallet-updated event or periodic sync will pick it up
+      return result;
+    } catch {
+      // If previous sync failed, fall through to start a new sync
+      console.log(`⏳ [InventorySync] Previous sync failed, starting new sync...`);
+    }
+  }
+
+  // No sync in progress - start a new one
+  // Create a deferred promise for this sync
+  let resolveCurrentSync: (result: SyncResult) => void;
+  _currentSyncPromise = new Promise<SyncResult>((resolve) => {
+    resolveCurrentSync = resolve;
+  });
+
+  const startTime = Date.now();
+
+  // Detect sync mode based on inputs
+  const mode = detectSyncMode({
+    local: params.local,
+    nametag: params.nametag,
+    incomingTokens: params.incomingTokens as Token[] | undefined,
+    outboxTokens: params.outboxTokens
+  });
+
+  console.log(`🔄 [InventorySync] Starting sync in ${mode} mode`);
+
+  // Dispatch sync start event to lock wallet refetches
+  window.dispatchEvent(new Event('inventory-sync-start'));
+
+  // SYNC LOCK: Prevent concurrent writes during sync
+  // Per TOKEN_INVENTORY_SPEC.md Section 6.1: "Only inventorySync should be allowed to access the inventory in localStorage!"
+  setSyncInProgress(true);
+
+  // Initialize context
+  const ctx = initializeContext(params, mode, startTime);
+
+  try {
+    // Collect any tokens that were queued during previous sync
+    const pendingTokens = getPendingTokens();
+    if (pendingTokens.length > 0) {
+      console.log(`📥 [InventorySync] Processing ${pendingTokens.length} pending token(s) from queue`);
+      // Add pending tokens to incoming tokens
+      const existingIncoming = params.incomingTokens || [];
+      params.incomingTokens = [...existingIncoming, ...pendingTokens];
+    }
+
+    // NAMETAG mode: simplified flow (Steps 1, 2, 8.4 only)
+    if (mode === 'NAMETAG') {
+      const result = await executeNametagSync(ctx, params);
+      resolveCurrentSync!(result);
+      return result;
+    }
+
+    // All other modes: acquire sync lock
+    if (shouldAcquireSyncLock(mode)) {
+      // TODO: Integrate with SyncCoordinator
+      // For now, proceed without lock
+    }
+
+    // Execute full sync pipeline
+    const result = await executeFullSync(ctx, params);
+    resolveCurrentSync!(result);
+    return result;
+
+  } catch (error) {
+    console.error(`❌ [InventorySync] Error:`, error);
+    const errorResult = buildErrorResult(ctx, error);
+    resolveCurrentSync!(errorResult);
+    return errorResult;
+  } finally {
+    // CRITICAL: Clear the mutex promise so next sync can proceed
+    _currentSyncPromise = null;
+    // CRITICAL: Always release sync lock, even on error (prevent deadlock)
+    setSyncInProgress(false);
+    // CRITICAL: Always dispatch sync-end, even on error (prevent deadlock)
+    window.dispatchEvent(new Event('inventory-sync-end'));
+  }
+}
+
+// ============================================
+// Sync Execution Flows
+// ============================================
+
+/**
+ * Execute NAMETAG mode sync (simplified flow)
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function executeNametagSync(ctx: SyncContext, _params: SyncParams): Promise<SyncResult> {
+  // Step 1: Load nametags from localStorage only
+  await step1_loadLocalStorage(ctx);
+
+  // Step 2: Load nametags from IPFS
+  await step2_loadIpfs(ctx);
+
+  // Step 8.4: Extract nametags for current user (filters for ownership)
+  const nametags = await step8_4_extractNametags(ctx);
+
+  return buildNametagResult(ctx, nametags);
+}
+
+/**
+ * Execute full sync (NORMAL/FAST/LOCAL modes)
+ */
+async function executeFullSync(ctx: SyncContext, params: SyncParams): Promise<SyncResult> {
+  // Step 0: Input Processing
+  step0_inputProcessing(ctx, params);
+
+  // Step 1: Load from localStorage
+  await step1_loadLocalStorage(ctx);
+
+  // Step 2: Load from IPFS (skip in LOCAL mode)
+  if (!shouldSkipIpfs(ctx.mode)) {
+    await step2_loadIpfs(ctx);
+  }
+
+  // Step 3: Proof Normalization
+  step3_normalizeProofs(ctx);
+
+  // Step 4: Commitment Validation
+  await step4_validateCommitments(ctx);
+
+  // Step 5: Token Validation
+  await step5_validateTokens(ctx);
+
+  // Step 6: Token Deduplication
+  step6_deduplicateTokens(ctx);
+
+  // Step 7: Spent Token Detection (skip in FAST/LOCAL mode)
+  if (!shouldSkipSpentDetection(ctx.mode)) {
+    await step7_detectSpentTokens(ctx);
+  }
+
+  // Step 7.5: Verify Tombstones (skip in FAST/LOCAL mode)
+  if (!shouldSkipSpentDetection(ctx.mode)) {
+    await step7_5_verifyTombstones(ctx);
+  }
+
+  // Step 8: Folder Assignment / Merge Inventory
+  step8_mergeInventory(ctx);
+
+  // Step 8.4: Filter nametags for current user ownership
+  ctx.nametags = await step8_4_extractNametags(ctx);
+
+  // Step 8.5: Ensure nametag bindings are registered with Nostr
+  // Best-effort, non-blocking - failures don't stop sync
+  await step8_5_ensureNametagNostrBinding(ctx);
+
+  // Step 9: Prepare for Storage
+  step9_prepareStorage(ctx);
+
+  // Step 10: Upload to IPFS (skip in LOCAL mode)
+  if (ctx.uploadNeeded && !shouldSkipIpfs(ctx.mode)) {
+    await step10_uploadIpfs(ctx);
+  }
+
+  return buildSuccessResult(ctx);
+}
+
+// ============================================
+// Step Implementations (Stubs - to be filled in)
+// ============================================
+
+function initializeContext(params: SyncParams, mode: SyncMode, startTime: number): SyncContext {
+  return {
+    mode,
+    address: params.address,
+    publicKey: params.publicKey,
+    ipnsName: params.ipnsName,
+    startTime,
+    tokens: new Map(),
+    archivedTokens: new Map(),  // Archived tokens for recovery
+    forkedTokens: new Map(),    // Forked tokens at specific states
+    sent: [],
+    invalid: [],
+    outbox: [],
+    tombstones: [],
+    nametags: [],
+    completedList: [],
+    localVersion: 0,
+    remoteCid: null,
+    remoteVersion: 0,
+    uploadNeeded: false,
+    ipnsPublished: false,
+    hasLocalOnlyContent: false,
+    preparedStorageData: null,
+    stats: createDefaultSyncOperationStats(),
+    circuitBreaker: createDefaultCircuitBreakerState(),
+    errors: []
+  };
+}
+
+function step0_inputProcessing(ctx: SyncContext, params: SyncParams): void {
+  console.log(`📥 [Step 0] Input Processing`);
+
+  // Process incoming tokens from Nostr/peer transfers
+  if (params.incomingTokens && params.incomingTokens.length > 0) {
+    console.log(`  Processing ${params.incomingTokens.length} incoming tokens`);
+    for (const token of params.incomingTokens) {
+      const txf = tokenToTxf(token);
+      if (txf) {
+        const tokenId = txf.genesis.data.tokenId;
+        ctx.tokens.set(tokenId, txf);
+        ctx.stats.tokensImported++;
+      } else {
+        console.warn(`  Failed to convert incoming token ${token.id} to TXF format`);
+      }
+    }
+  }
+
+  // Process outbox tokens (pending transfers)
+  if (params.outboxTokens && params.outboxTokens.length > 0) {
+    console.log(`  Processing ${params.outboxTokens.length} outbox entries`);
+    ctx.outbox.push(...params.outboxTokens);
+  }
+
+  // Process completed transfers (to mark as SPENT)
+  if (params.completedList && params.completedList.length > 0) {
+    console.log(`  Processing ${params.completedList.length} completed transfers`);
+    ctx.completedList.push(...params.completedList);
+  }
+
+  console.log(`  Input processing complete: ${ctx.tokens.size} tokens, ${ctx.outbox.length} outbox, ${ctx.completedList.length} completed`);
+}
+
+async function step1_loadLocalStorage(ctx: SyncContext): Promise<void> {
+  console.log(`💾 [Step 1] Load from localStorage`);
+
+  // Per TOKEN_INVENTORY_SPEC.md Section 6.1:
+  // "Only inventorySync should be allowed to access the inventory in localStorage!"
+  //
+  // We load directly from localStorage in TxfStorageData format (the canonical format).
+  // However, we also detect StoredWallet format (from legacy WalletRepository) and convert it.
+  // This ensures backward compatibility while maintaining spec compliance.
+
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(ctx.address);
+  const json = localStorage.getItem(storageKey);
+
+  if (!json) {
+    console.log(`  No wallet data found for address ${ctx.address.slice(0, 20)}...`);
+    return;
+  }
+
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(json);
+  } catch {
+    console.warn(`  Failed to parse localStorage data`);
+    return;
+  }
+
+  // Detect format: TxfStorageData has _meta and _<tokenId> keys
+  //                StoredWallet has tokens: Token[] array
+  const isTxfFormat = data._meta !== undefined || Object.keys(data).some(k => isTokenKey(k));
+  const isStoredWalletFormat = Array.isArray(data.tokens);
+
+  if (isStoredWalletFormat && !isTxfFormat) {
+    console.log(`  Detected StoredWallet format, converting...`);
+    // Convert StoredWallet format to TxfStorageData format
+    await loadFromStoredWalletFormat(ctx, data);
+  } else {
+    // Load from TxfStorageData format (the canonical format)
+    await loadFromTxfStorageDataFormat(ctx, data);
+  }
+}
+
+// Load from TxfStorageData format (canonical format per spec)
+async function loadFromTxfStorageDataFormat(ctx: SyncContext, data: Record<string, unknown>): Promise<void> {
+  // Load metadata
+  const meta = data._meta as TxfMeta | undefined;
+  if (meta?.version) {
+    ctx.localVersion = meta.version;
+    console.log(`  Loaded metadata: version=${ctx.localVersion}`);
+  }
+
+  // Load nametag
+  if (data._nametag) {
+    const nametag = data._nametag as NametagData;
+    ctx.nametags.push(nametag);
+    console.log(`  Loaded nametag: ${nametag.name}`);
+
+    // NAMETAG mode: only load nametag, skip rest
+    if (ctx.mode === 'NAMETAG') {
+      return;
+    }
+  } else if (ctx.mode === 'NAMETAG') {
+    return; // NAMETAG mode but no nametag found
+  }
+
+  // Load tombstones
+  if (data._tombstones && Array.isArray(data._tombstones)) {
+    ctx.tombstones.push(...(data._tombstones as TombstoneEntry[]));
+    console.log(`  Loaded ${ctx.tombstones.length} tombstones`);
+  }
+
+  // Load active tokens from _<tokenId> keys
+  let tokenCount = 0;
+  for (const key of Object.keys(data)) {
+    if (isTokenKey(key)) {
+      const txf = data[key] as TxfToken;
+      const tokenId = tokenIdFromKey(key);
+      // Don't overwrite incoming tokens from Step 0
+      if (!ctx.tokens.has(tokenId)) {
+        ctx.tokens.set(tokenId, txf);
+        tokenCount++;
+      }
+    }
+  }
+  console.log(`  Loaded ${tokenCount} active tokens from localStorage`);
+
+  // Load sent, invalid, outbox (for IPFS round-trip)
+  if (data._sent && Array.isArray(data._sent)) {
+    ctx.sent.push(...(data._sent as SentTokenEntry[]));
+    console.log(`  Loaded ${ctx.sent.length} sent tokens`);
+  }
+  if (data._invalid && Array.isArray(data._invalid)) {
+    ctx.invalid.push(...(data._invalid as InvalidTokenEntry[]));
+    console.log(`  Loaded ${ctx.invalid.length} invalid tokens`);
+  }
+  if (data._outbox && Array.isArray(data._outbox)) {
+    ctx.outbox.push(...(data._outbox as OutboxEntry[]));
+    console.log(`  Loaded ${ctx.outbox.length} outbox entries`);
+  }
+
+  // Load archived tokens from _archived_<tokenId> keys
+  // These are tokens that were spent/transferred but kept for recovery
+  let archivedCount = 0;
+  for (const key of Object.keys(data)) {
+    if (isArchivedKey(key)) {
+      const txf = data[key] as TxfToken;
+      const tokenId = tokenIdFromArchivedKey(key);
+      ctx.archivedTokens.set(tokenId, txf);
+      archivedCount++;
+    }
+  }
+  if (archivedCount > 0) {
+    console.log(`  Loaded ${archivedCount} archived tokens from localStorage`);
+  }
+
+  // Load forked tokens from _forked_<tokenId>_<stateHash> keys
+  // These are tokens saved at specific states for conflict resolution
+  let forkedCount = 0;
+  for (const key of Object.keys(data)) {
+    if (isForkedKey(key)) {
+      const txf = data[key] as TxfToken;
+      // Store with the full key (includes tokenId and stateHash)
+      const parsed = parseForkedKey(key);
+      if (parsed) {
+        const forkedKey = `${parsed.tokenId}_${parsed.stateHash}`;
+        ctx.forkedTokens.set(forkedKey, txf);
+        forkedCount++;
+      }
+    }
+  }
+  if (forkedCount > 0) {
+    console.log(`  Loaded ${forkedCount} forked tokens from localStorage`);
+  }
+}
+
+// Load from StoredWallet format (legacy WalletRepository format) and convert to TxfStorageData
+async function loadFromStoredWalletFormat(ctx: SyncContext, data: Record<string, unknown>): Promise<void> {
+  // Load nametag
+  if (data.nametag) {
+    const nametag = data.nametag as NametagData;
+    ctx.nametags.push(nametag);
+    console.log(`  Loaded nametag: ${nametag.name}`);
+
+    // NAMETAG mode: only load nametag, skip rest
+    if (ctx.mode === 'NAMETAG') {
+      return;
+    }
+  } else if (ctx.mode === 'NAMETAG') {
+    return;
+  }
+
+  // Load tombstones
+  if (data.tombstones && Array.isArray(data.tombstones)) {
+    ctx.tombstones.push(...(data.tombstones as TombstoneEntry[]));
+    console.log(`  Loaded ${ctx.tombstones.length} tombstones`);
+  }
+
+  // Load tokens from tokens: Token[] array and convert to TxfToken format
+  const tokens = data.tokens as Token[] | undefined;
+  if (tokens && Array.isArray(tokens)) {
+    let tokenCount = 0;
+    for (const token of tokens) {
+      const txf = tokenToTxf(token);
+      if (txf && txf.genesis?.data?.tokenId) {
+        const tokenId = txf.genesis.data.tokenId;
+        // Don't overwrite incoming tokens from Step 0
+        if (!ctx.tokens.has(tokenId)) {
+          ctx.tokens.set(tokenId, txf);
+          tokenCount++;
+        }
+      }
+    }
+    console.log(`  Loaded ${tokenCount} active tokens (converted from StoredWallet format)`);
+  }
+
+  // Note: StoredWallet format doesn't have _sent, _invalid, _outbox
+  // These will be loaded from IPFS in Step 2
+}
+
+async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
+  console.log(`🌐 [Step 2] Load from IPFS`);
+
+  // Early validation: skip IPFS loading if IPNS name is not available
+  // This is normal for new wallets that haven't published to IPNS yet
+  if (!ctx.ipnsName || ctx.ipnsName.trim().length === 0) {
+    console.log(`  ⏭️ Skipping IPFS load: no IPNS name configured (new wallet or LOCAL mode)`);
+    return; // Continue with local-only data
+  }
+
+  // Try to use IpfsTransport if available (provides better sequence tracking)
+  let transport: IpfsTransport | null = null;
+  try {
+    transport = getIpfsTransport();
+  } catch {
+    // Fall back to HTTP resolver only
+  }
+
+  let remoteData: TxfStorageData | null = null;
+
+  if (transport) {
+    // Initialize transport with identity so cachedIpnsName gets set
+    // This ensures IPFS is ready even if we don't need to upload later
+    const initialized = await transport.ensureInitialized();
+    if (!initialized) {
+      console.log(`  ⚠️ Transport initialization failed, falling back to HTTP resolver`);
+      transport = null;
+    }
+  }
+
+  if (transport) {
+    // Use full transport API (better sequence tracking, dual DHT+HTTP)
+    console.log(`  Using IpfsTransport for IPNS resolution...`);
+    const resolution = await transport.resolveIpns();
+
+    if (resolution.cid) {
+      ctx.remoteCid = resolution.cid;
+      ctx.remoteVersion = resolution.content?._meta?.version || 0;
+      remoteData = resolution.content || null;
+      console.log(`  Transport resolved: CID=${resolution.cid.slice(0, 16)}..., seq=${resolution.sequence}, version=${ctx.remoteVersion}`);
+    } else {
+      // Transport returned no CID - this can happen if IPFS isn't fully initialized yet
+      // (cachedIpnsName not set). Fall through to HTTP resolver which doesn't require Helia.
+      console.log(`  Transport IPNS resolution returned no CID, trying HTTP resolver...`);
+    }
+  }
+
+  // Fallback to HTTP resolver if transport didn't return data
+  // (either transport not available, or cachedIpnsName not set yet)
+  if (!remoteData) {
+    // Fallback to HTTP resolver (transport unavailable or not initialized yet)
+    console.log(`  Using HTTP resolver for IPNS resolution...`);
+    const resolver = getIpfsHttpResolver();
+
+    // 1. Resolve IPNS name to get CID and content
+    const resolution = await resolver.resolveIpnsName(ctx.ipnsName);
+
+    if (!resolution.success) {
+      console.warn(`  IPNS resolution failed: ${resolution.error || 'unknown error'}`);
+      return; // Continue with local-only data
+    }
+
+    if (!resolution.content) {
+      console.log(`  IPNS resolved but no content (new wallet or empty IPNS)`);
+      return;
+    }
+
+    ctx.remoteCid = resolution.cid || null;
+    remoteData = resolution.content;
+  }
+
+  if (!remoteData) {
+    console.log(`  No remote data available`);
+    return;
+  }
+
+  // Extract remote version
+  if (remoteData._meta) {
+    ctx.remoteVersion = remoteData._meta.version || 0;
+    console.log(`  Remote version: ${ctx.remoteVersion}, Local version: ${ctx.localVersion}`);
+    // Log warning if remote version seems stale (much lower than expected for active wallet)
+    // This can indicate IPNS propagation issues
+    if (ctx.localVersion > 0 && ctx.remoteVersion < ctx.localVersion) {
+      console.warn(`  ⚠️ Remote version (${ctx.remoteVersion}) is LOWER than local (${ctx.localVersion}) - possible stale IPNS data`);
+    }
+  }
+
+  // 2. Merge remote tokens into context
+  // Track which tokens were only in local (for upload detection)
+  const localOnlyTokenIds = new Set(ctx.tokens.keys());
+
+  let tokensImported = 0;
+  for (const key of Object.keys(remoteData)) {
+    if (isTokenKey(key)) {
+      const remoteTxf = remoteData[key] as TxfToken;
+      if (!remoteTxf || !remoteTxf.genesis?.data?.tokenId) continue;
+
+      // Use the storage key (tokenIdFromKey) for consistency with Step 1
+      // Step 1 uses tokenIdFromKey(key) to extract tokenId, so we must match that
+      const tokenId = tokenIdFromKey(key);
+      const localTxf = ctx.tokens.get(tokenId);
+
+      // Mark this token as not local-only (exists in remote)
+      localOnlyTokenIds.delete(tokenId);
+
+      // Prefer remote if: no local, or remote has more transactions
+      if (!localTxf || shouldPreferRemote(localTxf, remoteTxf)) {
+        ctx.tokens.set(tokenId, remoteTxf);
+        if (!localTxf) tokensImported++;
+      }
+    }
+  }
+
+  // Any tokens still in localOnlyTokenIds are local-only (not in remote)
+  if (localOnlyTokenIds.size > 0) {
+    ctx.hasLocalOnlyContent = true;
+    console.log(`  📤 ${localOnlyTokenIds.size} local-only token(s) not in remote - will upload`);
+  }
+
+  // 3. Merge remote tombstones (union merge)
+  if (remoteData._tombstones && Array.isArray(remoteData._tombstones)) {
+    const existingKeys = new Set(
+      ctx.tombstones.map(t => `${t.tokenId}:${t.stateHash}`)
+    );
+    for (const tombstone of remoteData._tombstones as TombstoneEntry[]) {
+      const key = `${tombstone.tokenId}:${tombstone.stateHash}`;
+      if (!existingKeys.has(key)) {
+        ctx.tombstones.push(tombstone);
+      }
+    }
+  }
+
+  // 4. Merge remote sent tokens (union merge by tokenId:stateHash)
+  // Multiple entries with same tokenId but different stateHash are allowed
+  // (supports boomerang scenarios where token returns at different states)
+  // NOTE: If stateHash is unavailable (getCurrentStateHash returns undefined),
+  // we still import the token using tokenId-only key to avoid losing sent history.
+  console.log(`  📤 IPFS _sent folder: ${remoteData._sent ? (Array.isArray(remoteData._sent) ? remoteData._sent.length : 'not-array') : 'undefined'} entries, local: ${ctx.sent.length}`);
+  if (remoteData._sent && Array.isArray(remoteData._sent)) {
+    const existingKeys = new Set(
+      ctx.sent.map(s => {
+        const tokenId = s.token.genesis?.data?.tokenId || '';
+        const stateHash = getCurrentStateHash(s.token) || '';
+        return `${tokenId}:${stateHash}`;
+      })
+    );
+    // Also track by tokenId-only for fallback deduplication
+    const existingTokenIds = new Set(
+      ctx.sent.map(s => s.token.genesis?.data?.tokenId || '')
+    );
+    let sentImported = 0;
+    for (const sentEntry of remoteData._sent as SentTokenEntry[]) {
+      const tokenId = sentEntry.token?.genesis?.data?.tokenId;
+      if (!tokenId) continue;  // Skip invalid entries
+
+      const stateHash = getCurrentStateHash(sentEntry.token);
+      const key = `${tokenId}:${stateHash || 'unknown'}`;
+
+      // Primary dedup: tokenId:stateHash (when stateHash available)
+      // Fallback dedup: tokenId-only (when stateHash unavailable)
+      const isDuplicate = stateHash
+        ? existingKeys.has(key)
+        : existingTokenIds.has(tokenId);
+
+      if (!isDuplicate) {
+        ctx.sent.push(sentEntry);
+        existingKeys.add(key);
+        // Only add to tokenId-only set when using fallback (stateHash unavailable)
+        // This prevents incorrectly blocking entries with same tokenId but different stateHash
+        if (!stateHash) {
+          existingTokenIds.add(tokenId);
+        }
+        sentImported++;
+      }
+    }
+    if (sentImported > 0) {
+      console.log(`  📤 Imported ${sentImported} sent token(s) from IPFS`);
+    }
+  }
+
+  // 5. Merge remote invalid tokens (union merge by tokenId:stateHash)
+  // Multiple entries with same tokenId but different stateHash are allowed
+  // (a token may fail validation at different states for different reasons)
+  // NOTE: If stateHash is unavailable, we still import using tokenId-only key.
+  if (remoteData._invalid && Array.isArray(remoteData._invalid)) {
+    const existingKeys = new Set(
+      ctx.invalid.map(i => {
+        const tokenId = i.token.genesis?.data?.tokenId || '';
+        const stateHash = getCurrentStateHash(i.token) || '';
+        return `${tokenId}:${stateHash}`;
+      })
+    );
+    // Also track by tokenId-only for fallback deduplication
+    const existingTokenIds = new Set(
+      ctx.invalid.map(i => i.token.genesis?.data?.tokenId || '')
+    );
+    let invalidImported = 0;
+    for (const invalidEntry of remoteData._invalid as InvalidTokenEntry[]) {
+      const tokenId = invalidEntry.token?.genesis?.data?.tokenId;
+      if (!tokenId) continue;  // Skip invalid entries
+
+      const stateHash = getCurrentStateHash(invalidEntry.token);
+      const key = `${tokenId}:${stateHash || 'unknown'}`;
+
+      // Primary dedup: tokenId:stateHash (when stateHash available)
+      // Fallback dedup: tokenId-only (when stateHash unavailable)
+      const isDuplicate = stateHash
+        ? existingKeys.has(key)
+        : existingTokenIds.has(tokenId);
+
+      if (!isDuplicate) {
+        ctx.invalid.push(invalidEntry);
+        existingKeys.add(key);
+        // Only add to tokenId-only set when using fallback (stateHash unavailable)
+        if (!stateHash) {
+          existingTokenIds.add(tokenId);
+        }
+        invalidImported++;
+      }
+    }
+    if (invalidImported > 0) {
+      console.log(`  ⚠️ Imported ${invalidImported} invalid token(s) from IPFS`);
+    }
+  }
+
+  // 6. Merge remote nametag if present
+  if (remoteData._nametag && ctx.nametags.length === 0) {
+    ctx.nametags.push(remoteData._nametag);
+    console.log(`  Imported nametag: ${remoteData._nametag.name}`);
+  } else if (!remoteData._nametag && ctx.nametags.length > 0) {
+    // Local has nametag, remote doesn't - need to upload
+    ctx.hasLocalOnlyContent = true;
+    console.log(`  📤 Local nametag "${ctx.nametags[0].name}" not in remote - will upload`);
+  }
+
+  ctx.stats.tokensImported = tokensImported;
+  console.log(`  ✓ Loaded from IPFS: ${tokensImported} new tokens, ${ctx.tombstones.length} tombstones`);
+}
+
+/**
+ * Determine if remote token should be preferred over local
+ * Prefers token with more transactions (more advanced state)
+ */
+function shouldPreferRemote(local: TxfToken, remote: TxfToken): boolean {
+  const localTxCount = local.transactions?.length || 0;
+  const remoteTxCount = remote.transactions?.length || 0;
+
+  // Prefer remote if it has more transactions
+  if (remoteTxCount > localTxCount) {
+    return true;
+  }
+
+  // If same transaction count, prefer the one with more committed transactions
+  if (remoteTxCount === localTxCount && remoteTxCount > 0) {
+    const localCommitted = local.transactions.filter(tx => tx.inclusionProof !== null).length;
+    const remoteCommitted = remote.transactions.filter(tx => tx.inclusionProof !== null).length;
+    return remoteCommitted > localCommitted;
+  }
+
+  return false;
+}
+
+function step3_normalizeProofs(ctx: SyncContext): void {
+  console.log(`📋 [Step 3] Normalize Proofs`);
+
+  let normalizedCount = 0;
+
+  for (const txf of ctx.tokens.values()) {
+    // Normalize genesis proof
+    if (txf.genesis?.inclusionProof) {
+      if (normalizeInclusionProof(txf.genesis.inclusionProof)) {
+        normalizedCount++;
+      }
+    }
+
+    // Normalize transaction proofs
+    if (txf.transactions) {
+      for (const tx of txf.transactions) {
+        if (tx.inclusionProof) {
+          if (normalizeInclusionProof(tx.inclusionProof)) {
+            normalizedCount++;
+          }
+        }
+      }
+    }
+  }
+
+  if (normalizedCount > 0) {
+    console.log(`  Normalized ${normalizedCount} inclusion proof(s)`);
+  } else {
+    console.log(`  No proofs needed normalization`);
+  }
+}
+
+/**
+ * Normalize an inclusion proof to ensure consistent format.
+ * Returns true if any normalization was applied.
+ *
+ * - Ensures stateHash has "0000" prefix (Unicity hash format)
+ * - Ensures merkle root has "0000" prefix
+ */
+function normalizeInclusionProof(proof: TxfInclusionProof): boolean {
+  let normalized = false;
+
+  // Normalize authenticator stateHash
+  if (proof.authenticator?.stateHash) {
+    if (!proof.authenticator.stateHash.startsWith('0000')) {
+      proof.authenticator.stateHash = '0000' + proof.authenticator.stateHash;
+      normalized = true;
+    }
+  }
+
+  // Normalize merkle tree root
+  if (proof.merkleTreePath?.root) {
+    if (!proof.merkleTreePath.root.startsWith('0000')) {
+      proof.merkleTreePath.root = '0000' + proof.merkleTreePath.root;
+      normalized = true;
+    }
+  }
+
+  return normalized;
+}
+
+async function step4_validateCommitments(ctx: SyncContext): Promise<void> {
+  console.log(`✓ [Step 4] Validate Commitments`);
+
+  const invalidTokenIds: string[] = [];
+  let validatedCount = 0;
+
+  for (const [tokenId, txf] of ctx.tokens) {
+    // Step 4.1: Validate genesis commitment
+    const genesisValid = validateGenesisCommitment(txf);
+    if (!genesisValid.valid) {
+      console.warn(`  Token ${tokenId.slice(0, 8)}... failed genesis validation: ${genesisValid.reason}`);
+      invalidTokenIds.push(tokenId);
+      ctx.invalid.push({
+        token: txf,
+        timestamp: Date.now(),
+        invalidatedAt: Date.now(),
+        reason: 'PROOF_MISMATCH' as InvalidReasonCode,
+        details: `Genesis: ${genesisValid.reason}`
+      });
+      continue;
+    }
+
+    // Step 4.2: Validate each transaction commitment
+    let txValid = true;
+    if (txf.transactions && txf.transactions.length > 0) {
+      for (let i = 0; i < txf.transactions.length; i++) {
+        const tx = txf.transactions[i];
+        if (tx.inclusionProof) {
+          const txResult = validateTransactionCommitment(txf, i);
+          if (!txResult.valid) {
+            console.warn(`  Token ${tokenId.slice(0, 8)}... failed transaction ${i} validation: ${txResult.reason}`);
+            invalidTokenIds.push(tokenId);
+            ctx.invalid.push({
+              token: txf,
+              timestamp: Date.now(),
+              invalidatedAt: Date.now(),
+              reason: 'PROOF_MISMATCH' as InvalidReasonCode,
+              details: `Transaction ${i}: ${txResult.reason}`
+            });
+            txValid = false;
+            break;
+          }
+        }
+      }
+    }
+
+    if (txValid) {
+      validatedCount++;
+    }
+  }
+
+  // Remove invalid tokens from active set
+  for (const tokenId of invalidTokenIds) {
+    ctx.tokens.delete(tokenId);
+    ctx.stats.tokensRemoved++;
+  }
+
+  console.log(`  ✓ Validated ${validatedCount} tokens, ${invalidTokenIds.length} moved to Invalid folder`);
+}
+
+/**
+ * Validate hex string format (with optional "0000" prefix)
+ */
+function isValidHexString(value: string, minLength: number = 64): boolean {
+  if (!value || typeof value !== 'string') return false;
+  // Strip "0000" prefix if present
+  const hex = value.startsWith('0000') ? value.slice(4) : value;
+  // Check it's valid hex of sufficient length
+  return /^[0-9a-fA-F]+$/.test(hex) && hex.length >= minLength - 4;
+}
+
+/**
+ * Validate genesis commitment matches inclusion proof.
+ *
+ * Step 4 Validation (per TOKEN_INVENTORY_SPEC.md):
+ * - Structural integrity: All required fields present and properly formatted
+ * - State hash chain: Genesis stateHash establishes chain root
+ * - Format validation: Transaction hash and state hash are valid hex strings
+ * - Genesis tokenId derivation: Verify hash(genesis.data) === tokenId (TODO)
+ * - Proof payload integrity: Verify hash(proof.transaction) === transactionHash (TODO)
+ *
+ * Note: Full cryptographic proof verification (signature validation, merkle path)
+ * is performed by the Unicity SDK in Step 5 via TokenValidationService.
+ *
+ * TODO (AMENDMENT 2): Enhanced validation requires SDK integration:
+ * - Use Token.fromJSON() to reconstruct genesis transaction
+ * - Calculate hash of genesis transaction data
+ * - Verify calculated hash matches txf.genesis.data.tokenId
+ * - Verify proof.transactionHash matches calculated transaction hash
+ *
+ * For now, we perform structural validation only. Full cryptographic validation
+ * happens in Step 5 via SDK's token.verify(trustBase).
+ */
+function validateGenesisCommitment(txf: TxfToken): { valid: boolean; reason?: string } {
+  if (!txf.genesis) {
+    return { valid: false, reason: 'Missing genesis' };
+  }
+
+  if (!txf.genesis.inclusionProof) {
+    return { valid: false, reason: 'Missing genesis inclusion proof' };
+  }
+
+  const proof = txf.genesis.inclusionProof;
+
+  // Verify authenticator is present and has stateHash
+  if (!proof.authenticator?.stateHash) {
+    return { valid: false, reason: 'Missing authenticator stateHash' };
+  }
+
+  // Verify stateHash format (should be hex, typically with "0000" prefix)
+  if (!isValidHexString(proof.authenticator.stateHash, 64)) {
+    return { valid: false, reason: 'Invalid stateHash format' };
+  }
+
+  // Verify merkle path is present
+  if (!proof.merkleTreePath?.root) {
+    return { valid: false, reason: 'Missing merkle tree root' };
+  }
+
+  // Verify merkle root format
+  if (!isValidHexString(proof.merkleTreePath.root, 64)) {
+    return { valid: false, reason: 'Invalid merkle root format' };
+  }
+
+  // Verify transactionHash format if present (optional field)
+  // Note: transactionHash is not required because:
+  // 1. Some SDK versions/faucet tokens don't populate this field
+  // 2. Full cryptographic validation happens in Step 5 via SDK's token.verify()
+  // 3. Making this required causes valid tokens to be incorrectly invalidated
+  if (proof.transactionHash && !isValidHexString(proof.transactionHash, 64)) {
+    return { valid: false, reason: 'Invalid transactionHash format' };
+  }
+
+  // Verify genesis data is present (needed to verify transaction hash)
+  if (!txf.genesis.data?.tokenId) {
+    return { valid: false, reason: 'Missing genesis data tokenId' };
+  }
+
+  // TODO (AMENDMENT 2): Add cryptographic validation
+  // 1. Verify hash(genesis.data) === tokenId (genesis tokenId derivation)
+  // 2. Verify hash(proof.transaction) === transactionHash (inclusion proof payload)
+  //
+  // This requires SDK integration:
+  // - const sdkToken = await Token.fromJSON(txf);
+  // - const genesisTransaction = sdkToken.getGenesisTransaction();
+  // - const calculatedHash = await genesisTransaction.calculateHash();
+  // - if (calculatedHash.toJSON() !== txf.genesis.data.tokenId) return false;
+  // - if (proof.transactionHash !== calculatedHash.toJSON()) return false;
+
+  return { valid: true };
+}
+
+/**
+ * Validate transaction commitment matches inclusion proof.
+ *
+ * Step 4 Validation for state transitions:
+ * - State hash chain integrity: previousStateHash links correctly
+ * - Format validation: All hashes are valid hex strings
+ * - Structural integrity: Required proof fields present
+ * - Transaction hash integrity: Verify hash(proof.transaction) === tx.transactionHash (TODO)
+ *
+ * Note: Full cryptographic proof verification (signature validation, merkle path)
+ * is performed by the Unicity SDK in Step 5 via TokenValidationService.
+ *
+ * TODO (AMENDMENT 2): Enhanced validation requires SDK integration:
+ * - Use Token.fromJSON() to reconstruct transaction object
+ * - Calculate hash of transaction data
+ * - Verify proof.transactionHash matches calculated transaction hash
+ *
+ * For now, we perform structural validation only. Full cryptographic validation
+ * happens in Step 5 via SDK's token.verify(trustBase).
+ */
+function validateTransactionCommitment(txf: TxfToken, txIndex: number): { valid: boolean; reason?: string } {
+  const tx = txf.transactions[txIndex];
+  if (!tx) {
+    return { valid: false, reason: `Transaction ${txIndex} not found` };
+  }
+
+  if (!tx.inclusionProof) {
+    // Uncommitted transaction - no proof to validate
+    return { valid: true };
+  }
+
+  const proof = tx.inclusionProof;
+
+  // Verify authenticator is present
+  if (!proof.authenticator?.stateHash) {
+    return { valid: false, reason: 'Missing authenticator stateHash' };
+  }
+
+  // Verify stateHash format
+  if (!isValidHexString(proof.authenticator.stateHash, 64)) {
+    return { valid: false, reason: 'Invalid authenticator stateHash format' };
+  }
+
+  // Verify merkle path is present
+  if (!proof.merkleTreePath?.root) {
+    return { valid: false, reason: 'Missing merkle tree root' };
+  }
+
+  // Verify merkle root format
+  if (!isValidHexString(proof.merkleTreePath.root, 64)) {
+    return { valid: false, reason: 'Invalid merkle root format' };
+  }
+
+  // Verify transactionHash if present
+  if (proof.transactionHash && !isValidHexString(proof.transactionHash, 64)) {
+    return { valid: false, reason: 'Invalid transactionHash format' };
+  }
+
+  // Verify state hash chain integrity
+  // Note: Some tokens from faucet/SDK may not have previousStateHash populated.
+  // For the first transaction, we can derive it from genesis stateHash.
+  // Full cryptographic validation is done by SDK in Step 5.
+  if (txIndex === 0) {
+    // First transaction should reference genesis state
+    const genesisStateHash = txf.genesis?.inclusionProof?.authenticator?.stateHash;
+    if (!genesisStateHash) {
+      return { valid: false, reason: 'Cannot verify chain - missing genesis stateHash' };
+    }
+
+    // If previousStateHash is present, validate it matches genesis
+    if (tx.previousStateHash) {
+      if (!isValidHexString(tx.previousStateHash, 64)) {
+        return { valid: false, reason: 'Invalid previousStateHash format' };
+      }
+      if (tx.previousStateHash !== genesisStateHash) {
+        return { valid: false, reason: `Chain break: previousStateHash doesn't match genesis (expected ${genesisStateHash.slice(0, 16)}..., got ${tx.previousStateHash.slice(0, 16)}...)` };
+      }
+    }
+    // If previousStateHash is missing on first transaction, that's OK - we know it should be genesis stateHash
+    // Full SDK validation in Step 5 will verify the actual cryptographic proof
+  } else {
+    // Subsequent transactions MUST have previousStateHash
+    if (!tx.previousStateHash || !isValidHexString(tx.previousStateHash, 64)) {
+      return { valid: false, reason: 'Invalid or missing previousStateHash' };
+    }
+    // Subsequent transactions should reference previous tx's new state
+    const prevTx = txf.transactions[txIndex - 1];
+    if (prevTx?.newStateHash && tx.previousStateHash !== prevTx.newStateHash) {
+      return { valid: false, reason: `Chain break: previousStateHash doesn't match tx ${txIndex - 1}` };
+    }
+  }
+
+  return { valid: true };
+}
+
+async function step5_validateTokens(ctx: SyncContext): Promise<void> {
+  console.log(`🔍 [Step 5] Validate Tokens`);
+
+  if (ctx.tokens.size === 0) {
+    console.log(`  No tokens to validate`);
+    return;
+  }
+
+  const validationService = getTokenValidationService();
+
+  // Convert TxfTokens to LocalTokens for validation
+  const tokensToValidate: Token[] = [];
+  const tokenIdMap = new Map<string, string>(); // localId -> txfTokenId
+
+  for (const [tokenId, txf] of ctx.tokens) {
+    const localToken = txfToToken(tokenId, txf);
+    if (localToken) {
+      tokensToValidate.push(localToken);
+      tokenIdMap.set(localToken.id, tokenId);
+    }
+  }
+
+  if (tokensToValidate.length === 0) {
+    console.log(`  No tokens could be converted for validation`);
+    return;
+  }
+
+  // Validate all tokens with progress callback
+  try {
+    const result = await validationService.validateAllTokens(tokensToValidate, {
+      batchSize: 5,
+      onProgress: (completed, total) => {
+        if (completed % 10 === 0 || completed === total) {
+          console.log(`  Validated ${completed}/${total} tokens`);
+        }
+      }
+    });
+
+    // Process issues - move invalid tokens to Invalid folder
+    for (const issue of result.issues) {
+      const txfTokenId = tokenIdMap.get(issue.tokenId) || issue.tokenId;
+      const txf = ctx.tokens.get(txfTokenId);
+
+      if (txf) {
+        ctx.invalid.push({
+          token: txf,
+          timestamp: Date.now(),
+          invalidatedAt: Date.now(),
+          reason: 'SDK_VALIDATION' as InvalidReasonCode,
+          details: issue.reason
+        });
+        ctx.tokens.delete(txfTokenId);
+        ctx.stats.tokensRemoved++;
+        console.warn(`  Token ${txfTokenId.slice(0, 8)}... failed SDK validation: ${issue.reason}`);
+      }
+    }
+
+    ctx.stats.tokensValidated = tokensToValidate.length;
+    console.log(`  ✓ SDK validation: ${result.validTokens.length} valid, ${result.issues.length} invalid`);
+
+  } catch (error) {
+    // SDK validation failure is non-fatal - log and continue
+    console.warn(`  SDK validation error (non-fatal):`, error);
+    ctx.errors.push(`SDK validation error: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function step6_deduplicateTokens(ctx: SyncContext): void {
+  console.log(`🔀 [Step 6] Deduplicate Tokens`);
+
+  const beforeCount = ctx.tokens.size;
+  const uniqueTokens = new Map<string, TxfToken>();
+
+  // Deduplication strategy:
+  // - Group tokens by tokenId (the actual token identity)
+  // - For each tokenId, keep the most advanced version (more transactions or more committed)
+  // - Track unique tokenId:stateHash combinations seen for logging
+
+  const seenStates = new Set<string>();
+
+  for (const [tokenId, txf] of ctx.tokens) {
+    const stateHash = getCurrentStateHash(txf) || 'NO_STATE';
+    const stateKey = `${tokenId}:${stateHash}`;
+
+    // Track unique states seen
+    seenStates.add(stateKey);
+
+    const existing = uniqueTokens.get(tokenId);
+    if (!existing) {
+      // First time seeing this tokenId
+      uniqueTokens.set(tokenId, txf);
+      continue;
+    }
+
+    // Compare and keep the more advanced version
+    if (shouldPreferRemote(existing, txf)) {
+      // Current txf is more advanced - replace
+      uniqueTokens.set(tokenId, txf);
+    }
+    // Otherwise keep existing (more advanced)
+  }
+
+  // Replace ctx.tokens with deduplicated map
+  ctx.tokens.clear();
+  for (const [tokenId, txf] of uniqueTokens) {
+    ctx.tokens.set(tokenId, txf);
+  }
+
+  const afterCount = ctx.tokens.size;
+  const duplicatesRemoved = beforeCount - afterCount;
+  const uniqueStates = seenStates.size;
+
+  if (duplicatesRemoved > 0) {
+    console.log(`  Removed ${duplicatesRemoved} duplicate tokens (${beforeCount} → ${afterCount})`);
+    console.log(`  Unique tokenId:stateHash combinations: ${uniqueStates}`);
+  } else {
+    console.log(`  No duplicates found (${afterCount} tokens)`);
+  }
+}
+
+async function step7_detectSpentTokens(ctx: SyncContext): Promise<void> {
+  console.log(`💸 [Step 7] Detect Spent Tokens`);
+
+  if (ctx.tokens.size === 0) {
+    console.log(`  No tokens to check for spent status`);
+    return;
+  }
+
+  const validationService = getTokenValidationService();
+
+  // Convert TxfTokens to LocalTokens
+  const tokensToCheck: Token[] = [];
+  const tokenIdMap = new Map<string, string>(); // localId -> txfTokenId
+
+  for (const [tokenId, txf] of ctx.tokens) {
+    const localToken = txfToToken(tokenId, txf);
+    if (localToken) {
+      tokensToCheck.push(localToken);
+      tokenIdMap.set(localToken.id, tokenId);
+    }
+  }
+
+  if (tokensToCheck.length === 0) {
+    console.log(`  No tokens could be converted for spent checking`);
+    return;
+  }
+
+  try {
+    // Check spent status against aggregator
+    const result = await validationService.checkSpentTokens(
+      tokensToCheck,
+      ctx.publicKey,
+      {
+        batchSize: 3,
+        onProgress: (completed, total) => {
+          if (completed % 5 === 0 || completed === total) {
+            console.log(`  Checked ${completed}/${total} tokens for spent status`);
+          }
+        }
+      }
+    );
+
+    // Move spent tokens to Sent folder and add tombstones
+    for (const spentInfo of result.spentTokens) {
+      const txfTokenId = tokenIdMap.get(spentInfo.localId) || spentInfo.tokenId;
+      const txf = ctx.tokens.get(txfTokenId);
+
+      if (txf) {
+        // Move to Sent folder
+        ctx.sent.push({
+          token: txf,
+          timestamp: Date.now(),
+          spentAt: Date.now()
+        });
+
+        // Add tombstone
+        ctx.tombstones.push({
+          tokenId: spentInfo.tokenId,
+          stateHash: spentInfo.stateHash,
+          timestamp: Date.now()
+        });
+
+        // Remove from active
+        ctx.tokens.delete(txfTokenId);
+        ctx.stats.tokensRemoved++;
+        ctx.stats.tombstonesAdded++;
+
+        console.log(`  💸 Token ${spentInfo.tokenId.slice(0, 8)}... is SPENT, moved to Sent folder`);
+      }
+    }
+
+    // Log errors (non-fatal)
+    for (const error of result.errors) {
+      ctx.errors.push(error);
+    }
+
+    console.log(`  ✓ Spent detection: ${result.spentTokens.length} spent, ${tokensToCheck.length - result.spentTokens.length} unspent`);
+
+  } catch (error) {
+    // Spent detection failure is non-fatal - log and continue
+    console.warn(`  Spent detection error (non-fatal):`, error);
+    ctx.errors.push(`Spent detection error: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Step 7.5: Verify Tombstones Against Aggregator
+ *
+ * Tombstones track spent states (tokenId:stateHash).
+ * Multi-device sync requires tombstone verification to prevent:
+ * - False tombstones from network forks
+ * - BFT finality rollbacks before PoW finality
+ *
+ * For each tombstone:
+ * 1. Query aggregator for inclusion proof
+ * 2. If NO proof found: remove tombstone, recover token to Active
+ * 3. If proof found: tombstone is valid, keep
+ */
+async function step7_5_verifyTombstones(ctx: SyncContext): Promise<void> {
+  console.log(`🔍 [Step 7.5] Verify tombstones against aggregator`);
+
+  if (ctx.tombstones.length === 0) {
+    console.log(`  No tombstones to verify`);
+    return;
+  }
+
+  const validationService = getTokenValidationService();
+  const tombstonesToRemove: number[] = [];
+
+  for (let i = 0; i < ctx.tombstones.length; i++) {
+    const tombstone = ctx.tombstones[i];
+
+    // Query aggregator to verify this state was actually spent
+    const isSpent = await validationService.isTokenStateSpent(
+      tombstone.tokenId,
+      tombstone.stateHash,
+      ctx.publicKey
+    );
+
+    if (!isSpent) {
+      console.warn(`  🔄 False tombstone detected: ${tombstone.tokenId.slice(0, 8)}... stateHash=${tombstone.stateHash.slice(0, 16)}...`);
+      tombstonesToRemove.push(i);
+
+      // Attempt to recover token from archived/forked storage
+      const recoveredToken = await attemptTokenRecovery(ctx, tombstone);
+      if (recoveredToken) {
+        ctx.tokens.set(tombstone.tokenId, recoveredToken);
+        if (!ctx.stats.tokensRecovered) {
+          ctx.stats.tokensRecovered = 0;
+        }
+        ctx.stats.tokensRecovered++;
+      }
+    }
+  }
+
+  // Remove invalid tombstones (reverse order to maintain indices)
+  for (const idx of tombstonesToRemove.reverse()) {
+    ctx.tombstones.splice(idx, 1);
+  }
+
+  console.log(`  ✓ Verified ${ctx.tombstones.length} tombstones, removed ${tombstonesToRemove.length} false positives`);
+}
+
+/**
+ * Attempt to recover a token that was falsely tombstoned
+ *
+ * Checks archived and forked token storage in SyncContext for a matching token.
+ * If found, returns the token for restoration to active inventory.
+ *
+ * NOTE: Per TOKEN_INVENTORY_SPEC.md Section 6.1, we now read from SyncContext
+ * instead of WalletRepository, eliminating the dual-ownership race condition.
+ */
+async function attemptTokenRecovery(ctx: SyncContext, tombstone: TombstoneEntry): Promise<TxfToken | null> {
+  // Check archived tokens in SyncContext (loaded in Step 1)
+  const archivedToken = ctx.archivedTokens.get(tombstone.tokenId);
+  if (archivedToken) {
+    console.log(`    ♻️ Recovered from archived: ${tombstone.tokenId.slice(0, 8)}...`);
+    return archivedToken;
+  }
+
+  // Check forked tokens with exact state match
+  const forkedKey = `${tombstone.tokenId}_${tombstone.stateHash}`;
+  const forkedToken = ctx.forkedTokens.get(forkedKey);
+  if (forkedToken) {
+    console.log(`    ♻️ Recovered from forked: ${tombstone.tokenId.slice(0, 8)}... (state: ${tombstone.stateHash.slice(0, 12)}...)`);
+    return forkedToken;
+  }
+
+  console.log(`    ⚠️ Cannot recover token ${tombstone.tokenId.slice(0, 8)}... - not found in SyncContext archives`);
+  return null;
+}
+
+function step8_mergeInventory(ctx: SyncContext): void {
+  console.log(`📦 [Step 8] Merge Inventory`);
+
+  // Step 8.1: Handle completed transfers (mark as SPENT, move to Sent)
+  if (ctx.completedList.length > 0) {
+    console.log(`  Processing ${ctx.completedList.length} completed transfers`);
+    for (const completed of ctx.completedList) {
+      const token = ctx.tokens.get(completed.tokenId);
+
+      if (token) {
+        // Verify state hash matches
+        const currentStateHash = getCurrentStateHash(token);
+        if (currentStateHash === completed.stateHash) {
+          // Move to Sent folder
+          ctx.sent.push({
+            token,
+            timestamp: Date.now(),
+            spentAt: Date.now(),
+          });
+          ctx.tokens.delete(completed.tokenId);
+
+          // Add tombstone
+          ctx.tombstones.push({
+            tokenId: completed.tokenId,
+            stateHash: completed.stateHash,
+            timestamp: Date.now(),
+          });
+          ctx.stats.tombstonesAdded++;
+
+          console.log(`  ✓ Marked ${completed.tokenId.slice(0, 8)}... as SPENT`);
+        } else {
+          console.warn(`  State hash mismatch for ${completed.tokenId.slice(0, 8)}... (expected ${completed.stateHash.slice(0, 12)}..., got ${currentStateHash?.slice(0, 12)}...)`);
+        }
+      }
+    }
+  }
+
+  // Step 8.2: Detect boomerang tokens (outbox tokens that returned to us)
+  //
+  // A "boomerang" occurs when:
+  // 1. We created an outbox entry to send a token (commitment with previousStateHash = S1)
+  // 2. The send succeeded and token was transferred to recipient (state became S2)
+  // 3. Recipient sent the token back to us (state became S3)
+  // 4. We now have the token again, but with a different state than when we sent it
+  //
+  // Detection: If we have a token in our inventory that matches an outbox entry's sourceTokenId,
+  // AND the token's current state differs from the commitment's previousStateHash,
+  // then the token has "boomeranged" back to us and the outbox entry should be removed.
+  //
+  // Note: If currentStateHash === previousStateHash, the send is still pending (token hasn't moved)
+
+  const boomerangTokens: string[] = [];
+  for (const outboxEntry of ctx.outbox) {
+    // Check if we have a token matching this outbox entry's source
+    const token = ctx.tokens.get(outboxEntry.sourceTokenId);
+    if (!token) {
+      // Token not in our inventory - send may have succeeded and it's with recipient
+      continue;
+    }
+
+    const currentStateHash = getCurrentStateHash(token);
+    if (!currentStateHash) {
+      continue;
+    }
+
+    try {
+      const commitment = JSON.parse(outboxEntry.commitmentJson);
+      const sentFromStateHash = commitment.transactionData?.previousStateHash;
+
+      if (!sentFromStateHash) {
+        continue;
+      }
+
+      // If current state differs from the state we sent FROM, token has changed
+      // This means either: send completed and token came back, OR token was spent elsewhere
+      if (currentStateHash !== sentFromStateHash) {
+        boomerangTokens.push(outboxEntry.id);
+        console.log(`  🪃 Detected boomerang: ${outboxEntry.sourceTokenId.slice(0, 8)}... (state changed from ${sentFromStateHash.slice(0, 12)}... to ${currentStateHash.slice(0, 12)}...)`);
+      }
+      // If currentStateHash === sentFromStateHash, send is still pending (token hasn't moved yet)
+    } catch {
+      // Ignore parse errors - commitment might be malformed
+    }
+  }
+
+  // Remove boomerang entries from outbox
+  if (boomerangTokens.length > 0) {
+    for (const outboxId of boomerangTokens) {
+      const index = ctx.outbox.findIndex(e => e.id === outboxId);
+      if (index !== -1) {
+        ctx.outbox.splice(index, 1);
+      }
+    }
+  }
+
+  console.log(`  Merge complete: ${ctx.tokens.size} active, ${ctx.sent.length} sent, ${ctx.invalid.length} invalid, ${ctx.outbox.length} outbox, ${boomerangTokens.length} boomerangs removed`);
+}
+
+/**
+ * Step 8.4: Extract Nametags
+ *
+ * Filters nametags to only include those owned by the current user.
+ * Uses predicate ownership verification to ensure security.
+ */
+async function step8_4_extractNametags(ctx: SyncContext): Promise<NametagData[]> {
+  console.log(`🏷️ [Step 8.4] Extract Nametags`);
+
+  if (ctx.nametags.length === 0) {
+    console.log(`  No nametags to filter`);
+    return [];
+  }
+
+  const userNametags: NametagData[] = [];
+  const pubKeyBytes = Buffer.from(ctx.publicKey, 'hex');
+
+  for (const nametag of ctx.nametags) {
+    if (!nametag.token) {
+      console.warn(`  Skipping nametag ${nametag.name}: missing token data`);
+      continue;
+    }
+
+    try {
+      // Parse the token and verify ownership
+      const tokenJson = nametag.token as Record<string, unknown>;
+
+      // Check if token has state with predicate (required for ownership check)
+      const stateJson = tokenJson.state as { predicate: string; data: string | null } | undefined;
+      if (!stateJson || !stateJson.predicate) {
+        console.warn(`  Skipping nametag ${nametag.name}: missing state predicate`);
+        continue;
+      }
+
+      // Use TokenState.fromJSON to properly parse the hex-encoded CBOR predicate
+      const { TokenState } = await import(
+        '@unicitylabs/state-transition-sdk/lib/token/TokenState'
+      );
+      const tokenState = TokenState.fromJSON(stateJson);
+
+      // Use PredicateEngineService to verify ownership
+      const { PredicateEngineService } = await import(
+        '@unicitylabs/state-transition-sdk/lib/predicate/PredicateEngineService'
+      );
+      const predicate = await PredicateEngineService.createPredicate(tokenState.predicate);
+      const isOwner = await predicate.isOwner(pubKeyBytes);
+
+      if (isOwner) {
+        userNametags.push(nametag);
+        console.log(`  ✓ ${nametag.name}: owned by current user`);
+      } else {
+        console.log(`  ✗ ${nametag.name}: not owned by current user (filtered)`);
+      }
+    } catch (error) {
+      // On parse error, include the nametag but log warning
+      // This prevents data loss if token format is unexpected
+      console.warn(`  ⚠️ ${nametag.name}: ownership check failed, including anyway:`, error);
+      userNametags.push(nametag);
+    }
+  }
+
+  console.log(`  Filtered ${userNametags.length}/${ctx.nametags.length} nametags for current user`);
+  return userNametags;
+}
+
+/**
+ * Step 8.5: Ensure Nametag-Nostr Consistency
+ *
+ * For each nametag token in the inventory, verify that the nametag binding
+ * is registered with Nostr relays. This ensures relays can route token
+ * transfer events to the correct identity.
+ *
+ * Per spec Section 8.5:
+ * - Query Nostr relay(s) for existing binding
+ * - If binding missing or pubkey mismatch, publish binding
+ * - Best-effort, non-blocking (failures don't stop sync)
+ * - Security: On-chain ownership is source of truth, Nostr is routing optimization
+ * - Skip in NAMETAG mode (read-only operation)
+ */
+async function step8_5_ensureNametagNostrBinding(ctx: SyncContext): Promise<void> {
+  console.log(`🏷️ [Step 8.5] Ensure Nametag-Nostr Consistency`);
+
+  // Skip in NAMETAG mode (read-only operation per spec section 8.5)
+  if (ctx.mode === 'NAMETAG') {
+    console.log(`  Skipping in NAMETAG mode (read-only)`);
+    return;
+  }
+
+  if (ctx.nametags.length === 0) {
+    console.log(`  No nametags to process`);
+    return;
+  }
+
+  // Initialize NostrService (fail gracefully if unavailable)
+  let nostrService: NostrService;
+  try {
+    nostrService = NostrService.getInstance(IdentityManager.getInstance());
+  } catch (err) {
+    console.warn(`  Failed to initialize NostrService:`, err);
+    return;
+  }
+
+  let published = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const nametag of ctx.nametags) {
+    if (!nametag.name) {
+      console.warn(`  Skipping nametag without name`);
+      skipped++;
+      continue;
+    }
+
+    // Clean the nametag name (remove @ prefix if present)
+    const cleanName = nametag.name.replace(/^@/, '').trim();
+
+    // Validate cleaned name is not empty
+    if (!cleanName) {
+      console.warn(`  Skipping nametag with empty name after cleanup`);
+      skipped++;
+      continue;
+    }
+
+    try {
+      // Derive the proxy address from nametag name
+      // IMPORTANT: Proxy address (where transfers go) is DIFFERENT from owner address (who controls token)
+      // The proxy address is deterministically derived from the nametag name itself
+      const { ProxyAddress } = await import('@unicitylabs/state-transition-sdk/lib/address/ProxyAddress');
+      const proxyAddress = await ProxyAddress.fromNameTag(cleanName);
+      const proxyAddressStr = proxyAddress.address;
+
+      // Query relay for existing binding
+      const existingPubkey = await nostrService.queryPubkeyByNametag(cleanName);
+
+      if (existingPubkey && existingPubkey === proxyAddressStr) {
+        // Binding exists and matches proxy address - no action needed
+        console.log(`  ✓ ${cleanName}: binding already registered -> ${proxyAddressStr.slice(0, 12)}...`);
+        skipped++;
+        continue;
+      }
+
+      // Binding missing or address mismatch - publish binding
+      // Publish the PROXY ADDRESS (where transfers to @nametag should go), not owner address
+      console.log(`  Publishing binding for ${cleanName} -> ${proxyAddressStr.slice(0, 12)}...`);
+      const success = await nostrService.publishNametagBinding(cleanName, proxyAddressStr);
+
+      if (success) {
+        console.log(`  ✓ ${cleanName}: binding published successfully`);
+        published++;
+        ctx.stats.nametagsPublished++;
+      } else {
+        console.warn(`  ✗ ${cleanName}: binding publish failed`);
+        failed++;
+      }
+    } catch (error) {
+      // Best-effort - don't fail sync on Nostr errors
+      console.warn(`  ✗ ${cleanName}: error ensuring binding:`, error);
+      failed++;
+    }
+  }
+
+  console.log(`  Nametag binding summary: ${published} published, ${skipped} skipped, ${failed} failed (total: ${ctx.nametags.length})`);
+}
+
+/**
+ * Compare two TxfStorageData objects for content equality.
+ * Ignores _meta.version and _meta.lastCid since those change every sync.
+ * Returns true if content (tokens, nametags, tombstones, etc.) is identical.
+ */
+function isContentEqual(a: TxfStorageData, b: TxfStorageData): boolean {
+  // Compare nametag
+  const nametagA = JSON.stringify(a._nametag || null);
+  const nametagB = JSON.stringify(b._nametag || null);
+  if (nametagA !== nametagB) return false;
+
+  // Compare tombstones
+  const tombstonesA = JSON.stringify(a._tombstones || []);
+  const tombstonesB = JSON.stringify(b._tombstones || []);
+  if (tombstonesA !== tombstonesB) return false;
+
+  // Compare sent
+  const sentA = JSON.stringify(a._sent || []);
+  const sentB = JSON.stringify(b._sent || []);
+  if (sentA !== sentB) return false;
+
+  // Compare invalid
+  const invalidA = JSON.stringify(a._invalid || []);
+  const invalidB = JSON.stringify(b._invalid || []);
+  if (invalidA !== invalidB) return false;
+
+  // Compare outbox
+  const outboxA = JSON.stringify(a._outbox || []);
+  const outboxB = JSON.stringify(b._outbox || []);
+  if (outboxA !== outboxB) return false;
+
+  // Collect token keys (entries starting with _ that aren't special keys)
+  const specialKeys = new Set(['_meta', '_nametag', '_tombstones', '_sent', '_invalid', '_outbox', '_invalidatedNametags', '_mintOutbox']);
+  const getTokenKeys = (data: TxfStorageData): string[] => {
+    return Object.keys(data).filter(k => !specialKeys.has(k)).sort();
+  };
+
+  const tokensKeysA = getTokenKeys(a);
+  const tokensKeysB = getTokenKeys(b);
+
+  // Compare token count
+  if (tokensKeysA.length !== tokensKeysB.length) return false;
+
+  // Compare token keys
+  if (tokensKeysA.join(',') !== tokensKeysB.join(',')) return false;
+
+  // Compare each token's content
+  for (const key of tokensKeysA) {
+    const tokenA = JSON.stringify(a[key]);
+    const tokenB = JSON.stringify(b[key]);
+    if (tokenA !== tokenB) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Build TxfStorageData from sync context
+ *
+ * Helper function to construct storage data structure from current sync state.
+ */
+function buildStorageDataFromContext(ctx: SyncContext): TxfStorageData {
+  // Build TxfStorageData structure
+  // Note: timestamp is excluded from _meta for CID stability (same content = same CID)
+
+  // CRITICAL: Use max(localVersion, remoteVersion) + 1 for version calculation
+  // This ensures proper version progression when:
+  // 1. Recovering from IPFS after localStorage corruption (local=1, remote=5 -> new=6)
+  // 2. Normal sync progression (local=5, remote=5 -> new=6)
+  // 3. Local-only changes (local=5, remote=0 -> new=6)
+  const baseVersion = Math.max(ctx.localVersion, ctx.remoteVersion);
+  const newVersion = baseVersion + 1;
+
+  const storageData: TxfStorageData = {
+    _meta: {
+      version: newVersion,
+      address: ctx.address,
+      ipnsName: ctx.ipnsName,
+      formatVersion: '2.0',
+      lastCid: ctx.remoteCid || undefined,
+    },
+  };
+
+  // Add nametag if present
+  if (ctx.nametags.length > 0) {
+    storageData._nametag = ctx.nametags[0];
+  }
+
+  // Add tombstones - deduplicate by tokenId:stateHash to prevent duplicates
+  // Duplicates can accumulate from multiple sync cycles detecting the same spent token
+  if (ctx.tombstones.length > 0) {
+    const seenKeys = new Set<string>();
+    const deduped: TombstoneEntry[] = [];
+    for (const t of ctx.tombstones) {
+      const key = `${t.tokenId}:${t.stateHash}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        deduped.push(t);
+      }
+    }
+    storageData._tombstones = deduped;
+    if (deduped.length < ctx.tombstones.length) {
+      console.log(`  🧹 Deduplicated tombstones: ${ctx.tombstones.length} → ${deduped.length}`);
+    }
+  }
+
+  // Add sent tokens - deduplicate by tokenId:stateHash to prevent duplicates
+  // Uses getCurrentStateHash to get state from token structure
+  if (ctx.sent.length > 0) {
+    const seenKeys = new Set<string>();
+    const deduped: SentTokenEntry[] = [];
+    for (const s of ctx.sent) {
+      const tokenId = s.token?.genesis?.data?.tokenId || '';
+      const stateHash = getCurrentStateHash(s.token) || 'unknown';
+      const key = `${tokenId}:${stateHash}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        deduped.push(s);
+      }
+    }
+    storageData._sent = deduped;
+    if (deduped.length < ctx.sent.length) {
+      console.log(`  🧹 Deduplicated sent tokens: ${ctx.sent.length} → ${deduped.length}`);
+    }
+  }
+
+  // Add invalid tokens - deduplicate by tokenId:stateHash to prevent duplicates
+  if (ctx.invalid.length > 0) {
+    const seenKeys = new Set<string>();
+    const deduped: InvalidTokenEntry[] = [];
+    for (const i of ctx.invalid) {
+      const tokenId = i.token?.genesis?.data?.tokenId || '';
+      const stateHash = getCurrentStateHash(i.token) || 'unknown';
+      const key = `${tokenId}:${stateHash}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        deduped.push(i);
+      }
+    }
+    storageData._invalid = deduped;
+    if (deduped.length < ctx.invalid.length) {
+      console.log(`  🧹 Deduplicated invalid tokens: ${ctx.invalid.length} → ${deduped.length}`);
+    }
+  }
+
+  // Add outbox entries
+  if (ctx.outbox.length > 0) {
+    storageData._outbox = ctx.outbox;
+  }
+
+  // Add active tokens with _<tokenId> keys
+  for (const [tokenId, txf] of ctx.tokens) {
+    storageData[keyFromTokenId(tokenId)] = txf;
+  }
+
+  // Add archived tokens with _archived_<tokenId> keys
+  for (const [tokenId, txf] of ctx.archivedTokens) {
+    storageData[archivedKeyFromTokenId(tokenId)] = txf;
+  }
+
+  // Add forked tokens with _forked_<tokenId>_<stateHash> keys
+  for (const [forkedKey, txf] of ctx.forkedTokens) {
+    // forkedKey is already in format: tokenId_stateHash
+    const [tokenId, stateHash] = forkedKey.split('_');
+    if (tokenId && stateHash) {
+      storageData[forkedKeyFromTokenIdAndState(tokenId, stateHash)] = txf;
+    }
+  }
+
+  return storageData;
+}
+
+function step9_prepareStorage(ctx: SyncContext): void {
+  console.log(`📤 [Step 9] Prepare for Storage`);
+
+  // Per TOKEN_INVENTORY_SPEC.md Section 6.1:
+  // "Only inventorySync should be allowed to access the inventory in localStorage!"
+  //
+  // We write directly to localStorage in TxfStorageData format (the canonical format).
+  // WalletRepository should NOT be used here - it uses a different format (StoredWallet)
+  // that would conflict with the TxfStorageData format we need for IPFS sync.
+
+  // Build TxfStorageData from context
+  // Note: buildStorageDataFromContext increments version internally (ctx.localVersion + 1)
+  const storageData = buildStorageDataFromContext(ctx);
+
+  // Read current localStorage to compare content
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(ctx.address);
+  const existingJson = localStorage.getItem(storageKey);
+  let existingData: TxfStorageData | null = null;
+  if (existingJson) {
+    try {
+      existingData = JSON.parse(existingJson);
+    } catch {
+      // Malformed JSON - treat as no existing data (will overwrite)
+      console.warn(`  ⚠️ Malformed JSON in localStorage, will overwrite`);
+    }
+  }
+
+  // Compare content (excluding version and lastCid which change every sync)
+  // Only write if content actually changed
+  if (existingData && isContentEqual(existingData, storageData)) {
+    // Content same as localStorage, but check if we have local-only content that needs upload
+    if (ctx.hasLocalOnlyContent) {
+      console.log(`  📤 Local-only content detected - forcing upload to IPFS`);
+      // Fall through to write localStorage and mark upload needed
+    } else {
+      console.log(`  ⏭️ No content changes detected`);
+      ctx.uploadNeeded = false;
+
+      // If remote version > local version, update local to match remote
+      // This prevents re-fetching IPFS data on every reload
+      if (ctx.remoteVersion > existingData._meta.version) {
+        console.log(`  📥 Updating local version to match remote: ${existingData._meta.version} → ${ctx.remoteVersion}`);
+        existingData._meta.version = ctx.remoteVersion;
+        localStorage.setItem(storageKey, JSON.stringify(existingData));
+        ctx.localVersion = ctx.remoteVersion;
+      } else {
+        console.log(`  ⏭️ Skipping localStorage write (version ${existingData._meta.version} is current)`);
+        ctx.localVersion = existingData._meta.version;
+      }
+      return;
+    }
+  }
+
+  // Content changed - update version and write
+  ctx.localVersion = storageData._meta.version;
+  localStorage.setItem(storageKey, JSON.stringify(storageData));
+  ctx.uploadNeeded = true;
+
+  // CRITICAL: Store the prepared data for step 10 to avoid double-increment bug
+  // Previously, step 10 called buildStorageDataFromContext() again which incremented version,
+  // causing localStorage to have version N but IPFS to have version N+1.
+  ctx.preparedStorageData = storageData;
+
+  // Dispatch wallet-updated event so UI components refresh
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('wallet-updated'));
+  }
+
+  console.log(`  ✓ Wrote to localStorage: version=${storageData._meta.version}, ${ctx.tokens.size} tokens`);
+  console.log(`  ✓ Folders: ${ctx.sent.length} sent, ${ctx.invalid.length} invalid, ${ctx.tombstones.length} tombstones`);
+}
+
+async function step10_uploadIpfs(ctx: SyncContext): Promise<void> {
+  console.log(`📤 [Step 10] Upload to IPFS`);
+
+  if (!ctx.uploadNeeded) {
+    console.log(`  ⏭️ Skipping IPFS upload: no changes to upload`);
+    return;
+  }
+
+  // Try to get transport (gracefully skip if not available)
+  let transport: IpfsTransport | null = null;
+  try {
+    transport = getIpfsTransport();
+  } catch {
+    console.log(`  ⏭️ Skipping IPFS upload: transport not available`);
+    return;
+  }
+
+  // Check if transport is initialized
+  const initialized = await transport.ensureInitialized();
+  if (!initialized) {
+    console.log(`  ⏭️ Skipping IPFS upload: transport not initialized`);
+    return;
+  }
+
+  // CRITICAL FIX: Reuse storage data from step 9 instead of rebuilding
+  // This prevents the version double-increment bug where step 10 would call
+  // buildStorageDataFromContext() again, incrementing version a second time.
+  if (!ctx.preparedStorageData) {
+    console.error(`  ❌ BUG: preparedStorageData is null - step 9 didn't run correctly`);
+    ctx.errors.push('Internal error: preparedStorageData is null');
+    return;
+  }
+  const storageData = ctx.preparedStorageData;
+
+  // Diagnostic logging: show exactly what we're uploading
+  // Token keys are _<tokenId> (e.g., "_abc123..."), not to be confused with
+  // special keys like _meta, _sent, etc.
+  const tokenKeys = Object.keys(storageData).filter(k => isTokenKey(k));
+  const tokenCount = tokenKeys.length;
+  const sentCount = storageData._sent?.length || 0;
+  const tombstoneCount = storageData._tombstones?.length || 0;
+  console.log(`  📦 Upload payload: version=${storageData._meta?.version}, tokens=${tokenCount}, sent=${sentCount}, tombstones=${tombstoneCount}`);
+  // Log token IDs to help trace missing tokens (e.g., change tokens from splits)
+  if (tokenCount <= 15) {
+    const tokenIds = tokenKeys.map(k => tokenIdFromKey(k).slice(0, 8)).join(', ');
+    console.log(`  📦 Token IDs: ${tokenIds}`);
+  }
+
+  // Upload content to IPFS
+  console.log(`  📤 Uploading content to IPFS...`);
+  const uploadResult = await transport.uploadContent(storageData);
+  if (!uploadResult.success) {
+    console.warn(`  ❌ IPFS upload failed: ${uploadResult.error}`);
+    ctx.errors.push(uploadResult.error || 'IPFS upload failed');
+    return;
+  }
+
+  ctx.remoteCid = uploadResult.cid;
+  transport.setLastCid(uploadResult.cid);
+  console.log(`  ✅ Content uploaded: CID=${uploadResult.cid.slice(0, 16)}...`);
+
+  // NOTE: We do NOT overwrite localStorage here.
+  // WalletRepository is the authoritative local store (StoredWallet format).
+  // The CID is tracked by the transport layer and context.
+
+  // Publish to IPNS
+  console.log(`  📡 Publishing to IPNS...`);
+  const publishResult = await transport.publishIpns(uploadResult.cid);
+  if (publishResult.success) {
+    ctx.ipnsPublished = true;
+    console.log(`  ✅ IPNS published: seq=${publishResult.sequence}`);
+  } else {
+    console.warn(`  ⚠️ IPNS publish failed (will retry in background): ${publishResult.error}`);
+  }
+}
+
+// ============================================
+// Result Builders
+// ============================================
+
+function buildSuccessResult(ctx: SyncContext): SyncResult {
+  // Determine status based on IPFS/IPNS state:
+  // - SUCCESS: Either no upload needed, or upload + IPNS publish both succeeded
+  // - PARTIAL_SUCCESS: Content uploaded but IPNS publish failed
+  const hasUploadedContent = ctx.remoteCid !== null && ctx.uploadNeeded;
+  const ipnsPublishPending = hasUploadedContent && !ctx.ipnsPublished;
+
+  return {
+    status: ipnsPublishPending ? 'PARTIAL_SUCCESS' : 'SUCCESS',
+    syncMode: ctx.mode,
+    operationStats: ctx.stats,
+    inventoryStats: buildInventoryStats(ctx),
+    lastCid: ctx.remoteCid || undefined,
+    ipnsName: ctx.ipnsName,
+    ipnsPublished: ctx.ipnsPublished,
+    ipnsPublishPending,
+    syncDurationMs: Date.now() - ctx.startTime,
+    timestamp: Date.now(),
+    version: ctx.localVersion,
+    circuitBreaker: ctx.circuitBreaker,
+    validationIssues: ctx.errors.length > 0 ? ctx.errors : undefined
+  };
+}
+
+function buildNametagResult(ctx: SyncContext, nametags: NametagData[]): SyncResult {
+  return {
+    status: 'NAMETAG_ONLY',
+    syncMode: 'NAMETAG',
+    operationStats: ctx.stats,
+    syncDurationMs: Date.now() - ctx.startTime,
+    timestamp: Date.now(),
+    nametags,
+    ipnsPublishPending: false
+  };
+}
+
+function buildErrorResult(ctx: SyncContext, error: unknown): SyncResult {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  return {
+    status: 'ERROR',
+    syncMode: ctx.mode,
+    errorCode: 'UNKNOWN',
+    errorMessage,
+    operationStats: ctx.stats,
+    syncDurationMs: Date.now() - ctx.startTime,
+    timestamp: Date.now(),
+    circuitBreaker: ctx.circuitBreaker,
+    ipnsPublishPending: false
+  };
+}
+
+function buildInventoryStats(ctx: SyncContext): TokenInventoryStats {
+  return {
+    activeTokens: ctx.tokens.size,
+    sentTokens: ctx.sent.length,
+    outboxTokens: ctx.outbox.length,
+    invalidTokens: ctx.invalid.length,
+    nametagTokens: ctx.nametags.length,
+    tombstoneCount: ctx.tombstones.length
+  };
+}
+
+// ============================================
+// READ-ONLY QUERY API
+// ============================================
+// These functions provide direct read access to localStorage in TxfStorageData format.
+// Per TOKEN_INVENTORY_SPEC.md Section 6.1, all writes should go through inventorySync().
+// However, read-only queries can access localStorage directly for UI display purposes.
+
+/**
+ * Get all active tokens for an address
+ * Read-only query - does not trigger sync
+ * Supports both TxfStorageData format (new) and StoredWallet format (legacy)
+ */
+export function getTokensForAddress(address: string): Token[] {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  if (!json) return [];
+
+  try {
+    const data = JSON.parse(json) as Record<string, unknown>;
+    const tokens: Token[] = [];
+
+    // Check for new TxfStorageData format (tokens stored as _<tokenId> keys)
+    for (const key of Object.keys(data)) {
+      if (isTokenKey(key)) {
+        const txf = data[key] as TxfToken;
+        const token = txfToToken(tokenIdFromKey(key), txf);
+        if (token) {
+          tokens.push(token);
+        }
+      }
+    }
+
+    // If no tokens found, check for legacy StoredWallet format (tokens in array)
+    if (tokens.length === 0 && data.tokens && Array.isArray(data.tokens)) {
+      // Legacy format: { id, name, address, tokens: Token[], nametag: {...} }
+      for (const token of data.tokens as Token[]) {
+        if (token && token.id) {
+          tokens.push(token);
+        }
+      }
+    }
+
+    return tokens;
+  } catch {
+    console.warn(`[getTokensForAddress] Failed to parse localStorage data for ${address.slice(0, 20)}...`);
+    return [];
+  }
+}
+
+/**
+ * Get nametag data for an address
+ * Read-only query - does not trigger sync
+ * Supports both TxfStorageData format (new) and StoredWallet format (legacy)
+ */
+export function getNametagForAddress(address: string): NametagData | null {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  if (!json) return null;
+
+  try {
+    const data = JSON.parse(json) as Record<string, unknown>;
+    // Check new TxfStorageData format first (_nametag)
+    if (data._nametag) {
+      return data._nametag as NametagData;
+    }
+    // Fall back to legacy StoredWallet format (nametag)
+    if (data.nametag) {
+      return data.nametag as NametagData;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get tombstones for an address
+ * Read-only query - does not trigger sync
+ * Supports both TxfStorageData format (new) and StoredWallet format (legacy)
+ */
+export function getTombstonesForAddress(address: string): TombstoneEntry[] {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  if (!json) return [];
+
+  try {
+    const data = JSON.parse(json) as Record<string, unknown>;
+    // Check new TxfStorageData format first (_tombstones)
+    if (data._tombstones && Array.isArray(data._tombstones)) {
+      return data._tombstones as TombstoneEntry[];
+    }
+    // Fall back to legacy StoredWallet format (tombstones)
+    if (data.tombstones && Array.isArray(data.tombstones)) {
+      return data.tombstones as TombstoneEntry[];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get invalidated nametags for an address
+ * These are nametags that failed Nostr validation (owned by different pubkey)
+ * Read-only query - does not trigger sync
+ * Supports both TxfStorageData format (new) and StoredWallet format (legacy)
+ */
+export function getInvalidatedNametagsForAddress(address: string): InvalidatedNametagEntry[] {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  if (!json) return [];
+
+  try {
+    const data = JSON.parse(json) as Record<string, unknown>;
+    // Check new TxfStorageData format first (_invalidatedNametags)
+    if (data._invalidatedNametags && Array.isArray(data._invalidatedNametags)) {
+      return data._invalidatedNametags as InvalidatedNametagEntry[];
+    }
+    // Fall back to legacy StoredWallet format (invalidatedNametags)
+    if (data.invalidatedNametags && Array.isArray(data.invalidatedNametags)) {
+      return data.invalidatedNametags as InvalidatedNametagEntry[];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Check if an address has any tokens
+ * Read-only query - does not trigger sync
+ */
+export function hasTokensForAddress(address: string): boolean {
+  return getTokensForAddress(address).length > 0;
+}
+
+/**
+ * Check if an address has a nametag
+ * Read-only query - does not trigger sync
+ */
+export function checkNametagForAddress(address: string): NametagData | null {
+  return getNametagForAddress(address);
+}
+
+/**
+ * Get metadata version for an address
+ * Read-only query - useful for version comparison
+ */
+export function getVersionForAddress(address: string): number {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  if (!json) return 0;
+
+  try {
+    const data = JSON.parse(json) as TxfStorageData;
+    return data._meta?.version || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Get archived tokens for an address
+ * Archived tokens are spent tokens kept for recovery purposes
+ * Read-only query - does not trigger sync
+ * Supports both TxfStorageData format (new) and StoredWallet format (legacy)
+ */
+export function getArchivedTokensForAddress(address: string): Map<string, TxfToken> {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  const result = new Map<string, TxfToken>();
+
+  if (!json) return result;
+
+  try {
+    const data = JSON.parse(json) as Record<string, unknown>;
+
+    // Check new TxfStorageData format first (_archived_<tokenId> keys)
+    for (const key of Object.keys(data)) {
+      if (isArchivedKey(key)) {
+        const txf = data[key] as TxfToken;
+        const tokenId = tokenIdFromArchivedKey(key);
+        result.set(tokenId, txf);
+      }
+    }
+
+    // If no archived tokens found, check legacy StoredWallet format (archivedTokens object)
+    if (result.size === 0 && data.archivedTokens && typeof data.archivedTokens === 'object') {
+      const legacyArchived = data.archivedTokens as Record<string, TxfToken>;
+      for (const [tokenId, txf] of Object.entries(legacyArchived)) {
+        if (txf) {
+          result.set(tokenId, txf);
+        }
+      }
+    }
+
+    return result;
+  } catch {
+    return result;
+  }
+}
+
+/**
+ * Get forked tokens for an address
+ * Forked tokens are tokens saved at specific states for conflict resolution
+ * Read-only query - does not trigger sync
+ */
+export function getForkedTokensForAddress(address: string): Map<string, TxfToken> {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  const result = new Map<string, TxfToken>();
+
+  if (!json) return result;
+
+  try {
+    const data = JSON.parse(json) as Record<string, unknown>;
+
+    for (const key of Object.keys(data)) {
+      if (isForkedKey(key)) {
+        const txf = data[key] as TxfToken;
+        const parsed = parseForkedKey(key);
+        if (parsed) {
+          const forkedKey = `${parsed.tokenId}_${parsed.stateHash}`;
+          result.set(forkedKey, txf);
+        }
+      }
+    }
+
+    return result;
+  } catch {
+    return result;
+  }
+}
+
+/**
+ * Get a specific archived token by tokenId
+ * Read-only query - does not trigger sync
+ */
+export function getArchivedTokenForAddress(address: string, tokenId: string): TxfToken | null {
+  const archived = getArchivedTokensForAddress(address);
+  return archived.get(tokenId) || null;
+}
+
+/**
+ * Get a specific forked token by tokenId and stateHash
+ * Read-only query - does not trigger sync
+ */
+export function getForkedTokenForAddress(
+  address: string,
+  tokenId: string,
+  stateHash: string
+): TxfToken | null {
+  const forked = getForkedTokensForAddress(address);
+  return forked.get(`${tokenId}_${stateHash}`) || null;
+}
+
+// ============================================
+// WRITE API (Wrappers around inventorySync)
+// ============================================
+// These functions provide convenient write operations that delegate to inventorySync().
+// All writes go through the centralized sync pipeline to prevent race conditions.
+
+/**
+ * Add a token to the inventory
+ * Triggers inventorySync with the token as incoming
+ */
+export async function addToken(
+  address: string,
+  publicKey: string,
+  ipnsName: string,
+  token: Token,
+  options?: { local?: boolean }
+): Promise<SyncResult> {
+  return inventorySync({
+    address,
+    publicKey,
+    ipnsName,
+    incomingTokens: [token],
+    local: options?.local ?? false,
+  });
+}
+
+/**
+ * Remove a token from the inventory (mark as spent)
+ * Triggers inventorySync with the completed transfer info
+ */
+export async function removeToken(
+  address: string,
+  publicKey: string,
+  ipnsName: string,
+  tokenId: string,
+  stateHash: string,
+  options?: { local?: boolean }
+): Promise<SyncResult> {
+  return inventorySync({
+    address,
+    publicKey,
+    ipnsName,
+    completedList: [{
+      tokenId,
+      stateHash,
+      inclusionProof: {}, // Minimal proof for removal
+    }],
+    local: options?.local ?? false,
+  });
+}
+
+/**
+ * Set nametag for an address
+ * This is a direct localStorage write since nametag is not part of token sync
+ */
+export function setNametagForAddress(address: string, nametag: NametagData): void {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+
+  let data: TxfStorageData;
+  if (json) {
+    try {
+      data = JSON.parse(json) as TxfStorageData;
+    } catch {
+      // Parse error - create fresh structure
+      // Note: This preserves existing behavior. If corruption is a concern,
+      // the data should be recovered from IPFS on next sync.
+      data = {
+        _meta: {
+          version: 1,
+          address,
+          ipnsName: '',
+          formatVersion: '2.0',
+        },
+      };
+    }
+  } else {
+    data = {
+      _meta: {
+        version: 1,
+        address,
+        ipnsName: '',
+        formatVersion: '2.0',
+      },
+    };
+  }
+
+  data._nametag = nametag;
+  localStorage.setItem(storageKey, JSON.stringify(data));
+
+  // Dispatch wallet-updated event so UI refreshes
+  window.dispatchEvent(new Event('wallet-updated'));
+}
+
+/**
+ * Clear nametag for an address
+ */
+export function clearNametagForAddress(address: string): void {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+  if (!json) return;
+
+  try {
+    const data = JSON.parse(json) as TxfStorageData;
+    delete data._nametag;
+    localStorage.setItem(storageKey, JSON.stringify(data));
+    window.dispatchEvent(new Event('wallet-updated'));
+  } catch {
+    // Ignore parse errors
+  }
+}
+
+/**
+ * Dispatch wallet-updated event to notify UI components of changes
+ * Use this when wallet state has changed and components need to refresh
+ */
+export function dispatchWalletUpdated(): void {
+  window.dispatchEvent(new Event('wallet-updated'));
+}
+
+// ============================================
+// IMPORT FLOW FLAGS
+// ============================================
+// Session flags for import flow management
+
+const IMPORT_SESSION_FLAG = "sphere_import_in_progress";
+
+/**
+ * Mark that we're in an active import flow.
+ * During import, credentials are saved BEFORE wallet data, so the safeguard
+ * that prevents wallet creation when credentials exist needs to be bypassed.
+ * This flag is stored in sessionStorage so it's cleared on browser close.
+ */
+export function setImportInProgress(): void {
+  console.log("📦 [IMPORT] Setting import-in-progress flag");
+  sessionStorage.setItem(IMPORT_SESSION_FLAG, "true");
+}
+
+/**
+ * Clear the import-in-progress flag.
+ * Should be called when import completes (success or failure).
+ */
+export function clearImportInProgress(): void {
+  console.log("📦 [IMPORT] Clearing import-in-progress flag");
+  sessionStorage.removeItem(IMPORT_SESSION_FLAG);
+}
+
+/**
+ * Check if we're currently in an import flow.
+ */
+export function isImportInProgress(): boolean {
+  return sessionStorage.getItem(IMPORT_SESSION_FLAG) === "true";
+}

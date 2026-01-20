@@ -12,7 +12,6 @@ import { useL1Wallet, useConnectionStatus } from "../hooks";
 import { HistoryView, MainWalletView } from ".";
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
 import { ConnectionStatus } from "../components/ConnectionStatus";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
@@ -242,9 +241,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       // Fallback: remove path to trigger default behavior
       localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
     }
-
-    // Reset L3 state so it picks up new identity
-    WalletRepository.getInstance().resetInMemoryState();
 
     // Force page reload to restart NostrService with new identity
     window.location.reload();

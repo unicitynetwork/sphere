@@ -25,3 +25,18 @@ agentic-chatbot-main
 *.sw?
 .env
 .env.production
+*.pdf
+
+# Claude Code analysis artifacts
+ANALYSIS_INDEX.md
+COVERAGE_MATRIX_SUMMARY.md
+TEST_ANALYSIS_*.txt
+TEST_ANALYSIS_*.md
+TEST_COVERAGE_ANALYSIS.md
+TEST_FINDINGS_SUMMARY.md
+TEST_GAPS_RECOMMENDATIONS.md
+TEST_IMPROVEMENTS.md
+TEST_QUICK_REFERENCE.txt
+docs/RECOMMENDED_TEST_CASES.md
+docs/TESTING_ROADMAP.md
+docs/TEST_*.md

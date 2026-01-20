@@ -25,7 +25,6 @@ import {
 import { useL1Wallet, useConnectionStatus } from "../hooks";
 import { useAddressNametags } from "../hooks/useAddressNametags";
 import { ConnectionStatus } from "../components/ConnectionStatus";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 import {
   QRModal,
@@ -197,7 +196,6 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     } else {
       localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
     }
-    WalletRepository.getInstance().resetInMemoryState();
     window.location.reload();
   };
 

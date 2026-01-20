@@ -193,7 +193,6 @@ class VestingClassifier {
       await this.saveToDB(currentTxHash, cacheEntry);
 
       if (isCoinbase) {
-        console.log(`Traced to coinbase at block ${blockHeight}, isVested: ${blockHeight !== null && blockHeight <= VESTING_THRESHOLD}`);
         return { coinbaseHeight: blockHeight };
       }
 
@@ -247,7 +246,6 @@ class VestingClassifier {
   }> {
     // Get current block height before classification
     currentBlockHeight = await getCurrentBlockHeight();
-    console.log(`VestingClassifier: blockHeight=${currentBlockHeight}, threshold=${VESTING_THRESHOLD}, utxos=${utxos.length}`);
 
     // Clear memory cache to force re-fetch with current block height
     this.memoryCache.clear();
@@ -292,8 +290,6 @@ class VestingClassifier {
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
     }
-
-    console.log(`VestingClassifier: ${vested.length} vested, ${unvested.length} unvested, ${errors.length} errors`);
 
     return { vested, unvested, errors };
   }

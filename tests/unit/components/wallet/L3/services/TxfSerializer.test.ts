@@ -194,7 +194,7 @@ describe("txfToToken", () => {
 // ==========================================
 
 describe("buildTxfStorageData", () => {
-  it("should build storage data with tokens and metadata", () => {
+  it("should build storage data with tokens and metadata", async () => {
     const tokens = [createMockToken()];
     const meta = {
       version: 1,
@@ -203,7 +203,7 @@ describe("buildTxfStorageData", () => {
       ipnsName: "ipns-test",
     };
 
-    const result = buildTxfStorageData(tokens, meta);
+    const result = await buildTxfStorageData(tokens, meta);
 
     expect(result._meta).toBeDefined();
     expect(result._meta.formatVersion).toBe("2.0");
@@ -211,7 +211,7 @@ describe("buildTxfStorageData", () => {
     expect(Object.keys(result).length).toBeGreaterThan(1);
   });
 
-  it("should include nametag if provided", () => {
+  it("should include nametag if provided", async () => {
     const tokens = [createMockToken()];
     const meta = {
       version: 1,
@@ -221,19 +221,19 @@ describe("buildTxfStorageData", () => {
     };
     const nametag = {
       name: "testuser",
-      token: {},
+      token: validTxfToken, // Must be a valid token, not empty object
       timestamp: Date.now(),
       format: "1.0",
       version: "1.0",
     };
 
-    const result = buildTxfStorageData(tokens, meta, nametag);
+    const result = await buildTxfStorageData(tokens, meta, nametag);
 
     expect(result._nametag).toBeDefined();
     expect(result._nametag?.name).toBe("testuser");
   });
 
-  it("should skip tokens without valid TXF data", () => {
+  it("should skip tokens without valid TXF data", async () => {
     const invalidToken = createMockToken({ jsonData: undefined });
     const meta = {
       version: 1,
@@ -242,7 +242,7 @@ describe("buildTxfStorageData", () => {
       ipnsName: "ipns-test",
     };
 
-    const result = buildTxfStorageData([invalidToken], meta);
+    const result = await buildTxfStorageData([invalidToken], meta);
 
     // Should only have _meta key
     const tokenKeys = Object.keys(result).filter((k) => k.startsWith("_") && k !== "_meta");
@@ -292,7 +292,7 @@ describe("parseTxfStorageData", () => {
       },
       _nametag: {
         name: "testuser",
-        token: {},
+        token: validTxfToken, // Must be a valid token, not empty object
         timestamp: Date.now(),
         format: "1.0",
         version: "1.0",

@@ -4,11 +4,20 @@
 import { useState, useCallback, useEffect } from "react";
 import { useWallet } from "../../L3/hooks/useWallet";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
+import {
+  setImportInProgress,
+  clearImportInProgress,
+} from "../../L3/services/InventorySyncService";
 import { IdentityManager } from "../../L3/services/IdentityManager";
 import { fetchNametagFromIpns } from "../../L3/services/IpnsNametagFetcher";
 import { IpfsStorageService } from "../../L3/services/IpfsStorageService";
 import { recordActivity } from "../../../../services/ActivityService";
+import {
+  checkNametagForAddress,
+  hasTokensForAddress,
+  setNametagForAddress,
+  getInvalidatedNametagsForAddress,
+} from "../../L3/services/InventorySyncService";
 import {
   saveWalletToStorage,
   loadWalletFromStorage,
@@ -122,10 +131,14 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const [firstFoundNametagPath, setFirstFoundNametagPath] = useState<string | null>(null);
   const [autoDeriveDuringIpnsCheck, setAutoDeriveDuringIpnsCheck] = useState(true);
   const [ipnsFetchingNametag, setIpnsFetchingNametag] = useState(false);
+  const [ipnsCheckCompleted, setIpnsCheckCompleted] = useState(false);
 
   // Effect: Fetch nametag from IPNS when identity exists but nametag doesn't
+  // CRITICAL FIX: Added ipnsCheckCompleted to prevent infinite loop.
+  // Without this, when no nametag is found, setting ipnsFetchingNametag=false
+  // would trigger the effect again, causing an infinite loop of IPNS checks.
   useEffect(() => {
-    if (step !== "start" || !identity || nametag || ipnsFetchingNametag) return;
+    if (step !== "start" || !identity || nametag || ipnsFetchingNametag || ipnsCheckCompleted) return;
 
     const fetchNametag = async () => {
       setIpnsFetchingNametag(true);
@@ -137,28 +150,50 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         if (result.nametag && result.nametagData) {
           console.log(`🔍 [Complete Setup] Found nametag: ${result.nametag}`);
 
-          WalletRepository.saveNametagForAddress(identity.address, {
-            name: result.nametagData.name,
-            token: result.nametagData.token,
-            timestamp: result.nametagData.timestamp || Date.now(),
-            format: result.nametagData.format || "TXF",
-            version: "1.0",
-          });
+          // CRITICAL: Check if this nametag was invalidated (e.g., owned by someone else on Nostr)
+          // If so, DO NOT restore it - user must create a new nametag
+          const invalidatedNametags = getInvalidatedNametagsForAddress(identity.address);
+          const isInvalidated = invalidatedNametags.some(inv => inv.name === result.nametag);
 
-          console.log("✅ [Complete Setup] Nametag found, proceeding to wallet...");
-          window.location.reload();
+          if (isInvalidated) {
+            console.warn(`🚫 [Complete Setup] Nametag "${result.nametag}" was invalidated - NOT restoring from IPNS`);
+            setIpnsFetchingNametag(false);
+            return;
+          }
+
+          try {
+            setNametagForAddress(identity.address, {
+              name: result.nametagData.name,
+              token: result.nametagData.token,
+              timestamp: result.nametagData.timestamp || Date.now(),
+              format: result.nametagData.format || "TXF",
+              version: "1.0",
+            });
+
+            console.log("✅ [Complete Setup] Nametag found and saved, proceeding to wallet...");
+            window.location.reload();
+          } catch (validationError) {
+            // Token data from IPFS is corrupted - skip saving, continue without nametag
+            console.warn(`⚠️ [Complete Setup] Nametag "${result.nametag}" has corrupted token data - skipping save:`,
+              validationError instanceof Error ? validationError.message : validationError
+            );
+            setIpnsFetchingNametag(false);
+            setIpnsCheckCompleted(true);
+          }
         } else {
-          console.log("🔍 [Complete Setup] No nametag found in IPNS");
+          console.log("🔍 [Complete Setup] No nametag found in IPNS - user can create new nametag");
           setIpnsFetchingNametag(false);
+          setIpnsCheckCompleted(true);
         }
       } catch (error) {
         console.warn("🔍 [Complete Setup] IPNS fetch error:", error);
         setIpnsFetchingNametag(false);
+        setIpnsCheckCompleted(true);
       }
     };
 
     fetchNametag();
-  }, [step, identity, nametag, ipnsFetchingNametag]);
+  }, [step, identity, nametag, ipnsFetchingNametag, ipnsCheckCompleted]);
 
   // Internal helper to derive next address
   const deriveNextAddressInternal = useCallback(async () => {
@@ -168,7 +203,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     const path = `${basePath}/0/${nextIndex}`;
     const derived = keyManager.deriveAddressFromPath(path);
     const l3Identity = await identityManager.deriveIdentityFromPath(path);
-    const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+    const existingNametag = checkNametagForAddress(l3Identity.address);
     const hasLocalNametag = !!existingNametag;
 
     setDerivedAddresses((prev) => [
@@ -277,7 +312,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
       // Gap limit logic: continue deriving if address has nametag OR L1 balance OR L3 tokens
       // Stop deriving if address has NO activity at all (gap detected)
-      const hasL3Tokens = WalletRepository.checkTokensForAddress(addr.l3Address);
+      const hasL3Tokens = hasTokensForAddress(addr.l3Address);
       const hasActivity = !!foundNametag || l1Balance > 0 || hasL3Tokens;
 
       if (autoDeriveDuringIpnsCheck && hasActivity && derivedAddresses.length < 20) {
@@ -302,7 +337,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         const path = `${basePath}/0/${i}`;
         const derived = keyManager.deriveAddressFromPath(path);
         const l3Identity = await identityManager.deriveIdentityFromPath(path);
-        const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+        const existingNametag = checkNametagForAddress(l3Identity.address);
         const hasLocalNametag = !!existingNametag;
 
         results.push({
@@ -371,6 +406,11 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setIsBusy(true);
     setError(null);
     try {
+      // Mark that we're in an active wallet creation flow
+      // This allows wallet creation even though credentials will exist after generateNewIdentity()
+      // (because generateNewIdentity saves mnemonic BEFORE wallet creation)
+      setImportInProgress();
+
       UnifiedKeyManager.clearAll();
       await createWallet();
 
@@ -398,7 +438,12 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       console.log("💾 Saved L1 wallet for new wallet");
 
       setStep("nametag");
+
+      // Clear import flag - wallet creation complete
+      clearImportInProgress();
     } catch (e) {
+      // Clear import flag on error
+      clearImportInProgress();
       const message = e instanceof Error ? e.message : "Failed to generate keys";
       setError(message);
     } finally {
@@ -420,6 +465,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setError(null);
 
     try {
+      // Mark that we're in an active import flow
+      // This allows wallet creation even though credentials exist
+      setImportInProgress();
+
       UnifiedKeyManager.clearAll();
       const mnemonic = words.join(" ");
       const keyManager = getUnifiedKeyManager();
@@ -428,6 +477,8 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       // Go to address selection
       await goToAddressSelection();
     } catch (e) {
+      // Clear import flag on error
+      clearImportInProgress();
       const message = e instanceof Error ? e.message : "Invalid recovery phrase";
       setError(message);
       setIsBusy(false);
@@ -519,7 +570,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       const path = `${basePath}/0/${nextIndex}`;
       const derived = keyManager.deriveAddressFromPath(path);
       const l3Identity = await identityManager.deriveIdentityFromPath(path);
-      const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+      const existingNametag = checkNametagForAddress(l3Identity.address);
       const hasLocalNametag = !!existingNametag;
 
       setDerivedAddresses([
@@ -572,7 +623,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
             }
 
             const l3Identity = await identityManager.deriveIdentityFromPath(addr.path);
-            const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+            const existingNametag = checkNametagForAddress(l3Identity.address);
 
             const isChange = addr.isChange ?? false;
             const chainLabel = isChange ? "change" : "external";
@@ -680,17 +731,28 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
       await IpfsStorageService.resetInstance();
 
-      // Save nametags from IPNS
+      // Save nametags from IPNS (skip corrupted tokens gracefully)
       for (const addr of derivedAddresses) {
         if (addr.hasNametag && addr.nametagData && addr.l3Address) {
           console.log(`💾 Saving nametag for ${addr.l3Address.slice(0, 20)}...`);
-          WalletRepository.saveNametagForAddress(addr.l3Address, {
-            name: addr.nametagData.name,
-            token: addr.nametagData.token,
-            timestamp: addr.nametagData.timestamp || Date.now(),
-            format: addr.nametagData.format || "TXF",
-            version: "1.0",
-          });
+          try {
+            setNametagForAddress(addr.l3Address, {
+              name: addr.nametagData.name,
+              token: addr.nametagData.token,
+              timestamp: addr.nametagData.timestamp || Date.now(),
+              format: addr.nametagData.format || "TXF",
+              version: "1.0",
+            });
+            console.log(`💾 Saved IPNS-fetched nametag "${addr.nametagData.name}" for address ${addr.l3Address.slice(0, 20)}...`);
+          } catch (validationError) {
+            // Token data from IPFS is corrupted/invalid - skip saving but don't break flow
+            // The user can still use the address, they'll just need to re-mint the nametag
+            console.warn(`⚠️ Skipping corrupted nametag "${addr.nametagData.name}" for ${addr.l3Address.slice(0, 20)}... - token validation failed:`,
+              validationError instanceof Error ? validationError.message : validationError
+            );
+            // Mark this address as NOT having a valid nametag since we couldn't save it
+            addr.hasNametag = false;
+          }
         }
       }
 
@@ -704,6 +766,8 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       const message = e instanceof Error ? e.message : "Failed to select address";
       setError(message);
     } finally {
+      // Clear import flag - import is complete (success or failure)
+      clearImportInProgress();
       setIsBusy(false);
     }
   }, [derivedAddresses, selectedAddressPath, getUnifiedKeyManager]);

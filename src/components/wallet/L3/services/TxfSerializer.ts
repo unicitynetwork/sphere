@@ -4,7 +4,7 @@
  */
 
 import { Token, TokenStatus } from "../data/model";
-import type { NametagData } from "../../../../repositories/WalletRepository";
+import type { NametagData } from "./types/TxfTypes";
 import {
   type TxfStorageData,
   type TxfMeta,
@@ -12,6 +12,7 @@ import {
   type TxfGenesis,
   type TxfTransaction,
   type TombstoneEntry,
+  type InvalidatedNametagEntry,
   isTokenKey,
   isArchivedKey,
   isForkedKey,
@@ -22,12 +23,13 @@ import {
   archivedKeyFromTokenId,
   forkedKeyFromTokenIdAndState,
 } from "./types/TxfTypes";
-import type { OutboxEntry } from "./types/OutboxTypes";
+import type { OutboxEntry, MintOutboxEntry } from "./types/OutboxTypes";
 import {
   safeParseTxfToken,
   safeParseTxfMeta,
   validateTokenEntry,
 } from "./types/TxfSchemas";
+import { validateNametagData } from "../../../../utils/tokenValidation";
 
 // ==========================================
 // Token → TXF Conversion
@@ -45,7 +47,11 @@ export function tokenToTxf(token: Token): TxfToken | null {
   }
 
   try {
-    const txfData = JSON.parse(token.jsonData);
+    // Parse and NORMALIZE the data - this ensures all bytes objects are converted
+    // to hex strings BEFORE Zod validation and BEFORE writing to IPFS.
+    // This is critical for fixing tokens that were stored with bytes format before
+    // the normalization fix was deployed.
+    const txfData = normalizeSdkTokenToStorage(JSON.parse(token.jsonData));
 
     // Validate it has the expected TXF structure
     if (!txfData.genesis || !txfData.state) {
@@ -87,7 +93,7 @@ export function tokenToTxf(token: Token): TxfToken | null {
     }
 
     // Fallback: return without strict validation (for backwards compatibility)
-    console.warn(`Token ${token.id}: Zod validation failed, using unvalidated data`);
+    // Note: safeParseTxfToken already logs validation errors
     return txfData as TxfToken;
   } catch (err) {
     console.error(`Failed to parse token ${token.id} jsonData:`, err);
@@ -157,21 +163,113 @@ export function txfToToken(tokenId: string, txf: TxfToken): Token {
 }
 
 // ==========================================
+// SDK Token Normalization
+// ==========================================
+
+/**
+ * Convert bytes array/object to hex string
+ */
+function bytesToHexInternal(bytes: number[] | Uint8Array): string {
+  const arr = Array.isArray(bytes) ? bytes : Array.from(bytes);
+  return arr.map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Normalize a value that may be a hex string, bytes object, or Buffer to hex string
+ */
+function normalizeToHex(value: unknown): string {
+  if (typeof value === "string") {
+    return value; // Already hex string
+  }
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    // SDK format: { bytes: [...] }
+    if ("bytes" in obj && (Array.isArray(obj.bytes) || obj.bytes instanceof Uint8Array)) {
+      return bytesToHexInternal(obj.bytes as number[] | Uint8Array);
+    }
+    // Buffer.toJSON() format: { type: "Buffer", data: [...] }
+    if (obj.type === "Buffer" && Array.isArray(obj.data)) {
+      return bytesToHexInternal(obj.data as number[]);
+    }
+  }
+  console.warn("Unknown bytes format, returning as-is:", value);
+  return String(value);
+}
+
+/**
+ * Normalize SDK token JSON to canonical TXF storage format.
+ * Converts all bytes objects to hex strings before storage.
+ *
+ * Call this immediately after Token.toJSON() to ensure consistent storage format.
+ * This prevents storing SDK's internal format (bytes objects) and ensures all
+ * tokenId, tokenType, salt, publicKey, signature fields are hex strings.
+ */
+export function normalizeSdkTokenToStorage(sdkTokenJson: unknown): TxfToken {
+  // Deep copy to avoid mutating the original
+  const txf = JSON.parse(JSON.stringify(sdkTokenJson));
+
+  // Normalize genesis.data fields (tokenId, tokenType, salt)
+  if (txf.genesis?.data) {
+    const data = txf.genesis.data;
+    if (data.tokenId !== undefined) {
+      data.tokenId = normalizeToHex(data.tokenId);
+    }
+    if (data.tokenType !== undefined) {
+      data.tokenType = normalizeToHex(data.tokenType);
+    }
+    if (data.salt !== undefined) {
+      data.salt = normalizeToHex(data.salt);
+    }
+  }
+
+  // Normalize authenticator fields in genesis inclusion proof
+  if (txf.genesis?.inclusionProof?.authenticator) {
+    const auth = txf.genesis.inclusionProof.authenticator;
+    if (auth.publicKey !== undefined) {
+      auth.publicKey = normalizeToHex(auth.publicKey);
+    }
+    if (auth.signature !== undefined) {
+      auth.signature = normalizeToHex(auth.signature);
+    }
+  }
+
+  // Normalize transaction authenticators
+  if (Array.isArray(txf.transactions)) {
+    for (const tx of txf.transactions) {
+      if (tx.inclusionProof?.authenticator) {
+        const auth = tx.inclusionProof.authenticator;
+        if (auth.publicKey !== undefined) {
+          auth.publicKey = normalizeToHex(auth.publicKey);
+        }
+        if (auth.signature !== undefined) {
+          auth.signature = normalizeToHex(auth.signature);
+        }
+      }
+    }
+  }
+
+  return txf as TxfToken;
+}
+
+// ==========================================
 // Storage Data Building
 // ==========================================
 
 /**
  * Build complete TXF storage data from tokens and metadata
+ * Now async to support stateHash computation for genesis-only tokens
  */
-export function buildTxfStorageData(
+export async function buildTxfStorageData(
   tokens: Token[],
   meta: Omit<TxfMeta, "formatVersion">,
   nametag?: NametagData,
   tombstones?: TombstoneEntry[],
   archivedTokens?: Map<string, TxfToken>,
   forkedTokens?: Map<string, TxfToken>,
-  outboxEntries?: OutboxEntry[]
-): TxfStorageData {
+  outboxEntries?: OutboxEntry[],
+  mintOutboxEntries?: MintOutboxEntry[],
+  invalidatedNametags?: InvalidatedNametagEntry[]
+): Promise<TxfStorageData> {
   const storageData: TxfStorageData = {
     _meta: {
       ...meta,
@@ -179,8 +277,18 @@ export function buildTxfStorageData(
     },
   };
 
+  // Validate nametag before exporting to IPFS
   if (nametag) {
-    storageData._nametag = nametag;
+    const nametagValidation = validateNametagData(nametag, {
+      requireInclusionProof: false, // May have stripped proofs
+      context: "IPFS export",
+    });
+    if (nametagValidation.isValid) {
+      storageData._nametag = nametag;
+    } else {
+      // Log error but DO NOT export corrupted nametag data
+      console.error("❌ Skipping corrupted nametag during IPFS export:", nametagValidation.errors);
+    }
   }
 
   // Add tombstones for spent token states (prevents zombie token resurrection)
@@ -193,10 +301,28 @@ export function buildTxfStorageData(
     storageData._outbox = outboxEntries;
   }
 
+  // Add mint outbox entries (CRITICAL for mint recovery)
+  if (mintOutboxEntries && mintOutboxEntries.length > 0) {
+    storageData._mintOutbox = mintOutboxEntries;
+  }
+
+  // Add invalidated nametags (preserves history across devices)
+  if (invalidatedNametags && invalidatedNametags.length > 0) {
+    storageData._invalidatedNametags = invalidatedNametags;
+  }
+
   // Add each active token with _<tokenId> key
   for (const token of tokens) {
-    const txf = tokenToTxf(token);
+    let txf = tokenToTxf(token);
     if (txf) {
+      // Compute stateHash for genesis-only tokens that don't have it
+      if (needsStateHashComputation(txf)) {
+        try {
+          txf = await computeAndPatchStateHash(txf);
+        } catch (err) {
+          console.warn(`Failed to compute stateHash for token ${token.id.slice(0, 8)}...:`, err);
+        }
+      }
       // Use the token's actual ID from genesis data
       const actualTokenId = txf.genesis.data.tokenId;
       storageData[keyFromTokenId(actualTokenId)] = txf;
@@ -235,6 +361,8 @@ export function parseTxfStorageData(data: unknown): {
   archivedTokens: Map<string, TxfToken>;
   forkedTokens: Map<string, TxfToken>;
   outboxEntries: OutboxEntry[];
+  mintOutboxEntries: MintOutboxEntry[];
+  invalidatedNametags: InvalidatedNametagEntry[];
   validationErrors: string[];
 } {
   const result: {
@@ -245,6 +373,8 @@ export function parseTxfStorageData(data: unknown): {
     archivedTokens: Map<string, TxfToken>;
     forkedTokens: Map<string, TxfToken>;
     outboxEntries: OutboxEntry[];
+    mintOutboxEntries: MintOutboxEntry[];
+    invalidatedNametags: InvalidatedNametagEntry[];
     validationErrors: string[];
   } = {
     tokens: [],
@@ -254,6 +384,8 @@ export function parseTxfStorageData(data: unknown): {
     archivedTokens: new Map(),
     forkedTokens: new Map(),
     outboxEntries: [],
+    mintOutboxEntries: [],
+    invalidatedNametags: [],
     validationErrors: [],
   };
 
@@ -278,9 +410,20 @@ export function parseTxfStorageData(data: unknown): {
     }
   }
 
-  // Extract nametag (less strict validation)
+  // Extract and validate nametag
   if (storageData._nametag && typeof storageData._nametag === "object") {
-    result.nametag = storageData._nametag as NametagData;
+    const nametagValidation = validateNametagData(storageData._nametag, {
+      requireInclusionProof: false, // IPFS data may have stripped proofs
+      context: "IPFS import",
+    });
+    if (nametagValidation.isValid) {
+      result.nametag = storageData._nametag as NametagData;
+    } else {
+      // Log warning but include validation errors
+      console.warn("Nametag validation failed during IPFS import:", nametagValidation.errors);
+      result.validationErrors.push(`Nametag validation: ${nametagValidation.errors.join(", ")}`);
+      // Do NOT import corrupted nametag - prevents token: {} bug
+    }
   }
 
   // Extract tombstones (state-hash-aware entries)
@@ -317,6 +460,45 @@ export function parseTxfStorageData(data: unknown): {
         result.outboxEntries.push(entry as OutboxEntry);
       } else {
         result.validationErrors.push("Invalid outbox entry structure");
+      }
+    }
+  }
+
+  // Extract mint outbox entries (CRITICAL for mint recovery)
+  if (storageData._mintOutbox && Array.isArray(storageData._mintOutbox)) {
+    for (const entry of storageData._mintOutbox) {
+      // Basic validation for MintOutboxEntry structure
+      if (
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as MintOutboxEntry).id === "string" &&
+        typeof (entry as MintOutboxEntry).status === "string" &&
+        typeof (entry as MintOutboxEntry).type === "string" &&
+        typeof (entry as MintOutboxEntry).salt === "string" &&
+        typeof (entry as MintOutboxEntry).requestIdHex === "string" &&
+        typeof (entry as MintOutboxEntry).mintDataJson === "string"
+      ) {
+        result.mintOutboxEntries.push(entry as MintOutboxEntry);
+      } else {
+        result.validationErrors.push("Invalid mint outbox entry structure");
+      }
+    }
+  }
+
+  // Extract invalidated nametags (preserves history across devices)
+  if (storageData._invalidatedNametags && Array.isArray(storageData._invalidatedNametags)) {
+    for (const entry of storageData._invalidatedNametags) {
+      // Basic validation for InvalidatedNametagEntry structure
+      if (
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as InvalidatedNametagEntry).name === "string" &&
+        typeof (entry as InvalidatedNametagEntry).invalidatedAt === "number" &&
+        typeof (entry as InvalidatedNametagEntry).invalidationReason === "string"
+      ) {
+        result.invalidatedNametags.push(entry as InvalidatedNametagEntry);
+      } else {
+        result.validationErrors.push("Invalid invalidated nametag entry structure");
       }
     }
   }
@@ -481,17 +663,29 @@ export function getTokenId(token: Token): string {
 }
 
 /**
- * Get the current state hash from a TXF token
- * - If no transactions: use genesis state hash
+ * Get the stored current state hash from a TXF token
  * - If has transactions: use newStateHash from last transaction
+ * - If genesis-only: use _integrity.currentStateHash (if computed and stored)
+ * - Otherwise: returns undefined (SDK should calculate it)
  */
-export function getCurrentStateHash(txf: TxfToken): string {
-  if (txf.transactions.length === 0) {
-    // No transfers yet - use genesis state hash
-    return txf.genesis.inclusionProof.authenticator.stateHash;
+export function getCurrentStateHash(txf: TxfToken): string | undefined {
+  // Handle tokens with transactions - use newStateHash from last transaction
+  if (txf.transactions && txf.transactions.length > 0) {
+    const lastTx = txf.transactions[txf.transactions.length - 1];
+    if (lastTx?.newStateHash) {
+      return lastTx.newStateHash;
+    }
+    // Missing newStateHash is expected for older tokens - SDK will calculate it
+    return undefined;
   }
-  // Use newStateHash from the most recent transaction
-  return txf.transactions[txf.transactions.length - 1].newStateHash;
+
+  // Genesis-only tokens: check _integrity.currentStateHash (computed post-import)
+  if (txf._integrity?.currentStateHash) {
+    return txf._integrity.currentStateHash;
+  }
+
+  // No stored state hash available - SDK must calculate it
+  return undefined;
 }
 
 /**
@@ -502,7 +696,7 @@ export function getCurrentStateHashFromToken(token: Token): string | null {
 
   try {
     const txf = JSON.parse(token.jsonData) as TxfToken;
-    return getCurrentStateHash(txf);
+    return getCurrentStateHash(txf) ?? null;
   } catch {
     return null;
   }
@@ -561,5 +755,211 @@ export function hasUncommittedTransactions(token: Token): boolean {
     );
   } catch {
     return false;
+  }
+}
+
+/**
+ * Check if a TXF token has missing newStateHash on any transaction
+ * This can happen with tokens sent from older versions of the app
+ */
+export function hasMissingNewStateHash(txf: TxfToken): boolean {
+  if (!txf.transactions || txf.transactions.length === 0) {
+    return false;
+  }
+  return txf.transactions.some(tx => !tx.newStateHash);
+}
+
+/**
+ * Check if a TXF token needs its currentStateHash computed
+ * Returns true for genesis-only tokens without a stored currentStateHash
+ */
+export function needsStateHashComputation(txf: TxfToken): boolean {
+  // Tokens with transactions don't need this - they have newStateHash
+  if (txf.transactions && txf.transactions.length > 0) {
+    return false;
+  }
+  // Genesis-only tokens need computation if currentStateHash is missing
+  return !txf._integrity?.currentStateHash;
+}
+
+/**
+ * Compute and patch the currentStateHash for a genesis-only token.
+ *
+ * For genesis-only tokens (no transactions), the current state hash must be
+ * calculated from the SDK's Token.state.calculateHash(). This function:
+ * 1. Parses the TXF with the SDK
+ * 2. Calculates the current state hash
+ * 3. Stores it in _integrity.currentStateHash
+ *
+ * @param txf - The TXF token to patch
+ * @returns Patched TXF token, or original if no patch needed or computation failed
+ */
+export async function computeAndPatchStateHash(txf: TxfToken): Promise<TxfToken> {
+  // Only patch genesis-only tokens that don't have currentStateHash
+  if (!needsStateHashComputation(txf)) {
+    return txf;
+  }
+
+  try {
+    // Dynamic import to avoid bundling issues
+    const { Token } = await import(
+      "@unicitylabs/state-transition-sdk/lib/token/Token"
+    );
+
+    // Parse with SDK to access state.calculateHash()
+    const sdkToken = await Token.fromJSON(txf);
+
+    // Calculate the current state hash
+    const calculatedStateHash = await sdkToken.state.calculateHash();
+    const stateHashStr = calculatedStateHash.toJSON();
+
+    // Deep copy the TXF to avoid mutating the original
+    const patchedTxf = JSON.parse(JSON.stringify(txf)) as TxfToken;
+
+    // Ensure _integrity exists
+    if (!patchedTxf._integrity) {
+      patchedTxf._integrity = {
+        genesisDataJSONHash: "0000" + "0".repeat(60),
+      };
+    }
+
+    // Store the computed state hash
+    patchedTxf._integrity.currentStateHash = stateHashStr;
+
+    console.log(
+      `📦 Computed stateHash for genesis-only token ${txf.genesis.data.tokenId.slice(0, 8)}...: ${stateHashStr.slice(0, 16)}...`
+    );
+
+    return patchedTxf;
+  } catch (err) {
+    console.error(
+      `Failed to compute stateHash for token ${txf.genesis?.data?.tokenId?.slice(0, 8)}...:`,
+      err
+    );
+    return txf;
+  }
+}
+
+/**
+ * Compute and patch stateHash for a Token model (updates jsonData)
+ * @returns New Token with patched jsonData, or original if no patch needed
+ */
+export async function computeAndPatchTokenStateHash(token: Token): Promise<Token> {
+  if (!token.jsonData) return token;
+
+  try {
+    const txf = JSON.parse(token.jsonData) as TxfToken;
+
+    // Check if patch is needed
+    if (!needsStateHashComputation(txf)) {
+      return token;
+    }
+
+    // Patch the TXF
+    const patchedTxf = await computeAndPatchStateHash(txf);
+
+    // If unchanged, return original
+    if (patchedTxf === txf) {
+      return token;
+    }
+
+    // Return new Token with patched jsonData
+    return new Token({
+      ...token,
+      jsonData: JSON.stringify(patchedTxf),
+    });
+  } catch {
+    return token;
+  }
+}
+
+/**
+ * Repair a TXF token by calculating missing newStateHash values using the SDK.
+ *
+ * BACKGROUND: Tokens sent before a bug fix were missing the `newStateHash` field
+ * on their transfer transactions. The SDK's Token.fromJSON can still parse these
+ * tokens because it recalculates state hashes internally from the `state` field.
+ *
+ * This function:
+ * 1. Parses the TXF with the SDK (which calculates hashes internally)
+ * 2. Gets the calculated state hash from the SDK token
+ * 3. Patches the last transaction with the correct newStateHash
+ *
+ * @param txf - The TXF token to repair
+ * @returns Repaired TXF token, or null if repair failed
+ */
+export async function repairMissingStateHash(txf: TxfToken): Promise<TxfToken | null> {
+  if (!txf.transactions || txf.transactions.length === 0) {
+    // No transactions to repair
+    return txf;
+  }
+
+  // Check if repair is needed
+  const lastTx = txf.transactions[txf.transactions.length - 1];
+  if (lastTx.newStateHash) {
+    // Already has newStateHash, no repair needed
+    return txf;
+  }
+
+  try {
+    // Dynamic import to avoid bundling issues
+    const { Token } = await import(
+      "@unicitylabs/state-transition-sdk/lib/token/Token"
+    );
+
+    // Parse with SDK - this calculates state hashes internally
+    const sdkToken = await Token.fromJSON(txf);
+
+    // Get the calculated state hash from the SDK token's current state
+    const calculatedStateHash = await sdkToken.state.calculateHash();
+    const stateHashStr = calculatedStateHash.toJSON();
+
+    // Deep copy the TXF to avoid mutating the original
+    const repairedTxf = JSON.parse(JSON.stringify(txf)) as TxfToken;
+
+    // Patch the last transaction with the calculated state hash
+    const lastTxIndex = repairedTxf.transactions.length - 1;
+    repairedTxf.transactions[lastTxIndex] = {
+      ...repairedTxf.transactions[lastTxIndex],
+      newStateHash: stateHashStr,
+    };
+
+    console.log(`🔧 Repaired token ${txf.genesis.data.tokenId.slice(0, 8)}... - added missing newStateHash: ${stateHashStr.slice(0, 12)}...`);
+
+    return repairedTxf;
+  } catch (err) {
+    console.error(`Failed to repair token ${txf.genesis?.data?.tokenId?.slice(0, 8)}...:`, err);
+    return null;
+  }
+}
+
+/**
+ * Repair a Token model by calculating missing newStateHash values.
+ * Returns a new Token with repaired jsonData, or the original if no repair needed/possible.
+ */
+export async function repairTokenMissingStateHash(token: Token): Promise<Token> {
+  if (!token.jsonData) return token;
+
+  try {
+    const txf = JSON.parse(token.jsonData) as TxfToken;
+
+    // Check if repair is needed
+    if (!hasMissingNewStateHash(txf)) {
+      return token;
+    }
+
+    // Repair the TXF
+    const repairedTxf = await repairMissingStateHash(txf);
+    if (!repairedTxf) {
+      return token; // Repair failed, return original
+    }
+
+    // Return new Token with repaired jsonData
+    return new Token({
+      ...token,
+      jsonData: JSON.stringify(repairedTxf),
+    });
+  } catch {
+    return token;
   }
 }

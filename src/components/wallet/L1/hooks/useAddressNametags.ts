@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { fetchNametagFromIpns } from '../../L3/services/IpnsNametagFetcher';
 import { IdentityManager } from '../../L3/services/IdentityManager';
-import { WalletRepository } from '../../../../repositories/WalletRepository';
+import { checkNametagForAddress, hasTokensForAddress } from '../../L3/services/InventorySyncService';
 import type { WalletAddress } from '../sdk/types';
 
 // Session key for IdentityManager (same as useWallet.ts)
@@ -76,8 +76,8 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
       const result = await fetchNametagFromIpns(l3Identity.privateKey);
 
       // Check L3 inventory from localStorage (instant check)
-      const localNametag = WalletRepository.checkNametagForAddress(l3Address);
-      const localTokens = WalletRepository.checkTokensForAddress(l3Address);
+      const localNametag = checkNametagForAddress(l3Address);
+      const localTokens = hasTokensForAddress(l3Address);
       const hasL3Inventory = !!result.nametag || !!localNametag || localTokens;
 
       return {
@@ -132,8 +132,8 @@ export function useAddressNametags(addresses: WalletAddress[] | undefined) {
         try {
           const identityManager = IdentityManager.getInstance(SESSION_KEY);
           const l3Identity = await identityManager.deriveIdentityFromPath(addr.path!);
-          const localNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
-          const localTokens = WalletRepository.checkTokensForAddress(l3Identity.address);
+          const localNametag = checkNametagForAddress(l3Identity.address);
+          const localTokens = hasTokensForAddress(l3Identity.address);
 
           if (localNametag) {
             console.log(`🔍 [L1] Found local nametag for ${addr.address.slice(0, 12)}...: ${localNametag.name}`);
