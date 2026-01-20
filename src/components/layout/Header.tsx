@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Sparkles, Github } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Sparkles, Github, Menu, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { isMock } from '../../hooks/useAgentChat';
 import { ThemeToggle } from '../theme';
+import { ComingSoonModal } from '../ui/ComingSoonModal';
 import { ServiceProvider } from '../wallet/L3/services/ServiceProvider';
 import { devReset } from '../../utils/devTools';
 import logoUrl from '/Union.svg';
@@ -13,7 +15,19 @@ const DiscordIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+const navItems = [
+  { label: 'Home', path: '/agents/chat' },
+  { label: 'Developers', path: '/developers' },
+  { label: 'Mine Alpha', path: null, external: true }, // External URL to be provided later
+];
+
 export function Header() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const isDevelopersPage = location.pathname === '/developers';
+
   // Dev config state for showing banner when non-default settings are active
   const [devConfig, setDevConfig] = useState(() => ServiceProvider.getDevConfig());
 
@@ -23,6 +37,11 @@ export function Header() {
     window.addEventListener('dev-config-changed', handler);
     return () => window.removeEventListener('dev-config-changed', handler);
   }, []);
+
+  // Close mobile menu on route change
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
 
   // Helper to get truncated hostname from URL
   const getHostname = (url: string): string => {
@@ -34,8 +53,22 @@ export function Header() {
     }
   };
 
+  const handleMobileNavigation = (path: string) => {
+    // Navigate first, menu will close via useEffect when location changes
+    navigate(path);
+  };
+
+  const isActive = (path: string | null) => {
+    if (!path) return false;
+    if (path === '/agents/chat') {
+      return location.pathname.startsWith('/agents/');
+    }
+    return location.pathname === path;
+  };
+
   return (
-    <header className="border-b border-neutral-200 dark:border-neutral-800/50 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-2xl sticky top-0 z-50 overflow-hidden theme-transition">
+    <>
+    <header className="border-b border-neutral-200 dark:border-neutral-800/50 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-2xl sticky top-0 z-50 overflow-hidden theme-transition w-screen">
       {/* Background decorative elements */}
       <div className="absolute top-0 left-0 w-96 h-full bg-linear-to-r from-orange-500/5 dark:from-orange-500/10 to-transparent blur-3xl" />
       <div className="absolute top-0 right-0 w-96 h-full bg-linear-to-l from-purple-500/5 dark:from-purple-500/10 to-transparent blur-3xl" />
@@ -43,35 +76,80 @@ export function Header() {
       {/* Animated gradient line on top */}
       <div className="absolute top-0 left-0 right-0 h-0.5 bg-linear-to-r from-transparent via-orange-500 to-transparent opacity-50" />
 
-      <div className="max-w-[1800px] mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-14 lg:h-14 flex items-center justify-between relative z-10">
-        <div className="flex items-center gap-2 sm:gap-3 lg:gap-4">
-          {/* Logo with enhanced effects */}
-          <motion.div
-            whileHover={{ scale: 1.05, rotate: 5 }}
-            className="relative"
-          >
+      <div className="max-w-[1800px] mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-14 lg:h-14 flex items-stretch justify-between relative z-10">
+        <div className="flex items-stretch gap-2 sm:gap-4 lg:gap-6">
+          {/* Logo with enhanced effects - entire block is clickable */}
+          <Link to="/agents/chat" className="flex items-center gap-2 sm:gap-4 lg:gap-6 group">
+            <div className="relative">
               <img
                 src={logoUrl}
                 alt="Logo"
-                className="relative z-10 w-7 h-7 sm:w-9 sm:h-9 lg:w-11 lg:h-11"
+                className="relative z-10 w-7 h-7 sm:w-9 sm:h-9 lg:w-11 lg:h-11 transition-transform duration-200 group-hover:scale-110 group-hover:rotate-6"
               />
-          </motion.div>
-
-          <div className="relative">
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <h1 className="text-base sm:text-lg lg:text-xl text-neutral-900 dark:text-white bg-clip-text">AgentSphere</h1>
-              <Sparkles className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500 animate-pulse" />
-              {isMock() && (
-                <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 border border-yellow-500/30">
-                  DEMO
-                </span>
-              )}
             </div>
-            <p className="text-[10px] sm:text-xs text-neutral-500 dark:text-neutral-400">AI-Powered Agent Platform</p>
 
-            {/* Decorative underline */}
-            <div className="absolute -bottom-1 left-0 w-16 sm:w-20 h-0.5 bg-linear-to-r from-orange-500 to-transparent rounded-full" />
-          </div>
+            <div className="relative">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <h1 className="text-base sm:text-lg lg:text-xl text-neutral-900 dark:text-white bg-clip-text">AgentSphere</h1>
+                <Sparkles className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500 animate-pulse" />
+                {isMock() && (
+                  <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 border border-yellow-500/30">
+                    DEMO
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] sm:text-xs text-neutral-500 dark:text-neutral-400">AI-Powered Agent Platform</p>
+
+              {/* Decorative underline */}
+              <div className="absolute -bottom-1 left-0 w-16 sm:w-20 h-0.5 bg-linear-to-r from-orange-500 to-transparent rounded-full" />
+            </div>
+          </Link>
+
+          {/* Navigation Tabs - next to logo */}
+          <nav className="hidden lg:flex items-center h-full ml-8 gap-1">
+            {navItems.map((item) => (
+              item.path ? (
+                <Link
+                  key={item.label}
+                  to={item.path}
+                  className="relative px-5 py-2.5 flex items-center text-sm font-medium transition-colors duration-300 group"
+                >
+                  {/* Active indicator - line at header bottom edge */}
+                  <AnimatePresence mode="wait">
+                    {isActive(item.path) && (
+                      <motion.span
+                        key={item.path}
+                        initial={{ scaleX: 0, opacity: 0 }}
+                        animate={{ scaleX: 1, opacity: 1 }}
+                        exit={{ scaleX: 0, opacity: 0 }}
+                        transition={{ duration: 0.2, ease: 'easeOut' }}
+                        className="absolute left-0 right-0 -bottom-2 h-0.5 bg-linear-to-r from-orange-400 via-orange-500 to-amber-500 origin-center"
+                      />
+                    )}
+                  </AnimatePresence>
+                  {/* Text */}
+                  <span className={`relative transition-colors duration-300 ${
+                    isActive(item.path)
+                      ? 'text-neutral-900 dark:text-white'
+                      : 'text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-300'
+                  }`}>
+                    {item.label}
+                  </span>
+                </Link>
+              ) : (
+                <button
+                  key={item.label}
+                  className="relative px-5 py-2.5 flex items-center text-sm font-medium text-neutral-400 dark:text-neutral-500 cursor-not-allowed"
+                  title="Coming soon"
+                >
+                  <span>{item.label}</span>
+                  <span className="ml-2 px-1.5 py-0.5 text-[10px] rounded bg-neutral-200/60 dark:bg-neutral-700/40 text-neutral-500 dark:text-neutral-500">
+                    Soon
+                  </span>
+                </button>
+              )
+            ))}
+          </nav>
         </div>
 
         {/* Dev Mode Banner - only shown when non-default settings are active */}
@@ -98,6 +176,16 @@ export function Header() {
         )}
 
         <div className="flex items-center gap-1 sm:gap-2 lg:gap-3">
+          {/* Get API Key Button - visible only on Developers page */}
+          <button
+            onClick={() => setShowApiKeyModal(true)}
+            className={`hidden lg:flex items-center gap-2 px-4 py-2 bg-linear-to-r from-orange-500 to-amber-500 text-white text-sm font-medium rounded-xl transition-all shadow-lg shadow-orange-500/25 ${
+              isDevelopersPage ? 'visible opacity-100 hover:opacity-90' : 'invisible opacity-0 pointer-events-none'
+            }`}
+          >
+            Get API Key
+          </button>
+
           {/* Social Links */}
           <motion.a
             href="https://github.com/unicitynetwork"
@@ -128,38 +216,103 @@ export function Header() {
           {/* Theme Toggle */}
           <ThemeToggle />
 
-          {/* Notification Button */}
-          {/* <motion.button
-            whileHover={{ scale: 1.05, y: -2 }}
-            whileTap={{ scale: 0.95 }}
-            transition={{duration: 0.05}}
-            className="relative p-2 sm:p-2.5 lg:p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg sm:rounded-xl transition-all group"
+          {/* Mobile Menu Button */}
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="lg:hidden p-2 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg transition-all"
           >
-            <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-neutral-500 dark:text-neutral-400 group-hover:text-orange-400 transition-colors" />
-
-            <span className="absolute top-1.5 sm:top-2 right-1.5 sm:right-2 w-1.5 sm:w-2 h-1.5 sm:h-2 bg-orange-500 rounded-full">
-              <span className="absolute inset-0 bg-orange-500 rounded-full animate-ping" />
-            </span>
-
-            <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
-          </motion.button> */}
-
-          {/* Settings Button */}
-          {/* <motion.button
-            whileHover={{ scale: 1.05, y: -2 }}
-            whileTap={{ scale: 0.95 }}
-            transition={{duration: 0.05}}
-            className="relative p-2 sm:p-2.5 lg:p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg sm:rounded-xl transition-all group"
-          >
-            <Settings className="w-4 h-4 sm:w-5 sm:h-5 text-neutral-500 dark:text-neutral-400 group-hover:text-orange-400 transition-colors" />
-            <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
-          </motion.button> */}
-
+            {mobileMenuOpen ? (
+              <X className="w-5 h-5 text-neutral-500 dark:text-neutral-400" />
+            ) : (
+              <Menu className="w-5 h-5 text-neutral-500 dark:text-neutral-400" />
+            )}
+          </button>
         </div>
       </div>
 
       {/* Bottom gradient line */}
       <div className="absolute bottom-0 left-0 right-0 h-px bg-linear-to-r from-transparent via-neutral-300 dark:via-neutral-700 to-transparent" />
     </header>
+
+    {/* Mobile Menu - overlay */}
+    <AnimatePresence>
+      {mobileMenuOpen && (
+        <>
+          {/* Backdrop */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.35, ease: 'easeInOut' }}
+            onClick={() => setMobileMenuOpen(false)}
+            className="lg:hidden fixed inset-0 top-14 bg-black/20 backdrop-blur-sm z-40"
+          />
+          {/* Menu */}
+          <motion.div
+            initial={{ height: 0 }}
+            animate={{ height: 'auto' }}
+            exit={{ height: 0 }}
+            transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+            className="lg:hidden fixed left-0 right-0 top-14 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800 z-50 shadow-xl overflow-hidden"
+          >
+          <nav className="px-4 py-3 space-y-1">
+            {navItems.map((item) => (
+              item.path ? (
+                <button
+                  key={item.label}
+                  onClick={() => handleMobileNavigation(item.path!)}
+                  className={`relative w-full flex items-center px-4 py-3 rounded-xl text-base font-medium transition-all text-left ${
+                    isActive(item.path)
+                      ? 'text-neutral-900 dark:text-white'
+                      : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                  }`}
+                >
+                  {/* Active indicator - vertical line on left edge */}
+                  {isActive(item.path) && (
+                    <motion.span
+                      initial={{ scaleY: 0, opacity: 0 }}
+                      animate={{ scaleY: 1, opacity: 1 }}
+                      transition={{ duration: 0.2, ease: 'easeOut' }}
+                      className="absolute left-0 top-2 bottom-2 w-0.5 bg-linear-to-b from-orange-400 via-orange-500 to-amber-500 origin-center rounded-full"
+                    />
+                  )}
+                  {item.label}
+                </button>
+              ) : (
+                <button
+                  key={item.label}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-base font-medium text-neutral-400 dark:text-neutral-500 cursor-not-allowed"
+                >
+                  {item.label}
+                  <span className="text-xs bg-neutral-200 dark:bg-neutral-700 px-2 py-0.5 rounded-full">Soon</span>
+                </button>
+              )
+            ))}
+
+            {/* Get API Key - mobile */}
+            {isDevelopersPage && (
+              <button
+                onClick={() => {
+                  setShowApiKeyModal(true);
+                  setMobileMenuOpen(false);
+                }}
+                className="w-full mt-2 px-4 py-3 bg-linear-to-r from-orange-500 to-amber-500 text-white text-base font-medium rounded-xl hover:opacity-90 transition shadow-lg shadow-orange-500/25"
+              >
+                Get API Key
+              </button>
+            )}
+          </nav>
+        </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+
+    {/* API Key Modal - outside header to avoid overflow:hidden */}
+    <ComingSoonModal
+      isOpen={showApiKeyModal}
+      onClose={() => setShowApiKeyModal(false)}
+      title="Get API Key"
+    />
+    </>
   );
 }

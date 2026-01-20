@@ -25,6 +25,7 @@ agentic-chatbot-main
 *.sw?
 .env
 .env.production
+*.pdf
 
 # Claude Code analysis artifacts
 ANALYSIS_INDEX.md
