@@ -153,7 +153,15 @@ function replaceMathPlaceholders(
   return parts.length > 0 ? parts : [text];
 }
 
-// Parse inline markdown and HTML (bold, italic, code, br, links, images, plain URLs)
+// Context for mention click handler (avoids prop drilling)
+type MentionClickHandler = (username: string) => void;
+let globalMentionClickHandler: MentionClickHandler | null = null;
+
+export function setMentionClickHandler(handler: MentionClickHandler | null) {
+  globalMentionClickHandler = handler;
+}
+
+// Parse inline markdown and HTML (bold, italic, code, br, links, images, plain URLs, @mentions)
 function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   // FIRST PASS: Handle escape sequences (e.g., \* should become just *)
   const unescapedText = text.replace(/\\([*_`[\]()#+-.|!\\])/g, '$1');
@@ -179,7 +187,8 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   let key = 0;
 
   // THIRD PASS: Process markdown - math placeholders won't be captured by markdown patterns
-  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(((?:[^\s()]|\([^\s)]*\))+)(?:\s+"([^"]+)")?\)|!\[([^\]]*)\]\(((?:[^()]|\([^)]*\))+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"]))/gi;
+  // Added @mention pattern at the end: @username (alphanumeric, underscore, hyphen)
+  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(((?:[^\s()]|\([^\s)]*\))+)(?:\s+"([^"]+)")?\)|!\[([^\]]*)\]\(((?:[^()]|\([^)]*\))+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"])|(@[a-zA-Z0-9_-]+))/gi;
   let lastIndex = 0;
   let match;
 
@@ -286,6 +295,34 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
         >
           {url}
         </a>
+      );
+    } else if (match[19]) {
+      // @mention (e.g., @username)
+      const mention = match[19];
+      const username = mention.slice(1); // Remove @ prefix
+      parts.push(
+        <span
+          key={`${keyPrefix}-mention-${key++}`}
+          className="text-orange-500 dark:text-orange-400 font-medium cursor-pointer hover:underline"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (globalMentionClickHandler) {
+              globalMentionClickHandler(username);
+            }
+          }}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              if (globalMentionClickHandler) {
+                globalMentionClickHandler(username);
+              }
+            }
+          }}
+        >
+          {mention}
+        </span>
       );
     }
 

@@ -10,6 +10,7 @@ import { MerchChat } from '../components/agents/MerchChat';
 import { TriviaChat } from '../components/agents/TriviaChat';
 import { GamesChat } from '../components/agents/GamesChat';
 import { AIChat } from '../components/agents/AIChat';
+import { SellAnythingChat } from '../components/agents/SellAnythingChat';
 import { WalletPanel } from '../components/wallet/WalletPanel';
 import { agents, getAgentConfig } from '../config/activities';
 
@@ -132,6 +133,8 @@ export function AgentPage() {
         return <P2PChat agent={currentAgent} />;
       case 'merch':
         return <MerchChat agent={currentAgent} />;
+      case 'sell-anything':
+        return <SellAnythingChat agent={currentAgent} />;
       default:
         return <ChatSection />;
     }

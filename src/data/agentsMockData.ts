@@ -240,6 +240,193 @@ export function getDefaultMockResponse(): string {
 }
 
 // Games Agent Mock Responses
+// ============================================
+// Buy/Sell Anything Marketplace Mock Data
+// ============================================
+
+export type MarketplaceCategory = 'gold' | 'tickets' | 'asics' | 'all';
+
+export interface MarketplaceListing {
+  id: string;
+  category: MarketplaceCategory;
+  title: string;
+  description: string;
+  price: number;
+  currency: string;
+  image: string;
+  seller: SellerInfo;
+  location?: string;
+  urgency?: 'normal' | 'urgent' | 'hot';
+  verified?: boolean;
+}
+
+export interface MarketplaceIntent {
+  id: string;
+  type: 'buy' | 'sell';
+  user: string;
+  message: string;
+  category: MarketplaceCategory;
+  timestamp: string;
+}
+
+export const marketplaceListings: MarketplaceListing[] = [
+  // Gold
+  {
+    id: 'mg1',
+    category: 'gold',
+    title: '1oz PAMP Suisse Gold Bar',
+    description: 'Brand new, sealed. Certificate included. Available for pickup in Dubai or London.',
+    price: 2150,
+    currency: 'USDC',
+    image: 'https://images.unsplash.com/photo-1610375461246-83df859d849d?w=400&h=200&fit=crop',
+    seller: { id: 'g1', name: 'GoldDealer_UAE', avatar: 'GD' },
+    location: 'Dubai, UAE',
+    verified: true,
+    urgency: 'hot',
+  },
+  {
+    id: 'mg2',
+    category: 'gold',
+    title: '10x 1oz Silver Coins - Austrian Philharmonic',
+    description: '2024 Austrian Philharmonic silver coins. Tube of 10. Spot + 3%.',
+    price: 285,
+    currency: 'USDC',
+    image: 'https://images.unsplash.com/photo-1607292803062-5b3f2c0b5c6d?w=400&h=200&fit=crop',
+    seller: { id: 'g2', name: 'SilverStack', avatar: 'SS' },
+    location: 'London, UK',
+  },
+  // Tickets
+  {
+    id: 'mt1',
+    category: 'tickets',
+    title: 'UFC 315 - Cage Side Seats x2',
+    description: 'Premium cage side seats. Can\'t attend anymore. Face value was $3500 each. Open to offers.',
+    price: 5500,
+    currency: 'USDC',
+    image: 'https://images.unsplash.com/photo-1549719386-74dfcbf7dbed?w=400&h=200&fit=crop',
+    seller: { id: 't1', name: 'FightFan', avatar: 'FF' },
+    location: 'Las Vegas',
+    urgency: 'urgent',
+  },
+  {
+    id: 'mt2',
+    category: 'tickets',
+    title: 'Coldplay World Tour - VIP Package',
+    description: 'Munich show, VIP package includes early entry, exclusive merch, and meet & greet chance.',
+    price: 450,
+    currency: 'USDC',
+    image: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=400&h=200&fit=crop',
+    seller: { id: 't2', name: 'ConcertHopper', avatar: 'CH' },
+    location: 'Munich, Germany',
+  },
+  {
+    id: 'mt3',
+    category: 'tickets',
+    title: 'World Cup 2026 - England vs Argentina',
+    description: 'Group stage match. Category 1 seats. Verified through FIFA portal.',
+    price: 1800,
+    currency: 'USDC',
+    image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=400&h=200&fit=crop',
+    seller: { id: 't3', name: 'FootballAgent', avatar: 'FA' },
+    location: 'USA',
+    verified: true,
+    urgency: 'hot',
+  },
+  // ASICs / Mining Hardware
+  {
+    id: 'ma1',
+    category: 'asics',
+    title: 'Antminer S21 200TH/s',
+    description: 'Brand new, unopened. Bitmain warranty valid. 17.5 J/TH efficiency. Perfect for Bitcoin mining.',
+    price: 4200,
+    currency: 'USDC',
+    image: 'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=400&h=200&fit=crop',
+    seller: { id: 'a1', name: 'MiningPro', avatar: 'MP' },
+    location: 'Texas, USA',
+    verified: true,
+  },
+  {
+    id: 'ma2',
+    category: 'asics',
+    title: 'Antminer KS5 Pro - Kaspa Miner',
+    description: '21 TH/s Kaspa miner. 6 months old with remaining warranty. Selling due to facility upgrade.',
+    price: 8500,
+    currency: 'USDC',
+    image: 'https://images.unsplash.com/photo-1518546305927-5a555bb7020d?w=400&h=200&fit=crop',
+    seller: { id: 'a2', name: 'KaspaKing', avatar: 'KK' },
+    location: 'Iceland',
+    urgency: 'urgent',
+  },
+  {
+    id: 'ma3',
+    category: 'asics',
+    title: '5x GPU Mining Rig - RTX 4090',
+    description: 'Complete rig with 5x RTX 4090. Frame, PSU, mobo included. Great for AI/ML or mining.',
+    price: 12000,
+    currency: 'USDC',
+    image: 'https://images.unsplash.com/photo-1591799264318-7e6ef8ddb7ea?w=400&h=200&fit=crop',
+    seller: { id: 'a3', name: 'GPUFarm', avatar: 'GF' },
+    location: 'Singapore',
+  },
+];
+
+// Simulated activity feed - intents from other users
+export const marketplaceActivity: MarketplaceIntent[] = [
+  {
+    id: 'i1',
+    type: 'sell',
+    user: 'GoldBug_Dubai',
+    message: 'Have 5oz PAMP gold available at spot + 1.5%',
+    category: 'gold',
+    timestamp: '2 min ago',
+  },
+  {
+    id: 'i2',
+    type: 'buy',
+    user: 'CryptoMiner_TX',
+    message: 'Urgent: Need Antminer S21, paying premium for quick deal',
+    category: 'asics',
+    timestamp: '5 min ago',
+  },
+  {
+    id: 'i3',
+    type: 'buy',
+    user: 'FootballFan_UK',
+    message: 'Want World Cup tickets - England, France or Argentina matches',
+    category: 'tickets',
+    timestamp: '8 min ago',
+  },
+  {
+    id: 'i4',
+    type: 'buy',
+    user: 'TicketHunter',
+    message: 'Auto-buy any Coldplay tickets under €300 for EU shows',
+    category: 'tickets',
+    timestamp: '12 min ago',
+  },
+  {
+    id: 'i5',
+    type: 'sell',
+    user: 'MiningExodus',
+    message: 'Liquidating farm: 20x S19 Pro, bulk discount available',
+    category: 'asics',
+    timestamp: '18 min ago',
+  },
+  {
+    id: 'i6',
+    type: 'buy',
+    user: 'PreciousMetals',
+    message: 'Monitor gold spot, alert when 1oz bars under 2% premium',
+    category: 'gold',
+    timestamp: '22 min ago',
+  },
+];
+
+export function getMarketplaceListingsByCategory(category: MarketplaceCategory): MarketplaceListing[] {
+  if (category === 'all') return marketplaceListings;
+  return marketplaceListings.filter(l => l.category === category);
+}
+
 export function getGamesMockResponse(userInput: string): string {
   const input = userInput.toLowerCase();
 

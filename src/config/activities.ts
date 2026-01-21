@@ -164,6 +164,12 @@ export const agents: AgentConfig[] = [
     color: 'from-teal-500 to-cyan-500',
     type: 'simple-ai',
     greetingMessage: "Welcome to Sell Anything! Describe what you want to sell and I'll get you a quote.",
+    quickActions: [
+      { label: 'Gold', message: 'Show me gold listings' },
+      { label: 'Tickets', message: 'Show me event tickets' },
+      { label: 'ASICs', message: 'Show me mining hardware' },
+      { label: 'Browse all', message: 'Show me what\'s available' },
+    ],
   },
   {
     id: 'pokemon',

@@ -1,18 +1,21 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Hash, Menu, PanelLeft, ChevronDown, Users } from 'lucide-react';
+import { Hash, Menu, PanelLeft, ChevronDown, Users, Maximize2, Minimize2 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useGroupChat } from '../hooks/useGroupChat';
 import { useServices } from '../../../contexts/useServices';
+import { useUIState } from '../../../hooks/useUIState';
 import { GroupList } from './GroupList';
 import { GroupMessageList } from './GroupMessageList';
 import { DMChatInput } from '../dm/DMChatInput';
 import { JoinGroupModal } from './JoinGroupModal';
 import { agents } from '../../../config/activities';
-import type { ChatMode } from '../../../types';
+import { setMentionClickHandler } from '../../../utils/markdown';
+import type { ChatModeChangeHandler } from '../../../types';
 
 interface GroupChatSectionProps {
-  onModeChange: (mode: ChatMode) => void;
+  onModeChange: ChatModeChangeHandler;
 }
 
 export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
@@ -46,6 +49,20 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
   const [inviteLinkFromUrl, setInviteLinkFromUrl] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Global fullscreen state
+  const { isFullscreen, setFullscreen } = useUIState();
+
+  // Handle Escape key to exit fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        setFullscreen(false);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen, setFullscreen]);
 
   // Handle ?join= URL parameter for invite links
   useEffect(() => {
@@ -92,6 +109,14 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     }
   }, [selectedGroup]);
 
+  // Set up mention click handler - clicking @mention switches to DM with that user
+  useEffect(() => {
+    setMentionClickHandler((username) => {
+      onModeChange('dm', username);
+    });
+    return () => setMentionClickHandler(null);
+  }, [onModeChange]);
+
   const handleAgentSelect = (agentId: string) => {
     navigate(`/agents/${agentId}`);
     setShowAgentPicker(false);
@@ -122,11 +147,12 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     await leaveGroup(groupId);
   };
 
-  return (
-    <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden grid grid-cols-1 lg:grid-cols-[auto_1fr] relative lg:shadow-xl dark:lg:shadow-2xl h-full min-h-0 theme-transition">
+  // Chat content (shared between normal and fullscreen modes)
+  const chatContent = (
+    <>
       {/* Background decorative elements */}
-      <div className="absolute -top-20 -right-20 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl" />
-      <div className="absolute -bottom-20 -left-20 w-96 h-96 bg-purple-500/5 rounded-full blur-3xl" />
+      <div className="absolute -top-20 -right-20 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-20 -left-20 w-96 h-96 bg-purple-500/5 rounded-full blur-3xl pointer-events-none" />
 
       {/* Left Sidebar - Group List */}
       <GroupList
@@ -177,8 +203,8 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
               <Menu className="w-5 h-5" />
             </motion.button>
 
-            {/* Mobile: Agent picker dropdown */}
-            <div ref={pickerRef} className="relative lg:hidden">
+            {/* Mobile & Fullscreen: Agent picker dropdown */}
+            <div ref={pickerRef} className={`relative ${isFullscreen ? '' : 'lg:hidden'}`}>
               <button
                 onClick={() => setShowAgentPicker(!showAgentPicker)}
                 className="flex items-center gap-2 active:scale-95 transition-transform"
@@ -186,9 +212,10 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
                 <div className={`p-2.5 rounded-xl bg-linear-to-br ${chatAgent.color}`}>
                   <chatAgent.Icon className="w-5 h-5 text-white" />
                 </div>
-                <span className="text-lg text-neutral-900 dark:text-white font-medium">
-                  {chatAgent.name}
-                </span>
+                <div className="text-left">
+                  <div className="text-lg text-neutral-900 dark:text-white font-medium">{chatAgent.name}</div>
+                  <div className="text-sm text-neutral-500 dark:text-neutral-400">{chatAgent.description}</div>
+                </div>
                 <ChevronDown
                   className={`w-4 h-4 text-neutral-500 dark:text-neutral-400 transition-transform ${
                     showAgentPicker ? 'rotate-180' : ''
@@ -212,10 +239,13 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
                           a.id === 'chat' ? 'bg-neutral-100 dark:bg-neutral-800/80' : ''
                         }`}
                       >
-                        <div className={`p-2 rounded-lg bg-linear-to-br ${a.color}`}>
+                        <div className={`p-2 rounded-lg bg-linear-to-br ${a.color} shrink-0`}>
                           <a.Icon className="w-4 h-4 text-white" />
                         </div>
-                        <span className="text-neutral-900 dark:text-white text-sm">{a.name}</span>
+                        <div className="text-left min-w-0">
+                          <div className="text-neutral-900 dark:text-white text-sm font-medium">{a.name}</div>
+                          <div className="text-neutral-500 dark:text-neutral-400 text-xs truncate">{a.description}</div>
+                        </div>
                       </button>
                     ))}
                   </motion.div>
@@ -223,8 +253,8 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
               </AnimatePresence>
             </div>
 
-            {/* Desktop: Show group or default header */}
-            <div className="hidden lg:flex items-center gap-3">
+            {/* Desktop: Show group or default header (hidden in fullscreen) */}
+            <div className={`${isFullscreen ? 'hidden' : 'hidden lg:flex'} items-center gap-3`}>
               {selectedGroup ? (
                 <>
                   <motion.div whileHover={{ scale: 1.05 }} className="relative">
@@ -260,6 +290,21 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
               )}
             </div>
           </div>
+
+          {/* Fullscreen toggle */}
+          <motion.button
+            onClick={() => setFullscreen(!isFullscreen)}
+            className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          >
+            {isFullscreen ? (
+              <Minimize2 className="w-5 h-5" />
+            ) : (
+              <Maximize2 className="w-5 h-5" />
+            )}
+          </motion.button>
         </div>
 
         {/* Messages */}
@@ -321,6 +366,40 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
         onJoin={handleJoinGroup}
         initialInviteLink={inviteLinkFromUrl || undefined}
       />
+    </>
+  );
+
+  // Normal container
+  const normalContent = (
+    <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden grid grid-cols-1 lg:grid-cols-[auto_1fr] relative lg:shadow-xl dark:lg:shadow-2xl h-full min-h-0 theme-transition">
+      {chatContent}
     </div>
+  );
+
+  // Fullscreen portal content with smooth animation
+  const fullscreenContent = createPortal(
+    <AnimatePresence>
+      {isFullscreen && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.96 }}
+          transition={{ duration: 0.5, ease: [0.32, 0.72, 0, 1] }}
+          className="fixed top-14 left-0 right-0 bottom-0 z-99999 bg-white dark:bg-neutral-900"
+        >
+          <div className="h-full w-full grid grid-cols-1 lg:grid-cols-[auto_1fr] overflow-hidden relative">
+            {chatContent}
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
+    document.body
+  );
+
+  return (
+    <>
+      {!isFullscreen && normalContent}
+      {fullscreenContent}
+    </>
   );
 }
