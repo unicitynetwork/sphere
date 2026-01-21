@@ -168,7 +168,10 @@ export function DMChatSection({ onModeChange }: DMChatSectionProps) {
                 <div className={`p-2.5 rounded-xl bg-linear-to-br ${chatAgent.color}`}>
                   <chatAgent.Icon className="w-5 h-5 text-white" />
                 </div>
-                <span className="text-lg text-neutral-900 dark:text-white font-medium">{chatAgent.name}</span>
+                <div className="text-left">
+                  <div className="text-lg text-neutral-900 dark:text-white font-medium">{chatAgent.name}</div>
+                  <div className="text-sm text-neutral-500 dark:text-neutral-400">{chatAgent.description}</div>
+                </div>
                 <ChevronDown className={`w-4 h-4 text-neutral-500 dark:text-neutral-400 transition-transform ${showAgentPicker ? 'rotate-180' : ''}`} />
               </button>
 
@@ -188,10 +191,13 @@ export function DMChatSection({ onModeChange }: DMChatSectionProps) {
                           a.id === 'chat' ? 'bg-neutral-100 dark:bg-neutral-800/80' : ''
                         }`}
                       >
-                        <div className={`p-2 rounded-lg bg-linear-to-br ${a.color}`}>
+                        <div className={`p-2 rounded-lg bg-linear-to-br ${a.color} shrink-0`}>
                           <a.Icon className="w-4 h-4 text-white" />
                         </div>
-                        <span className="text-neutral-900 dark:text-white text-sm">{a.name}</span>
+                        <div className="text-left min-w-0">
+                          <div className="text-neutral-900 dark:text-white text-sm font-medium">{a.name}</div>
+                          <div className="text-neutral-500 dark:text-neutral-400 text-xs truncate">{a.description}</div>
+                        </div>
                       </button>
                     ))}
                   </motion.div>
