@@ -13,8 +13,10 @@ export function ChatSection() {
   useEffect(() => {
     const nametag = searchParams.get('nametag');
     if (nametag) {
+      // Strip leading @ if present (handles @username format from mentions)
+      const cleanNametag = nametag.startsWith('@') ? nametag.slice(1) : nametag;
       // Convert to nametag format (e.g., "Sarah Williams" → "sarah-williams")
-      const formattedNametag = nametag.toLowerCase().replace(/\s+/g, '-');
+      const formattedNametag = cleanNametag.toLowerCase().replace(/\s+/g, '-');
       setPendingDmRecipient(formattedNametag);
       // Clear the URL params after reading them
       setSearchParams((prev) => {

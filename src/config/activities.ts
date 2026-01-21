@@ -163,7 +163,7 @@ export const agents: AgentConfig[] = [
     category: 'Shopping',
     color: 'from-teal-500 to-cyan-500',
     type: 'simple-ai',
-    greetingMessage: "Welcome to Sell Anything! Describe what you want to sell and I'll get you a quote.",
+    greetingMessage: "Welcome to the P2P Marketplace! Tell me what you want to buy or sell and I'll help you find the best deals.",
     quickActions: [
       { label: 'Gold', message: 'Show me gold listings' },
       { label: 'Tickets', message: 'Show me event tickets' },

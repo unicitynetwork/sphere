@@ -182,7 +182,8 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
 
   // THIRD PASS: Process markdown - math placeholders won't be captured by markdown patterns
   // Added @mention pattern at the end: @username (alphanumeric, underscore, hyphen)
-  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(((?:[^\s()]|\([^\s)]*\))+)(?:\s+"([^"]+)")?\)|!\[([^\]]*)\]\(((?:[^()]|\([^)]*\))+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"])|(@[a-zA-Z0-9_-]+))/gi;
+  // Note: hyphen must be at start or end of character class, or escaped
+  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(((?:[^\s()]|\([^\s)]*\))+)(?:\s+"([^"]+)")?\)|!\[([^\]]*)\]\(((?:[^()]|\([^)]*\))+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"])|(@[\w-]+))/gi;
   let lastIndex = 0;
   let match;
 
@@ -297,7 +298,7 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
       parts.push(
         <span
           key={`${keyPrefix}-mention-${key++}`}
-          className="text-orange-500 dark:text-orange-400 font-medium cursor-pointer hover:underline"
+          className="text-white font-bold cursor-pointer hover:underline"
           onClick={(e) => {
             e.stopPropagation();
             const handler = getMentionClickHandler();
