@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Menu, PanelLeft, ChevronDown } from 'lucide-react';
+import { Menu, PanelLeft, ChevronDown, Maximize2, Minimize2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { agents, type AgentConfig } from '../../../config/activities';
@@ -11,6 +11,8 @@ interface ChatHeaderProps {
   onExpandSidebar?: () => void;
   showMenuButton?: boolean;
   sidebarCollapsed?: boolean;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }
 
 export function ChatHeader({
@@ -20,6 +22,8 @@ export function ChatHeader({
   onExpandSidebar,
   showMenuButton,
   sidebarCollapsed,
+  isFullscreen,
+  onToggleFullscreen,
 }: ChatHeaderProps) {
   const navigate = useNavigate();
   const [showAgentPicker, setShowAgentPicker] = useState(false);
@@ -69,8 +73,8 @@ export function ChatHeader({
             </motion.button>
           )}
 
-          {/* Mobile: Agent picker dropdown */}
-          <div ref={pickerRef} className="relative lg:hidden">
+          {/* Mobile & Fullscreen: Agent picker dropdown */}
+          <div ref={pickerRef} className={`relative ${isFullscreen ? '' : 'lg:hidden'}`}>
             <button
               onClick={() => setShowAgentPicker(!showAgentPicker)}
               className="flex items-center gap-2 active:scale-95 transition-transform"
@@ -109,8 +113,8 @@ export function ChatHeader({
             </AnimatePresence>
           </div>
 
-          {/* Desktop: Static agent info */}
-          <div className="hidden lg:flex items-center gap-3">
+          {/* Desktop: Static agent info (hidden in fullscreen) */}
+          <div className={`${isFullscreen ? 'hidden' : 'hidden lg:flex'} items-center gap-3`}>
             <div className={`p-2.5 rounded-xl bg-linear-to-br ${agent.color}`}>
               <agent.Icon className="w-5 h-5 text-white" />
             </div>
@@ -121,12 +125,25 @@ export function ChatHeader({
           </div>
         </div>
 
-        {/* Right side: custom content */}
-        {rightContent && (
-          <div className="flex items-center gap-2">
-            {rightContent}
-          </div>
-        )}
+        {/* Right side: fullscreen toggle + custom content */}
+        <div className="flex items-center gap-2">
+          {rightContent}
+          {onToggleFullscreen && (
+            <motion.button
+              onClick={onToggleFullscreen}
+              className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            >
+              {isFullscreen ? (
+                <Minimize2 className="w-5 h-5" />
+              ) : (
+                <Maximize2 className="w-5 h-5" />
+              )}
+            </motion.button>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, X, PanelLeftClose, Search, Trash2, Clock, MessageSquare, Activity, ChevronDown, Cloud, Check, Loader2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../../config/activities';
 import { useAgentChat, type ChatMessage } from '../../../hooks/useAgentChat';
 import { useWallet } from '../../wallet/L3/hooks/useWallet';
+import { useUIState } from '../../../hooks/useUIState';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatHeader, ChatBubble, ChatInput, QuickActions } from './index';
 import { useChatHistory } from './useChatHistory';
@@ -110,6 +112,20 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
   const [searchQuery, setSearchQuery] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
+
+  // Global fullscreen state (persists across agent switches)
+  const { isFullscreen, setFullscreen } = useUIState();
+
+  // Handle Escape key to exit fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        setFullscreen(false);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen, setFullscreen]);
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -958,6 +974,8 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
         onExpandSidebar={() => setSidebarCollapsed(false)}
         showMenuButton={true}
         sidebarCollapsed={sidebarCollapsed}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={() => setFullscreen(!isFullscreen)}
       />
 
       {/* Messages area */}
@@ -1047,15 +1065,36 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     </div>
   );
 
-  return (
-    <>
-      {/* Layout with left sidebar for chat history */}
-      <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden relative lg:grid lg:grid-cols-[auto_1fr] lg:shadow-xl dark:lg:shadow-2xl h-full min-h-0 theme-transition">
-        <div className={`absolute -top-20 -right-20 w-96 h-96 ${bgGradient.from} rounded-full blur-3xl`} />
-        <div className={`absolute -bottom-20 -left-20 w-96 h-96 ${bgGradient.to} rounded-full blur-3xl`} />
+  // Normal chat container
+  const normalChatContent = (
+    <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden relative lg:grid lg:grid-cols-[auto_1fr] lg:shadow-xl dark:lg:shadow-2xl h-full min-h-0 theme-transition">
+      <div className={`absolute -top-20 -right-20 w-96 h-96 ${bgGradient.from} rounded-full blur-3xl`} />
+      <div className={`absolute -bottom-20 -left-20 w-96 h-96 ${bgGradient.to} rounded-full blur-3xl`} />
+      {renderHistorySidebar()}
+      {renderChat()}
+    </div>
+  );
+
+  // Fullscreen portal content (below app header)
+  const fullscreenContent = isFullscreen ? createPortal(
+    <div className="fixed top-14 left-0 right-0 bottom-0 z-99999 bg-white dark:bg-neutral-900">
+      <div className="h-full w-full lg:grid lg:grid-cols-[auto_1fr] overflow-hidden relative">
+        <div className={`absolute -top-20 -right-20 w-96 h-96 ${bgGradient.from} rounded-full blur-3xl pointer-events-none`} />
+        <div className={`absolute -bottom-20 -left-20 w-96 h-96 ${bgGradient.to} rounded-full blur-3xl pointer-events-none`} />
         {renderHistorySidebar()}
         {renderChat()}
       </div>
+    </div>,
+    document.body
+  ) : null;
+
+  return (
+    <>
+      {/* Normal layout */}
+      {!isFullscreen && normalChatContent}
+
+      {/* Fullscreen portal */}
+      {fullscreenContent}
 
       {/* Additional custom content */}
       {additionalContent}
