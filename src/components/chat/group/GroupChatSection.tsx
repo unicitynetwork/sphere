@@ -11,7 +11,7 @@ import { GroupMessageList } from './GroupMessageList';
 import { DMChatInput } from '../dm/DMChatInput';
 import { JoinGroupModal } from './JoinGroupModal';
 import { agents } from '../../../config/activities';
-import { setMentionClickHandler } from '../../../utils/markdown';
+import { setMentionClickHandler } from '../../../utils/mentionHandler';
 import type { ChatModeChangeHandler } from '../../../types';
 
 interface GroupChatSectionProps {

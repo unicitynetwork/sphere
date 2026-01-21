@@ -10,7 +10,7 @@ import { DMMessageList } from './DMMessageList';
 import { DMChatInput } from './DMChatInput';
 import { NewConversationModal } from './NewConversationModal';
 import { agents } from '../../../config/activities';
-import { setMentionClickHandler } from '../../../utils/markdown';
+import { setMentionClickHandler } from '../../../utils/mentionHandler';
 import type { ChatModeChangeHandler } from '../../../types';
 
 interface DMChatSectionProps {
