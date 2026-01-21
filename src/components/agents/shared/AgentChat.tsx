@@ -56,7 +56,8 @@ interface ActionConfig<TCardData> {
 interface AgentChatProps<TCardData, TItem extends SidebarItem = SidebarItem> {
   agent: AgentConfig;
 
-  // Mock response handler (for sidebar-based agents that don't use real backend)
+  // Mock response handler (for agents that don't use real backend)
+  // When provided AND agent has no backendActivityId, mock mode is used automatically
   getMockResponse?: (
     userInput: string,
     addMessage: (content: string, cardData?: TCardData, showActionButton?: boolean) => void
@@ -177,8 +178,10 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     userId: nametag ?? undefined,
   });
 
-  // Determine if we're in mock mode based on VITE_AGENT_MODE env variable
-  const useMockMode = agentMode === 'mock';
+  // Determine if we're in mock mode:
+  // - If agent has no backendActivityId AND getMockResponse is provided, use mock mode
+  // - Otherwise, use agentMode from env variable
+  const useMockMode = (getMockResponse && !agent.backendActivityId) || agentMode === 'mock';
   const isTyping = useMockMode ? isMockTyping : isStreaming;
 
   // Copy message content
