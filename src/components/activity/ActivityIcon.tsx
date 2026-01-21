@@ -1,4 +1,4 @@
-import { ShoppingBag, ArrowRightLeft, Wallet, Gamepad2, TrendingUp, Handshake, ShoppingCart } from 'lucide-react';
+import { ShoppingBag, ArrowRightLeft, Wallet, Gamepad2, TrendingUp, Handshake, ShoppingCart, Tag } from 'lucide-react';
 import type { ActivityKind } from '../../types/activity';
 
 interface ActivityIconProps {
@@ -10,6 +10,11 @@ const iconConfig: Record<ActivityKind, { icon: typeof ShoppingBag; bgColor: stri
   marketplace_post: {
     icon: ShoppingBag,
     bgColor: 'from-purple-500 to-purple-600',
+    iconColor: 'text-white',
+  },
+  marketplace_offer: {
+    icon: Tag,
+    bgColor: 'from-indigo-500 to-indigo-600',
     iconColor: 'text-white',
   },
   token_transfer: {
@@ -49,7 +54,7 @@ export function ActivityIcon({ kind, className = '' }: ActivityIconProps) {
   const Icon = config.icon;
 
   return (
-    <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${config.bgColor} flex items-center justify-center shadow-lg ${className}`}>
+    <div className={`w-8 h-8 rounded-lg bg-linear-to-br ${config.bgColor} flex items-center justify-center shadow-lg ${className}`}>
       <Icon className={`w-4 h-4 ${config.iconColor}`} />
     </div>
   );

@@ -1,5 +1,6 @@
 export type ActivityKind =
   | 'marketplace_post'
+  | 'marketplace_offer'
   | 'token_transfer'
   | 'wallet_created'
   | 'game_started'
