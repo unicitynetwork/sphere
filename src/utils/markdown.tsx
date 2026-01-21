@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Copy, Check } from 'lucide-react';
+import { getMentionClickHandler } from './mentionHandler';
 
 // Code block component with copy button
 function CodeBlock({ code, language, keyPrefix }: { code: string; language?: string; keyPrefix: string }) {
@@ -153,13 +154,6 @@ function replaceMathPlaceholders(
   return parts.length > 0 ? parts : [text];
 }
 
-// Context for mention click handler (avoids prop drilling)
-type MentionClickHandler = (username: string) => void;
-let globalMentionClickHandler: MentionClickHandler | null = null;
-
-export function setMentionClickHandler(handler: MentionClickHandler | null) {
-  globalMentionClickHandler = handler;
-}
 
 // Parse inline markdown and HTML (bold, italic, code, br, links, images, plain URLs, @mentions)
 function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
@@ -306,8 +300,9 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
           className="text-orange-500 dark:text-orange-400 font-medium cursor-pointer hover:underline"
           onClick={(e) => {
             e.stopPropagation();
-            if (globalMentionClickHandler) {
-              globalMentionClickHandler(username);
+            const handler = getMentionClickHandler();
+            if (handler) {
+              handler(username);
             }
           }}
           role="button"
@@ -315,8 +310,9 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
-              if (globalMentionClickHandler) {
-                globalMentionClickHandler(username);
+              const handler = getMentionClickHandler();
+              if (handler) {
+                handler(username);
               }
             }
           }}

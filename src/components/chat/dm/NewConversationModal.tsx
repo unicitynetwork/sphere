@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, User, AtSign, Loader2 } from 'lucide-react';
 
@@ -22,6 +22,27 @@ export function NewConversationModal({
   const [error, setError] = useState<string | null>(null);
   const hasAutoSubmitted = useRef(false);
 
+  const handleSubmitWithValue = useCallback(async (value: string) => {
+    if (!value.trim()) return;
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const success = await onStart(value.trim());
+      if (success) {
+        setInput('');
+        onClose();
+      } else {
+        setError(`Could not start conversation with @${value}. User not found or does not have a registered nametag.`);
+      }
+    } catch {
+      setError('Failed to start conversation. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [onStart, onClose]);
+
   // Set initial value and optionally auto-submit when modal opens
   useEffect(() => {
     if (isOpen && initialValue) {
@@ -42,28 +63,7 @@ export function NewConversationModal({
     if (!isOpen) {
       hasAutoSubmitted.current = false;
     }
-  }, [isOpen, initialValue, autoSubmit]);
-
-  const handleSubmitWithValue = async (value: string) => {
-    if (!value.trim()) return;
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const success = await onStart(value.trim());
-      if (success) {
-        setInput('');
-        onClose();
-      } else {
-        setError(`Could not start conversation with @${value}. User not found or does not have a registered nametag.`);
-      }
-    } catch {
-      setError('Failed to start conversation. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  }, [isOpen, initialValue, autoSubmit, handleSubmitWithValue]);
 
   const handleSubmit = async () => {
     if (!input.trim()) return;
