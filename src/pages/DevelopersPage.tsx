@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ComingSoonModal } from '../components/ui/ComingSoonModal';
 
-type ApiKey = 'payments' | 'communication' | 'orchestration';
+type ApiKey = 'init' | 'payments' | 'communication' | 'orchestration';
 
 interface ApiInfo {
   icon: string;
@@ -16,9 +15,8 @@ interface ApiInfo {
 }
 
 export function DevelopersPage() {
-  const [activeApi, setActiveApi] = useState<ApiKey>('payments');
+  const [activeApi, setActiveApi] = useState<ApiKey>('init');
   const [copiedIndex, setCopiedIndex] = useState<string | null>(null);
-  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
 
   const copyToClipboard = (text: string, index: string) => {
     navigator.clipboard.writeText(text);
@@ -27,83 +25,125 @@ export function DevelopersPage() {
   };
 
   const apis: Record<ApiKey, ApiInfo> = {
+    init: {
+      icon: '🔑',
+      title: 'Initialization',
+      tagline: 'Your key is your identity.',
+      description: 'No API keys. Your cryptographic keypair IS your Unicity ID. Self-authenticated, decentralized identity.',
+      color: 'from-emerald-500 to-teal-500',
+      code: `const sphere = await Sphere.init({ mode: 'trusted', mnemonic: '...' });`,
+      fullExample: `// Trusted mode (browser - local key management)
+const sphere = await Sphere.init({
+  mode: 'trusted',
+  mnemonic: 'abandon badge cable ...'
+});
+console.log(sphere.address); // "unicity:0x8f3a..."
+
+// Untrusted mode (server agent - remote signing)
+const sphere = await Sphere.init({
+  mode: 'untrusted',
+  remoteUnicityId: 'unicity:0x8f3a...'
+});
+// Transactions tunneled to browser for signing`,
+      features: ['Self-authenticated', 'No registration', 'BIP32 HD wallets', 'Cross-device sync']
+    },
     payments: {
       icon: '⚡',
-      title: 'Payments API',
+      title: 'Payments',
       tagline: "Three parameters. That's it.",
       description: 'Send any token to anyone. No gas estimation. No nonce management. No failed transactions.',
       color: 'from-orange-500 to-amber-500',
-      code: `await sphere.send("USDC", 100, "unicity:0x8f3a...");`,
-      fullExample: `// Simple payment
-await sphere.send("USDC", 100, sellerUnicityId);
+      code: `await sphere.send("USDC", 100, "@merchant");`,
+      fullExample: `// Simple payment (use @nametag or unicity:0x...)
+await sphere.send("USDC", 100, "@merchant");
+
+// Listen for incoming payments
+sphere.on.receive((transfer) => {
+  console.log(\`Received \${transfer.amount} \${transfer.token}\`);
+});
+
+// Check balance
+const balance = await sphere.getBalance("USDC");
 
 // With escrow
 const escrow = await sphere.escrow({
   token: "USDC",
   amount: 5000,
-  from: buyerUnicityId,
-  to: sellerUnicityId,
+  to: "@seller",
   releaseCondition: "delivery_confirmed"
 });
-
-// Release when ready
 await escrow.release();`,
-      features: ['Instant P2P settlement', 'Any token, any amount', 'Built-in escrow', 'Multi-party splits']
+      features: ['Instant P2P settlement', 'Any token, any amount', 'Built-in escrow', 'Nametag support']
     },
     communication: {
       icon: '💬',
-      title: 'Communication API',
+      title: 'Communication',
       tagline: 'Message anyone. Human or agent.',
-      description: 'Direct encrypted messaging between any Unicity IDs. Build negotiations, notifications, agent coordination.',
+      description: 'Direct encrypted P2P messaging via Nostr. NIP-17 encryption. No central servers.',
       color: 'from-violet-500 to-purple-500',
-      code: `await sphere.msg(unicityId, { type: "offer", price: 500 });`,
+      code: `await sphere.msg("@alice", { type: "offer", price: 500 });`,
       fullExample: `// Send an offer
-await sphere.msg(sellerUnicityId, {
+await sphere.msg("@alice", {
   type: "offer",
   item: "PSA-10-charizard",
   price: 12000,
   currency: "USDC"
 });
 
-// Listen for responses
-sphere.onMessage((msg) => {
+// Listen for messages
+sphere.on.msg((msg) => {
   if (msg.type === "accepted") {
     // Trigger payment
     await sphere.send(msg.currency, msg.price, msg.from);
   }
 });`,
-      features: ['End-to-end encrypted', 'Structured payloads', 'Agent-to-agent native', 'Real-time webhooks']
+      features: ['End-to-end encrypted', 'P2P via Nostr', 'Agent-to-agent native', 'Structured payloads']
     },
     orchestration: {
       icon: '🤖',
-      title: 'AI Orchestration API',
-      tagline: 'Define intent. Agents do the rest.',
-      description: 'Connect to the agent layer. Define what you want, agents find it, negotiate, and execute.',
+      title: 'AI Orchestration',
+      tagline: 'Intent-based or direct. Your choice.',
+      description: 'Register high-level intents for autonomous matching, or discover and invoke agents directly.',
       color: 'from-cyan-500 to-blue-500',
       code: `await sphere.intent("buy", { item: "gold-1oz", maxPrice: 2100 });`,
-      fullExample: `// Post a buy intent
+      fullExample: `// High-level intent (autonomous matching)
 const intent = await sphere.intent("buy", {
   category: "tickets",
   event: "World Cup 2026",
-  teams: ["England", "France"],
-  maxPricePerTicket: 2000,
-  quantity: 2
+  maxPrice: 2000
+});
+intent.onMatch((match) => {
+  console.log(\`Found: \${match.description} - \${match.price}\`);
+  match.approve(); // Auto-execute
 });
 
-// Agent monitors and matches
-intent.onMatch((match) => {
-  console.log(\`Found: \${match.event} - \${match.price}\`);
+// Direct agent discovery
+const sellers = await sphere.discover("ticket resellers");
+
+// Direct invocation (P2P)
+await sphere.invoke(sellers[0].id, "buy", {
+  item: "World Cup ticket",
+  maxPrice: 2000
+});
+
+// Advertise your own capabilities
+sphere.advertise({
+  capabilities: ["sell_collectibles"],
+  fee: { currency: "USDC", percent: 1 }
 });`,
-      features: ['Natural language intents', 'Autonomous negotiation', 'Multi-marketplace discovery', 'Full audit trail']
+      features: ['Intent-based matching', 'P2P discovery', 'Direct invocation', 'Capability advertising']
     }
   };
 
-  const marketplaceCode = `// Initialize the SDK
-const sphere = new Sphere({ apiKey: 'your-key' });
+  const marketplaceCode = `// Initialize with your keypair (no API key needed!)
+const sphere = await Sphere.init({
+  mode: 'trusted',
+  mnemonic: process.env.WALLET_MNEMONIC
+});
 
 // Create a listing
 async function list(item, price) {
-  return sphere.listing.create({ item, price, seller: sphere.me() });
+  return sphere.listing.create({ item, price, seller: sphere.address });
 }
 
 // Make an offer
@@ -113,10 +153,10 @@ async function offer(listingId, price) {
 }
 
 // Handle offers automatically
-sphere.onMessage(async (msg) => {
+sphere.on.msg(async (msg) => {
   if (msg.type === "offer" && msg.price >= listing.price) {
-    await sphere.escrow({ token: "USDC", amount: msg.price, from: msg.buyer, to: sphere.me() });
-    await sphere.msg(msg.buyer, { type: "accepted" });
+    await sphere.escrow({ token: "USDC", amount: msg.price, to: sphere.address });
+    await sphere.msg(msg.from, { type: "accepted" });
   }
 });
 
@@ -136,7 +176,7 @@ sphere.onMessage(async (msg) => {
               animate={{ opacity: 1, y: 0 }}
               className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-6 leading-tight"
             >
-              Three APIs.<br />
+              One SDK.<br />
               <span className="bg-gradient-to-r from-orange-400 to-amber-400 bg-clip-text text-transparent">Infinite Marketplaces.</span>
             </motion.h1>
             <motion.p
@@ -166,7 +206,7 @@ sphere.onMessage(async (msg) => {
         {/* API Cards Section */}
         <section className="px-4 sm:px-6 py-8 sm:py-12">
           <div className="max-w-6xl mx-auto">
-            <div className="grid md:grid-cols-3 gap-4 mb-8">
+            <div className="grid md:grid-cols-4 gap-4 mb-8">
               {(Object.entries(apis) as [ApiKey, ApiInfo][]).map(([key, api]) => (
                 <motion.button
                   key={key}
@@ -282,22 +322,22 @@ sphere.onMessage(async (msg) => {
               <div className="bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
                 <h3 className="text-lg font-semibold mb-6 text-neutral-500 dark:text-neutral-400">Traditional Stack</h3>
                 <ul className="space-y-4 text-neutral-500">
-                  <li className="flex items-center gap-3"><span className="text-red-400">✗</span> Smart contract development</li>
+                  <li className="flex items-center gap-3"><span className="text-red-400">✗</span> API key management</li>
                   <li className="flex items-center gap-3"><span className="text-red-400">✗</span> Gas fee estimation</li>
-                  <li className="flex items-center gap-3"><span className="text-red-400">✗</span> Wallet integration hell</li>
-                  <li className="flex items-center gap-3"><span className="text-red-400">✗</span> Payment rails from scratch</li>
-                  <li className="flex items-center gap-3"><span className="text-red-400">✗</span> Messaging infrastructure</li>
+                  <li className="flex items-center gap-3"><span className="text-red-400">✗</span> Wallet integration</li>
+                  <li className="flex items-center gap-3"><span className="text-red-400">✗</span> Payment rails</li>
+                  <li className="flex items-center gap-3"><span className="text-red-400">✗</span> Messaging infra</li>
                   <li className="flex items-center gap-3"><span className="text-red-400">✗</span> Months to MVP</li>
                 </ul>
               </div>
               <div className="bg-gradient-to-br from-orange-500/10 to-amber-500/10 dark:from-orange-500/20 dark:to-amber-500/10 rounded-2xl border border-orange-500/30 p-6 sm:p-8">
-                <h3 className="text-lg font-semibold mb-6 text-orange-500">AgentSphere</h3>
+                <h3 className="text-lg font-semibold mb-6 text-orange-500">Sphere SDK</h3>
                 <ul className="space-y-4">
-                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> Just call <code className="text-amber-600 dark:text-amber-400 text-sm">send()</code></li>
-                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> Included</li>
+                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> Private key IS identity</li>
+                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> Included (off-chain)</li>
                   <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> Unified Unicity ID</li>
-                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> Built in</li>
-                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> Built in</li>
+                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> Just call <code className="text-amber-600 dark:text-amber-400 text-sm">send()</code></li>
+                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> Built-in P2P</li>
                   <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> <strong>Days</strong></li>
                 </ul>
               </div>
@@ -309,20 +349,29 @@ sphere.onMessage(async (msg) => {
         <section className="px-4 sm:px-6 py-12 sm:py-16">
           <div className="max-w-4xl mx-auto text-center">
             <h2 className="text-3xl sm:text-4xl font-bold mb-6">Ready to Build?</h2>
-            <p className="text-lg sm:text-xl text-neutral-600 dark:text-neutral-400 mb-8 sm:mb-10">Get your API key and ship a marketplace this week.</p>
+            <p className="text-lg sm:text-xl text-neutral-600 dark:text-neutral-400 mb-8 sm:mb-10">Install the SDK and ship a marketplace this week.</p>
 
             <div className="bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8 mb-8 sm:mb-10 shadow-xl">
               <pre className="text-left font-mono text-sm mb-6 overflow-x-auto">
                 <code className="text-neutral-500"># Install the SDK</code>{'\n'}
                 <code className="text-amber-600 dark:text-amber-400">npm install @agentsphere/sdk</code>{'\n\n'}
-                <code className="text-neutral-500"># You're ready</code>
+                <code className="text-neutral-500"># Generate a keypair (your identity)</code>{'\n'}
+                <code className="text-amber-600 dark:text-amber-400">npx sphere-keygen</code>
               </pre>
-              <button
-                onClick={() => setShowApiKeyModal(true)}
-                className="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:opacity-90 transition w-full shadow-lg shadow-orange-500/25"
-              >
-                Get Your API Key →
-              </button>
+              <div className="flex gap-4 justify-center flex-wrap">
+                <a
+                  href="#"
+                  className="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:opacity-90 transition shadow-lg shadow-orange-500/25"
+                >
+                  View Documentation
+                </a>
+                <a
+                  href="#"
+                  className="border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-white px-8 py-4 rounded-xl font-semibold text-lg hover:border-neutral-400 dark:hover:border-neutral-500 transition"
+                >
+                  Generate Keypair
+                </a>
+              </div>
             </div>
 
             <div className="flex justify-center gap-6 sm:gap-8 text-neutral-600 dark:text-neutral-400 flex-wrap">
@@ -349,16 +398,10 @@ sphere.onMessage(async (msg) => {
               <div className="w-6 h-6 bg-linear-to-br from-orange-500 to-amber-500 rounded flex items-center justify-center font-bold text-xs text-white">S</div>
               <span>AgentSphere by Unicity Labs</span>
             </div>
-            <div>Three APIs. Any marketplace. Let's build.</div>
+            <div>One SDK. Any marketplace. Let's build.</div>
           </div>
         </footer>
 
-        {/* API Key Modal */}
-        <ComingSoonModal
-          isOpen={showApiKeyModal}
-          onClose={() => setShowApiKeyModal(false)}
-          title="Get API Key"
-        />
     </motion.div>
   );
 }
