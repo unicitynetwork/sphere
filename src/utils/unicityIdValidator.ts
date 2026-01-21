@@ -130,9 +130,9 @@ export async function validateUnicityId(): Promise<UnicityIdValidationResult> {
     };
 
     console.log("✅ Identity loaded");
-    console.log(`   L3 pubkey: ${identity.publicKey.substring(0, 20)}...`);
-    console.log(`   Nostr pubkey (Schnorr): ${expectedNostrPubkey.substring(0, 20)}...`);
-    console.log(`   Address: ${identity.address.substring(0, 40)}...`);
+    console.log(`   L3 pubkey: ${identity.publicKey}...`);
+    console.log(`   Nostr pubkey (Schnorr): ${expectedNostrPubkey}...`);
+    console.log(`   Address: ${identity.address}...`);
   } catch (err) {
     errors.push(`Failed to load identity: ${err instanceof Error ? err.message : String(err)}`);
     return result;

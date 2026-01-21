@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { isMock } from '../../hooks/useAgentChat';
 import { ThemeToggle } from '../theme';
-import { ComingSoonModal } from '../ui/ComingSoonModal';
 import { ServiceProvider } from '../wallet/L3/services/ServiceProvider';
 import { devReset } from '../../utils/devTools';
 import logoUrl from '/Union.svg';
@@ -15,18 +14,17 @@ const DiscordIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-const navItems = [
+const navItems: { label: string; path: string; external?: boolean }[] = [
   { label: 'Home', path: '/agents/chat' },
   { label: 'Developers', path: '/developers' },
-  { label: 'Mine Alpha', path: null, external: true }, // External URL to be provided later
+  { label: 'Mine Alpha', path: '/mine' },
 ];
 
 export function Header() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const isDevelopersPage = location.pathname === '/developers';
+  const isMinePage = location.pathname === '/mine';
 
   // Dev config state for showing banner when non-default settings are active
   const [devConfig, setDevConfig] = useState(() => ServiceProvider.getDevConfig());
@@ -68,7 +66,7 @@ export function Header() {
 
   return (
     <>
-    <header className="border-b border-neutral-200 dark:border-neutral-800/50 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-2xl sticky top-0 z-50 overflow-hidden theme-transition w-screen">
+    <header className={`border-b backdrop-blur-2xl sticky top-0 z-50 overflow-hidden w-screen border-neutral-200 dark:border-neutral-800/50 bg-white/80 ${isMinePage ? 'dark:bg-gray-950/90' : 'theme-transition dark:bg-neutral-900/80'}`}>
       {/* Background decorative elements */}
       <div className="absolute top-0 left-0 w-96 h-full bg-linear-to-r from-orange-500/5 dark:from-orange-500/10 to-transparent blur-3xl" />
       <div className="absolute top-0 right-0 w-96 h-full bg-linear-to-l from-purple-500/5 dark:from-purple-500/10 to-transparent blur-3xl" />
@@ -90,7 +88,7 @@ export function Header() {
 
             <div className="relative">
               <div className="flex items-center gap-1.5 sm:gap-2">
-                <h1 className="text-base sm:text-lg lg:text-xl text-neutral-900 dark:text-white bg-clip-text">AgentSphere</h1>
+                <h1 className="text-base sm:text-lg lg:text-xl bg-clip-text text-neutral-900 dark:text-white">AgentSphere</h1>
                 <Sparkles className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500 animate-pulse" />
                 {isMock() && (
                   <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 border border-yellow-500/30">
@@ -108,7 +106,19 @@ export function Header() {
           {/* Navigation Tabs - next to logo */}
           <nav className="hidden lg:flex items-center h-full ml-8 gap-1">
             {navItems.map((item) => (
-              item.path ? (
+              item.external ? (
+                <a
+                  key={item.label}
+                  href={item.path!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="relative px-5 py-2.5 flex items-center text-sm font-medium transition-colors duration-300 group"
+                >
+                  <span className="relative transition-colors duration-300 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-300">
+                    {item.label}
+                  </span>
+                </a>
+              ) : item.path ? (
                 <Link
                   key={item.label}
                   to={item.path}
@@ -176,16 +186,6 @@ export function Header() {
         )}
 
         <div className="flex items-center gap-1 sm:gap-2 lg:gap-3">
-          {/* Get API Key Button - visible only on Developers page */}
-          <button
-            onClick={() => setShowApiKeyModal(true)}
-            className={`hidden lg:flex items-center gap-2 px-4 py-2 bg-linear-to-r from-orange-500 to-amber-500 text-white text-sm font-medium rounded-xl transition-all shadow-lg shadow-orange-500/25 ${
-              isDevelopersPage ? 'visible opacity-100 hover:opacity-90' : 'invisible opacity-0 pointer-events-none'
-            }`}
-          >
-            Get API Key
-          </button>
-
           {/* Social Links */}
           <motion.a
             href="https://github.com/unicitynetwork"
@@ -253,11 +253,22 @@ export function Header() {
             animate={{ height: 'auto' }}
             exit={{ height: 0 }}
             transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
-            className="lg:hidden fixed left-0 right-0 top-14 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800 z-50 shadow-xl overflow-hidden"
+            className="lg:hidden fixed left-0 right-0 top-14 backdrop-blur-xl border-b z-50 shadow-xl overflow-hidden bg-white/95 dark:bg-neutral-900/95 border-neutral-200 dark:border-neutral-800"
           >
           <nav className="px-4 py-3 space-y-1">
             {navItems.map((item) => (
-              item.path ? (
+              item.external ? (
+                <a
+                  key={item.label}
+                  href={item.path!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="w-full flex items-center px-4 py-3 rounded-xl text-base font-medium transition-all text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                >
+                  {item.label}
+                </a>
+              ) : item.path ? (
                 <button
                   key={item.label}
                   onClick={() => handleMobileNavigation(item.path!)}
@@ -289,30 +300,12 @@ export function Header() {
               )
             ))}
 
-            {/* Get API Key - mobile */}
-            {isDevelopersPage && (
-              <button
-                onClick={() => {
-                  setShowApiKeyModal(true);
-                  setMobileMenuOpen(false);
-                }}
-                className="w-full mt-2 px-4 py-3 bg-linear-to-r from-orange-500 to-amber-500 text-white text-base font-medium rounded-xl hover:opacity-90 transition shadow-lg shadow-orange-500/25"
-              >
-                Get API Key
-              </button>
-            )}
           </nav>
         </motion.div>
         </>
       )}
     </AnimatePresence>
 
-    {/* API Key Modal - outside header to avoid overflow:hidden */}
-    <ComingSoonModal
-      isOpen={showApiKeyModal}
-      onClose={() => setShowApiKeyModal(false)}
-      title="Get API Key"
-    />
     </>
   );
 }

@@ -11,10 +11,13 @@ import { MerchChat } from '../components/agents/MerchChat';
 import { TriviaChat } from '../components/agents/TriviaChat';
 import { GamesChat } from '../components/agents/GamesChat';
 import { AIChat } from '../components/agents/AIChat';
+import { SellAnythingChat } from '../components/agents/SellAnythingChat';
 import { WalletPanel } from '../components/wallet/WalletPanel';
 import { agents, getAgentConfig } from '../config/activities';
 
 const DEFAULT_VISIBLE_AGENTS = 7;
+
+type AnimationPhase = 'idle' | 'exiting' | 'entering';
 
 export function AgentPage() {
   const { agentId } = useParams<{ agentId: string }>();
@@ -22,18 +25,56 @@ export function AgentPage() {
   const [activePanel, setActivePanel] = useState<'chat' | 'wallet'>('chat');
   const [showAllAgents, setShowAllAgents] = useState(false);
   const [recentAgentIds, setRecentAgentIds] = useState<string[]>([]);
+  const [animatingAgentId, setAnimatingAgentId] = useState<string | null>(null);
+  const [animationPhase, setAnimationPhase] = useState<AnimationPhase>('idle');
+  const prevAgentIdRef = useRef<string | undefined>(undefined);
+  const recentAgentIdsRef = useRef<string[]>([]);
+
+  // Keep ref in sync with state
+  recentAgentIdsRef.current = recentAgentIds;
 
   const hasMoreAgents = agents.length > DEFAULT_VISIBLE_AGENTS;
 
-  // Track recently selected agents
+  // Track recently selected agents with animation
   useEffect(() => {
     if (!agentId) return;
 
-    setRecentAgentIds(prev => {
-      if (prev[0] === agentId) return prev; // Already first, no change
-      const filtered = prev.filter(id => id !== agentId);
-      return [agentId, ...filtered].slice(0, DEFAULT_VISIBLE_AGENTS);
-    });
+    // Check if this is a new agent selection (not just a re-render)
+    const isNewSelection = prevAgentIdRef.current !== agentId;
+    prevAgentIdRef.current = agentId;
+
+    const currentRecentIds = recentAgentIdsRef.current;
+
+    // If already first, no animation needed
+    if (currentRecentIds[0] === agentId) return;
+
+    if (isNewSelection && currentRecentIds.includes(agentId)) {
+      // Agent exists in visible list - animate the reorder
+      setAnimatingAgentId(agentId);
+      setAnimationPhase('exiting');
+
+      // Phase 1: Exit animation (card disappears)
+      setTimeout(() => {
+        // Phase 2: Update order (others slide)
+        setRecentAgentIds(prev => {
+          const filtered = prev.filter(id => id !== agentId);
+          return [agentId, ...filtered].slice(0, DEFAULT_VISIBLE_AGENTS);
+        });
+        setAnimationPhase('entering');
+
+        // Phase 3: Enter animation (card appears at new position)
+        setTimeout(() => {
+          setAnimationPhase('idle');
+          setAnimatingAgentId(null);
+        }, 450);
+      }, 350);
+    } else {
+      // New agent not in list - just add to front without fancy animation
+      setRecentAgentIds(prev => {
+        const filtered = prev.filter(id => id !== agentId);
+        return [agentId, ...filtered].slice(0, DEFAULT_VISIBLE_AGENTS);
+      });
+    }
   }, [agentId]);
 
   // Calculate visible agents - prioritize recently selected agents
@@ -133,6 +174,8 @@ export function AgentPage() {
         return <P2PChat agent={currentAgent} />;
       case 'merch':
         return <MerchChat agent={currentAgent} />;
+      case 'sell-anything':
+        return <SellAnythingChat agent={currentAgent} />;
       default:
         return <ChatSection />;
     }
@@ -150,27 +193,79 @@ export function AgentPage() {
             className="grid gap-4"
             style={{ gridTemplateColumns: `repeat(${Math.min(visibleAgents.length, DEFAULT_VISIBLE_AGENTS)}, 1fr)` }}
           >
-            {/* First N agents - no animation */}
-            {visibleAgents.slice(0, DEFAULT_VISIBLE_AGENTS).map((agent) => (
-              <AgentCard
-                key={agent.id}
-                id={agent.id}
-                name={agent.name}
-                Icon={agent.Icon}
-                category={agent.category}
-                color={agent.color}
-                isSelected={agentId === agent.id}
-              />
-            ))}
+            {/* First N agents - with layout animation for reordering */}
+            {visibleAgents.slice(0, DEFAULT_VISIBLE_AGENTS).map((agent, index) => {
+              const isAnimatingAgent = animatingAgentId === agent.id;
+              const isFirstPosition = index === 0;
+              const isExiting = isAnimatingAgent && animationPhase === 'exiting' && !isFirstPosition;
+              const isEntering = isAnimatingAgent && animationPhase === 'entering' && isFirstPosition;
+
+              return (
+                <motion.div
+                  key={agent.id}
+                  layout
+                  initial={false}
+                  animate={{
+                    opacity: isExiting ? 0 : 1,
+                    scale: isExiting ? 0.75 : 1,
+                    y: isExiting ? -15 : 0,
+                  }}
+                  transition={{
+                    layout: {
+                      type: "spring",
+                      stiffness: 250,
+                      damping: 30,
+                    },
+                    opacity: {
+                      duration: 0.35,
+                      ease: "easeOut",
+                    },
+                    scale: {
+                      duration: 0.35,
+                      ease: "easeOut",
+                    },
+                    y: {
+                      duration: 0.35,
+                      ease: "easeOut",
+                    },
+                  }}
+                >
+                  {/* Inner wrapper for enter animation */}
+                  <motion.div
+                    initial={isEntering ? { opacity: 0, scale: 0.8, y: 15 } : false}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    transition={{
+                      duration: 0.4,
+                      ease: [0.34, 1.56, 0.64, 1], // Custom spring-like ease
+                    }}
+                  >
+                    <AgentCard
+                      id={agent.id}
+                      name={agent.name}
+                      Icon={agent.Icon}
+                      category={agent.category}
+                      color={agent.color}
+                      isSelected={agentId === agent.id}
+                    />
+                  </motion.div>
+                </motion.div>
+              );
+            })}
             {/* Extra agents - with animation */}
             <AnimatePresence initial={false} mode="sync">
               {showAllAgents && visibleAgents.slice(DEFAULT_VISIBLE_AGENTS).map((agent, index) => (
                 <motion.div
                   key={agent.id}
+                  layout
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.1 } }}
                   transition={{
+                    layout: {
+                      type: "spring",
+                      stiffness: 400,
+                      damping: 35,
+                    },
                     duration: 0.15,
                     delay: index * 0.02,
                   }}

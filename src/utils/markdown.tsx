@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Copy, Check } from 'lucide-react';
+import { getMentionClickHandler } from './mentionHandler';
 
 // Code block component with copy button
 function CodeBlock({ code, language, keyPrefix }: { code: string; language?: string; keyPrefix: string }) {
@@ -153,7 +154,8 @@ function replaceMathPlaceholders(
   return parts.length > 0 ? parts : [text];
 }
 
-// Parse inline markdown and HTML (bold, italic, code, br, links, images, plain URLs)
+
+// Parse inline markdown and HTML (bold, italic, code, br, links, images, plain URLs, @mentions)
 function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   // FIRST PASS: Handle escape sequences (e.g., \* should become just *)
   const unescapedText = text.replace(/\\([*_`[\]()#+-.|!\\])/g, '$1');
@@ -179,7 +181,9 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   let key = 0;
 
   // THIRD PASS: Process markdown - math placeholders won't be captured by markdown patterns
-  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(((?:[^\s()]|\([^\s)]*\))+)(?:\s+"([^"]+)")?\)|!\[([^\]]*)\]\(((?:[^()]|\([^)]*\))+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"]))/gi;
+  // Added @mention pattern at the end: @username (alphanumeric, underscore, hyphen)
+  // Note: hyphen must be at start or end of character class, or escaped
+  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(((?:[^\s()]|\([^\s)]*\))+)(?:\s+"([^"]+)")?\)|!\[([^\]]*)\]\(((?:[^()]|\([^)]*\))+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"])|(@[\w-]+))/gi;
   let lastIndex = 0;
   let match;
 
@@ -286,6 +290,36 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
         >
           {url}
         </a>
+      );
+    } else if (match[19]) {
+      // @mention (e.g., @username)
+      const mention = match[19];
+      const username = mention.slice(1); // Remove @ prefix
+      parts.push(
+        <span
+          key={`${keyPrefix}-mention-${key++}`}
+          className="text-white font-bold cursor-pointer hover:underline"
+          onClick={(e) => {
+            e.stopPropagation();
+            const handler = getMentionClickHandler();
+            if (handler) {
+              handler(username);
+            }
+          }}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              const handler = getMentionClickHandler();
+              if (handler) {
+                handler(username);
+              }
+            }
+          }}
+        >
+          {mention}
+        </span>
       );
     }
 

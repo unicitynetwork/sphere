@@ -30,7 +30,7 @@ export function P2PChat({ agent }: P2PChatProps) {
 
   const handleChatWithSeller = (seller: SellerInfo, productTitle?: string, productImage?: string, productPrice?: number, purchased?: boolean) => {
     const params = new URLSearchParams({
-      sellerId: seller.id,
+      nametag: seller.name,
       ...(productTitle && { product: productTitle }),
       ...(productImage && { image: productImage }),
       ...(productPrice && { price: productPrice.toString() }),

@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, X, PanelLeftClose, Sparkles, Hash, User } from 'lucide-react';
 import { Group } from '../data/groupModels';
 import { GroupItem } from './GroupItem';
-import type { ChatMode } from '../../../types';
+import type { ChatModeChangeHandler } from '../../../types';
 
 interface GroupListProps {
   groups: Group[];
@@ -17,7 +17,7 @@ interface GroupListProps {
   isCollapsed: boolean;
   onCollapse: () => void;
   totalUnreadCount: number;
-  onModeChange: (mode: ChatMode) => void;
+  onModeChange: ChatModeChangeHandler;
 }
 
 export function GroupList({
