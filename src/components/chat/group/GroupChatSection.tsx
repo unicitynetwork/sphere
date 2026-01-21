@@ -367,15 +367,25 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     </div>
   );
 
-  // Fullscreen portal content
-  const fullscreenContent = isFullscreen ? createPortal(
-    <div className="fixed top-14 left-0 right-0 bottom-0 z-99999 bg-white dark:bg-neutral-900">
-      <div className="h-full w-full grid grid-cols-1 lg:grid-cols-[auto_1fr] overflow-hidden relative">
-        {chatContent}
-      </div>
-    </div>,
+  // Fullscreen portal content with smooth animation
+  const fullscreenContent = createPortal(
+    <AnimatePresence>
+      {isFullscreen && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.96 }}
+          transition={{ duration: 0.5, ease: [0.32, 0.72, 0, 1] }}
+          className="fixed top-14 left-0 right-0 bottom-0 z-99999 bg-white dark:bg-neutral-900"
+        >
+          <div className="h-full w-full grid grid-cols-1 lg:grid-cols-[auto_1fr] overflow-hidden relative">
+            {chatContent}
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
     document.body
-  ) : null;
+  );
 
   return (
     <>

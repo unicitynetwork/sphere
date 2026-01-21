@@ -1075,18 +1075,28 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     </div>
   );
 
-  // Fullscreen portal content (below app header)
-  const fullscreenContent = isFullscreen ? createPortal(
-    <div className="fixed top-14 left-0 right-0 bottom-0 z-99999 bg-white dark:bg-neutral-900">
-      <div className="h-full w-full lg:grid lg:grid-cols-[auto_1fr] overflow-hidden relative">
-        <div className={`absolute -top-20 -right-20 w-96 h-96 ${bgGradient.from} rounded-full blur-3xl pointer-events-none`} />
-        <div className={`absolute -bottom-20 -left-20 w-96 h-96 ${bgGradient.to} rounded-full blur-3xl pointer-events-none`} />
-        {renderHistorySidebar()}
-        {renderChat()}
-      </div>
-    </div>,
+  // Fullscreen portal content (below app header) with smooth animation
+  const fullscreenContent = createPortal(
+    <AnimatePresence>
+      {isFullscreen && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.96 }}
+          transition={{ duration: 0.5, ease: [0.32, 0.72, 0, 1] }}
+          className="fixed top-14 left-0 right-0 bottom-0 z-99999 bg-white dark:bg-neutral-900"
+        >
+          <div className="h-full w-full lg:grid lg:grid-cols-[auto_1fr] overflow-hidden relative">
+            <div className={`absolute -top-20 -right-20 w-96 h-96 ${bgGradient.from} rounded-full blur-3xl pointer-events-none`} />
+            <div className={`absolute -bottom-20 -left-20 w-96 h-96 ${bgGradient.to} rounded-full blur-3xl pointer-events-none`} />
+            {renderHistorySidebar()}
+            {renderChat()}
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
     document.body
-  ) : null;
+  );
 
   return (
     <>
