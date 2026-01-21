@@ -5,6 +5,7 @@ import { IntroPage } from './pages/IntroPage';
 import { AgentPage } from './pages/AgentPage';
 import { DevelopersPage } from './pages/DevelopersPage';
 import { MineAlphaPage } from './pages/MineAlphaPage';
+import { DocsPage } from './pages/DocsPage';
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="/ai" element={<Navigate to="/agents/ai" replace />} />
         <Route path="/developers" element={<DevelopersPage />} />
         <Route path="/mine" element={<MineAlphaPage />} />
+        <Route path="/docs" element={<DocsPage />} />
       </Route>
     </Routes>
   );

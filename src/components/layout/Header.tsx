@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { isMock } from '../../hooks/useAgentChat';
 import { ThemeToggle } from '../theme';
-import { ComingSoonModal } from '../ui/ComingSoonModal';
 import { ServiceProvider } from '../wallet/L3/services/ServiceProvider';
 import { devReset } from '../../utils/devTools';
 import logoUrl from '/Union.svg';
@@ -29,9 +28,7 @@ const navItems: { label: string; path: string; external?: boolean }[] = [
 export function Header({ onActivityClick, isActivityPanelOpen }: HeaderProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const isDevelopersPage = location.pathname === '/developers';
   const isMinePage = location.pathname === '/mine';
 
   // Dev config state for showing banner when non-default settings are active
@@ -194,16 +191,6 @@ export function Header({ onActivityClick, isActivityPanelOpen }: HeaderProps) {
         )}
 
         <div className="flex items-center gap-1 sm:gap-2 lg:gap-3">
-          {/* Get API Key Button - visible only on Developers page */}
-          <button
-            onClick={() => setShowApiKeyModal(true)}
-            className={`hidden lg:flex items-center gap-2 px-4 py-2 bg-linear-to-r from-orange-500 to-amber-500 text-white text-sm font-medium rounded-xl transition-all shadow-lg shadow-orange-500/25 ${
-              isDevelopersPage ? 'visible opacity-100 hover:opacity-90' : 'invisible opacity-0 pointer-events-none'
-            }`}
-          >
-            Get API Key
-          </button>
-
           {/* Social Links */}
           <motion.a
             href="https://github.com/unicitynetwork"
@@ -330,30 +317,12 @@ export function Header({ onActivityClick, isActivityPanelOpen }: HeaderProps) {
               )
             ))}
 
-            {/* Get API Key - mobile */}
-            {isDevelopersPage && (
-              <button
-                onClick={() => {
-                  setShowApiKeyModal(true);
-                  setMobileMenuOpen(false);
-                }}
-                className="w-full mt-2 px-4 py-3 bg-linear-to-r from-orange-500 to-amber-500 text-white text-base font-medium rounded-xl hover:opacity-90 transition shadow-lg shadow-orange-500/25"
-              >
-                Get API Key
-              </button>
-            )}
           </nav>
         </motion.div>
         </>
       )}
     </AnimatePresence>
 
-    {/* API Key Modal - outside header to avoid overflow:hidden */}
-    <ComingSoonModal
-      isOpen={showApiKeyModal}
-      onClose={() => setShowApiKeyModal(false)}
-      title="Get API Key"
-    />
     </>
   );
 }

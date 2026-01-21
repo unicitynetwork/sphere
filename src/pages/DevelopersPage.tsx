@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
+import { Link } from 'react-router-dom';
 
-type ApiKey = 'init' | 'payments' | 'communication' | 'orchestration';
+type ApiKey = 'init' | 'payments' | 'communication' | 'agents';
 
 interface ApiInfo {
   icon: string;
@@ -99,9 +100,9 @@ sphere.on.msg((msg) => {
 });`,
       features: ['End-to-end encrypted', 'P2P via Nostr', 'Agent-to-agent native', 'Structured payloads']
     },
-    orchestration: {
+    agents: {
       icon: '🤖',
-      title: 'AI Orchestration',
+      title: 'Agents',
       tagline: 'Intent-based or direct. Your choice.',
       description: 'Register high-level intents for autonomous matching, or discover and invoke agents directly.',
       color: 'from-cyan-500 to-blue-500',
@@ -196,9 +197,9 @@ sphere.on.msg(async (msg) => {
               <button className="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-6 py-3 rounded-xl font-semibold hover:opacity-90 transition shadow-lg shadow-orange-500/25">
                 Start Building
               </button>
-              <button className="border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-white px-6 py-3 rounded-xl font-medium hover:border-neutral-400 dark:hover:border-neutral-500 transition">
+              <Link to="/docs" className="border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-white px-6 py-3 rounded-xl font-medium hover:border-neutral-400 dark:hover:border-neutral-500 transition">
                 Read Docs
-              </button>
+              </Link>
             </motion.div>
           </div>
         </section>
@@ -359,12 +360,12 @@ sphere.on.msg(async (msg) => {
                 <code className="text-amber-600 dark:text-amber-400">npx sphere-keygen</code>
               </pre>
               <div className="flex gap-4 justify-center flex-wrap">
-                <a
-                  href="#"
+                <Link
+                  to="/docs"
                   className="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:opacity-90 transition shadow-lg shadow-orange-500/25"
                 >
                   View Documentation
-                </a>
+                </Link>
                 <a
                   href="#"
                   className="border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-white px-8 py-4 rounded-xl font-semibold text-lg hover:border-neutral-400 dark:hover:border-neutral-500 transition"
@@ -375,9 +376,9 @@ sphere.on.msg(async (msg) => {
             </div>
 
             <div className="flex justify-center gap-6 sm:gap-8 text-neutral-600 dark:text-neutral-400 flex-wrap">
-              <a href="#" className="hover:text-orange-500 transition flex items-center gap-2">
+              <Link to="/docs" className="hover:text-orange-500 transition flex items-center gap-2">
                 <span>📖</span> Documentation
-              </a>
+              </Link>
               <a href="https://discord.gg/S9f57ZKdt" target="_blank" rel="noopener noreferrer" className="hover:text-orange-500 transition flex items-center gap-2">
                 <span>💬</span> Discord
               </a>
