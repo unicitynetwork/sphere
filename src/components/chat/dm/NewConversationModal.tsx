@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, User, AtSign, Loader2 } from 'lucide-react';
 
@@ -6,16 +6,64 @@ interface NewConversationModalProps {
   isOpen: boolean;
   onClose: () => void;
   onStart: (pubkeyOrNametag: string) => Promise<boolean>;
+  initialValue?: string;
+  autoSubmit?: boolean;
 }
 
 export function NewConversationModal({
   isOpen,
   onClose,
   onStart,
+  initialValue,
+  autoSubmit,
 }: NewConversationModalProps) {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasAutoSubmitted = useRef(false);
+
+  // Set initial value and optionally auto-submit when modal opens
+  useEffect(() => {
+    if (isOpen && initialValue) {
+      setInput(initialValue);
+      setError(null);
+
+      // Auto-submit if requested and haven't already
+      if (autoSubmit && !hasAutoSubmitted.current) {
+        hasAutoSubmitted.current = true;
+        // Small delay to ensure the modal is rendered
+        setTimeout(() => {
+          handleSubmitWithValue(initialValue);
+        }, 100);
+      }
+    }
+
+    // Reset when modal closes
+    if (!isOpen) {
+      hasAutoSubmitted.current = false;
+    }
+  }, [isOpen, initialValue, autoSubmit]);
+
+  const handleSubmitWithValue = async (value: string) => {
+    if (!value.trim()) return;
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const success = await onStart(value.trim());
+      if (success) {
+        setInput('');
+        onClose();
+      } else {
+        setError(`Could not start conversation with @${value}. User not found or does not have a registered nametag.`);
+      }
+    } catch {
+      setError('Failed to start conversation. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!input.trim()) return;

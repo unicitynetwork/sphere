@@ -1,6 +1,7 @@
 import { type LucideIcon } from "lucide-react";
 
 export type ChatMode = 'global' | 'dm';
+export type ChatModeChangeHandler = (mode: ChatMode, dmRecipient?: string) => void;
 
 /**
  * Memory state stored in browser localStorage

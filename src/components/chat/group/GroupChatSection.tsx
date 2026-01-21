@@ -11,10 +11,11 @@ import { GroupMessageList } from './GroupMessageList';
 import { DMChatInput } from '../dm/DMChatInput';
 import { JoinGroupModal } from './JoinGroupModal';
 import { agents } from '../../../config/activities';
-import type { ChatMode } from '../../../types';
+import { setMentionClickHandler } from '../../../utils/markdown';
+import type { ChatModeChangeHandler } from '../../../types';
 
 interface GroupChatSectionProps {
-  onModeChange: (mode: ChatMode) => void;
+  onModeChange: ChatModeChangeHandler;
 }
 
 export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
@@ -107,6 +108,14 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
       }, 100);
     }
   }, [selectedGroup]);
+
+  // Set up mention click handler - clicking @mention switches to DM with that user
+  useEffect(() => {
+    setMentionClickHandler((username) => {
+      onModeChange('dm', username);
+    });
+    return () => setMentionClickHandler(null);
+  }, [onModeChange]);
 
   const handleAgentSelect = (agentId: string) => {
     navigate(`/agents/${agentId}`);

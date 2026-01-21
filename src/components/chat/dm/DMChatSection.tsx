@@ -10,13 +10,16 @@ import { DMMessageList } from './DMMessageList';
 import { DMChatInput } from './DMChatInput';
 import { NewConversationModal } from './NewConversationModal';
 import { agents } from '../../../config/activities';
-import type { ChatMode } from '../../../types';
+import { setMentionClickHandler } from '../../../utils/markdown';
+import type { ChatModeChangeHandler } from '../../../types';
 
 interface DMChatSectionProps {
-  onModeChange: (mode: ChatMode) => void;
+  onModeChange: ChatModeChangeHandler;
+  pendingRecipient?: string | null;
+  onPendingRecipientHandled?: () => void;
 }
 
-export function DMChatSection({ onModeChange }: DMChatSectionProps) {
+export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipientHandled }: DMChatSectionProps) {
   const navigate = useNavigate();
   const {
     selectedConversation,
@@ -39,6 +42,8 @@ export function DMChatSection({ onModeChange }: DMChatSectionProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNewConversation, setShowNewConversation] = useState(false);
   const [showAgentPicker, setShowAgentPicker] = useState(false);
+  const [modalInitialValue, setModalInitialValue] = useState<string | undefined>();
+  const [modalAutoSubmit, setModalAutoSubmit] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -83,6 +88,25 @@ export function DMChatSection({ onModeChange }: DMChatSectionProps) {
       }, 100);
     }
   }, [selectedConversation]);
+
+  // Handle pending recipient from @mention click or P2P DM button
+  // Open the modal with the nametag pre-filled and auto-submit
+  useEffect(() => {
+    if (pendingRecipient) {
+      setModalInitialValue(pendingRecipient);
+      setModalAutoSubmit(true);
+      setShowNewConversation(true);
+      onPendingRecipientHandled?.();
+    }
+  }, [pendingRecipient, onPendingRecipientHandled]);
+
+  // Set up mention click handler - clicking @mention in DM starts conversation with that user
+  useEffect(() => {
+    setMentionClickHandler((username) => {
+      startNewConversation(username);
+    });
+    return () => setMentionClickHandler(null);
+  }, [startNewConversation]);
 
   const handleAgentSelect = (agentId: string) => {
     navigate(`/agents/${agentId}`);
@@ -300,8 +324,14 @@ export function DMChatSection({ onModeChange }: DMChatSectionProps) {
       {/* New Conversation Modal */}
       <NewConversationModal
         isOpen={showNewConversation}
-        onClose={() => setShowNewConversation(false)}
+        onClose={() => {
+          setShowNewConversation(false);
+          setModalInitialValue(undefined);
+          setModalAutoSubmit(false);
+        }}
         onStart={handleNewConversation}
+        initialValue={modalInitialValue}
+        autoSubmit={modalAutoSubmit}
       />
     </>
   );

@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MessageSquarePlus, Search, X, PanelLeftClose, Sparkles, Hash, User } from 'lucide-react';
 import { ChatConversation } from '../data/models';
 import { DMConversationItem } from './DMConversationItem';
-import type { ChatMode } from '../../../types';
+import type { ChatModeChangeHandler } from '../../../types';
 
 interface DMConversationListProps {
   conversations: ChatConversation[];
@@ -17,7 +17,7 @@ interface DMConversationListProps {
   isCollapsed: boolean;
   onCollapse: () => void;
   totalUnreadCount: number;
-  onModeChange: (mode: ChatMode) => void;
+  onModeChange: ChatModeChangeHandler;
 }
 
 export function DMConversationList({

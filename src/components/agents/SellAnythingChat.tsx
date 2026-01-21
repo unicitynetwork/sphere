@@ -36,10 +36,12 @@ function ActivityFeed({
   activities,
   selectedCategory,
   onCategoryChange,
+  onUserClick,
 }: {
   activities: MarketplaceIntent[];
   selectedCategory: MarketplaceCategory;
   onCategoryChange: (cat: MarketplaceCategory) => void;
+  onUserClick: (username: string) => void;
 }) {
   const filteredActivities = selectedCategory === 'all'
     ? activities
@@ -90,9 +92,15 @@ function ActivityFeed({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-teal-600 dark:text-teal-400">
-                      {intent.user}
-                    </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUserClick(intent.user);
+                      }}
+                      className="text-xs font-medium text-teal-600 dark:text-teal-400 hover:underline"
+                    >
+                      @{intent.user}
+                    </button>
                     <span className="text-xs text-neutral-400">{intent.timestamp}</span>
                   </div>
                   <p className="text-sm text-neutral-700 dark:text-neutral-300 truncate">
@@ -122,7 +130,7 @@ export function SellAnythingChat({ agent }: SellAnythingChatProps) {
 
   const handleChatWithSeller = (listing: MarketplaceListing) => {
     const params = new URLSearchParams({
-      sellerId: listing.seller.id,
+      nametag: listing.seller.name,
       product: listing.title,
       image: listing.image,
       price: listing.price.toString(),
@@ -253,12 +261,18 @@ export function SellAnythingChat({ agent }: SellAnythingChatProps) {
     setPendingListing(null);
   };
 
+  // Handle clicking on a username in activity feed
+  const handleActivityUserClick = (username: string) => {
+    navigate(`/agents/chat?nametag=${encodeURIComponent(username)}`);
+  };
+
   // Custom header content with activity feed
   const renderActivityHeader = () => (
     <ActivityFeed
       activities={marketplaceActivity}
       selectedCategory={selectedCategory}
       onCategoryChange={setSelectedCategory}
+      onUserClick={handleActivityUserClick}
     />
   );
 

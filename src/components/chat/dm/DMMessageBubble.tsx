@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { Check, CheckCheck, Clock, AlertCircle } from 'lucide-react';
 import { ChatMessage, MessageStatus } from '../data/models';
+import { MarkdownContent } from '../../../utils/markdown';
 
 interface DMMessageBubbleProps {
   message: ChatMessage;
@@ -57,9 +58,9 @@ export function DMMessageBubble({ message, delay = 0 }: DMMessageBubbleProps) {
             <div className="absolute inset-0 bg-linear-to-tr from-white/0 via-white/10 to-white/0" />
           )}
 
-          <p className="text-sm leading-relaxed relative z-10 break-words whitespace-pre-wrap">
-            {message.content}
-          </p>
+          <div className="text-sm leading-relaxed relative z-10 wrap-break-word whitespace-pre-wrap">
+            <MarkdownContent text={message.content} />
+          </div>
         </motion.div>
 
         {/* Timestamp and status */}
