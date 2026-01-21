@@ -20,10 +20,10 @@ const DiscordIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-const navItems = [
+const navItems: { label: string; path: string; external?: boolean }[] = [
   { label: 'Home', path: '/agents/chat' },
   { label: 'Developers', path: '/developers' },
-  { label: 'Mine Alpha', path: 'https://dashboard.friendly-miners.com/auth/login', external: true },
+  { label: 'Mine Alpha', path: '/mine' },
 ];
 
 export function Header({ onActivityClick, isActivityPanelOpen }: HeaderProps) {
@@ -32,6 +32,7 @@ export function Header({ onActivityClick, isActivityPanelOpen }: HeaderProps) {
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isDevelopersPage = location.pathname === '/developers';
+  const isMinePage = location.pathname === '/mine';
 
   // Dev config state for showing banner when non-default settings are active
   const [devConfig, setDevConfig] = useState(() => ServiceProvider.getDevConfig());
@@ -73,7 +74,7 @@ export function Header({ onActivityClick, isActivityPanelOpen }: HeaderProps) {
 
   return (
     <>
-    <header className="border-b border-neutral-200 dark:border-neutral-800/50 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-2xl sticky top-0 z-50 overflow-hidden theme-transition w-screen">
+    <header className={`border-b backdrop-blur-2xl sticky top-0 z-50 overflow-hidden w-screen border-neutral-200 dark:border-neutral-800/50 bg-white/80 ${isMinePage ? 'dark:bg-gray-950/90' : 'theme-transition dark:bg-neutral-900/80'}`}>
       {/* Background decorative elements */}
       <div className="absolute top-0 left-0 w-96 h-full bg-linear-to-r from-orange-500/5 dark:from-orange-500/10 to-transparent blur-3xl" />
       <div className="absolute top-0 right-0 w-96 h-full bg-linear-to-l from-purple-500/5 dark:from-purple-500/10 to-transparent blur-3xl" />
@@ -95,7 +96,7 @@ export function Header({ onActivityClick, isActivityPanelOpen }: HeaderProps) {
 
             <div className="relative">
               <div className="flex items-center gap-1.5 sm:gap-2">
-                <h1 className="text-base sm:text-lg lg:text-xl text-neutral-900 dark:text-white bg-clip-text">AgentSphere</h1>
+                <h1 className="text-base sm:text-lg lg:text-xl bg-clip-text text-neutral-900 dark:text-white">AgentSphere</h1>
                 <Sparkles className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500 animate-pulse" />
                 {isMock() && (
                   <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 border border-yellow-500/30">
@@ -282,7 +283,7 @@ export function Header({ onActivityClick, isActivityPanelOpen }: HeaderProps) {
             animate={{ height: 'auto' }}
             exit={{ height: 0 }}
             transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
-            className="lg:hidden fixed left-0 right-0 top-14 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800 z-50 shadow-xl overflow-hidden"
+            className="lg:hidden fixed left-0 right-0 top-14 backdrop-blur-xl border-b z-50 shadow-xl overflow-hidden bg-white/95 dark:bg-neutral-900/95 border-neutral-200 dark:border-neutral-800"
           >
           <nav className="px-4 py-3 space-y-1">
             {navItems.map((item) => (
@@ -293,7 +294,7 @@ export function Header({ onActivityClick, isActivityPanelOpen }: HeaderProps) {
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={() => setMobileMenuOpen(false)}
-                  className="w-full flex items-center px-4 py-3 rounded-xl text-base font-medium text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all"
+                  className="w-full flex items-center px-4 py-3 rounded-xl text-base font-medium transition-all text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                 >
                   {item.label}
                 </a>
