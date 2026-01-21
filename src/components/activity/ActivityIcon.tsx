@@ -63,8 +63,8 @@ export function ActivityIcon({ kind, className = '', size = 'md' }: ActivityIcon
     : 'w-4 h-4';
 
   return (
-    <div className={`w-8 h-8 rounded-lg bg-linear-to-br ${config.bgColor} flex items-center justify-center shadow-lg ${className}`}>
-      <Icon className={`w-4 h-4 ${config.iconColor}`} />
+    <div className={`${sizeClasses} bg-linear-to-br ${config.bgColor} flex items-center justify-center shadow-lg ${className}`}>
+      <Icon className={`${iconSizeClasses} ${config.iconColor}`} />
     </div>
   );
 }

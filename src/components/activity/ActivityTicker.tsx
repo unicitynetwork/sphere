@@ -14,6 +14,11 @@ const ACTIVITY_GLOW_COLORS: Record<ActivityKind, { bg: string; glow: string; bor
     glow: 'shadow-[0_4px_12px_-2px_rgba(168,85,247,0.35)]',
     border: 'border-purple-500/30',
   },
+  marketplace_offer: {
+    bg: 'bg-indigo-500/10',
+    glow: 'shadow-[0_4px_12px_-2px_rgba(99,102,241,0.35)]',
+    border: 'border-indigo-500/30',
+  },
   token_transfer: {
     bg: 'bg-blue-500/10',
     glow: 'shadow-[0_4px_12px_-2px_rgba(59,130,246,0.35)]',

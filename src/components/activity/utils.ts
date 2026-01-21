@@ -4,6 +4,8 @@ export function getActivityTitle(kind: ActivityKind): string {
   switch (kind) {
     case 'marketplace_post':
       return 'New Listing';
+    case 'marketplace_offer':
+      return 'New Offer';
     case 'token_transfer':
       return 'Token Transfer';
     case 'wallet_created':
@@ -30,6 +32,11 @@ export function getActivityDescription(activity: Activity): string {
         return `"${data.title}" posted for ${data.price} ${data.currency || 'ALPHA'}`;
       }
       return 'A new item was listed';
+    case 'marketplace_offer':
+      if (data.title && data.price) {
+        return `Offer: ${data.price} ${data.currency || 'ALPHA'}`;
+      }
+      return 'New offer received';
     case 'token_transfer':
       if (data.amount && data.symbol) {
         return `${data.amount} ${data.symbol}`;

@@ -1,8 +1,10 @@
-import { useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Header } from './Header';
 
 export function DashboardLayout() {
+  const location = useLocation();
+  const isMinePage = location.pathname === '/mine';
+
   return (
     <div className="h-full flex flex-col bg-neutral-100 dark:bg-linear-to-br dark:from-neutral-950 dark:via-neutral-900 dark:to-neutral-950 theme-transition overflow-y-auto overflow-x-hidden">
       <Header />
