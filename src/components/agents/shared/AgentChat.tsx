@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ChatHeader, ChatBubble, ChatInput, QuickActions } from './index';
 import { useChatHistory } from './useChatHistory';
 import { useUrlSession } from './useUrlSession';
+import { useMentionNavigation } from '../../../hooks/useMentionNavigation';
 import type { SyncState } from './useChatHistorySync';
 
 // Generic sidebar item (for custom agent-specific items like bets, purchases, orders)
@@ -115,6 +116,9 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
 
   // Global fullscreen state (persists across agent switches)
   const { isFullscreen, setFullscreen } = useUIState();
+
+  // Enable @mention click navigation to DM for all agent chats
+  useMentionNavigation();
 
   // Handle Escape key to exit fullscreen
   useEffect(() => {
@@ -1106,8 +1110,13 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
       {/* Fullscreen portal */}
       {fullscreenContent}
 
-      {/* Additional custom content */}
-      {additionalContent}
+      {/* Additional custom content - render as portal with higher z-index when fullscreen */}
+      {isFullscreen
+        ? createPortal(
+            <div className="fixed inset-0 z-[100000] pointer-events-none [&>*]:pointer-events-auto">{additionalContent}</div>,
+            document.body
+          )
+        : additionalContent}
     </>
   );
 }

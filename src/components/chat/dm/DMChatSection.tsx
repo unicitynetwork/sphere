@@ -43,7 +43,6 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
   const [showNewConversation, setShowNewConversation] = useState(false);
   const [showAgentPicker, setShowAgentPicker] = useState(false);
   const [modalInitialValue, setModalInitialValue] = useState<string | undefined>();
-  const [modalAutoSubmit, setModalAutoSubmit] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -90,23 +89,42 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
   }, [selectedConversation]);
 
   // Handle pending recipient from @mention click or P2P DM button
-  // Open the modal with the nametag pre-filled and auto-submit
+  // If conversation exists, select it directly; otherwise open modal
   useEffect(() => {
     if (pendingRecipient) {
-      setModalInitialValue(pendingRecipient);
-      setModalAutoSubmit(true);
-      setShowNewConversation(true);
+      const nametag = pendingRecipient.startsWith('@') ? pendingRecipient.slice(1) : pendingRecipient;
+      // Check if conversation already exists
+      const existingConversation = filteredConversations.find(
+        (c) => c.participantNametag?.toLowerCase() === nametag.toLowerCase()
+      );
+      if (existingConversation) {
+        selectConversation(existingConversation);
+      } else {
+        setModalInitialValue(nametag);
+        setShowNewConversation(true);
+      }
       onPendingRecipientHandled?.();
     }
-  }, [pendingRecipient, onPendingRecipientHandled]);
+  }, [pendingRecipient, onPendingRecipientHandled, filteredConversations, selectConversation]);
 
-  // Set up mention click handler - clicking @mention in DM starts conversation with that user
+  // Set up mention click handler - clicking @mention in DM
+  // If conversation exists, select it directly; otherwise open modal
   useEffect(() => {
     setMentionClickHandler((username) => {
-      startNewConversation(username);
+      const nametag = username.startsWith('@') ? username.slice(1) : username;
+      // Check if conversation already exists
+      const existingConversation = filteredConversations.find(
+        (c) => c.participantNametag?.toLowerCase() === nametag.toLowerCase()
+      );
+      if (existingConversation) {
+        selectConversation(existingConversation);
+      } else {
+        setModalInitialValue(nametag);
+        setShowNewConversation(true);
+      }
     });
     return () => setMentionClickHandler(null);
-  }, [startNewConversation]);
+  }, [filteredConversations, selectConversation]);
 
   const handleAgentSelect = (agentId: string) => {
     navigate(`/agents/${agentId}`);
@@ -320,20 +338,20 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
           </div>
         )}
       </div>
-
-      {/* New Conversation Modal */}
-      <NewConversationModal
-        isOpen={showNewConversation}
-        onClose={() => {
-          setShowNewConversation(false);
-          setModalInitialValue(undefined);
-          setModalAutoSubmit(false);
-        }}
-        onStart={handleNewConversation}
-        initialValue={modalInitialValue}
-        autoSubmit={modalAutoSubmit}
-      />
     </>
+  );
+
+  // New Conversation Modal - rendered separately to avoid duplication during fullscreen transitions
+  const modalElement = (
+    <NewConversationModal
+      isOpen={showNewConversation}
+      onClose={() => {
+        setShowNewConversation(false);
+        setModalInitialValue(undefined);
+      }}
+      onStart={handleNewConversation}
+      initialValue={modalInitialValue}
+    />
   );
 
   // Normal container
@@ -367,6 +385,7 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
     <>
       {!isFullscreen && normalContent}
       {fullscreenContent}
+      {modalElement}
     </>
   );
 }

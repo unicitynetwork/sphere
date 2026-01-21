@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { X, MessageSquare, Wallet, CheckCircle, Sparkles, ShoppingCart, Tag, ArrowUpRight, ArrowDownLeft, Flame, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -7,6 +7,7 @@ import {
   marketplaceListings,
   marketplaceActivity,
   getMarketplaceListingsByCategory,
+  MARKETPLACE_LOCATIONS,
   type MarketplaceListing,
   type MarketplaceCategory,
   type MarketplaceIntent,
@@ -99,7 +100,7 @@ function ActivityFeed({
                       }}
                       className="text-xs font-medium text-teal-600 dark:text-teal-400 hover:underline"
                     >
-                      @{intent.user}
+                      {intent.user}
                     </button>
                     <span className="text-xs text-neutral-400">{intent.timestamp}</span>
                   </div>
@@ -119,6 +120,18 @@ function ActivityFeed({
 export function SellAnythingChat({ agent }: SellAnythingChatProps) {
   const navigate = useNavigate();
 
+  // Handle clicking on user in activity feed - navigate to DM
+  const handleActivityUserClick = (username: string) => {
+    const nametag = username.startsWith('@') ? username : `@${username}`;
+    navigate(`/agents/chat?nametag=${encodeURIComponent(nametag)}`);
+  };
+
+  // User location state
+  const [userLocation, setUserLocation] = useState<string | null>(null);
+  const hasAskedLocation = useRef(false);
+  const waitingForLocation = useRef(false); // True when we're expecting a location response
+  const pendingQuery = useRef<string | null>(null); // Store user's query while asking for location
+
   // Category filter state
   const [selectedCategory, setSelectedCategory] = useState<MarketplaceCategory>('all');
 
@@ -127,6 +140,21 @@ export function SellAnythingChat({ agent }: SellAnythingChatProps) {
   const [pendingListing, setPendingListing] = useState<MarketplaceListing | null>(null);
   const [modalStep, setModalStep] = useState<'confirm' | 'processing' | 'success'>('confirm');
   const [offerAmount, setOfferAmount] = useState('');
+
+  // Helper to find listings by category, prioritizing user's location
+  const findListings = (category: MarketplaceCategory): MarketplaceListing[] => {
+    const listings = getMarketplaceListingsByCategory(category);
+    if (userLocation) {
+      return [...listings].sort((a, b) => {
+        const aLocal = a.location?.toLowerCase().includes(userLocation.toLowerCase()) ?? false;
+        const bLocal = b.location?.toLowerCase().includes(userLocation.toLowerCase()) ?? false;
+        if (aLocal && !bLocal) return -1;
+        if (!aLocal && bLocal) return 1;
+        return 0;
+      });
+    }
+    return listings;
+  };
 
   const handleChatWithSeller = (listing: MarketplaceListing) => {
     const params = new URLSearchParams({
@@ -138,6 +166,97 @@ export function SellAnythingChat({ agent }: SellAnythingChatProps) {
     navigate(`/agents/chat?${params.toString()}`);
   };
 
+  // Helper to format seller list from listings
+  const formatSellerList = (listings: MarketplaceListing[], categoryName: string): string => {
+    const count = listings.length;
+
+    if (count === 0) {
+      return `No ${categoryName} listings available right now.`;
+    }
+
+    if (count === 1) {
+      const l = listings[0];
+      const verifiedBadge = l.verified ? ' ✓' : '';
+      const nearbyBadge = userLocation && l.location?.toLowerCase().includes(userLocation.split(',')[0].toLowerCase()) ? ' (nearby)' : '';
+      return `Found **1 seller** with ${categoryName}:\n\n` +
+        `• ${l.seller.name}${verifiedBadge}${nearbyBadge} — **${l.title}** — ${l.price} ${l.currency}\n\n` +
+        `DM them to discuss!`;
+    }
+
+    // Multiple listings
+    const sellerLines = listings.slice(0, 5).map(l => {
+      const verifiedBadge = l.verified ? ' ✓' : '';
+      const nearbyBadge = userLocation && l.location?.toLowerCase().includes(userLocation.split(',')[0].toLowerCase()) ? ' (nearby)' : '';
+      return `• ${l.seller.name}${verifiedBadge}${nearbyBadge} — **${l.title}** — ${l.price} ${l.currency}`;
+    }).join('\n');
+
+    const moreText = count > 5 ? `\n\n...and ${count - 5} more` : '';
+
+    return `Found **${count} sellers** with ${categoryName}:\n\n${sellerLines}${moreText}\n\nDM any seller to discuss!`;
+  };
+
+  // Helper to process a search query and show matching listings
+  const processSearchQuery = (
+    query: string,
+    addMessage: (content: string, cardData?: MarketplaceCardData, showActionButton?: boolean) => void
+  ): boolean => {
+    const input = query.toLowerCase();
+
+    // Gold / Precious Metals
+    if (input.includes('gold') || input.includes('silver') || input.includes('pamp') || input.includes('bar') || input.includes('precious')) {
+      const listings = findListings('gold');
+      addMessage(formatSellerList(listings, 'gold/precious metals'));
+      return true;
+    }
+
+    // Tickets / Events
+    if (input.includes('ticket') || input.includes('concert') || input.includes('ufc') || input.includes('world cup') || input.includes('coldplay') || input.includes('event') || input.includes('f1') || input.includes('formula') || input.includes('taylor') || input.includes('nba') || input.includes('champions')) {
+      const listings = findListings('tickets');
+      addMessage(formatSellerList(listings, 'tickets'));
+      return true;
+    }
+
+    // ASICs / Mining Hardware
+    if (input.includes('asic') || input.includes('antminer') || input.includes('miner') || input.includes('mining') || input.includes('gpu') || input.includes('rig') || input.includes('kaspa') || input.includes('s21') || input.includes('ks5') || input.includes('whatsminer') || input.includes('goldshell') || input.includes('avalon')) {
+      const listings = findListings('asics');
+      addMessage(formatSellerList(listings, 'mining hardware'));
+      return true;
+    }
+
+    // Phone / Electronics - not available
+    if (input.includes('phone') || input.includes('iphone') || input.includes('samsung') || input.includes('android') || input.includes('mobile') || input.includes('laptop') || input.includes('macbook') || input.includes('electronics')) {
+      addMessage(
+        "No sellers with phones or electronics right now.\n\n" +
+        "**Available categories:**\n" +
+        "- Gold & precious metals\n" +
+        "- Event tickets\n" +
+        "- Mining hardware (ASICs)\n\n" +
+        "Want me to notify you when electronics appear?"
+      );
+      return true;
+    }
+
+    // Check if user is trying to buy something specific that we don't have
+    const buyPatterns = /(?:buy|want|need|looking for|find|get|purchase|searching for)\s+(?:a\s+|an\s+|some\s+)?(.+)/i;
+    const buyMatch = input.match(buyPatterns);
+    if (buyMatch) {
+      const productName = buyMatch[1].replace(/[?.!,]+$/, '').trim();
+      if (productName && productName.length > 1 && productName.length < 50) {
+        addMessage(
+          `No sellers with **"${productName}"** right now.\n\n` +
+          "**Available categories:**\n" +
+          "- Gold & precious metals\n" +
+          "- Event tickets\n" +
+          "- Mining hardware (ASICs)\n\n" +
+          `Want me to watch for "${productName}" listings?`
+        );
+        return true;
+      }
+    }
+
+    return false; // Query not handled
+  };
+
   const getMockResponse = async (
     userInput: string,
     addMessage: (content: string, cardData?: MarketplaceCardData, showActionButton?: boolean) => void
@@ -146,86 +265,201 @@ export function SellAnythingChat({ agent }: SellAnythingChatProps) {
 
     const input = userInput.toLowerCase();
 
-    // Gold / Precious Metals
-    if (input.includes('gold') || input.includes('silver') || input.includes('pamp') || input.includes('bar') || input.includes('precious')) {
-      const listings = getMarketplaceListingsByCategory('gold');
-      if (listings.length > 0) {
-        const listing = listings[Math.floor(Math.random() * listings.length)];
-        addMessage(
-          `Found a precious metals listing!\n\n**${listing.title}**\n${listing.description}\n\n**Seller:** ${listing.seller.name} ${listing.verified ? '(Verified)' : ''}\n**Location:** ${listing.location}\n**Price:** ${listing.price} ${listing.currency}\n\nWant to make an offer or contact the seller?`,
-          { listing },
-          true
+    // Check if user is setting their location
+    const locationPatterns = MARKETPLACE_LOCATIONS.map(loc => loc.toLowerCase());
+    const locationMatch = locationPatterns.find(loc =>
+      input.includes(loc) ||
+      input.includes(loc.split(',')[0].toLowerCase()) // Match city name only
+    );
+
+    if (locationMatch || input.match(/(?:i(?:'m| am) (?:in|from|at|near)|my location is|location[:\s]+)/i)) {
+      const matchedLocation = locationMatch
+        ? MARKETPLACE_LOCATIONS.find(l => l.toLowerCase() === locationMatch || l.toLowerCase().startsWith(locationMatch.split(',')[0]))
+        : null;
+
+      if (matchedLocation) {
+        setUserLocation(matchedLocation);
+        hasAskedLocation.current = true;
+        waitingForLocation.current = false;
+
+        // Check if we have a pending query to process
+        if (pendingQuery.current) {
+          const savedQuery = pendingQuery.current;
+          pendingQuery.current = null;
+
+          addMessage(`Got it! You're near **${matchedLocation}**. Let me find what you're looking for...`);
+
+          // Small delay then process the original query
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          // Process the saved query with location context
+          const handled = processSearchQuery(savedQuery, addMessage);
+          if (!handled) {
+            // If query wasn't a specific search, show general info
+            addMessage(
+              `I'll prioritize deals from your area.\n\n**Available categories:**\n- Gold & precious metals\n- Event tickets\n- Mining hardware (ASICs)\n\nWhat would you like to browse?`
+            );
+          }
+          return;
+        }
+
+        // No pending query - show generic location confirmation
+        const nearbyListings = marketplaceListings.filter(l =>
+          l.location?.toLowerCase().includes(matchedLocation.toLowerCase()) ||
+          l.location?.toLowerCase().includes(matchedLocation.split(',')[0].toLowerCase())
         );
-      } else {
-        addMessage("No gold listings available right now. I can monitor spot prices and alert you when something comes up.");
+
+        if (nearbyListings.length > 0) {
+          addMessage(
+            `Got it! You're near **${matchedLocation}**.\n\nI found **${nearbyListings.length}** listing(s) nearby:\n\n` +
+            nearbyListings.slice(0, 5).map(l => `- **${l.title}** - ${l.price} ${l.currency}`).join('\n') +
+            "\n\nWhat are you looking to buy or sell today?"
+          );
+        } else {
+          addMessage(
+            `Got it! You're near **${matchedLocation}**.\n\nI'll prioritize deals from your area. What are you looking for?\n\n**Categories:**\n- Gold & precious metals\n- Event tickets\n- Mining hardware (ASICs)`
+          );
+        }
+        return;
       }
+    }
+
+    // First interaction - ask for location if not set
+    if (!hasAskedLocation.current && !userLocation) {
+      hasAskedLocation.current = true;
+      waitingForLocation.current = true;
+      // Save the user's query to process after they provide location
+      pendingQuery.current = userInput;
+      addMessage(
+        "Welcome to the P2P marketplace! Before I help you, let me know your location so I can show nearby deals first.\n\n" +
+        "**Popular locations:**\n" +
+        MARKETPLACE_LOCATIONS.slice(0, 6).map(loc => `- ${loc}`).join('\n') +
+        "\n\nJust tell me where you're at, or say \"skip\" to browse everything!"
+      );
       return;
     }
 
-    // Tickets / Events
-    if (input.includes('ticket') || input.includes('concert') || input.includes('ufc') || input.includes('world cup') || input.includes('coldplay') || input.includes('event')) {
-      const listings = getMarketplaceListingsByCategory('tickets');
-      if (listings.length > 0) {
-        const listing = listings[Math.floor(Math.random() * listings.length)];
-        addMessage(
-          `Found event tickets!\n\n**${listing.title}**\n${listing.description}\n\n**Seller:** ${listing.seller.name} ${listing.verified ? '(Verified)' : ''}\n**Location:** ${listing.location}\n**Price:** ${listing.price} ${listing.currency}${listing.urgency === 'urgent' ? '\n\n**URGENT** - Seller needs to sell quickly!' : ''}\n\nWant to grab these?`,
-          { listing },
-          true
-        );
-      } else {
-        addMessage("No ticket listings right now. Tell me what events you're interested in and I'll watch for them!");
+    // Handle response when we're waiting for location (user entered something not in our list)
+    if (waitingForLocation.current && !userLocation) {
+      waitingForLocation.current = false;
+
+      // User provided a location we don't have specific listings for
+      const userProvidedLocation = userInput.trim();
+      setUserLocation(userProvidedLocation); // Accept their location anyway
+
+      if (pendingQuery.current) {
+        const savedQuery = pendingQuery.current;
+        pendingQuery.current = null;
+
+        addMessage(`Got it! I don't have specific listings for **${userProvidedLocation}** yet, but I'll show you global deals.\n\nLet me find what you're looking for...`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        const handled = processSearchQuery(savedQuery, addMessage);
+        if (!handled) {
+          addMessage(
+            "**Available categories:**\n- Gold & precious metals\n- Event tickets (UFC, concerts, sports)\n- Mining hardware (ASICs, GPUs)\n\nWhat would you like to browse?"
+          );
+        }
+        return;
       }
+
+      addMessage(
+        `Got it! I don't have specific listings for **${userProvidedLocation}** yet, but I can show you global deals.\n\n**Available categories:**\n- Gold & precious metals\n- Event tickets\n- Mining hardware (ASICs)\n\nWhat are you looking for?`
+      );
       return;
     }
 
-    // ASICs / Mining Hardware
-    if (input.includes('asic') || input.includes('antminer') || input.includes('miner') || input.includes('mining') || input.includes('gpu') || input.includes('rig') || input.includes('kaspa') || input.includes('s21') || input.includes('ks5')) {
-      const listings = getMarketplaceListingsByCategory('asics');
-      if (listings.length > 0) {
-        const listing = listings[Math.floor(Math.random() * listings.length)];
-        addMessage(
-          `Found mining hardware!\n\n**${listing.title}**\n${listing.description}\n\n**Seller:** ${listing.seller.name} ${listing.verified ? '(Verified)' : ''}\n**Location:** ${listing.location}\n**Price:** ${listing.price} ${listing.currency}${listing.urgency === 'urgent' ? '\n\n**URGENT** - Quick sale needed!' : ''}\n\nReady to make a move?`,
-          { listing },
-          true
-        );
-      } else {
-        addMessage("No mining hardware available at the moment. I'll keep an eye out for you!");
+    // Handle skip location
+    if (input.includes('skip') && !userLocation) {
+      waitingForLocation.current = false;
+      // Process pending query if exists
+      if (pendingQuery.current) {
+        const savedQuery = pendingQuery.current;
+        pendingQuery.current = null;
+
+        addMessage("No problem! I'll show you global deals. Let me find what you're looking for...");
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        const handled = processSearchQuery(savedQuery, addMessage);
+        if (!handled) {
+          addMessage(
+            "**Available categories:**\n- Gold & precious metals\n- Event tickets (UFC, concerts, sports)\n- Mining hardware (ASICs, GPUs)\n\nOr say \"browse\" to see everything!"
+          );
+        }
+        return;
       }
+
+      addMessage(
+        "No problem! I'll show you global deals.\n\nWhat are you interested in?\n\n" +
+        "**Categories:**\n- Gold & precious metals\n- Event tickets (UFC, concerts, sports)\n- Mining hardware (ASICs, GPUs)\n\nOr say \"browse\" to see everything!"
+      );
+      return;
+    }
+
+    // Try to process as a search query first
+    if (processSearchQuery(input, addMessage)) {
       return;
     }
 
     // Selling intent
     if (input.includes('sell') || input.includes('selling') || input.includes('have') || input.includes('offering')) {
+      const locationPrompt = userLocation ? '' : '\n3. **Location** (for physical items)';
       addMessage(
-        "Great! To list your item, I need some details:\n\n1. **What are you selling?** (e.g., Claude credits, gold bars, tickets, mining hardware)\n2. **Your asking price** (in USDC)\n3. **Location** (for physical items)\n4. **Description** of the item\n\nOnce you provide these, I'll create a listing and broadcast it to potential buyers on the network!"
+        "Great! To list your item, I need some details:\n\n1. **What are you selling?** (e.g., gold bars, tickets, mining hardware)\n2. **Your asking price** (in USDC)" + locationPrompt + "\n4. **Description** of the item\n\nOnce you provide these, I'll create a listing and broadcast it to potential buyers on the network!"
+      );
+      return;
+    }
+
+    // Change location
+    if (input.includes('change location') || input.includes('set location') || input.includes('update location')) {
+      hasAskedLocation.current = false;
+      setUserLocation(null);
+      addMessage(
+        "Sure! What's your new location?\n\n**Popular locations:**\n" +
+        MARKETPLACE_LOCATIONS.slice(0, 6).map(loc => `- ${loc}`).join('\n')
       );
       return;
     }
 
     // Browse / Show all
     if (input.includes('show') || input.includes('browse') || input.includes('list') || input.includes('available') || input.includes('what')) {
-      const allListings = marketplaceListings;
+      const goldListings = findListings('gold');
+      const ticketListings = findListings('tickets');
+      const asicListings = findListings('asics');
+
+      const locationNote = userLocation ? ` (showing ${userLocation} deals first)` : '';
+
       addMessage(
-        "Here's what's available right now:\n\n" +
+        `Here's what's available${locationNote}:\n\n` +
         "**Gold & Precious Metals:**\n" +
-        allListings.filter(l => l.category === 'gold').map(l => `- ${l.title} - ${l.price} ${l.currency}`).join('\n') +
+        goldListings.slice(0, 3).map(l => {
+          const nearby = userLocation && l.location?.toLowerCase().includes(userLocation.split(',')[0].toLowerCase()) ? ' (Nearby!)' : '';
+          return `- ${l.title} - ${l.price} ${l.currency}${nearby}`;
+        }).join('\n') +
         "\n\n**Event Tickets:**\n" +
-        allListings.filter(l => l.category === 'tickets').map(l => `- ${l.title} - ${l.price} ${l.currency}`).join('\n') +
+        ticketListings.slice(0, 3).map(l => {
+          const nearby = userLocation && l.location?.toLowerCase().includes(userLocation.split(',')[0].toLowerCase()) ? ' (Nearby!)' : '';
+          return `- ${l.title} - ${l.price} ${l.currency}${nearby}`;
+        }).join('\n') +
         "\n\n**Mining Hardware (ASICs):**\n" +
-        allListings.filter(l => l.category === 'asics').map(l => `- ${l.title} - ${l.price} ${l.currency}`).join('\n') +
+        asicListings.slice(0, 3).map(l => {
+          const nearby = userLocation && l.location?.toLowerCase().includes(userLocation.split(',')[0].toLowerCase()) ? ' (Nearby!)' : '';
+          return `- ${l.title} - ${l.price} ${l.currency}${nearby}`;
+        }).join('\n') +
         "\n\nAsk me about any category for more details!"
       );
       return;
     }
 
     // Default response
+    const locationInfo = userLocation ? `\n\nCurrently showing deals near **${userLocation}**. Say "change location" to update.` : '';
     addMessage(
       "I can help you buy or sell almost anything P2P!\n\n**Try asking:**\n" +
       "- \"Show me gold listings\"\n" +
       "- \"Anyone selling Coldplay tickets?\"\n" +
       "- \"Need an Antminer S21\"\n" +
       "- \"I want to sell my mining rig\"\n\n" +
-      "Or browse by category using the tabs above!"
+      "Or browse by category using the tabs above!" + locationInfo
     );
   };
 
@@ -259,11 +493,6 @@ export function SellAnythingChat({ agent }: SellAnythingChatProps) {
     await new Promise(resolve => setTimeout(resolve, 1500));
     setShowModal(false);
     setPendingListing(null);
-  };
-
-  // Handle clicking on a username in activity feed
-  const handleActivityUserClick = (username: string) => {
-    navigate(`/agents/chat?nametag=${encodeURIComponent(username)}`);
   };
 
   // Custom header content with activity feed
