@@ -39,7 +39,7 @@ export interface AgentConfig {
 export const agents: AgentConfig[] = [
   {
     id: 'chat',
-    name: 'Discord',
+    name: 'Chat',
     description: 'DM and group messaging',
     Icon: MessageSquare,
     category: 'Social',
