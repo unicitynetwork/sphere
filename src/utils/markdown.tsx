@@ -182,8 +182,8 @@ function parseInline(text: string, keyPrefix: string, mentionClassName: string =
 
   // THIRD PASS: Process markdown - math placeholders won't be captured by markdown patterns
   // Added @mention pattern at the end: @username (alphanumeric, underscore, hyphen)
-  // Note: hyphen must be at start or end of character class, or escaped
-  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(((?:[^\s()]|\([^\s)]*\))+)(?:\s+"([^"]+)")?\)|!\[([^\]]*)\]\(((?:[^()]|\([^)]*\))+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"])|(@[\w-]+))/gi;
+  // Note: (?<!\S) ensures @ is at start of word (not in email like user@example.com)
+  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(((?:[^\s()]|\([^\s)]*\))+)(?:\s+"([^"]+)")?\)|!\[([^\]]*)\]\(((?:[^()]|\([^)]*\))+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"])|((?<!\S)@[\w-]+))/gi;
   let lastIndex = 0;
   let match;
 
@@ -196,16 +196,16 @@ function parseInline(text: string, keyPrefix: string, mentionClassName: string =
     }
 
     if (match[2]) {
-      // **bold** - just render the text content (which may include math placeholders)
-      const content = replaceMathPlaceholders(match[2], mathBlocks, `${keyPrefix}-bold`, key);
+      // **bold** - recursively parse content for @mentions, links, etc.
+      const content = parseInline(match[2], `${keyPrefix}-bold-${key}`, mentionClassName);
       parts.push(<strong key={`${keyPrefix}-strong-${key++}`}>{content}</strong>);
     } else if (match[3]) {
-      // *italic*
-      const content = replaceMathPlaceholders(match[3], mathBlocks, `${keyPrefix}-italic`, key);
+      // *italic* - recursively parse content
+      const content = parseInline(match[3], `${keyPrefix}-italic-${key}`, mentionClassName);
       parts.push(<em key={`${keyPrefix}-em-${key++}`}>{content}</em>);
     } else if (match[4]) {
-      // _italic_
-      const content = replaceMathPlaceholders(match[4], mathBlocks, `${keyPrefix}-italic2`, key);
+      // _italic_ - recursively parse content
+      const content = parseInline(match[4], `${keyPrefix}-italic2-${key}`, mentionClassName);
       parts.push(<em key={`${keyPrefix}-em2-${key++}`}>{content}</em>);
     } else if (match[5]) {
       // `code` - don't process math inside code blocks
@@ -218,20 +218,20 @@ function parseInline(text: string, keyPrefix: string, mentionClassName: string =
       // <br> or <br/>
       parts.push(<br key={`${keyPrefix}-br-${key++}`} />);
     } else if (match[6]) {
-      // <b>text</b>
-      const content = replaceMathPlaceholders(match[6], mathBlocks, `${keyPrefix}-b`, key);
+      // <b>text</b> - recursively parse content
+      const content = parseInline(match[6], `${keyPrefix}-b-${key}`, mentionClassName);
       parts.push(<strong key={`${keyPrefix}-b-${key++}`}>{content}</strong>);
     } else if (match[7]) {
-      // <strong>text</strong>
-      const content = replaceMathPlaceholders(match[7], mathBlocks, `${keyPrefix}-strong`, key);
+      // <strong>text</strong> - recursively parse content
+      const content = parseInline(match[7], `${keyPrefix}-strong-${key}`, mentionClassName);
       parts.push(<strong key={`${keyPrefix}-strong2-${key++}`}>{content}</strong>);
     } else if (match[8]) {
-      // <i>text</i>
-      const content = replaceMathPlaceholders(match[8], mathBlocks, `${keyPrefix}-i`, key);
+      // <i>text</i> - recursively parse content
+      const content = parseInline(match[8], `${keyPrefix}-i-${key}`, mentionClassName);
       parts.push(<em key={`${keyPrefix}-i-${key++}`}>{content}</em>);
     } else if (match[9]) {
-      // <em>text</em>
-      const content = replaceMathPlaceholders(match[9], mathBlocks, `${keyPrefix}-em`, key);
+      // <em>text</em> - recursively parse content
+      const content = parseInline(match[9], `${keyPrefix}-em-${key}`, mentionClassName);
       parts.push(<em key={`${keyPrefix}-em3-${key++}`}>{content}</em>);
     } else if (match[10]) {
       // <code>text</code> - don't process math inside code blocks
@@ -241,16 +241,16 @@ function parseInline(text: string, keyPrefix: string, mentionClassName: string =
         </code>
       );
     } else if (match[11] && match[12]) {
-      // <a href="url">text</a>
-      const content = replaceMathPlaceholders(match[12], mathBlocks, `${keyPrefix}-a`, key);
+      // <a href="url">text</a> - recursively parse content
+      const content = parseInline(match[12], `${keyPrefix}-a-${key}`, mentionClassName);
       parts.push(
         <a key={`${keyPrefix}-a-${key++}`} href={match[11]} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 underline">
           {content}
         </a>
       );
     } else if (match[13] && match[14]) {
-      // [text](url) or [text](url "tooltip") markdown link
-      const content = replaceMathPlaceholders(match[13], mathBlocks, `${keyPrefix}-link`, key);
+      // [text](url) or [text](url "tooltip") markdown link - recursively parse content
+      const content = parseInline(match[13], `${keyPrefix}-link-${key}`, mentionClassName);
       const tooltip = match[15]; // Optional tooltip
       parts.push(
         <a
