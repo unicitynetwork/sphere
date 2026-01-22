@@ -178,9 +178,18 @@ export const agents: AgentConfig[] = [
     Icon: Zap,
     category: 'Entertainment',
     color: 'from-yellow-500 to-red-500',
-    type: 'simple-ai',
+    type: 'ai-with-sidebar',
     backendActivityId: 'pokemon',
     greetingMessage: "Welcome to the Pokémon Card marketplace! I can help you browse Pokémon cards, manage your cart, and complete purchases using Unicity tokens. You can also sell cards! Tell me your Unicity ID to get started, or ask me what cards are available.",
+    placeholder: 'Search for cards, check cart, or ask about selling...',
+    quickActions: [
+      { label: 'Browse cards', message: 'Show me available Pokémon cards' },
+      { label: 'My cart', message: 'Show my cart' },
+      { label: 'Sell cards', message: 'I want to sell some cards' },
+      { label: 'Check order', message: 'Check my order status' },
+    ],
+    contentType: 'product',
+    hasSidebar: true,
   },
 ];
 
