@@ -51,6 +51,7 @@ import { STORAGE_KEYS } from "../../../../config/storageKeys";
 import { normalizeSdkTokenToStorage } from "./TxfSerializer";
 import { NOSTR_CONFIG } from "../../../../config/nostr.config";
 import { recordActivity } from "../../../../services/ActivityService";
+import { addReceivedTransaction } from "../../../../services/TransactionHistoryService";
 
 export class NostrService {
   private static instance: NostrService;
@@ -795,6 +796,18 @@ export class NostrService {
           { local: true } // Quick local storage, IPFS sync handled by background loop
         );
         console.log(`💾 Token saved via InventorySyncService: ${uiToken.id}`);
+
+        // Record to transaction history (deduplication handled by TransactionHistoryService)
+        if (amount && coinId) {
+          addReceivedTransaction(
+            amount,
+            coinId,
+            symbol || "UNK",
+            iconUrl,
+            senderPubkey,
+            Date.now()
+          );
+        }
 
         // Record token transfer activity (fire and forget)
         recordActivity("token_transfer", {

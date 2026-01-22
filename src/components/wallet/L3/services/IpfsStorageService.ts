@@ -2966,8 +2966,8 @@ export class IpfsStorageService implements IpfsTransport {
       const localToken = localTokenMap.get(tokenId);
 
       if (!localToken) {
-        // NEW token - import it
-        walletRepo.addToken(remoteToken);
+        // NEW token - import it (skip history since it was recorded on original device)
+        walletRepo.addToken(remoteToken, true);
         console.log(`📦 Imported new token ${tokenId.slice(0, 8)}... from remote`);
         importedCount++;
       } else {
@@ -3645,7 +3645,7 @@ export class IpfsStorageService implements IpfsTransport {
                   const txfToken = mergeResult.merged[tokenKey] as TxfToken;
                   if (txfToken) {
                     const token = txfToToken(tokenId, txfToken);
-                    walletRepo.addToken(token);
+                    walletRepo.addToken(token, true); // skip history - recorded on original device
                     console.log(`📦 Synced token ${tokenId.slice(0, 8)}... from IPFS to local`);
                   }
                 }
