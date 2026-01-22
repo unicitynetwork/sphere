@@ -58,11 +58,11 @@ interface ActivityTickerProps {
 // Map agent IDs to their relevant activity kinds
 const AGENT_ACTIVITY_MAP: Record<string, ActivityKind[]> = {
   sport: ['bet_placed'],
-  p2p: ['otc_purchase', 'marketplace_post'],
+  p2p: ['otc_purchase'],
   merch: ['merch_order'],
   games: ['game_started'],
   trivia: ['game_started'],
-  'sell-anything': ['marketplace_post'],
+  'sell-anything': ['marketplace_post', 'marketplace_offer'],
   pokemon: ['game_started'],
 };
 
