@@ -12,6 +12,7 @@ import { TriviaChat } from '../components/agents/TriviaChat';
 import { GamesChat } from '../components/agents/GamesChat';
 import { AIChat } from '../components/agents/AIChat';
 import { SellAnythingChat } from '../components/agents/SellAnythingChat';
+import { PokemonChat } from '../components/agents/PokemonChat';
 import { WalletPanel } from '../components/wallet/WalletPanel';
 import { agents, getAgentConfig } from '../config/activities';
 
@@ -176,6 +177,8 @@ export function AgentPage() {
         return <MerchChat agent={currentAgent} />;
       case 'sell-anything':
         return <SellAnythingChat agent={currentAgent} />;
+      case 'pokemon':
+        return <PokemonChat agent={currentAgent} />;
       default:
         return <ChatSection />;
     }
