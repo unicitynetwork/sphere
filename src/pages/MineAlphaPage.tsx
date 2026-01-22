@@ -28,7 +28,7 @@ export function MineAlphaPage() {
         <div className="space-y-6">
           <div className="bg-white dark:bg-gray-950 rounded-xl p-6 border border-neutral-200 dark:border-gray-800">
             <div className="flex items-center gap-4 mb-4">
-              <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-xl flex items-center justify-center text-2xl">⛏️</div>
+              <div className="w-12 h-12 bg-linear-to-br from-emerald-500 to-teal-500 rounded-xl flex items-center justify-center text-2xl">⛏️</div>
               <div>
                 <h3 className="font-semibold text-lg text-neutral-900 dark:text-white">Friendly Miners</h3>
                 <p className="text-neutral-500 dark:text-gray-400 text-sm">Mining-as-a-Service Platform</p>
@@ -59,7 +59,7 @@ export function MineAlphaPage() {
               href="https://friendly-miners.com"
               target="_blank"
               rel="noopener noreferrer"
-              className="block w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-center px-6 py-4 rounded-xl font-semibold hover:opacity-90 transition"
+              className="block w-full bg-linear-to-r from-emerald-500 to-teal-500 text-white text-center px-6 py-4 rounded-xl font-semibold hover:opacity-90 transition"
             >
               Start Mining on Friendly Miners →
             </a>
@@ -187,7 +187,7 @@ threads = 8  # Adjust to your CPU cores`}
             href="https://friendly-miners.com"
             target="_blank"
             rel="noopener noreferrer"
-            className="block w-full bg-gradient-to-r from-orange-500 to-amber-500 text-white text-center px-6 py-4 rounded-xl font-semibold hover:opacity-90 transition"
+            className="block w-full bg-linear-to-r from-orange-500 to-amber-500 text-white text-center px-6 py-4 rounded-xl font-semibold hover:opacity-90 transition"
           >
             Full Solo Mining Guide →
           </a>
@@ -341,7 +341,7 @@ threads = 8  # Adjust to your CPU cores`}
             className="text-3xl md:text-5xl font-bold mb-4 md:mb-6 leading-tight"
           >
             Mine ALPHA.<br />
-            <span className="bg-gradient-to-r from-emerald-500 to-teal-500 bg-clip-text text-transparent">Choose Your Path.</span>
+            <span className="bg-linear-to-r from-emerald-500 to-teal-500 bg-clip-text text-transparent">Choose Your Path.</span>
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 20 }}
@@ -371,7 +371,7 @@ threads = 8  # Adjust to your CPU cores`}
                     : 'bg-white/50 dark:bg-gray-900/50 border-neutral-200/50 dark:border-gray-800/50 hover:border-neutral-300 dark:hover:border-gray-700'
                 }`}
               >
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${option.color} flex items-center justify-center text-2xl mb-4`}>
+                <div className={`w-12 h-12 rounded-xl bg-linear-to-br ${option.color} flex items-center justify-center text-2xl mb-4`}>
                   {option.icon}
                 </div>
                 <h3 className="font-semibold text-lg mb-1 text-neutral-900 dark:text-white">{option.title}</h3>
@@ -463,7 +463,7 @@ threads = 8  # Adjust to your CPU cores`}
       <footer className="border-t border-neutral-200 dark:border-gray-800 py-8">
         <div className="max-w-6xl mx-auto flex items-center justify-between text-sm text-neutral-500 dark:text-gray-500 flex-wrap gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-6 h-6 bg-gradient-to-br from-emerald-500 to-teal-500 rounded flex items-center justify-center font-bold text-xs text-white">⛏</div>
+            <div className="w-6 h-6 bg-linear-to-br from-emerald-500 to-teal-500 rounded flex items-center justify-center font-bold text-xs text-white">⛏</div>
             <span>Mine ALPHA by Unicity Labs</span>
           </div>
           <div>Choose your path. Start mining today.</div>
