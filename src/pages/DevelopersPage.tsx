@@ -178,7 +178,7 @@ sphere.on.msg(async (msg) => {
               className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-6 leading-tight"
             >
               One SDK.<br />
-              <span className="bg-gradient-to-r from-orange-400 to-amber-400 bg-clip-text text-transparent">Infinite Marketplaces.</span>
+              <span className="bg-linear-to-r from-orange-400 to-amber-400 bg-clip-text text-transparent">Infinite Marketplaces.</span>
             </motion.h1>
             <motion.p
               initial={{ opacity: 0, y: 20 }}
@@ -194,7 +194,7 @@ sphere.on.msg(async (msg) => {
               transition={{ delay: 0.2 }}
               className="flex gap-4 justify-center flex-wrap"
             >
-              <button className="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-6 py-3 rounded-xl font-semibold hover:opacity-90 transition shadow-lg shadow-orange-500/25">
+              <button className="bg-linear-to-r from-orange-500 to-amber-500 text-white px-6 py-3 rounded-xl font-semibold hover:opacity-90 transition shadow-lg shadow-orange-500/25">
                 Start Building
               </button>
               <Link to="/developers/docs" className="border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-white px-6 py-3 rounded-xl font-medium hover:border-neutral-400 dark:hover:border-neutral-500 transition">
@@ -220,7 +220,7 @@ sphere.on.msg(async (msg) => {
                       : 'bg-white/50 dark:bg-neutral-800/50 border-neutral-200 dark:border-neutral-700/50 hover:border-neutral-300 dark:hover:border-neutral-600'
                   }`}
                 >
-                  <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${api.color} flex items-center justify-center text-2xl mb-4`}>
+                  <div className={`w-12 h-12 rounded-xl bg-linear-to-br ${api.color} flex items-center justify-center text-2xl mb-4`}>
                     {api.icon}
                   </div>
                   <h3 className="font-semibold text-lg mb-1">{api.title}</h3>
@@ -331,7 +331,7 @@ sphere.on.msg(async (msg) => {
                   <li className="flex items-center gap-3"><span className="text-red-400">✗</span> Months to MVP</li>
                 </ul>
               </div>
-              <div className="bg-gradient-to-br from-orange-500/10 to-amber-500/10 dark:from-orange-500/20 dark:to-amber-500/10 rounded-2xl border border-orange-500/30 p-6 sm:p-8">
+              <div className="bg-linear-to-br from-orange-500/10 to-amber-500/10 dark:from-orange-500/20 dark:to-amber-500/10 rounded-2xl border border-orange-500/30 p-6 sm:p-8">
                 <h3 className="text-lg font-semibold mb-6 text-orange-500">Sphere SDK</h3>
                 <ul className="space-y-4">
                   <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> Private key IS identity</li>
@@ -362,7 +362,7 @@ sphere.on.msg(async (msg) => {
               <div className="flex gap-4 justify-center flex-wrap">
                 <Link
                   to="/developers/docs"
-                  className="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:opacity-90 transition shadow-lg shadow-orange-500/25"
+                  className="bg-linear-to-r from-orange-500 to-amber-500 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:opacity-90 transition shadow-lg shadow-orange-500/25"
                 >
                   View Documentation
                 </Link>
