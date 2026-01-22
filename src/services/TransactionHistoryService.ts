@@ -124,9 +124,34 @@ export class TransactionHistoryService {
   // ==========================================
 
   /**
+   * Check if a similar transaction already exists (deduplication)
+   * Matches on type, coinId, amount, and timestamp within 2 minutes
+   */
+  private isDuplicate(entry: Omit<TransactionHistoryEntry, 'id'>): boolean {
+    const TWO_MINUTES_MS = 2 * 60 * 1000;
+
+    return this._history.some(existing =>
+      existing.type === entry.type &&
+      existing.coinId === entry.coinId &&
+      existing.amount === entry.amount &&
+      Math.abs(existing.timestamp - entry.timestamp) < TWO_MINUTES_MS
+    );
+  }
+
+  /**
    * Add a transaction to history
    */
   addTransaction(entry: Omit<TransactionHistoryEntry, 'id'>): TransactionHistoryEntry {
+    // Reload from storage to catch entries added by other systems (e.g., WalletRepository)
+    this.loadFromStorage();
+
+    // Deduplicate: skip if similar entry already exists
+    if (this.isDuplicate(entry)) {
+      console.log(`📜 [TransactionHistory] Skipping duplicate ${entry.type}: ${entry.amount} ${entry.symbol}`);
+      // Return a fake entry to satisfy return type - caller doesn't usually need it
+      return { id: 'duplicate', ...entry };
+    }
+
     const historyEntry: TransactionHistoryEntry = {
       id: uuidv4(),
       ...entry,
