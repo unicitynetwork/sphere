@@ -36,8 +36,8 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
   // Nametag validation - same as in NametagScreen
   const handleRecipientChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.toLowerCase();
-    // Allow only valid nametag characters: lowercase letters, numbers, underscore, dash, plus, dot
-    if (/^[a-z0-9_\-+.]*$/.test(value)) {
+    // Allow valid nametag characters plus @ (which will be stripped on validation)
+    if (/^@?[a-z0-9_\-+.]*$/.test(value)) {
       setRecipient(value);
       setRecipientError(null);
     }
