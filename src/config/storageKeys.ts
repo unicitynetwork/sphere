@@ -132,6 +132,9 @@ export const STORAGE_KEYS = {
   // Token backup timestamp
   TOKEN_BACKUP_TIMESTAMP: 'sphere_token_backup_timestamp',
 
+  // Spent token state cache (persisted SPENT results)
+  SPENT_TOKEN_CACHE: 'sphere_spent_token_cache',
+
   // Last successful IPFS sync timestamp
   LAST_IPFS_SYNC_SUCCESS: 'sphere_last_ipfs_sync_success',
 

@@ -13,6 +13,7 @@ import type {
   TxfToken,
 } from "./types/TxfTypes";
 import { getCurrentStateHash, tokenToTxf } from "./TxfSerializer";
+import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 // ==========================================
 // Validation Action Types
@@ -75,7 +76,7 @@ export class TokenValidationService {
   private spentCacheLoadedFromStorage = false;
 
   // localStorage key for persisting SPENT cache entries
-  private static readonly SPENT_CACHE_STORAGE_KEY = "unicity_spent_token_cache";
+  private static readonly SPENT_CACHE_STORAGE_KEY = STORAGE_KEYS.SPENT_TOKEN_CACHE;
 
   constructor(aggregatorUrl: string = DEFAULT_AGGREGATOR_URL) {
     this.aggregatorUrl = aggregatorUrl;
