@@ -219,55 +219,39 @@ export function DocsPage() {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="min-h-screen bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white"
+      className="min-h-screen text-neutral-900 dark:text-white relative z-0"
     >
-      {/* Header */}
-      <header className="sticky top-0 z-50 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-lg border-b border-neutral-200 dark:border-neutral-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link to="/developers" className="flex items-center gap-3 hover:opacity-80 transition">
-              <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-amber-500 rounded-lg flex items-center justify-center font-bold text-sm text-white">
-                S
-              </div>
-              <span className="font-semibold text-lg">Sphere SDK</span>
-            </Link>
-            <span className="text-neutral-400 hidden sm:inline">Documentation</span>
-          </div>
+      {/* Mobile menu button */}
+      <button
+        onClick={() => setMobileNavOpen(!mobileNavOpen)}
+        className="lg:hidden fixed top-16 left-4 z-30 p-2 bg-white/80 dark:bg-neutral-800/80 backdrop-blur-lg rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          {mobileNavOpen ? (
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          ) : (
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          )}
+        </svg>
+      </button>
 
-          <div className="flex items-center gap-4">
-            <a
-              href="https://github.com/unicitynetwork"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition"
-            >
-              GitHub
-            </a>
-            <button
-              onClick={() => setMobileNavOpen(!mobileNavOpen)}
-              className="lg:hidden p-2 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                {mobileNavOpen ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                )}
-              </svg>
-            </button>
-          </div>
-        </div>
-      </header>
+      {/* Mobile overlay */}
+      {mobileNavOpen && (
+        <div
+          className="fixed inset-0 z-10 bg-black/50 lg:hidden"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 flex">
-        {/* Sidebar */}
-        <aside className={`
-          fixed lg:sticky top-16 left-0 z-40 w-64 h-[calc(100vh-4rem)] overflow-y-auto
-          bg-white dark:bg-neutral-900 lg:bg-transparent border-r border-neutral-200 dark:border-neutral-800 lg:border-0
-          transform transition-transform lg:transform-none
-          ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-          p-4 lg:py-8 lg:pr-8
-        `}>
+      {/* Sidebar - mobile: fixed to left edge, desktop: fixed but aligned with content */}
+      <aside className={`
+        fixed top-14 z-20 w-64 h-[calc(100vh-3.5rem)] overflow-y-auto
+        backdrop-blur-lg lg:backdrop-blur-none border-r border-neutral-200/50 dark:border-neutral-800/50 lg:border-0
+        transform transition-transform
+        ${mobileNavOpen ? 'left-0 translate-x-0' : '-translate-x-full lg:translate-x-0'}
+        lg:left-[max(1rem,calc((100vw-80rem)/2))]
+        p-4 lg:py-8 lg:pr-8
+      `}>
           <nav className="space-y-1">
             {navigation.map((item) => (
               <div key={item.id}>
@@ -324,16 +308,8 @@ export function DocsPage() {
           </nav>
         </aside>
 
-        {/* Mobile overlay */}
-        {mobileNavOpen && (
-          <div
-            className="fixed inset-0 z-30 bg-black/50 lg:hidden"
-            onClick={() => setMobileNavOpen(false)}
-          />
-        )}
-
         {/* Main Content */}
-        <main className="flex-1 min-w-0 py-8 lg:pl-8">
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 lg:pl-72">
           {/* Getting Started */}
           <section id="getting-started" data-section="getting-started" className="mb-16">
             <h1 className="text-3xl sm:text-4xl font-bold mb-4">
@@ -1308,7 +1284,6 @@ main();`}
             </p>
           </footer>
         </main>
-      </div>
     </motion.div>
   );
 }
