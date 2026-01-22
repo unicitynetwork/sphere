@@ -156,7 +156,7 @@ function replaceMathPlaceholders(
 
 
 // Parse inline markdown and HTML (bold, italic, code, br, links, images, plain URLs, @mentions)
-function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
+function parseInline(text: string, keyPrefix: string, mentionClassName: string = 'text-white'): React.ReactNode[] {
   // FIRST PASS: Handle escape sequences (e.g., \* should become just *)
   const unescapedText = text.replace(/\\([*_`[\]()#+-.|!\\])/g, '$1');
 
@@ -298,7 +298,7 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
       parts.push(
         <span
           key={`${keyPrefix}-mention-${key++}`}
-          className="text-white font-bold cursor-pointer hover:underline"
+          className={`${mentionClassName} font-bold cursor-pointer hover:underline`}
           onClick={(e) => {
             e.stopPropagation();
             const handler = getMentionClickHandler();
@@ -406,7 +406,7 @@ function splitTableRow(line: string): string[] {
 }
 
 // Parse markdown table
-function parseTable(lines: string[], keyPrefix: string): React.ReactNode {
+function parseTable(lines: string[], keyPrefix: string, mentionClassName: string = 'text-white'): React.ReactNode {
   const rows = lines
     .filter(line => !line.match(/^\|[\s-:|]+\|$/)) // Skip separator rows
     .map(line => splitTableRow(line));
@@ -422,7 +422,7 @@ function parseTable(lines: string[], keyPrefix: string): React.ReactNode {
           <tr className="border-b border-neutral-300 dark:border-neutral-600">
             {header.map((cell, i) => (
               <th key={i} className="text-left p-2 font-semibold text-neutral-800 dark:text-neutral-200">
-                {parseInline(cell, `${keyPrefix}-th-${i}`)}
+                {parseInline(cell, `${keyPrefix}-th-${i}`, mentionClassName)}
               </th>
             ))}
           </tr>
@@ -432,7 +432,7 @@ function parseTable(lines: string[], keyPrefix: string): React.ReactNode {
             <tr key={rowIndex} className="border-b border-neutral-200 dark:border-neutral-700/50 hover:bg-neutral-100 dark:hover:bg-neutral-700/20">
               {row.map((cell, cellIndex) => (
                 <td key={cellIndex} className="p-2 text-neutral-700 dark:text-neutral-300">
-                  {parseInline(cell, `${keyPrefix}-td-${rowIndex}-${cellIndex}`)}
+                  {parseInline(cell, `${keyPrefix}-td-${rowIndex}-${cellIndex}`, mentionClassName)}
                 </td>
               ))}
             </tr>
@@ -444,7 +444,7 @@ function parseTable(lines: string[], keyPrefix: string): React.ReactNode {
 }
 
 // Parse header line (# ## ### etc.)
-function parseHeader(line: string, keyPrefix: string): React.ReactNode {
+function parseHeader(line: string, keyPrefix: string, mentionClassName: string = 'text-white'): React.ReactNode {
   const match = line.match(/^(#{1,6})\s+(.+)$/);
   if (!match) return null;
 
@@ -460,7 +460,7 @@ function parseHeader(line: string, keyPrefix: string): React.ReactNode {
     6: 'text-sm font-medium text-neutral-500 dark:text-neutral-400 mt-2 mb-1',
   };
 
-  const inlineContent = parseInline(content, `${keyPrefix}-h`);
+  const inlineContent = parseInline(content, `${keyPrefix}-h`, mentionClassName);
 
   switch (level) {
     case 1:
@@ -484,9 +484,16 @@ function parseHeader(line: string, keyPrefix: string): React.ReactNode {
 // Supports: **bold**, *italic*, _italic_, `code`, ```code blocks```, # headers, tables,
 // unordered lists (* or - followed by space), HTML tags: <br>, <b>, <strong>, <i>, <em>, <code>, <a href="">
 // Links: [text](url), plain URLs (https://... http://...)
-export function MarkdownContent({ text }: { text: string }) {
+interface MarkdownContentProps {
+  text: string;
+  /** Custom class for @mentions. Defaults to "text-white" */
+  mentionClassName?: string;
+}
+
+export function MarkdownContent({ text, mentionClassName = 'text-white' }: MarkdownContentProps) {
   const parts: React.ReactNode[] = [];
   let key = 0;
+  const mClass = mentionClassName;
 
   const lines = text.split('\n');
   let i = 0;
@@ -507,7 +514,7 @@ export function MarkdownContent({ text }: { text: string }) {
         if (beforeMath.trim()) {
           parts.push(
             <p key={`p-${key++}`} className="leading-relaxed">
-              {parseInline(beforeMath, `line-${key}`)}
+              {parseInline(beforeMath, `line-${key}`, mClass)}
             </p>
           );
         }
@@ -541,7 +548,7 @@ export function MarkdownContent({ text }: { text: string }) {
             if (afterMath.trim()) {
               parts.push(
                 <p key={`p-${key++}`} className="leading-relaxed">
-                  {parseInline(afterMath, `line-${key}`)}
+                  {parseInline(afterMath, `line-${key}`, mClass)}
                 </p>
               );
             }
@@ -566,7 +573,7 @@ export function MarkdownContent({ text }: { text: string }) {
           const fullText = '\\[' + mathLines.join('\n');
           parts.push(
             <p key={`p-${key++}`} className="leading-relaxed">
-              {parseInline(fullText, `line-${key}`)}
+              {parseInline(fullText, `line-${key}`, mClass)}
             </p>
           );
         }
@@ -577,7 +584,7 @@ export function MarkdownContent({ text }: { text: string }) {
         const unescaped = line.replace('\\\\[', '\\[');
         parts.push(
           <p key={`p-${key++}`} className="leading-relaxed">
-            {parseInline(unescaped, `line-${key}`)}
+            {parseInline(unescaped, `line-${key}`, mClass)}
           </p>
         );
         i++;
@@ -605,7 +612,7 @@ export function MarkdownContent({ text }: { text: string }) {
 
     // Check if this is a header
     if (line.trim().match(/^#{1,6}\s+/)) {
-      const header = parseHeader(line.trim(), `header-${key++}`);
+      const header = parseHeader(line.trim(), `header-${key++}`, mClass);
       if (header) {
         parts.push(header);
         i++;
@@ -633,7 +640,7 @@ export function MarkdownContent({ text }: { text: string }) {
         i++;
       }
       if (tableLines.length >= 2) {
-        parts.push(parseTable(tableLines, `table-${key++}`));
+        parts.push(parseTable(tableLines, `table-${key++}`, mClass));
       }
       continue;
     }
@@ -659,7 +666,7 @@ export function MarkdownContent({ text }: { text: string }) {
           <ul key={`ul-${key++}`} className="list-disc list-inside space-y-1 ml-1">
             {listItems.map((item, idx) => (
               <li key={idx} className="text-neutral-800 dark:text-neutral-200">
-                {parseInline(item.content, `li-${key}-${idx}`)}
+                {parseInline(item.content, `li-${key}-${idx}`, mClass)}
               </li>
             ))}
           </ul>
@@ -678,7 +685,7 @@ export function MarkdownContent({ text }: { text: string }) {
     // Regular line
     parts.push(
       <p key={`p-${key++}`} className="leading-relaxed">
-        {parseInline(line, `line-${key}`)}
+        {parseInline(line, `line-${key}`, mClass)}
       </p>
     );
     i++;

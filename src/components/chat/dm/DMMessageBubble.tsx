@@ -73,7 +73,10 @@ export function DMMessageBubble({ message, delay = 0 }: DMMessageBubbleProps) {
 
         {/* Message content */}
         <div className="text-sm leading-relaxed wrap-break-word whitespace-pre-wrap">
-          <MarkdownContent text={message.content} />
+          <MarkdownContent
+            text={message.content}
+            mentionClassName={isOwn ? 'text-white' : 'text-orange-500'}
+          />
         </div>
       </div>
 
