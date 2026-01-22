@@ -215,7 +215,7 @@ export function L3WalletView({
     return new AggregatedAsset({
       coinId: 'l1-alpha',
       symbol: 'ALPHA',
-      name: 'Unicity Mainnet',
+      name: 'Unicity Alphanet',
       totalAmount: satoshis.toString(),
       decimals: 8,
       tokenCount: 1,
@@ -605,15 +605,17 @@ export function L3WalletView({
                     <EmptyState />
                   ) : (
                     <>
-                      {/* L1 ALPHA - always first, clickable */}
-                      <AssetRow
-                        key="l1-alpha"
-                        asset={l1AlphaAsset}
-                        showBalances={showBalances}
-                        delay={0}
-                        layer="L1"
-                        onClick={() => setIsL1WalletOpen(true)}
-                      />
+                      {/* L1 ALPHA - only show if balance > 0 */}
+                      {l1Balance > 0 && (
+                        <AssetRow
+                          key="l1-alpha"
+                          asset={l1AlphaAsset}
+                          showBalances={showBalances}
+                          delay={0}
+                          layer="L1"
+                          onClick={() => setIsL1WalletOpen(true)}
+                        />
+                      )}
                       {/* L3 Assets */}
                       {assets.map((asset, index) => (
                         <AssetRow

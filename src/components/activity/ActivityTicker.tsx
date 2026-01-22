@@ -119,7 +119,9 @@ export function ActivityTicker({ agentId }: ActivityTickerProps) {
         return relevantKinds.includes(activity.kind);
       })
     : allActivities
-  ).slice(0, 20);
+  )
+    .filter((activity) => activity.kind !== 'token_transfer')
+    .slice(0, 20);
 
   if (isLoading && filteredActivities.length === 0) {
     return (

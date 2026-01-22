@@ -6,8 +6,8 @@ export function getActivityTitle(kind: ActivityKind): string {
       return 'New Listing';
     case 'marketplace_offer':
       return 'New Offer';
-    case 'token_transfer':
-      return 'Token Transfer';
+    // case 'token_transfer':
+    //   return 'Token Transfer';
     case 'wallet_created':
       return 'New Wallet';
     case 'game_started':
@@ -37,11 +37,11 @@ export function getActivityDescription(activity: Activity): string {
         return `Offer: ${data.price} ${data.currency || 'ALPHA'}`;
       }
       return 'New offer received';
-    case 'token_transfer':
-      if (data.amount && data.symbol) {
-        return `${data.amount} ${data.symbol}`;
-      }
-      return 'Tokens transferred';
+    // case 'token_transfer':
+    //   if (data.amount && data.symbol) {
+    //     return `${data.amount} ${data.symbol}`;
+    //   }
+    //   return 'Tokens transferred';
     case 'wallet_created':
       return 'A new wallet joined the network';
     case 'game_started':
