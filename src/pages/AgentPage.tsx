@@ -3,6 +3,7 @@ import { useParams, Navigate } from 'react-router-dom';
 import { MessageSquare, Wallet, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AgentCard } from '../components/agents/AgentCard';
+import { ActivityTicker } from '../components/activity';
 import { ChatSection } from '../components/chat/ChatSection';
 import { SportChat } from '../components/agents/SportChat';
 import { P2PChat } from '../components/agents/P2PChat';
@@ -305,6 +306,12 @@ export function AgentPage() {
           )}
         </div>
       </div>
+
+      {/* Activity Ticker - desktop only */}
+      <div className="hidden lg:block mb-6">
+        <ActivityTicker agentId={agentId} />
+      </div>
+
       {/* Mobile tab switcher with sliding indicator */}
       <div className="lg:hidden shrink-0 relative flex p-1 mb-3 bg-neutral-100 dark:bg-neutral-800/50 rounded-2xl backdrop-blur-sm border border-neutral-200 dark:border-neutral-700/30 overflow-hidden">
         {/* Sliding background indicator */}

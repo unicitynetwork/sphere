@@ -1,3 +1,2 @@
-export { RecentActivityPanel } from './RecentActivityPanel';
-export { ActivityItem } from './ActivityItem';
 export { ActivityIcon } from './ActivityIcon';
+export { ActivityTicker } from './ActivityTicker';

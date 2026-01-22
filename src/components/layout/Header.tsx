@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Sparkles, Github, Menu, X, Activity } from 'lucide-react';
+import { Sparkles, Github, Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { isMock } from '../../hooks/useAgentChat';
@@ -7,11 +7,6 @@ import { ThemeToggle } from '../theme';
 import { ServiceProvider } from '../wallet/L3/services/ServiceProvider';
 import { devReset } from '../../utils/devTools';
 import logoUrl from '/Union.svg';
-
-interface HeaderProps {
-  onActivityClick?: () => void;
-  isActivityPanelOpen?: boolean;
-}
 
 const DiscordIcon = ({ className }: { className?: string }) => (
   <svg className={className} viewBox="0 0 24 24" fill="currentColor">
@@ -25,7 +20,7 @@ const navItems: { label: string; path: string; external?: boolean }[] = [
   { label: 'Mine Alpha', path: '/mine' },
 ];
 
-export function Header({ onActivityClick, isActivityPanelOpen }: HeaderProps) {
+export function Header() {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -101,7 +96,7 @@ export function Header({ onActivityClick, isActivityPanelOpen }: HeaderProps) {
                   </span>
                 )}
               </div>
-              <p className="text-[10px] sm:text-xs text-neutral-500 dark:text-neutral-400">AI-Powered Agent Platform</p>
+              <p className="text-[10px] sm:text-xs text-neutral-500 dark:text-neutral-400">Agentic AI Marketplaces</p>
 
               {/* Decorative underline */}
               <div className="absolute -bottom-1 left-0 w-16 sm:w-20 h-0.5 bg-linear-to-r from-orange-500 to-transparent rounded-full" />
@@ -217,18 +212,6 @@ export function Header({ onActivityClick, isActivityPanelOpen }: HeaderProps) {
             <DiscordIcon className="w-4 h-4 sm:w-5 sm:h-5 text-neutral-500 dark:text-neutral-400 group-hover:text-orange-400 transition-colors" />
             <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
           </motion.a>
-
-          {/* Activity Button */}
-          <motion.button
-            onClick={onActivityClick}
-            whileHover={{ scale: 1.05, y: -2 }}
-            whileTap={{ scale: 0.95 }}
-            transition={{ duration: 0.05 }}
-            className={`relative p-2 sm:p-2.5 lg:p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg sm:rounded-xl transition-all group ${isActivityPanelOpen ? 'bg-orange-500/10' : ''}`}
-          >
-            <Activity className={`w-4 h-4 sm:w-5 sm:h-5 transition-colors ${isActivityPanelOpen ? 'text-orange-500' : 'text-neutral-500 dark:text-neutral-400 group-hover:text-orange-400'}`} />
-            <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
-          </motion.button>
 
           {/* Theme Toggle */}
           <ThemeToggle />

@@ -121,7 +121,7 @@ export const agents: AgentConfig[] = [
   },
   {
     id: 'p2p',
-    name: 'OTC',
+    name: 'OTC Crypto',
     description: 'Peer-to-peer trading',
     Icon: ShoppingBag,
     category: 'Trading',
@@ -160,7 +160,7 @@ export const agents: AgentConfig[] = [
     name: 'Buy / Sell Anything',
     description: 'Get a quote',
     Icon: Tag,
-    category: 'Shopping',
+    category: 'Trading',
     color: 'from-teal-500 to-cyan-500',
     type: 'simple-ai',
     greetingMessage: "Welcome to the P2P Marketplace! Tell me what you want to buy or sell and I'll help you find the best deals.",
