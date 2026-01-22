@@ -18,6 +18,8 @@ export function getActivityTitle(kind: ActivityKind): string {
       return 'OTC Trade';
     case 'merch_order':
       return 'Merch Order';
+    case 'pokemon_purchase':
+      return 'Card Purchase';
     default:
       return 'Activity';
   }
@@ -64,6 +66,11 @@ export function getActivityDescription(activity: Activity): string {
         return `"${data.itemName}" ordered for ${data.price} ALPHA`;
       }
       return 'Merch was ordered';
+    case 'pokemon_purchase':
+      if (data.card) {
+        return `"${data.card}" (${data.rarity}) from ${data.merchant}`;
+      }
+      return 'A card was purchased';
     default:
       return 'Network activity';
   }

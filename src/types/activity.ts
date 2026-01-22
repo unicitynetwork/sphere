@@ -6,7 +6,8 @@ export type ActivityKind =
   | 'game_started'
   | 'bet_placed'
   | 'otc_purchase'
-  | 'merch_order';
+  | 'merch_order'
+  | 'pokemon_purchase';
 
 export interface Activity {
   id: number;

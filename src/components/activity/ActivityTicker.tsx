@@ -49,6 +49,11 @@ const ACTIVITY_GLOW_COLORS: Record<ActivityKind, { bg: string; glow: string; bor
     glow: 'shadow-[0_4px_12px_-2px_rgba(236,72,153,0.35)]',
     border: 'border-pink-500/30',
   },
+  pokemon_purchase: {
+    bg: 'bg-yellow-500/10',
+    glow: 'shadow-[0_4px_12px_-2px_rgba(234,179,8,0.35)]',
+    border: 'border-yellow-500/30',
+  },
 };
 
 interface ActivityTickerProps {
@@ -63,7 +68,7 @@ const AGENT_ACTIVITY_MAP: Record<string, ActivityKind[]> = {
   games: ['game_started'],
   trivia: ['game_started'],
   'sell-anything': ['marketplace_post', 'marketplace_offer'],
-  pokemon: ['game_started'],
+  pokemon: ['pokemon_purchase'],
 };
 
 // Agents that show all activities
