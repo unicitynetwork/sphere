@@ -173,13 +173,14 @@ export const agents: AgentConfig[] = [
   },
   {
     id: 'pokemon',
-    name: 'Pokemon Cards',
+    name: 'Pokémon Cards',
     description: 'Catch em all',
     Icon: Zap,
     category: 'Entertainment',
     color: 'from-yellow-500 to-red-500',
     type: 'simple-ai',
-    greetingMessage: "Welcome to Pokemon! Ready to start your adventure?",
+    backendActivityId: 'pokemon',
+    greetingMessage: "Welcome to the Pokémon Card marketplace! I can help you browse Pokémon cards, manage your cart, and complete purchases using Unicity tokens. You can also sell cards! Tell me your Unicity ID to get started, or ask me what cards are available.",
   },
 ];
 
