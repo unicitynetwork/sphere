@@ -2,11 +2,15 @@ import { useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Header } from './Header';
 import { RecentActivityPanel } from '../activity';
+import { MiniChatBubbles } from '../chat/mini';
 
 export function DashboardLayout() {
   const [isActivityPanelOpen, setIsActivityPanelOpen] = useState(false);
   const location = useLocation();
   const isMinePage = location.pathname === '/mine';
+
+  // Hide mini chat on the DM chat page (to avoid duplicate UI)
+  const isChatPage = location.pathname === '/agents/chat';
 
   return (
     <div className={`h-full flex flex-col overflow-y-auto overflow-x-hidden ${
@@ -29,6 +33,9 @@ export function DashboardLayout() {
           onClose={() => setIsActivityPanelOpen(false)}
         />
       </div>
+
+      {/* Mini chat bubbles - hidden on chat page */}
+      {!isChatPage && <MiniChatBubbles />}
     </div>
   );
 }
