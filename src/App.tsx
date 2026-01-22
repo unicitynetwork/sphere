@@ -23,7 +23,7 @@ export default function App() {
         <Route path="/ai" element={<Navigate to="/agents/ai" replace />} />
         <Route path="/developers" element={<DevelopersPage />} />
         <Route path="/mine" element={<MineAlphaPage />} />
-        <Route path="/docs" element={<DocsPage />} />
+        <Route path="/developers/docs" element={<DocsPage />} />
       </Route>
     </Routes>
   );

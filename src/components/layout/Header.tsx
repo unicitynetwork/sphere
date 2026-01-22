@@ -61,6 +61,9 @@ export function Header() {
     if (path === '/agents/chat') {
       return location.pathname.startsWith('/agents/');
     }
+    if (path === '/developers') {
+      return location.pathname.startsWith('/developers');
+    }
     return location.pathname === path;
   };
 

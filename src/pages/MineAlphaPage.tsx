@@ -223,7 +223,7 @@ threads = 8  # Adjust to your CPU cores`}
                 </div>
                 <div className="flex items-center justify-between mt-3 pt-3 border-t border-neutral-200 dark:border-gray-800">
                   <div className="text-sm text-neutral-600 dark:text-gray-400">pool.unicity.network:3333</div>
-                  <a href="https://pool.unicity.network" target="_blank" rel="noopener noreferrer" className="text-violet-600 dark:text-violet-400 text-sm hover:underline">Connect →</a>
+                  <a href="https://unicity-pool.com/index.html" target="_blank" rel="noopener noreferrer" className="text-violet-600 dark:text-violet-400 text-sm hover:underline">Connect →</a>
                 </div>
               </div>
 
