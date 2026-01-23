@@ -100,10 +100,13 @@ export const useGroupChat = (): UseGroupChatReturn => {
 
     const handleGroupMessageReceived = (event: CustomEvent<GroupMessage>) => {
       const message = event.detail;
-      // If we're viewing this group, refetch messages
+      // If we're viewing this group, refetch messages and members (nametags may have updated)
       if (selectedGroup && message.groupId === selectedGroup.id) {
         queryClient.invalidateQueries({
           queryKey: QUERY_KEYS.MESSAGES(selectedGroup.id),
+        });
+        queryClient.invalidateQueries({
+          queryKey: QUERY_KEYS.MEMBERS(selectedGroup.id),
         });
         // Auto-mark as read since user is viewing
         groupRepository.markGroupAsRead(selectedGroup.id);

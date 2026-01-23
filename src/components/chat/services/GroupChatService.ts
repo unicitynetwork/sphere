@@ -309,11 +309,23 @@ export class GroupChatService {
     this.repository.saveMessage(message);
     this.repository.addProcessedEventId(event.id);
 
-    // Update member's nametag if we learned it from this message
+    // Update or create member with nametag from this message
     if (senderNametag) {
-      const member = this.repository.getMember(groupId, event.pubkey);
-      if (member && member.nametag !== senderNametag) {
-        member.nametag = senderNametag;
+      let member = this.repository.getMember(groupId, event.pubkey);
+      if (member) {
+        if (member.nametag !== senderNametag) {
+          member.nametag = senderNametag;
+          this.repository.saveMember(member);
+        }
+      } else {
+        // Create member record if they sent a message but aren't in member list yet
+        member = new GroupMember({
+          pubkey: event.pubkey,
+          groupId: groupId,
+          role: GroupRole.MEMBER,
+          nametag: senderNametag,
+          joinedAt: event.created_at * 1000,
+        });
         this.repository.saveMember(member);
       }
     }
@@ -924,11 +936,23 @@ export class GroupChatService {
           this.repository.saveMessage(message);
           this.repository.addProcessedEventId(event.id);
 
-          // Update member's nametag if we learned it from this message
+          // Update or create member with nametag from this message
           if (senderNametag) {
-            const member = this.repository.getMember(groupId, event.pubkey);
-            if (member && member.nametag !== senderNametag) {
-              member.nametag = senderNametag;
+            let member = this.repository.getMember(groupId, event.pubkey);
+            if (member) {
+              if (member.nametag !== senderNametag) {
+                member.nametag = senderNametag;
+                this.repository.saveMember(member);
+              }
+            } else {
+              // Create member record if they sent a message but aren't in member list yet
+              member = new GroupMember({
+                pubkey: event.pubkey,
+                groupId: groupId,
+                role: GroupRole.MEMBER,
+                nametag: senderNametag,
+                joinedAt: event.created_at * 1000,
+              });
               this.repository.saveMember(member);
             }
           }
