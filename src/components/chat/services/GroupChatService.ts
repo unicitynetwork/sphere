@@ -447,6 +447,7 @@ export class GroupChatService {
             const groupName = group.getDisplayName();
             this.repository.removeGroup(groupId);
             showToast(`You were removed from "${groupName}"`, 'warning', 0);
+            window.dispatchEvent(new CustomEvent('group-kicked', { detail: { groupId } }));
             window.dispatchEvent(new CustomEvent('group-chat-updated'));
           } else {
             // Someone else was kicked, just remove them from member list

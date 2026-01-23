@@ -116,12 +116,22 @@ export const useGroupChat = (): UseGroupChatReturn => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
     };
 
+    const handleGroupKicked = (event: CustomEvent<{ groupId: string }>) => {
+      const { groupId } = event.detail;
+      // If we're viewing the group we were kicked from, deselect it
+      if (selectedGroup && selectedGroup.id === groupId) {
+        setSelectedGroup(null);
+      }
+    };
+
     window.addEventListener('group-chat-updated', handleGroupChatUpdate);
     window.addEventListener('group-message-received', handleGroupMessageReceived as EventListener);
+    window.addEventListener('group-kicked', handleGroupKicked as EventListener);
 
     return () => {
       window.removeEventListener('group-chat-updated', handleGroupChatUpdate);
       window.removeEventListener('group-message-received', handleGroupMessageReceived as EventListener);
+      window.removeEventListener('group-kicked', handleGroupKicked as EventListener);
     };
   }, [queryClient, selectedGroup]);
 
