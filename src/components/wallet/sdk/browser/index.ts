@@ -39,6 +39,7 @@ export {
   BrowserNetworkProvider,
   getBrowserProvider,
   disposeBrowserProvider,
+  getBalance,
 } from './network';
 
 // ==========================================

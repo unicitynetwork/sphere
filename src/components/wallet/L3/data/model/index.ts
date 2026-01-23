@@ -148,3 +148,9 @@ import { TokenCollection } from '../../../sdk';
  * Kept for backwards compatibility during migration.
  */
 export const Wallet = TokenCollection;
+
+/**
+ * Type alias for Wallet class
+ * @deprecated Use TokenCollection type instead
+ */
+export type Wallet = TokenCollection;

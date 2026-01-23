@@ -48,9 +48,9 @@ export function useSwitchAddress(): UseSwitchAddressReturn {
       const identityManager = IdentityManager.getInstance(SESSION_KEY);
       identityManager.setSelectedAddressPath(path || "m/84'/1'/0'/0/0");
 
-      // 3. Reset WalletRepository in-memory state (silent to avoid premature events)
+      // 3. Reset WalletRepository in-memory state
       const walletRepo = WalletRepository.getInstance();
-      walletRepo.resetInMemoryState(true);
+      walletRepo.resetInMemoryState();
 
       // 4. Reset IpfsStorageService for new identity
       // This ensures IPFS sync uses the new identity's IPNS keys
@@ -61,7 +61,7 @@ export function useSwitchAddress(): UseSwitchAddressReturn {
       const newIdentity = await identityManager.getCurrentIdentity();
       if (newIdentity) {
         console.log(`📦 Pre-loading wallet for new identity: ${newIdentity.address.slice(0, 20)}...`);
-        await walletRepo.loadWalletForAddressAsync(newIdentity.address);
+        walletRepo.loadWalletForAddress(newIdentity.address);
       }
 
       // 6. Dispatch wallet-loaded event for services (NostrService reset)

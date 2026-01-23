@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { fetchNametagFromIpns } from '../../L3/services/IpnsNametagFetcher';
 import { IdentityManager } from '../../L3/services/IdentityManager';
 import { checkNametagForAddress, hasTokensForAddress } from '../../L3/services/InventorySyncService';
-import type { WalletAddress } from '../sdk/types';
+import type { WalletAddress } from '../sdk';
 
 // Session key for IdentityManager (same as useWallet.ts)
 const SESSION_KEY = "user-pin-1234";

@@ -41,6 +41,7 @@ export {
   BrowserNetworkProvider,
   getBrowserProvider,
   disposeBrowserProvider,
+  getBalance,
 } from '../../sdk/browser';
 
 // Backwards-compatible singleton
@@ -150,6 +151,7 @@ export {
   createTransactionPlan,
   sendAlpha,
   broadcastTransaction,
+  broadcastTransaction as broadcast, // Backwards-compatible alias
   // Types
   type TransactionInput,
   type TransactionOutput,

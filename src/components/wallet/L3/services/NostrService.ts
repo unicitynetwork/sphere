@@ -353,7 +353,15 @@ export class NostrService {
 
       const incomingRequest: IncomingPaymentRequest = {
         id: event.id,
+        eventId: event.id,
         senderPubkey: event.pubkey,
+        request: {
+          requestId: request.requestId,
+          amount: request.amount.toString(),
+          coinId: request.coinId,
+          message: request.message,
+          recipientNametag: request.recipientNametag,
+        },
         amount: request.amount,
         coinId: request.coinId,
         symbol: symbol,
