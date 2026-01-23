@@ -1,10 +1,13 @@
 /**
  * useWalletImport - Handles wallet file import logic
+ *
+ * NOTE: Nametag handling during import has been removed to prevent data corruption.
+ * The scan process only discovers nametag NAMES, not the full token data.
+ * Saving nametags with empty token objects (token: {}) causes corruption.
+ * Instead, nametags are now populated correctly via IPFS sync after import.
  */
 import { useState, useCallback } from "react";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
-import { IdentityManager } from "../../L3/services/IdentityManager";
 import {
   importWallet as importWalletFromFile,
   importWalletFromJSON,
@@ -21,10 +24,7 @@ import {
   isValidMnemonicFormat,
 } from "../../shared/utils/walletFileParser";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
-
-// Session key (same as useWallet.ts)
-const SESSION_KEY = "user-pin-1234";
-const identityManager = IdentityManager.getInstance(SESSION_KEY);
+import { setImportInProgress, clearImportInProgress } from "../../../wallet/L3/services/InventorySyncService";
 
 export interface UseWalletImportReturn {
   // Modal state
@@ -151,6 +151,9 @@ export function useWalletImport({
     async (file: File, scanCountParam?: number) => {
       setIsBusy(true);
       setError(null);
+
+      // Mark that we're in an active import flow to allow wallet creation
+      setImportInProgress();
 
       try {
         // Clear any existing wallet data
@@ -320,6 +323,8 @@ export function useWalletImport({
 
         await goToAddressSelection();
       } catch (e) {
+        // Clear import flag on error
+        clearImportInProgress();
         const message = e instanceof Error ? e.message : "Failed to import wallet from file";
         setError(message);
         setIsBusy(false);
@@ -332,6 +337,9 @@ export function useWalletImport({
   const onSelectScannedAddress = useCallback(
     async (scannedAddr: ScannedAddress) => {
       if (!pendingWallet) return;
+
+      // Mark that we're in an active import flow to allow wallet creation
+      setImportInProgress();
 
       try {
         setIsBusy(true);
@@ -353,19 +361,13 @@ export function useWalletImport({
 
         saveWalletToStorage("main", walletWithAddress);
 
-        if (scannedAddr.l3Nametag && scannedAddr.path) {
-          try {
-            const l3Identity = await identityManager.deriveIdentityFromPath(scannedAddr.path);
-            WalletRepository.saveNametagForAddress(l3Identity.address, {
-              name: scannedAddr.l3Nametag,
-              token: {},
-              timestamp: Date.now(),
-              format: "TXF",
-              version: "1.0",
-            });
-          } catch (e) {
-            console.warn(`Failed to save nametag for address ${scannedAddr.path}:`, e);
-          }
+        // NOTE: Do NOT save nametag here with empty token data!
+        // The scan only provides the nametag NAME, not the full token data.
+        // Saving with `token: {}` corrupts the wallet data.
+        // Instead, let IPFS sync populate the nametag correctly on first sync.
+        // See: https://github.com/anthropics/claude-code/issues/XXX
+        if (scannedAddr.l3Nametag) {
+          console.log(`📝 Found nametag "${scannedAddr.l3Nametag}" for address - will be populated via IPFS sync`);
         }
 
         const keyManager = getUnifiedKeyManager();
@@ -387,6 +389,8 @@ export function useWalletImport({
         setPendingWallet(null);
         await goToAddressSelection(true);
       } catch (e) {
+        // Clear import flag on error
+        clearImportInProgress();
         const message = e instanceof Error ? e.message : "Failed to import wallet";
         setError(message);
         setIsBusy(false);
@@ -399,6 +403,9 @@ export function useWalletImport({
   const onSelectAllScannedAddresses = useCallback(
     async (scannedAddresses: ScannedAddress[]) => {
       if (!pendingWallet || scannedAddresses.length === 0) return;
+
+      // Mark that we're in an active import flow to allow wallet creation
+      setImportInProgress();
 
       try {
         setIsBusy(true);
@@ -419,21 +426,13 @@ export function useWalletImport({
 
         saveWalletToStorage("main", walletWithAddresses);
 
-        for (const addr of scannedAddresses) {
-          if (addr.l3Nametag && addr.path) {
-            try {
-              const l3Identity = await identityManager.deriveIdentityFromPath(addr.path);
-              WalletRepository.saveNametagForAddress(l3Identity.address, {
-                name: addr.l3Nametag,
-                token: {},
-                timestamp: Date.now(),
-                format: "TXF",
-                version: "1.0",
-              });
-            } catch (e) {
-              console.warn(`Failed to save nametag for address ${addr.path}:`, e);
-            }
-          }
+        // NOTE: Do NOT save nametags here with empty token data!
+        // The scan only provides the nametag NAME, not the full token data.
+        // Saving with `token: {}` corrupts the wallet data.
+        // Instead, let IPFS sync populate nametags correctly on first sync.
+        const addressesWithNametags = scannedAddresses.filter(addr => addr.l3Nametag);
+        if (addressesWithNametags.length > 0) {
+          console.log(`📝 Found ${addressesWithNametags.length} addresses with nametags - will be populated via IPFS sync`);
         }
 
         const keyManager = getUnifiedKeyManager();
@@ -455,6 +454,8 @@ export function useWalletImport({
         setPendingWallet(null);
         await goToAddressSelection(true);
       } catch (e) {
+        // Clear import flag on error
+        clearImportInProgress();
         const message = e instanceof Error ? e.message : "Failed to import wallet";
         setError(message);
         setIsBusy(false);
@@ -465,6 +466,8 @@ export function useWalletImport({
 
   // Cancel scan modal
   const onCancelScan = useCallback(() => {
+    // Clear import flag when user cancels
+    clearImportInProgress();
     setShowScanModal(false);
     setPendingWallet(null);
   }, []);
@@ -473,6 +476,9 @@ export function useWalletImport({
   const onConfirmLoadWithPassword = useCallback(
     async (password: string) => {
       if (!pendingFile) return;
+
+      // Mark that we're in an active import flow to allow wallet creation
+      setImportInProgress();
 
       try {
         setIsBusy(true);
@@ -560,6 +566,8 @@ export function useWalletImport({
           await goToAddressSelection();
         }
       } catch (e) {
+        // Clear import flag on error
+        clearImportInProgress();
         const message = e instanceof Error ? e.message : "Failed to decrypt wallet";
         setError(message);
         setIsBusy(false);

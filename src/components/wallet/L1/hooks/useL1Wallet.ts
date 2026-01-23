@@ -18,7 +18,7 @@ import {
 import { browserProvider } from "../sdk";
 import { loadWalletFromUnifiedKeyManager, getUnifiedKeyManager } from "../../shared/services/UnifiedWalletBridge";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { dispatchWalletUpdated } from "../../L3/services/InventorySyncService";
 import { KEYS as L3_KEYS } from "../../L3/hooks/useWallet";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
@@ -296,8 +296,8 @@ export function useL1Wallet(selectedAddressProp?: string) {
       // Clear all wallet data from localStorage and reset singletons
       UnifiedKeyManager.clearAll();
 
-      // Reset WalletRepository in-memory state
-      WalletRepository.getInstance().resetInMemoryState();
+      // Notify UI components of wallet change
+      dispatchWalletUpdated();
     },
     onSuccess: () => {
       // Set identity to null immediately - this triggers WalletGate to show onboarding

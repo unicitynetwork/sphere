@@ -33,6 +33,11 @@ export function getAgentApiUrl(): string {
   return import.meta.env.VITE_AGENT_API_URL || 'http://localhost:3000';
 }
 
+// Get API Key
+export function getAgentApiKey(): string | undefined {
+  return import.meta.env.VITE_AGENT_API_KEY;
+}
+
 export function useAgentChat({ activityId, userId }: UseAgentChatOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -111,10 +116,12 @@ export function useAgentChat({ activityId, userId }: UseAgentChatOptions) {
 
       console.log('[useAgentChat] Sending memory state:', memoryState);
 
+      const apiKey = getAgentApiKey();
       const response = await fetch(`${apiUrl}/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(apiKey && { 'x-api-key': apiKey }),
         },
         body: JSON.stringify({
           activityId,

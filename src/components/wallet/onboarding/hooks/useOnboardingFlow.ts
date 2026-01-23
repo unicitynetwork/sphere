@@ -1,28 +1,30 @@
 /**
  * useOnboardingFlow - Manages onboarding flow state and navigation
- *
- * Uses WalletCore SDK for pure wallet operations (key generation, address derivation).
- * UnifiedKeyManager handles storage, IdentityManager handles L3 identity.
  */
 import { useState, useCallback, useEffect } from "react";
 import { useWallet } from "../../L3/hooks/useWallet";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
+import {
+  setImportInProgress,
+  clearImportInProgress,
+} from "../../L3/services/InventorySyncService";
 import { IdentityManager } from "../../L3/services/IdentityManager";
 import { fetchNametagFromIpns } from "../../L3/services/IpnsNametagFetcher";
 import { IpfsStorageService } from "../../L3/services/IpfsStorageService";
+import { recordActivity } from "../../../../services/ActivityService";
+import {
+  checkNametagForAddress,
+  hasTokensForAddress,
+  setNametagForAddress,
+  getInvalidatedNametagsForAddress,
+} from "../../L3/services/InventorySyncService";
 import {
   saveWalletToStorage,
   loadWalletFromStorage,
-  browserProvider,
+  getBalance,
   type Wallet as L1Wallet,
 } from "../../L1/sdk";
 import type { DerivedAddressInfo } from "../components/AddressSelectionScreen";
-import {
-  deriveUnifiedAddress,
-  getAddressPath,
-} from "../../sdk";
-import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 export type OnboardingStep =
   | "start"
@@ -67,8 +69,6 @@ export interface UseOnboardingFlowReturn {
   nametagInput: string;
   setNametagInput: (value: string) => void;
   processingStatus: string;
-  isProcessingComplete: boolean;
-  handleCompleteOnboarding: () => void;
 
   // Address selection state
   derivedAddresses: DerivedAddressInfo[];
@@ -122,7 +122,6 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   // Nametag state
   const [nametagInput, setNametagInput] = useState("");
   const [processingStatus, setProcessingStatus] = useState("");
-  const [isProcessingComplete, setIsProcessingComplete] = useState(false);
 
   // Address selection state
   const [derivedAddresses, setDerivedAddresses] = useState<DerivedAddressInfo[]>([]);
@@ -132,115 +131,91 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const [firstFoundNametagPath, setFirstFoundNametagPath] = useState<string | null>(null);
   const [autoDeriveDuringIpnsCheck, setAutoDeriveDuringIpnsCheck] = useState(true);
   const [ipnsFetchingNametag, setIpnsFetchingNametag] = useState(false);
+  const [ipnsCheckCompleted, setIpnsCheckCompleted] = useState(false);
 
-  // Effect: Handle onboarding flag cleanup and auto-navigation
+  // Effect: Fetch nametag from IPNS when identity exists but nametag doesn't
+  // CRITICAL FIX: Added ipnsCheckCompleted to prevent infinite loop.
+  // Without this, when no nametag is found, setting ipnsFetchingNametag=false
+  // would trigger the effect again, causing an infinite loop of IPNS checks.
   useEffect(() => {
-    console.log(`🔍 [Auto-check effect] step=${step}, hasIdentity=${!!identity}, hasNametag=${!!nametag}`);
+    if (step !== "start" || !identity || nametag || ipnsFetchingNametag || ipnsCheckCompleted) return;
 
-    // If user has both identity AND nametag, but onboarding flag is still set
-    // Check if onboarding is actually complete (user clicked "Let's go!" or imported wallet)
-    if (identity && nametag) {
-      const onboardingFlag = localStorage.getItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
-      const onboardingComplete = localStorage.getItem(STORAGE_KEYS.ONBOARDING_COMPLETE);
-
-      if (onboardingFlag === 'true' && onboardingComplete === 'true') {
-        // User completed onboarding but page was reloaded before flag was cleared
-        console.log('🔍 [Auto-check] Onboarding complete flag set - clearing both flags');
-        localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
-        localStorage.removeItem(STORAGE_KEYS.ONBOARDING_COMPLETE);
-        // Dispatch events to ensure services initialize
-        window.dispatchEvent(new Event("wallet-loaded"));
-        window.dispatchEvent(new Event("wallet-updated"));
-      }
-      return;
-    }
-
-    if (step !== "start" || !identity || nametag) {
-      console.log(`🔍 [Auto-check effect] Skipping IPNS check - conditions not met`);
-      return;
-    }
-
-    // Check IPNS in background for existing nametag
     const fetchNametag = async () => {
       setIpnsFetchingNametag(true);
-      console.log("🔍 [Auto-check] Checking IPNS for existing nametag...");
+      console.log("🔍 [Complete Setup] Checking IPNS for existing nametag...");
 
       try {
         const result = await fetchNametagFromIpns(identity.privateKey);
 
         if (result.nametag && result.nametagData) {
-          console.log(`🔍 [Auto-check] Found nametag: ${result.nametag}`);
+          console.log(`🔍 [Complete Setup] Found nametag: ${result.nametag}`);
 
-          WalletRepository.saveNametagForAddress(identity.address, {
-            name: result.nametagData.name,
-            token: result.nametagData.token,
-            timestamp: result.nametagData.timestamp || Date.now(),
-            format: result.nametagData.format || "TXF",
-            version: "1.0",
-          });
+          // CRITICAL: Check if this nametag was invalidated (e.g., owned by someone else on Nostr)
+          // If so, DO NOT restore it - user must create a new nametag
+          const invalidatedNametags = getInvalidatedNametagsForAddress(identity.address);
+          const isInvalidated = invalidatedNametags.some(inv => inv.name === result.nametag);
 
-          console.log("✅ [Auto-check] Nametag found, proceeding to wallet...");
-          // Clear onboarding flags if set
-          localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
-          localStorage.removeItem(STORAGE_KEYS.ONBOARDING_COMPLETE);
-          // Dispatch events to initialize services - no reload needed
-          window.dispatchEvent(new Event("wallet-loaded"));
-          window.dispatchEvent(new Event("wallet-updated"));
+          if (isInvalidated) {
+            console.warn(`🚫 [Complete Setup] Nametag "${result.nametag}" was invalidated - NOT restoring from IPNS`);
+            setIpnsFetchingNametag(false);
+            return;
+          }
+
+          try {
+            setNametagForAddress(identity.address, {
+              name: result.nametagData.name,
+              token: result.nametagData.token,
+              timestamp: result.nametagData.timestamp || Date.now(),
+              format: result.nametagData.format || "TXF",
+              version: "1.0",
+            });
+
+            console.log("✅ [Complete Setup] Nametag found and saved, proceeding to wallet...");
+            window.location.reload();
+          } catch (validationError) {
+            // Token data from IPFS is corrupted - skip saving, continue without nametag
+            console.warn(`⚠️ [Complete Setup] Nametag "${result.nametag}" has corrupted token data - skipping save:`,
+              validationError instanceof Error ? validationError.message : validationError
+            );
+            setIpnsFetchingNametag(false);
+            setIpnsCheckCompleted(true);
+          }
         } else {
-          console.log("🔍 [Auto-check] No nametag found in IPNS");
+          console.log("🔍 [Complete Setup] No nametag found in IPNS - user can create new nametag");
           setIpnsFetchingNametag(false);
+          setIpnsCheckCompleted(true);
         }
       } catch (error) {
-        console.warn("🔍 [Auto-check] IPNS fetch error:", error);
+        console.warn("🔍 [Complete Setup] IPNS fetch error:", error);
         setIpnsFetchingNametag(false);
+        setIpnsCheckCompleted(true);
       }
     };
 
-    // Start background check
     fetchNametag();
-
-    // Skip to nametag screen immediately (don't wait for IPNS)
-    console.log("⏩ Identity exists without nametag, skipping to nametag creation");
-
-    // Mark that we're in onboarding flow - this prevents automatic IPNS sync
-    // which would compete with our controlled sync during nametag creation
-    localStorage.setItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS, 'true');
-    console.log('🎯 Onboarding flag set - IPFS will skip initial IPNS sync');
-
-    setStep("nametag");
-  }, [step, identity, nametag]);
+  }, [step, identity, nametag, ipnsFetchingNametag, ipnsCheckCompleted]);
 
   // Internal helper to derive next address
-  // Uses WalletCore for unified address derivation (L1 + L3)
   const deriveNextAddressInternal = useCallback(async () => {
     const nextIndex = derivedAddresses.length;
     const keyManager = getUnifiedKeyManager();
-    const masterKey = keyManager.getMasterKeyHex();
-    const chainCode = keyManager.getChainCodeHex();
     const basePath = keyManager.getBasePath();
-    const mode = keyManager.getDerivationMode();
-
-    if (!masterKey) {
-      throw new Error("Wallet not initialized");
-    }
-
-    // Use WalletCore for unified address derivation
-    const path = getAddressPath(nextIndex, false, basePath);
-    const unified = await deriveUnifiedAddress(masterKey, chainCode, path, mode);
-
-    const existingNametag = WalletRepository.checkNametagForAddress(unified.l3Address);
+    const path = `${basePath}/0/${nextIndex}`;
+    const derived = keyManager.deriveAddressFromPath(path);
+    const l3Identity = await identityManager.deriveIdentityFromPath(path);
+    const existingNametag = checkNametagForAddress(l3Identity.address);
     const hasLocalNametag = !!existingNametag;
 
     setDerivedAddresses((prev) => [
       ...prev,
       {
         index: nextIndex,
-        l1Address: unified.l1Address,
-        l3Address: unified.l3Address,
+        l1Address: derived.l1Address,
+        l3Address: l3Identity.address,
         path: path,
         hasNametag: hasLocalNametag,
         existingNametag: existingNametag?.name,
-        privateKey: hasLocalNametag ? undefined : unified.privateKey,
+        privateKey: hasLocalNametag ? undefined : l3Identity.privateKey,
         ipnsLoading: !hasLocalNametag,
         balanceLoading: true, // Always check balance for gap limit
       },
@@ -294,7 +269,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       // Fetch L1 balance
       if (addr.balanceLoading) {
         try {
-          l1Balance = await browserProvider.getBalance(addr.l1Address);
+          l1Balance = await getBalance(addr.l1Address);
           console.log(`💰 L1 balance for ${chainLabel} #${addr.index}: ${l1Balance} ALPHA`);
         } catch (error) {
           console.warn(`💰 Balance fetch error for ${chainLabel} #${addr.index}:`, error);
@@ -337,7 +312,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
       // Gap limit logic: continue deriving if address has nametag OR L1 balance OR L3 tokens
       // Stop deriving if address has NO activity at all (gap detected)
-      const hasL3Tokens = WalletRepository.checkTokensForAddress(addr.l3Address);
+      const hasL3Tokens = hasTokensForAddress(addr.l3Address);
       const hasActivity = !!foundNametag || l1Balance > 0 || hasL3Tokens;
 
       if (autoDeriveDuringIpnsCheck && hasActivity && derivedAddresses.length < 20) {
@@ -352,37 +327,27 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   }, [step, derivedAddresses, isCheckingIpns, firstFoundNametagPath, autoDeriveDuringIpnsCheck, deriveNextAddressInternal]);
 
   // Helper: derive addresses and check for existing nametags
-  // Uses WalletCore for unified address derivation (L1 + L3)
   const deriveAndCheckAddresses = useCallback(
     async (count: number): Promise<DerivedAddressInfo[]> => {
       const keyManager = getUnifiedKeyManager();
-      const masterKey = keyManager.getMasterKeyHex();
-      const chainCode = keyManager.getChainCodeHex();
       const basePath = keyManager.getBasePath();
-      const mode = keyManager.getDerivationMode();
-
-      if (!masterKey) {
-        throw new Error("Wallet not initialized");
-      }
-
       const results: DerivedAddressInfo[] = [];
 
       for (let i = 0; i < count; i++) {
-        // Use WalletCore for unified address derivation
-        const path = getAddressPath(i, false, basePath);
-        const unified = await deriveUnifiedAddress(masterKey, chainCode, path, mode);
-
-        const existingNametag = WalletRepository.checkNametagForAddress(unified.l3Address);
+        const path = `${basePath}/0/${i}`;
+        const derived = keyManager.deriveAddressFromPath(path);
+        const l3Identity = await identityManager.deriveIdentityFromPath(path);
+        const existingNametag = checkNametagForAddress(l3Identity.address);
         const hasLocalNametag = !!existingNametag;
 
         results.push({
           index: i,
-          l1Address: unified.l1Address,
-          l3Address: unified.l3Address,
+          l1Address: derived.l1Address,
+          l3Address: l3Identity.address,
           path: path,
           hasNametag: hasLocalNametag,
           existingNametag: existingNametag?.name,
-          privateKey: hasLocalNametag ? undefined : unified.privateKey,
+          privateKey: hasLocalNametag ? undefined : l3Identity.privateKey,
           ipnsLoading: !hasLocalNametag,
           balanceLoading: true, // Always check balance for gap limit
         });
@@ -405,61 +370,23 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   }, []);
 
   // Helper: Verify nametag is available via IPNS with retry
-  // This performs REAL HTTP gateway reads to ensure data is accessible from network
   const verifyNametagInIpnsWithRetry = async (
     privateKey: string,
     expectedNametag: string,
-    timeoutMs: number = 60000, // Increased to 60s for IPNS propagation
-    onStatusUpdate?: (status: string) => void
+    timeoutMs: number = 30000
   ): Promise<boolean> => {
     const startTime = Date.now();
-    const retryInterval = 3000; // Check every 3 seconds
-    let successCount = 0;
-    const REQUIRED_SUCCESS_COUNT = 2; // Require 2 consecutive successful reads
-    let attemptCount = 0;
+    const retryInterval = 3000;
 
     while (Date.now() - startTime < timeoutMs) {
       try {
-        attemptCount++;
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        const remaining = Math.ceil((timeoutMs - (Date.now() - startTime)) / 1000);
-
-        // Update status in UI
-        onStatusUpdate?.(`Verifying IPNS... (${elapsed}s / ${Math.floor(timeoutMs / 1000)}s)`);
-
-        console.log(`🔄 IPNS verification attempt #${attemptCount} for "${expectedNametag}" (${elapsed}s elapsed, ${remaining}s remaining)...`);
-
+        console.log(`🔄 IPNS verification attempt for "${expectedNametag}"...`);
         const result = await fetchNametagFromIpns(privateKey);
-
-        console.log(`🔄 IPNS result:`, {
-          nametag: result.nametag,
-          expected: expectedNametag,
-          source: result.source,
-          hasData: !!result.nametagData
-        });
-
-        // Check if nametag matches AND came from HTTP gateway (not cache)
-        if (result.nametag === expectedNametag && result.source === "http" && result.nametagData) {
-          successCount++;
-          onStatusUpdate?.(`Verifying IPNS... (${successCount}/${REQUIRED_SUCCESS_COUNT} confirmations)`);
-          console.log(`✅ IPNS read successful (${successCount}/${REQUIRED_SUCCESS_COUNT})`);
-
-          if (successCount >= REQUIRED_SUCCESS_COUNT) {
-            console.log(`✅ IPNS verified with ${REQUIRED_SUCCESS_COUNT} consecutive reads`);
-            onStatusUpdate?.(`IPNS verified successfully!`);
-            return true;
-          }
-
-          // Wait a bit before next verification
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-          continue;
+        if (result.nametag === expectedNametag) {
+          return true;
         }
-
-        // Reset success count if read failed
-        successCount = 0;
         console.log(`🔄 IPNS returned "${result.nametag || "null"}", expected "${expectedNametag}"`);
       } catch (error) {
-        successCount = 0;
         console.log("🔄 IPNS verification attempt failed, retrying...", error);
       }
 
@@ -469,7 +396,6 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       }
     }
 
-    console.error(`❌ IPNS verification timeout after ${timeoutMs}ms`);
     return false;
   };
 
@@ -479,15 +405,13 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
     setIsBusy(true);
     setError(null);
-
-    // Mark onboarding flag BEFORE clearAll - it will be preserved
-    localStorage.setItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS, 'true');
-    console.log('🎯 Onboarding flag set - IPFS will skip initial IPNS sync');
-
     try {
-      // Pass false to preserve onboarding flags during cleanup
-      UnifiedKeyManager.clearAll(false);
+      // Mark that we're in an active wallet creation flow
+      // This allows wallet creation even though credentials will exist after generateNewIdentity()
+      // (because generateNewIdentity saves mnemonic BEFORE wallet creation)
+      setImportInProgress();
 
+      UnifiedKeyManager.clearAll();
       await createWallet();
 
       // Save L1 wallet to storage (same as import flow)
@@ -514,12 +438,14 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       console.log("💾 Saved L1 wallet for new wallet");
 
       setStep("nametag");
+
+      // Clear import flag - wallet creation complete
+      clearImportInProgress();
     } catch (e) {
+      // Clear import flag on error
+      clearImportInProgress();
       const message = e instanceof Error ? e.message : "Failed to generate keys";
       setError(message);
-      // Clear onboarding flag on error
-      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
-      console.log('🎯 Onboarding flag cleared after error');
     } finally {
       setIsBusy(false);
     }
@@ -538,14 +464,12 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setIsBusy(true);
     setError(null);
 
-    // Mark onboarding flag BEFORE clearAll - it will be preserved
-    localStorage.setItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS, 'true');
-    console.log('🎯 Onboarding flag set for wallet restore');
-
     try {
-      // Pass false to preserve onboarding flags during cleanup
-      UnifiedKeyManager.clearAll(false);
+      // Mark that we're in an active import flow
+      // This allows wallet creation even though credentials exist
+      setImportInProgress();
 
+      UnifiedKeyManager.clearAll();
       const mnemonic = words.join(" ");
       const keyManager = getUnifiedKeyManager();
       await keyManager.createFromMnemonic(mnemonic);
@@ -553,11 +477,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       // Go to address selection
       await goToAddressSelection();
     } catch (e) {
+      // Clear import flag on error
+      clearImportInProgress();
       const message = e instanceof Error ? e.message : "Invalid recovery phrase";
       setError(message);
-      // Clear onboarding flag on error
-      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
-      console.log('🎯 Onboarding flag cleared after restore error');
       setIsBusy(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -570,19 +493,6 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setIsBusy(true);
     setError(null);
 
-    // Verify onboarding flag is still set (should have been set in handleCreateKeys)
-    const onboardingFlag = localStorage.getItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
-    console.log('🎯 handleMintNametag: onboarding flag check:', onboardingFlag);
-
-    // Add beforeunload handler to warn user about closing during sync
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      // Modern browsers ignore custom message, but preventDefault() shows default warning
-      return "Your Unicity ID is being synced. Closing now may prevent recovery on other devices.";
-    };
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-
     try {
       const cleanTag = nametagInput.trim().replace("@", "");
 
@@ -590,7 +500,6 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       if (!isNametagAvailable) {
         setError(`${cleanTag} already exists.`);
         setIsBusy(false);
-        window.removeEventListener("beforeunload", handleBeforeUnload);
         return;
       }
 
@@ -601,205 +510,79 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       await mintNametag(cleanTag);
       console.log("✅ Nametag minted and saved to localStorage");
 
-      // DON'T trigger wallet-updated yet - it will start background sync that competes with our syncNow()
-      // We'll do a controlled sync here and trigger wallet-updated after
-
-      // Wait a moment for localStorage write to flush
-      console.log("⏳ Waiting for nametag to be written to storage...");
-      setProcessingStatus("Preparing to sync...");
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      // Ensure wallet is loaded in WalletRepository with the new nametag
-      const mintedIdentity = await identityManager.getCurrentIdentity();
-      if (!mintedIdentity) {
-        throw new Error("Identity not found after minting");
-      }
-      const walletRepo = WalletRepository.getInstance();
-      const wallet = walletRepo.loadWalletForAddress(mintedIdentity.address);
-      if (!wallet) {
-        throw new Error("Wallet not found after minting");
-      }
-      const loadedNametag = walletRepo.getNametag();
-      if (!loadedNametag || loadedNametag.name !== cleanTag) {
-        throw new Error(`Nametag not loaded correctly. Expected "${cleanTag}", got "${loadedNametag?.name || "none"}"`);
-      }
-      console.log(`✅ Nametag loaded in WalletRepository: ${loadedNametag.name}`);
-
-      // Step 2: Sync to IPFS (CRITICAL - prevents loss on import)
+      // Step 2: Sync to IPFS
       setProcessingStatus("Syncing to IPFS storage...");
-      // Give React time to update UI before blocking on syncNow()
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      const ipfsService = IpfsStorageService.getInstance(identityManager);
-
-      console.log("🔄 Starting IPFS sync with new nametag...");
-
-      // Add timeout to prevent hanging forever if IPFS gets stuck
-      // 60 seconds should be enough for IPNS publishing which can be slow
-      const syncPromise = ipfsService.syncNow();
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("IPFS sync timeout after 60 seconds")), 60000)
-      );
-
-      const syncResult = await Promise.race([syncPromise, timeoutPromise]);
-      console.log("📦 IPFS sync result:", {
-        success: syncResult.success,
-        cid: syncResult.cid,
-        ipnsName: syncResult.ipnsName,
-        ipnsPublished: syncResult.ipnsPublished,
-        ipnsPublishPending: syncResult.ipnsPublishPending,
-        tokenCount: syncResult.tokenCount,
-        error: syncResult.error
-      });
-
-      // For new wallets, tokenCount will be 0 (nametag is synced separately)
-      // So we just check if sync succeeded
-      if (!syncResult.success) {
-        console.error("❌ IPFS sync failed:", syncResult.error);
-        window.removeEventListener("beforeunload", handleBeforeUnload);
-        throw new Error(
-          `Failed to sync your Unicity ID to decentralized storage. ${syncResult.error || "Unknown error"}. Your ID is saved locally but may not be recoverable on other devices.`
-        );
+      try {
+        const ipfsService = IpfsStorageService.getInstance(identityManager);
+        await ipfsService.syncNow();
+        console.log("✅ IPFS sync completed");
+      } catch (syncError) {
+        console.warn("⚠️ IPFS sync failed, continuing anyway:", syncError);
       }
 
-      // Check if IPNS was published (critical for recovery on other devices)
-      if (syncResult.ipnsPublishPending) {
-        console.error("❌ IPNS publish failed, marked as pending");
-        window.removeEventListener("beforeunload", handleBeforeUnload);
-        throw new Error(
-          `Your Unicity ID was saved to IPFS but IPNS publish failed. It may not be immediately recoverable on other devices. Please ensure you have a stable internet connection and try again.`
-        );
-      }
-
-      console.log("✅ IPFS sync completed, IPNS published:", syncResult.ipnsPublished);
-
-      // CRITICAL: For new nametag, IPNS MUST be published
-      // If ipnsPublished is false, something went wrong
-      if (!syncResult.ipnsPublished) {
-        console.error("❌ IPNS was not published during sync");
-        window.removeEventListener("beforeunload", handleBeforeUnload);
-        throw new Error(
-          `Your Unicity ID was saved to IPFS but was not published to IPNS. This means it won't be recoverable on other devices. Please ensure you have a stable internet connection and try again.`
-        );
-      }
-
-      // Step 3: Verify in IPNS (CRITICAL - ensure recovery works)
+      // Step 3: Verify in IPNS
       setProcessingStatus("Verifying IPFS availability...");
       const currentIdentity = await identityManager.getCurrentIdentity();
-
-      console.log("🔍 Starting IPNS verification for nametag:", cleanTag);
-      console.log("🔍 Current identity:", currentIdentity ? "exists" : "missing");
-
       const verified = currentIdentity
-        ? await verifyNametagInIpnsWithRetry(
-            currentIdentity.privateKey,
-            cleanTag,
-            60000,
-            (status) => setProcessingStatus(status) // Update UI in real-time
-          )
+        ? await verifyNametagInIpnsWithRetry(currentIdentity.privateKey, cleanTag, 30000)
         : false;
 
-      console.log("🔍 IPNS verification result:", verified);
-
       if (!verified) {
-        console.error("❌ IPNS verification failed after 60s");
-        window.removeEventListener("beforeunload", handleBeforeUnload);
-        throw new Error(
-          `Your Unicity ID was saved but could not be verified in decentralized storage after 60 seconds. This may be due to network issues or IPFS gateway problems. Your ID is saved locally - you can try again later or contact support.`
-        );
+        console.warn("⚠️ IPNS verification timed out after 30s, proceeding anyway");
+      } else {
+        console.log(`✅ Verified nametag "${cleanTag}" available via IPNS`);
       }
 
-      console.log(`✅ Verified nametag "${cleanTag}" available via IPNS`);
+      // Step 4: Record wallet creation activity
+      console.log("🏷️ Step 4: Recording wallet creation activity...");
+      recordActivity("wallet_created", { isPublic: false });
 
-      // Step 4: Nametag successfully synced - show completion UI
-      console.log("🏷️ Step 4: Nametag synced to IPFS successfully!");
+      // Step 5: Notify app that wallet is ready (instead of reload)
+      console.log("🏷️ Step 5: All steps completed, notifying app...");
 
-      // Remove beforeunload handler
-      window.removeEventListener("beforeunload", handleBeforeUnload);
+      // Signal wallet creation - this triggers Nostr service initialization
+      window.dispatchEvent(new Event("wallet-loaded"));
+      // Trigger UI updates
+      window.dispatchEvent(new Event("wallet-updated"));
 
-      // DON'T clear onboarding flag yet - we want to show "Let's go!" button first
-      // The flag will be cleared in handleCompleteOnboarding when user clicks button
-      // But set "complete" flag so if page reloads, we know to proceed to app
-      localStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETE, 'true');
-      console.log('🎯 Onboarding complete flag set - ready for user to click "Let\'s go!"');
+      // Wait a moment for Nostr to initialize, then close onboarding
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
-      console.log('🎯 About to set processing complete...');
-      // Show completion screen with "Let's go!" button
-      setProcessingStatus("Your Unicity ID is ready!");
-      setIsProcessingComplete(true);
-      console.log('🎉 Processing complete! isProcessingComplete set to true');
-      console.log('🎯 Onboarding in-progress flag still set - waiting for user to click "Let\'s go!"');
+      // Set step to null/complete to trigger navigation away from onboarding
+      setStep("start"); // This will trigger the existing identity/nametag check in useEffect
     } catch (e) {
       const message = e instanceof Error ? e.message : "Minting failed";
       console.error("❌ Nametag minting failed:", e);
       setError(message);
       setStep("nametag");
-      // Remove beforeunload handler on error
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-      // Clear onboarding flag on error so IPFS sync resumes normally
-      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
-      console.log('🎯 Onboarding flag cleared after error');
     } finally {
       setIsBusy(false);
     }
   }, [nametagInput, checkNametagAvailability, mintNametag]);
 
-  // Action: Complete onboarding and enter app
-  const handleCompleteOnboarding = useCallback(() => {
-    console.log("🎉 User clicked 'Let's go!' - completing onboarding...");
-
-    // Clear both onboarding flags
-    localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
-    localStorage.removeItem(STORAGE_KEYS.ONBOARDING_COMPLETE);
-
-    // Set authenticated flag - user has completed initial onboarding
-    // This flag tells WalletGate to never show onboarding again for this user
-    // New addresses will be created via in-app modal instead
-    localStorage.setItem(STORAGE_KEYS.AUTHENTICATED, 'true');
-    console.log('🎯 Onboarding flags cleared, authenticated flag set - user can now enter app');
-
-    // Signal wallet creation - this triggers Nostr service initialization and UI updates
-    console.log('📢 Dispatching wallet-loaded event...');
-    window.dispatchEvent(new Event("wallet-loaded"));
-    console.log('📢 Dispatching wallet-updated event...');
-    window.dispatchEvent(new Event("wallet-updated"));
-
-    // No reload needed - WalletGate will see flags cleared and show main app
-  }, []);
-
   // Action: Derive new address
-  // Uses WalletCore for unified address derivation (L1 + L3)
   const handleDeriveNewAddress = useCallback(async () => {
     setIsBusy(true);
     try {
       const nextIndex = derivedAddresses.length;
       const keyManager = getUnifiedKeyManager();
-      const masterKey = keyManager.getMasterKeyHex();
-      const chainCode = keyManager.getChainCodeHex();
       const basePath = keyManager.getBasePath();
-      const mode = keyManager.getDerivationMode();
-
-      if (!masterKey) {
-        throw new Error("Wallet not initialized");
-      }
-
-      // Use WalletCore for unified address derivation
-      const path = getAddressPath(nextIndex, false, basePath);
-      const unified = await deriveUnifiedAddress(masterKey, chainCode, path, mode);
-
-      const existingNametag = WalletRepository.checkNametagForAddress(unified.l3Address);
+      const path = `${basePath}/0/${nextIndex}`;
+      const derived = keyManager.deriveAddressFromPath(path);
+      const l3Identity = await identityManager.deriveIdentityFromPath(path);
+      const existingNametag = checkNametagForAddress(l3Identity.address);
       const hasLocalNametag = !!existingNametag;
 
       setDerivedAddresses([
         ...derivedAddresses,
         {
           index: nextIndex,
-          l1Address: unified.l1Address,
-          l3Address: unified.l3Address,
+          l1Address: derived.l1Address,
+          l3Address: l3Identity.address,
           path: path,
           hasNametag: hasLocalNametag,
           existingNametag: existingNametag?.name,
-          privateKey: hasLocalNametag ? undefined : unified.privateKey,
+          privateKey: hasLocalNametag ? undefined : l3Identity.privateKey,
           ipnsLoading: !hasLocalNametag,
           balanceLoading: true, // Check balance for gap limit
         },
@@ -840,7 +623,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
             }
 
             const l3Identity = await identityManager.deriveIdentityFromPath(addr.path);
-            const existingNametag = WalletRepository.checkNametagForAddress(l3Identity.address);
+            const existingNametag = checkNametagForAddress(l3Identity.address);
 
             const isChange = addr.isChange ?? false;
             const chainLabel = isChange ? "change" : "external";
@@ -897,7 +680,6 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
   // Action: Continue with selected address
   const handleContinueWithAddress = useCallback(async () => {
-    console.log('📍 handleContinueWithAddress called');
     setIsBusy(true);
     setError(null);
 
@@ -949,49 +731,43 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
       await IpfsStorageService.resetInstance();
 
-      // Save nametags from IPNS
+      // Save nametags from IPNS (skip corrupted tokens gracefully)
       for (const addr of derivedAddresses) {
         if (addr.hasNametag && addr.nametagData && addr.l3Address) {
           console.log(`💾 Saving nametag for ${addr.l3Address.slice(0, 20)}...`);
-          WalletRepository.saveNametagForAddress(addr.l3Address, {
-            name: addr.nametagData.name,
-            token: addr.nametagData.token,
-            timestamp: addr.nametagData.timestamp || Date.now(),
-            format: addr.nametagData.format || "TXF",
-            version: "1.0",
-          });
+          try {
+            setNametagForAddress(addr.l3Address, {
+              name: addr.nametagData.name,
+              token: addr.nametagData.token,
+              timestamp: addr.nametagData.timestamp || Date.now(),
+              format: addr.nametagData.format || "TXF",
+              version: "1.0",
+            });
+            console.log(`💾 Saved IPNS-fetched nametag "${addr.nametagData.name}" for address ${addr.l3Address.slice(0, 20)}...`);
+          } catch (validationError) {
+            // Token data from IPFS is corrupted/invalid - skip saving but don't break flow
+            // The user can still use the address, they'll just need to re-mint the nametag
+            console.warn(`⚠️ Skipping corrupted nametag "${addr.nametagData.name}" for ${addr.l3Address.slice(0, 20)}... - token validation failed:`,
+              validationError instanceof Error ? validationError.message : validationError
+            );
+            // Mark this address as NOT having a valid nametag since we couldn't save it
+            addr.hasNametag = false;
+          }
         }
       }
 
-      console.log(`📍 Selected address check: hasNametag=${selectedAddress.hasNametag}, path=${selectedAddress.path}`);
-
       if (selectedAddress.hasNametag) {
         console.log("✅ Address has existing nametag, proceeding to main app");
-
-        // Clear onboarding flags
-        localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
-        localStorage.removeItem(STORAGE_KEYS.ONBOARDING_COMPLETE);
-        console.log('🎯 Onboarding flags cleared for imported wallet');
-
-        // Dispatch events to initialize services (Nostr, etc.)
-        window.dispatchEvent(new Event("wallet-loaded"));
-        window.dispatchEvent(new Event("wallet-updated"));
-
-        // No reload needed - WalletGate will detect flags and show main app
-        return;
+        window.location.reload();
       } else {
-        console.log("📍 No nametag found, setting onboarding flag and going to nametag screen");
-        // Mark that we're in onboarding flow - this prevents automatic IPNS sync
-        // which would compete with our controlled sync during nametag creation
-        localStorage.setItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS, 'true');
-        console.log('🎯 Onboarding flag set - IPFS will skip initial IPNS sync');
         setStep("nametag");
-        console.log('📍 Step set to "nametag"');
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to select address";
       setError(message);
     } finally {
+      // Clear import flag - import is complete (success or failure)
+      clearImportInProgress();
       setIsBusy(false);
     }
   }, [derivedAddresses, selectedAddressPath, getUnifiedKeyManager]);
@@ -1026,8 +802,6 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     nametagInput,
     setNametagInput,
     processingStatus,
-    isProcessingComplete,
-    handleCompleteOnboarding,
 
     // Address selection state
     derivedAddresses,

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../config/activities';
 import { merchItems } from '../../data/agentsMockData';
 import { AgentChat } from './shared';
+import { recordActivity } from '../../services/ActivityService';
 
 // Card data for merch items
 interface MerchCardData {
@@ -89,6 +90,16 @@ export function MerchChat({ agent }: MerchChatProps) {
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     setOrderStep('success');
+
+    // Record merch order activity
+    recordActivity('merch_order', {
+      isPublic: true,
+      data: {
+        itemName: pendingOrder.title,
+        price: pendingOrder.price,
+      },
+    });
+
     await new Promise(resolve => setTimeout(resolve, 1500));
     setShowOrderModal(false);
     setPendingOrder(null);

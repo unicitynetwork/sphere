@@ -3,9 +3,14 @@ import { ChevronDown, Plus, Loader2, Check, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useL1Wallet } from '../../L1/hooks/useL1Wallet';
 import { useAddressNametags } from '../../L1/hooks/useAddressNametags';
-import { useSwitchAddress } from '../hooks/useSwitchAddress';
+import { generateAddress, loadWalletFromStorage } from '../../L1/sdk';
 import { STORAGE_KEYS } from '../../../../config/storageKeys';
-import { CreateAddressModal } from '../modals/CreateAddressModal';
+
+/** Truncate long nametags: show first 6 chars + ... + last 3 chars */
+function truncateNametag(nametag: string, maxLength: number = 12): string {
+  if (nametag.length <= maxLength) return nametag;
+  return `${nametag.slice(0, 6)}...${nametag.slice(-3)}`;
+}
 
 interface AddressSelectorProps {
   /** Current nametag to display when collapsed */
@@ -17,11 +22,10 @@ interface AddressSelectorProps {
 export function AddressSelector({ currentNametag, compact = true }: AddressSelectorProps) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
-  const { wallet } = useL1Wallet();
+  const { wallet, invalidateWallet } = useL1Wallet();
   const { nametagState, addressesWithNametags } = useAddressNametags(wallet?.addresses);
-  const { switchToAddress, isSwitching } = useSwitchAddress();
 
   // Check if any address is still loading nametag from IPNS
   const isAnyAddressLoading = useMemo(() => {
@@ -51,34 +55,42 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
     });
   }, [wallet?.addresses]);
 
-  const handleSelectAddress = async (address: string) => {
-    if (isSwitching) return;
-
+  const handleSelectAddress = (address: string) => {
     const selectedAddr = wallet?.addresses.find(a => a.address === address);
-    if (!selectedAddr) return;
-
-    // Don't switch if already on this address
-    if (selectedAddr.address === currentAddress?.address) {
-      setShowDropdown(false);
-      return;
+    if (selectedAddr?.path) {
+      localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, selectedAddr.path);
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
     }
-
     setShowDropdown(false);
-
-    // Use the hook to switch address without page reload
-    await switchToAddress(selectedAddr.address, selectedAddr.path || null);
+    window.location.reload();
   };
 
-  const handleNewAddress = () => {
-    if (!wallet || isAnyAddressLoading) return;
-    setShowDropdown(false);
-    setShowCreateModal(true);
+  const handleNewAddress = async () => {
+    if (!wallet || isGenerating || isAnyAddressLoading) return;
+    setIsGenerating(true);
+
+    try {
+      const addr = generateAddress(wallet);
+      const updated = loadWalletFromStorage("main");
+
+      if (updated && addr.path) {
+        invalidateWallet();
+        localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, addr.path);
+        setShowDropdown(false);
+        window.location.reload();
+      }
+    } catch (err) {
+      console.error('Failed to generate address:', err);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleCopyNametag = async () => {
     if (!currentNametag) return;
     try {
-      await navigator.clipboard.writeText(`@${currentNametag}`);
+      await navigator.clipboard.writeText(currentNametag);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
@@ -107,7 +119,7 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
             {isLoading ? (
               <Loader2 className="w-3 h-3 animate-spin" />
             ) : displayNametag ? (
-              <span className="font-medium">@{displayNametag}</span>
+              <span className="font-medium" title={`@${displayNametag}`}>@{truncateNametag(displayNametag)}</span>
             ) : (
               <span className="font-mono">{currentAddress?.address.slice(0, 8)}...</span>
             )}
@@ -153,20 +165,24 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
                 {/* Header */}
                 <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2">
                   <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 flex items-center gap-1.5">
-                    {(isAnyAddressLoading || isSwitching) && (
+                    {isAnyAddressLoading && (
                       <Loader2 className="w-3 h-3 animate-spin" />
                     )}
-                    {isSwitching ? 'Switching...' : isAnyAddressLoading ? 'Checking nametags...' : `Addresses (${sortedAddresses.length})`}
+                    {isAnyAddressLoading ? 'Checking nametags...' : `Addresses (${sortedAddresses.length})`}
                   </span>
                   <motion.button
-                    whileHover={{ scale: isAnyAddressLoading ? 1 : 1.05 }}
-                    whileTap={{ scale: isAnyAddressLoading ? 1 : 0.95 }}
+                    whileHover={{ scale: (isGenerating || isAnyAddressLoading) ? 1 : 1.05 }}
+                    whileTap={{ scale: (isGenerating || isAnyAddressLoading) ? 1 : 0.95 }}
                     onClick={handleNewAddress}
-                    disabled={isAnyAddressLoading}
+                    disabled={isGenerating || isAnyAddressLoading}
                     className="flex items-center gap-1 px-2 py-1 text-xs bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
                     title={isAnyAddressLoading ? 'Wait for nametag check to complete' : 'Create new address'}
                   >
-                    <Plus className="w-3 h-3" />
+                    {isGenerating ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Plus className="w-3 h-3" />
+                    )}
                     <span>New</span>
                   </motion.button>
                 </div>
@@ -182,8 +198,7 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
                       <button
                         key={addr.address}
                         onClick={() => handleSelectAddress(addr.address)}
-                        disabled={isSwitching}
-                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${
                           isSelected ? 'bg-orange-50 dark:bg-orange-900/20' : ''
                         }`}
                       >
@@ -238,12 +253,6 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
             </>
           )}
         </AnimatePresence>
-
-        {/* Create Address Modal */}
-        <CreateAddressModal
-          isOpen={showCreateModal}
-          onClose={() => setShowCreateModal(false)}
-        />
       </div>
     );
   }
@@ -293,10 +302,14 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={handleNewAddress}
-                  disabled={isAnyAddressLoading}
+                  disabled={isGenerating}
                   className="flex items-center gap-1 px-2 py-1 text-xs bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-lg transition-colors disabled:opacity-50"
                 >
-                  <Plus className="w-3 h-3" />
+                  {isGenerating ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Plus className="w-3 h-3" />
+                  )}
                   <span>New Address</span>
                 </motion.button>
               </div>
@@ -339,12 +352,6 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
           </>
         )}
       </AnimatePresence>
-
-      {/* Create Address Modal */}
-      <CreateAddressModal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-      />
     </div>
   );
 }

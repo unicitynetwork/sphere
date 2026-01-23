@@ -27,6 +27,9 @@ export {
     TransactionEvent,
 } from '../../../sdk';
 
+// Backwards-compatibility alias for dev branch code
+export { WalletToken as Token } from '../../../sdk';
+
 // ==========================================
 // 3. Type Interfaces (from SDK)
 // ==========================================

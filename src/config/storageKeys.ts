@@ -124,7 +124,7 @@ export const STORAGE_KEYS = {
   OUTBOX_SPLIT_GROUPS: SDK_WALLET_KEYS.OUTBOX_SPLIT_GROUPS,
 
   // ============================================================================
-  // CHAT (App-specific)
+  // CHAT (User-to-User DMs)
   // ============================================================================
 
   /** Chat conversations list */
@@ -134,7 +134,26 @@ export const STORAGE_KEYS = {
   CHAT_MESSAGES: 'sphere_chat_messages',
 
   // ============================================================================
-  // AGENT CHAT SESSIONS (App-specific)
+  // GROUP CHAT (NIP-29)
+  // ============================================================================
+
+  /** Joined groups list */
+  GROUP_CHAT_GROUPS: 'sphere_group_chat_groups',
+
+  /** Group messages */
+  GROUP_CHAT_MESSAGES: 'sphere_group_chat_messages',
+
+  /** Group members cache */
+  GROUP_CHAT_MEMBERS: 'sphere_group_chat_members',
+
+  /** Group chat relay URL */
+  GROUP_CHAT_RELAY_URL: 'sphere_group_chat_relay_url',
+
+  /** Processed group event IDs (for deduplication) */
+  GROUP_CHAT_PROCESSED_EVENTS: 'sphere_group_chat_processed_events',
+
+  // ============================================================================
+  // AGENT CHAT SESSIONS
   // ============================================================================
 
   /** Agent chat sessions metadata */
@@ -149,6 +168,9 @@ export const STORAGE_KEYS = {
 
   /** Token backup timestamp */
   TOKEN_BACKUP_TIMESTAMP: SDK_WALLET_KEYS.TOKEN_BACKUP_TIMESTAMP,
+
+  /** Spent token state cache (persisted SPENT results) */
+  SPENT_TOKEN_CACHE: 'sphere_spent_token_cache',
 
   /** Last successful IPFS sync timestamp */
   LAST_IPFS_SYNC_SUCCESS: SDK_WALLET_KEYS.LAST_IPFS_SYNC,
@@ -175,6 +197,16 @@ export const STORAGE_KEYS = {
 
   /** Processed Nostr event IDs */
   NOSTR_PROCESSED_EVENTS: SDK_WALLET_KEYS.NOSTR_PROCESSED_EVENTS,
+
+  // ============================================================================
+  // DEV SETTINGS
+  // ============================================================================
+
+  /** Custom aggregator URL (dev mode) */
+  DEV_AGGREGATOR_URL: 'sphere_dev_aggregator_url',
+
+  /** Trust base verification skip flag (dev mode) */
+  DEV_SKIP_TRUST_BASE: 'sphere_dev_skip_trust_base',
 } as const;
 
 // ============================================================================

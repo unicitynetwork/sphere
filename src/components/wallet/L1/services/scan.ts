@@ -20,7 +20,7 @@ import {
 } from "../sdk";
 // L3 inventory checking imports (browser-specific)
 import { IdentityManager } from "../../L3/services/IdentityManager";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { checkNametagForAddress, hasTokensForAddress } from "../../L3/services/InventorySyncService";
 import { fetchNametagFromIpns } from "../../L3/services/IpnsNametagFetcher";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 
@@ -51,8 +51,8 @@ async function getCachedL3Info(
     const l3Address = identity.address;
 
     // Check localStorage (instant)
-    const localNametag = WalletRepository.checkNametagForAddress(l3Address);
-    const localTokens = WalletRepository.checkTokensForAddress(l3Address);
+    const localNametag = checkNametagForAddress(l3Address);
+    const localTokens = hasTokensForAddress(l3Address);
 
     return {
       nametag: localNametag?.name,

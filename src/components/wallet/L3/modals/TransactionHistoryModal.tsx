@@ -80,7 +80,7 @@ export function TransactionHistoryModal({ isOpen, onClose }: TransactionHistoryM
                     <Clock className="w-5 h-5 text-white" />
                   </motion.div>
                   <div>
-                    <h3 className="text-lg font-bold text-neutral-900 dark:text-white leading-tight">Payment Requests</h3>
+                    <h3 className="text-lg font-bold text-neutral-900 dark:text-white leading-tight">Transaction History</h3>
                     
                   </div>
                 </div>

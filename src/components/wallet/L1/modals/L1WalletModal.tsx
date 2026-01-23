@@ -15,15 +15,15 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
+  generateAddress,
+  loadWalletFromStorage,
   createTransactionPlan,
   createAndSignTransaction,
-  browserProvider,
+  broadcast,
   type TransactionPlan,
 } from "../sdk";
-import { CreateAddressModal } from "../../shared/modals/CreateAddressModal";
 import { useL1Wallet, useConnectionStatus } from "../hooks";
 import { useAddressNametags } from "../hooks/useAddressNametags";
-import { useSwitchAddress } from "../../shared/hooks/useSwitchAddress";
 import { ConnectionStatus } from "../components/ConnectionStatus";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 import {
@@ -67,7 +67,6 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     message: string;
     txids?: string[];
   }>({ show: false, type: "info", title: "", message: "" });
-  const [showCreateAddressModal, setShowCreateAddressModal] = useState(false);
 
   const {
     wallet,
@@ -79,13 +78,13 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     isLoadingTransactions,
     currentBlockHeight,
     analyzeTransaction,
+    invalidateWallet,
     vestingBalances,
     isClassifyingVesting,
   } = useL1Wallet(selectedAddress);
 
   const addresses = wallet?.addresses.map((a) => a.address) ?? [];
   const { nametagState, addressesWithNametags } = useAddressNametags(wallet?.addresses);
-  const { switchToAddress, isSwitching } = useSwitchAddress();
 
   // Check if any address is still loading nametag from IPNS
   const isAnyAddressLoading = addressesWithNametags.some(addr => addr.ipnsLoading);
@@ -119,10 +118,18 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     }
   }, [isOpen]);
 
-  // Generate new address and open modal for nametag creation
-  const onNewAddress = () => {
+  const onNewAddress = async () => {
     if (!wallet || isAnyAddressLoading) return;
-    setShowCreateAddressModal(true);
+    try {
+      const addr = generateAddress(wallet);
+      const updated = loadWalletFromStorage("main");
+      if (updated) {
+        invalidateWallet();
+        setSelectedAddress(addr.address);
+      }
+    } catch {
+      showMessage("error", "Error", "Failed to generate address");
+    }
   };
 
   const onSendTransaction = async (destination: string, amount: string) => {
@@ -160,7 +167,7 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
       for (const tx of txPlan.transactions) {
         try {
           const signed = createAndSignTransaction(wallet, tx);
-          const result = await browserProvider.broadcast(signed.raw);
+          const result = await broadcast(signed.raw);
           results.push({ txid: signed.txid, raw: signed.raw, result });
         } catch (e: unknown) {
           errors.push(e instanceof Error ? e.message : String(e));
@@ -182,23 +189,14 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     }
   };
 
-  const onSelectAddress = async (address: string) => {
-    if (isSwitching) return;
-
+  const onSelectAddress = (address: string) => {
     const selectedAddr = wallet?.addresses.find(a => a.address === address);
-    if (!selectedAddr) return;
-
-    // Don't switch if already on this address
-    if (address === selectedAddress) {
-      setShowDropdown(false);
-      return;
+    if (selectedAddr?.path) {
+      localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, selectedAddr.path);
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
     }
-
-    setShowDropdown(false);
-
-    // Use the hook to switch address without page reload
-    await switchToAddress(address, selectedAddr.path || null);
-    setSelectedAddress(address);
+    window.location.reload();
   };
 
   const formatBalance = (bal: number) => {
@@ -534,11 +532,6 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
               message={messageModal.message}
               txids={messageModal.txids}
               onClose={closeMessage}
-            />
-
-            <CreateAddressModal
-              isOpen={showCreateAddressModal}
-              onClose={() => setShowCreateAddressModal(false)}
             />
           </motion.div>
         </motion.div>

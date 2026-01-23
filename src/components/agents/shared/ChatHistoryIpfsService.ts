@@ -649,8 +649,9 @@ export class ChatHistoryIpfsService {
           const formData = new FormData();
           formData.append("file", new Blob([new Uint8Array(marshalledRecord)]), "record");
 
+          // NOTE: Do NOT use allow-offline=true - it prevents DHT propagation!
           const response = await fetch(
-            `${gatewayUrl}/api/v0/routing/put?arg=/ipns/${this.cachedIpnsName}&allow-offline=true`,
+            `${gatewayUrl}/api/v0/routing/put?arg=/ipns/${this.cachedIpnsName}`,
             { method: "POST", body: formData, signal: AbortSignal.timeout(30000) }
           );
 

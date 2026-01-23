@@ -3,47 +3,50 @@
  * Validates tokens before IPFS sync and fetches missing Unicity proofs
  */
 
-import { WalletToken as LocalToken, TokenStatus } from "../data/model";
+import { Token as LocalToken, TokenStatus } from "../data/model";
 import type {
+  ValidationResult,
+  ValidationIssue,
+  TokenValidationResult,
   TxfTransaction,
   TxfInclusionProof,
   TxfToken,
 } from "./types/TxfTypes";
 import { getCurrentStateHash, tokenToTxf } from "./TxfSerializer";
-import { Token } from "../sdk";
+import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
-// Re-export SDK validation types for backwards compatibility
-export type {
-  ValidationAction,
-  TokenValidationResult,
-  ValidationIssue,
-  ValidationResult,
-  SpentTokenInfo,
-  SpentTokenResult,
-} from "../../sdk/validation";
+// ==========================================
+// Validation Action Types
+// ==========================================
 
-// Import SDK validation functions
-import {
-  hasValidTxfStructure as sdkHasValidTxfStructure,
-  getUncommittedTransactions as sdkGetUncommittedTransactions,
-  isSplitToken as sdkIsSplitToken,
-  extractBurnTxHash as sdkExtractBurnTxHash,
-} from "../../sdk/validation";
-
-import type {
-  ValidationAction,
-  TokenValidationResult,
-  ValidationIssue,
-  ValidationResult,
-  SpentTokenInfo,
-  SpentTokenResult,
-} from "../../sdk/validation";
+/**
+ * Describes what action should be taken based on validation result
+ * - ACCEPT: Token is valid, can be used
+ * - RETRY_LATER: Proof not available yet, retry submission later
+ * - DISCARD_FORK: Transaction can NEVER succeed (source state spent), should be discarded
+ */
+export type ValidationAction = "ACCEPT" | "RETRY_LATER" | "DISCARD_FORK";
 
 /**
  * Extended validation result with action guidance
  */
-export interface ExtendedValidationResult extends TokenValidationResult<LocalToken> {
+export interface ExtendedValidationResult extends TokenValidationResult {
   action?: ValidationAction;
+}
+
+// ==========================================
+// Spent Token Detection Types
+// ==========================================
+
+export interface SpentTokenInfo {
+  tokenId: string;     // SDK token ID from genesis
+  localId: string;     // Local Token.id for repository removal
+  stateHash: string;   // Current state hash being checked
+}
+
+export interface SpentTokenResult {
+  spentTokens: SpentTokenInfo[];
+  errors: string[];
 }
 
 // ==========================================
@@ -62,8 +65,193 @@ export class TokenValidationService {
   private trustBaseCacheTime = 0;
   private readonly TRUST_BASE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
+  // Spent state verification cache
+  // SPENT results are immutable - cache forever (persisted to localStorage)
+  // UNSPENT results could change - cache with 5-min TTL (in-memory only)
+  private spentStateCache = new Map<string, {
+    isSpent: boolean;
+    timestamp: number;
+  }>();
+  private readonly UNSPENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes for UNSPENT
+  private spentCacheLoadedFromStorage = false;
+
+  // localStorage key for persisting SPENT cache entries
+  private static readonly SPENT_CACHE_STORAGE_KEY = STORAGE_KEYS.SPENT_TOKEN_CACHE;
+
   constructor(aggregatorUrl: string = DEFAULT_AGGREGATOR_URL) {
     this.aggregatorUrl = aggregatorUrl;
+  }
+
+  // ==========================================
+  // Spent State Cache Methods
+  // ==========================================
+
+  /**
+   * Generate cache key for spent state verification
+   * Format: tokenId:stateHash:publicKey
+   */
+  private getSpentStateCacheKey(
+    tokenId: string,
+    stateHash: string,
+    publicKey: string
+  ): string {
+    return `${tokenId}:${stateHash}:${publicKey}`;
+  }
+
+  /**
+   * Load SPENT cache entries from localStorage (lazy load on first access)
+   * Only SPENT entries are persisted - UNSPENT entries remain in-memory only.
+   */
+  private loadSpentCacheFromStorage(): void {
+    if (this.spentCacheLoadedFromStorage) return;
+    this.spentCacheLoadedFromStorage = true;
+
+    try {
+      const stored = localStorage.getItem(TokenValidationService.SPENT_CACHE_STORAGE_KEY);
+      if (!stored) return;
+
+      const entries = JSON.parse(stored) as Array<{ key: string; timestamp: number }>;
+      let loadedCount = 0;
+
+      for (const entry of entries) {
+        // Only load SPENT entries (isSpent is always true for persisted entries)
+        this.spentStateCache.set(entry.key, {
+          isSpent: true,
+          timestamp: entry.timestamp,
+        });
+        loadedCount++;
+      }
+
+      if (loadedCount > 0) {
+        console.log(`📦 Loaded ${loadedCount} SPENT cache entries from localStorage`);
+      }
+    } catch (err) {
+      console.warn("📦 Failed to load SPENT cache from localStorage:", err);
+      // Clear corrupted data
+      try {
+        localStorage.removeItem(TokenValidationService.SPENT_CACHE_STORAGE_KEY);
+      } catch { /* ignore */ }
+    }
+  }
+
+  /**
+   * Persist SPENT cache entries to localStorage
+   * Only SPENT entries are persisted - they are immutable and safe to cache forever.
+   */
+  private persistSpentCacheToStorage(): void {
+    try {
+      const entries: Array<{ key: string; timestamp: number }> = [];
+
+      for (const [key, entry] of this.spentStateCache.entries()) {
+        // Only persist SPENT entries
+        if (entry.isSpent) {
+          entries.push({ key, timestamp: entry.timestamp });
+        }
+      }
+
+      if (entries.length === 0) {
+        localStorage.removeItem(TokenValidationService.SPENT_CACHE_STORAGE_KEY);
+      } else {
+        localStorage.setItem(
+          TokenValidationService.SPENT_CACHE_STORAGE_KEY,
+          JSON.stringify(entries)
+        );
+      }
+    } catch (err) {
+      console.warn("📦 Failed to persist SPENT cache to localStorage:", err);
+    }
+  }
+
+  /**
+   * Check if spent state is cached
+   * Returns: true (SPENT), false (UNSPENT), or null (not cached/expired)
+   */
+  private getSpentStateFromCache(cacheKey: string): boolean | null {
+    // Lazy load from localStorage on first access
+    this.loadSpentCacheFromStorage();
+
+    const cached = this.spentStateCache.get(cacheKey);
+    if (!cached) return null;
+
+    // SPENT results never expire (immutable)
+    if (cached.isSpent) {
+      return true;
+    }
+
+    // UNSPENT results expire after TTL (state could have changed)
+    const isExpired = Date.now() - cached.timestamp > this.UNSPENT_CACHE_TTL_MS;
+    if (isExpired) {
+      this.spentStateCache.delete(cacheKey);
+      return null;
+    }
+
+    return false;
+  }
+
+  /**
+   * Store spent state result in cache
+   * SPENT entries are persisted to localStorage; UNSPENT entries are in-memory only.
+   */
+  private cacheSpentState(cacheKey: string, isSpent: boolean): void {
+    this.spentStateCache.set(cacheKey, {
+      isSpent,
+      timestamp: Date.now(),
+    });
+
+    // Persist SPENT entries to localStorage (they're immutable)
+    if (isSpent) {
+      this.persistSpentCacheToStorage();
+    }
+  }
+
+  /**
+   * Clear spent state cache (call on logout/address change or when refreshing Unicity proofs)
+   * Also clears localStorage persistence.
+   */
+  clearSpentStateCache(): void {
+    const size = this.spentStateCache.size;
+    this.spentStateCache.clear();
+    this.spentCacheLoadedFromStorage = false;
+
+    // Also clear localStorage
+    try {
+      localStorage.removeItem(TokenValidationService.SPENT_CACHE_STORAGE_KEY);
+    } catch { /* ignore */ }
+
+    if (size > 0) {
+      console.log(`📦 Cleared spent state cache (${size} entries) and localStorage`);
+    }
+  }
+
+  /**
+   * Clear only UNSPENT cache entries
+   * Called after IPFS sync detects inventory changes
+   * SPENT entries remain cached (immutable)
+   */
+  clearUnspentCacheEntries(): void {
+    let clearedCount = 0;
+    for (const [key, entry] of this.spentStateCache.entries()) {
+      if (!entry.isSpent) {
+        this.spentStateCache.delete(key);
+        clearedCount++;
+      }
+    }
+    if (clearedCount > 0) {
+      console.log(`📦 Cleared ${clearedCount} UNSPENT cache entries after IPFS inventory change`);
+    }
+  }
+
+  /**
+   * Get cache statistics for debugging
+   */
+  getSpentStateCacheStats(): { size: number; spentCount: number; unspentCount: number } {
+    let spentCount = 0;
+    let unspentCount = 0;
+    for (const entry of this.spentStateCache.values()) {
+      if (entry.isSpent) spentCount++;
+      else unspentCount++;
+    }
+    return { size: this.spentStateCache.size, spentCount, unspentCount };
   }
 
   // ==========================================
@@ -77,7 +265,7 @@ export class TokenValidationService {
   async validateAllTokens(
     tokens: LocalToken[],
     options?: { batchSize?: number; onProgress?: (completed: number, total: number) => void }
-  ): Promise<ValidationResult<LocalToken>> {
+  ): Promise<ValidationResult> {
     const validTokens: LocalToken[] = [];
     const issues: ValidationIssue[] = [];
 
@@ -100,7 +288,7 @@ export class TokenValidationService {
               result: {
                 isValid: false,
                 reason: err instanceof Error ? err.message : String(err),
-              } as TokenValidationResult<LocalToken>,
+              } as TokenValidationResult,
             };
           }
         })
@@ -143,9 +331,12 @@ export class TokenValidationService {
   /**
    * Validate a single token
    */
-  async validateToken(token: LocalToken): Promise<TokenValidationResult<LocalToken>> {
+  async validateToken(token: LocalToken): Promise<TokenValidationResult> {
+    const tokenIdPrefix = token.id.slice(0, 8);
+
     // Check if token has jsonData
     if (!token.jsonData) {
+      console.log(`📦 Validation FAIL [${tokenIdPrefix}]: no jsonData`);
       return {
         isValid: false,
         reason: "Token has no jsonData field",
@@ -156,6 +347,7 @@ export class TokenValidationService {
     try {
       txfToken = JSON.parse(token.jsonData);
     } catch {
+      console.log(`📦 Validation FAIL [${tokenIdPrefix}]: invalid JSON`);
       return {
         isValid: false,
         reason: "Failed to parse token jsonData as JSON",
@@ -164,6 +356,7 @@ export class TokenValidationService {
 
     // Check basic structure
     if (!this.hasValidTxfStructure(txfToken)) {
+      console.log(`📦 Validation FAIL [${tokenIdPrefix}]: missing TXF structure (genesis/state)`);
       return {
         isValid: false,
         reason: "Token jsonData missing required TXF fields (genesis, state)",
@@ -173,16 +366,12 @@ export class TokenValidationService {
     // Check for uncommitted transactions
     const uncommitted = this.getUncommittedTransactions(txfToken);
     if (uncommitted.length > 0) {
-      console.log(
-        `📦 Token ${token.id} has ${uncommitted.length} uncommitted transaction(s), attempting to fetch proofs...`
-      );
-
       const recovered = await this.fetchMissingProofs(token);
       if (recovered) {
-        console.log(`📦 Token ${token.id} proofs recovered successfully`);
         return { isValid: true, token: recovered };
       }
 
+      console.warn(`📦 Validation FAIL [${tokenIdPrefix}]: uncommitted transactions, proofs not recoverable`);
       return {
         isValid: false,
         reason: `${uncommitted.length} uncommitted transaction(s), could not fetch proofs from aggregator`,
@@ -193,6 +382,7 @@ export class TokenValidationService {
     try {
       const verificationResult = await this.verifyWithSdk(txfToken);
       if (!verificationResult.success) {
+        console.warn(`📦 Validation FAIL [${tokenIdPrefix}]: SDK verification failed - ${verificationResult.error}`);
         return {
           isValid: false,
           reason: verificationResult.error || "SDK verification failed",
@@ -232,7 +422,7 @@ export class TokenValidationService {
     // Try to fetch proofs for each uncommitted transaction
     for (let i = 0; i < transactions.length; i++) {
       const tx = transactions[i];
-      if (tx.inclusionProof === null) {
+      if (tx.inclusionProof === null && tx.newStateHash) {
         try {
           const proof = await this.fetchProofFromAggregator(tx.newStateHash);
           if (proof) {
@@ -301,6 +491,10 @@ export class TokenValidationService {
       if (!prevTx) {
         return { submittable: false, reason: "Previous transaction not found", action: "DISCARD_FORK" };
       }
+      if (!prevTx.newStateHash) {
+        // Old token format without newStateHash - can't verify, assume submittable
+        return { submittable: true, reason: "Cannot verify - missing newStateHash on previous tx", action: "RETRY_LATER" };
+      }
       prevStateHash = prevTx.newStateHash;
     }
 
@@ -325,6 +519,7 @@ export class TokenValidationService {
 
     try {
       // Use SDK to check if source state is spent
+      const { Token } = await import("@unicitylabs/state-transition-sdk/lib/token/Token");
       const sdkToken = await Token.fromJSON(txf);
 
       // Get token owner public key from IdentityManager
@@ -438,15 +633,40 @@ export class TokenValidationService {
         continue;
       }
 
-      // Use SDK function to check if it's a split token and extract burn hash
-      if (!sdkIsSplitToken(txf)) {
-        // Not a split token - assume valid
+      // Check if this is a split token by examining genesis.data.reason
+      // Split tokens typically have a reason field referencing the parent burn
+      const genesisData = txf.genesis?.data;
+      const reason = genesisData?.reason;
+
+      // If no reason field, not a split token - assume valid
+      if (!reason) {
         valid.push(token);
         continue;
       }
 
-      // Extract burn transaction hash using SDK function
-      const burnTxHash = sdkExtractBurnTxHash(txf);
+      // Parse the reason to check if it's a split mint
+      // Common patterns: "SPLIT_MINT:<burnTxHash>" or JSON with splitMintReason
+      let burnTxHash: string | null = null;
+
+      if (typeof reason === "string") {
+        // Check for SPLIT_MINT prefix
+        if (reason.startsWith("SPLIT_MINT:")) {
+          burnTxHash = reason.substring("SPLIT_MINT:".length);
+        }
+        // Check for JSON format
+        else if (reason.startsWith("{")) {
+          try {
+            const reasonObj = JSON.parse(reason);
+            if (reasonObj.splitMintReason?.burnTransactionHash) {
+              burnTxHash = reasonObj.splitMintReason.burnTransactionHash;
+            } else if (reasonObj.burnTransactionHash) {
+              burnTxHash = reasonObj.burnTransactionHash;
+            }
+          } catch {
+            // Not JSON, continue checking other formats
+          }
+        }
+      }
 
       // If no burn transaction reference found, not a split token - assume valid
       if (!burnTxHash) {
@@ -455,13 +675,10 @@ export class TokenValidationService {
       }
 
       // This is a split token - verify the burn was committed
-      console.log(`📦 Validating split token ${token.id.slice(0, 8)}... (burn hash: ${burnTxHash.slice(0, 12)}...)`);
-
       const burnCommitted = await this.checkBurnTransactionCommitted(burnTxHash);
 
       if (burnCommitted.committed) {
         valid.push(token);
-        console.log(`📦 Split token ${token.id.slice(0, 8)}... is VALID (burn committed)`);
       } else {
         invalid.push(token);
         errors.push({
@@ -471,8 +688,6 @@ export class TokenValidationService {
         console.warn(`⚠️ Split token ${token.id.slice(0, 8)}... is INVALID: ${burnCommitted.error}`);
       }
     }
-
-    console.log(`📦 Split token validation: ${valid.length} valid, ${invalid.length} invalid`);
     return { valid, invalid, errors };
   }
 
@@ -517,7 +732,6 @@ export class TokenValidationService {
   /**
    * Identify which tokens in a list are split tokens
    * Useful for filtering before validation
-   * Uses SDK validation function
    */
   identifySplitTokens(tokens: LocalToken[]): {
     splitTokens: LocalToken[];
@@ -533,8 +747,15 @@ export class TokenValidationService {
         continue;
       }
 
-      // Use SDK function to check if it's a split token
-      if (sdkIsSplitToken(txf)) {
+      const reason = txf.genesis?.data?.reason;
+
+      // Check if reason indicates a split token
+      const isSplit = reason && (
+        (typeof reason === "string" && reason.startsWith("SPLIT_MINT:")) ||
+        (typeof reason === "string" && reason.includes("burnTransactionHash"))
+      );
+
+      if (isSplit) {
         splitTokens.push(token);
       } else {
         regularTokens.push(token);
@@ -549,20 +770,186 @@ export class TokenValidationService {
   // ==========================================
 
   /**
+   * Check if a specific token state (tokenId + stateHash) was spent
+   * Used for tombstone verification (Step 7.5 in InventorySyncService)
+   *
+   * This queries the aggregator to determine if a specific state was consumed
+   * by a subsequent transaction. Returns true if spent, false if unspent.
+   *
+   * @param tokenId - The SDK token ID (from genesis.data.tokenId)
+   * @param stateHash - The state hash to check (with "0000" prefix)
+   * @param publicKey - The wallet's public key (hex string)
+   * @returns Promise<boolean> - true if spent, false if unspent
+   */
+  async isTokenStateSpent(
+    tokenId: string,
+    stateHash: string,
+    publicKey: string
+  ): Promise<boolean> {
+    // Check cache first
+    const cacheKey = this.getSpentStateCacheKey(tokenId, stateHash, publicKey);
+    const cachedResult = this.getSpentStateFromCache(cacheKey);
+    if (cachedResult !== null) {
+      return cachedResult;
+    }
+
+    // Get trust base and client
+    const trustBase = await this.getTrustBase();
+    if (!trustBase) {
+      console.warn(`⚠️ [isTokenStateSpent] Trust base not available - assuming unspent (safe default)`);
+      return false;
+    }
+
+    let client: unknown;
+    try {
+      const { ServiceProvider } = await import("./ServiceProvider");
+      client = ServiceProvider.stateTransitionClient;
+    } catch {
+      console.warn(`⚠️ [isTokenStateSpent] StateTransitionClient not available - assuming unspent`);
+      return false;
+    }
+
+    if (!client) {
+      console.warn(`⚠️ [isTokenStateSpent] StateTransitionClient is null - assuming unspent`);
+      return false;
+    }
+
+    try {
+      const { ServiceProvider } = await import("./ServiceProvider");
+      const skipVerification = ServiceProvider.isTrustBaseVerificationSkipped();
+
+      let isSpent: boolean;
+
+      if (skipVerification) {
+        // DEV MODE: Query aggregator using RequestId derived from publicKey + stateHash
+        const { RequestId } = await import(
+          "@unicitylabs/state-transition-sdk/lib/api/RequestId"
+        );
+        const { DataHash } = await import(
+          "@unicitylabs/state-transition-sdk/lib/hash/DataHash"
+        );
+
+        const pubKeyBytes = Buffer.from(publicKey, "hex");
+
+        // Parse stateHash using SDK's DataHash
+        const stateHashObj = DataHash.fromJSON(stateHash);
+
+        // Create RequestId exactly as SDK does
+        const requestId = await RequestId.create(pubKeyBytes, stateHashObj);
+
+        // Query aggregator for inclusion/exclusion proof
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const response = await (client as any).getInclusionProof(requestId);
+
+        if (!response.inclusionProof) {
+          isSpent = false;
+        } else {
+          const proof = response.inclusionProof;
+
+          // Verify the hashpath cryptographically corresponds to our RequestId
+          const pathResult = await proof.merkleTreePath.verify(
+            requestId.toBitString().toBigInt()
+          );
+
+          if (!pathResult.isPathValid) {
+            // Invalid proof - assume unspent for safety
+            console.warn(`⚠️ [isTokenStateSpent] Invalid hashpath for ${tokenId.slice(0, 16)}... - assuming unspent`);
+            isSpent = false;
+          } else if (pathResult.isPathIncluded && proof.authenticator !== null) {
+            // Valid INCLUSION proof: state was spent
+            isSpent = true;
+          } else if (!pathResult.isPathIncluded && proof.authenticator === null) {
+            // Valid EXCLUSION proof: state is unspent
+            isSpent = false;
+          } else if (pathResult.isPathIncluded && proof.authenticator === null) {
+            // SECURITY VIOLATION: path included but no authenticator
+            console.error(`❌ SECURITY VIOLATION: pathIncluded=true but authenticator=null for token ${tokenId.slice(0, 16)}...`);
+            // Assume unspent for safety (don't trust invalid proof)
+            isSpent = false;
+          } else {
+            // Contradictory: authenticator present but path doesn't lead to RequestId
+            console.warn(`⚠️ [isTokenStateSpent] Invalid proof state for ${tokenId.slice(0, 16)}... - assuming unspent`);
+            isSpent = false;
+          }
+        }
+      } else {
+        // PRODUCTION MODE: We need a full token to use SDK's isTokenStateSpent
+        // This is a limitation - for now, fall back to dev mode logic
+        // Future enhancement: Store full token in tombstones for verification
+        console.warn(`⚠️ [isTokenStateSpent] Production mode requires full token - falling back to dev mode logic`);
+
+        // Use the same dev mode logic above
+        const { RequestId } = await import(
+          "@unicitylabs/state-transition-sdk/lib/api/RequestId"
+        );
+        const { DataHash } = await import(
+          "@unicitylabs/state-transition-sdk/lib/hash/DataHash"
+        );
+
+        const pubKeyBytes = Buffer.from(publicKey, "hex");
+        const stateHashObj = DataHash.fromJSON(stateHash);
+        const requestId = await RequestId.create(pubKeyBytes, stateHashObj);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const response = await (client as any).getInclusionProof(requestId);
+
+        if (!response.inclusionProof) {
+          isSpent = false;
+        } else {
+          const proof = response.inclusionProof;
+          const pathResult = await proof.merkleTreePath.verify(
+            requestId.toBitString().toBigInt()
+          );
+
+          if (!pathResult.isPathValid) {
+            isSpent = false;
+          } else if (pathResult.isPathIncluded && proof.authenticator !== null) {
+            isSpent = true;
+          } else if (!pathResult.isPathIncluded && proof.authenticator === null) {
+            isSpent = false;
+          } else {
+            isSpent = false;
+          }
+        }
+      }
+
+      // Cache the result
+      this.cacheSpentState(cacheKey, isSpent);
+
+      return isSpent;
+    } catch (err) {
+      // On error, assume unspent (safe default - don't recover tokens on errors)
+      console.warn(`⚠️ [isTokenStateSpent] Error checking state for ${tokenId.slice(0, 16)}...:`, err);
+      return false;
+    }
+  }
+
+  /**
    * Check which tokens are NOT spent (unspent) on Unicity
    * Used for sanity check when importing remote tombstones/missing tokens
    * Requires full TxfToken data for SDK-based verification
    * Returns array of tokenIds that are still valid/unspent
+   *
+   * NOTE: This now uses checkSingleTokenSpent internally to respect dev mode bypass
+   *
+   * @param options.treatErrorsAsUnspent - If true (default), network errors assume token is unspent.
+   *   Use false for tombstone recovery where errors should NOT restore tokens.
+   *   - true: errors → assume unspent → for live tokens, safe (don't delete)
+   *   - false: errors → assume spent → for tombstones, safe (don't restore)
    */
   async checkUnspentTokens(
     tokens: Map<string, TxfToken>,
-    publicKey: string
+    publicKey: string,
+    options?: { treatErrorsAsUnspent?: boolean }
   ): Promise<string[]> {
     if (tokens.size === 0) return [];
 
+    // Default to true for backward compatibility (safe for live token sanity checks)
+    const treatErrorsAsUnspent = options?.treatErrorsAsUnspent ?? true;
+
     const unspentTokenIds: string[] = [];
 
-    console.log(`📦 Sanity check: Verifying ${tokens.size} token(s) with aggregator...`);
+    console.log(`📦 Sanity check (checkUnspentTokens): Verifying ${tokens.size} token(s) with aggregator...`);
 
     // Get trust base and client
     const trustBase = await this.getTrustBase();
@@ -585,36 +972,36 @@ export class TokenValidationService {
       return [...tokens.keys()];
     }
 
+    // Use checkSingleTokenSpent which has dev mode bypass logic
     for (const [tokenId, txfToken] of tokens) {
       try {
-        // Parse SDK token from TXF data
-        const sdkToken = await Token.fromJSON(txfToken);
+        // Create a LocalToken-like object for checkSingleTokenSpent
+        const localToken = {
+          id: tokenId,
+          jsonData: JSON.stringify(txfToken),
+        } as LocalToken;
 
-        // Convert public key to bytes for SDK
-        const pubKeyBytes = Buffer.from(publicKey, "hex");
+        const result = await this.checkSingleTokenSpent(localToken, publicKey, trustBase, client);
 
-        // Check if token state is spent using SDK
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const isSpent = await (client as any).isTokenStateSpent(
-          trustBase,
-          sdkToken,
-          pubKeyBytes
-        );
-
-        if (!isSpent) {
+        if (result.error) {
+          if (treatErrorsAsUnspent) {
+            // Safe fallback for live tokens: assume unspent → don't delete
+            unspentTokenIds.push(tokenId);
+          }
+          // Safe fallback for tombstones: assume spent → don't restore (no action needed)
+        } else if (!result.spent) {
           unspentTokenIds.push(tokenId);
-          console.log(`📦 Token ${tokenId.slice(0, 8)}... is NOT spent`);
-        } else {
-          console.log(`📦 Token ${tokenId.slice(0, 8)}... is SPENT`);
         }
+        // If spent, no action needed
       } catch (err) {
-        console.warn(`📦 Sanity check: Error checking token ${tokenId.slice(0, 8)}...:`, err);
-        // On error, assume unspent (safe fallback to avoid data loss)
-        unspentTokenIds.push(tokenId);
+        console.warn(`📦 Sanity check: Exception checking token ${tokenId.slice(0, 8)}...:`, err);
+        if (treatErrorsAsUnspent) {
+          // Safe fallback for live tokens: assume unspent → don't delete
+          unspentTokenIds.push(tokenId);
+        }
+        // Safe fallback for tombstones: assume spent → don't restore (no action needed)
       }
     }
-
-    console.log(`📦 Sanity check result: ${unspentTokenIds.length} unspent, ${tokens.size - unspentTokenIds.length} spent`);
     return unspentTokenIds;
   }
 
@@ -698,7 +1085,15 @@ export class TokenValidationService {
   }
 
   /**
-   * Check if a single token's current state is spent
+   * Check if a single token's current state is spent.
+   *
+   * Uses SDK's getInclusionProof to query the aggregator:
+   * - Inclusion proof (authenticator !== null) = SPENT
+   * - Exclusion proof (authenticator === null) = UNSPENT
+   *
+   * When trust base verification is skipped (dev mode), we skip the
+   * cryptographic verification of the proof but still use the SDK's
+   * aggregator query logic.
    */
   private async checkSingleTokenSpent(
     token: LocalToken,
@@ -737,34 +1132,174 @@ export class TokenValidationService {
 
     // Get SDK token ID and state hash
     const tokenId = txfToken.genesis?.data?.tokenId || token.id;
-    const stateHash = getCurrentStateHash(txfToken);
+    const localStateHash = getCurrentStateHash(txfToken);
 
+    // Try cache lookup if we have a local stateHash
+    if (localStateHash) {
+      const cacheKey = this.getSpentStateCacheKey(tokenId, localStateHash, publicKey);
+      const cachedResult = this.getSpentStateFromCache(cacheKey);
+      if (cachedResult !== null) {
+        return {
+          tokenId,
+          localId: token.id,
+          stateHash: localStateHash,
+          spent: cachedResult,
+        };
+      }
+    }
+
+    // CACHE MISS - query aggregator
     try {
-      // Parse SDK token
-      const sdkToken = await Token.fromJSON(txfToken);
+      const { ServiceProvider } = await import("./ServiceProvider");
+      const skipVerification = ServiceProvider.isTrustBaseVerificationSkipped();
 
-      // Convert public key to bytes for SDK
-      const pubKeyBytes = Buffer.from(publicKey, "hex");
+      let spent: boolean;
 
-      // Check if token state is spent using SDK client
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const isSpent = await (client as any).isTokenStateSpent(
-        trustBase,
-        sdkToken,
-        pubKeyBytes
-      );
+      if (skipVerification) {
+        // DEV MODE: Use SDK Token object directly, skip trust base verification only
+        // This ensures we create the exact same RequestId as the SDK
+        const { Token } = await import(
+          "@unicitylabs/state-transition-sdk/lib/token/Token"
+        );
+        const { RequestId } = await import(
+          "@unicitylabs/state-transition-sdk/lib/api/RequestId"
+        );
 
-      return {
-        tokenId,
-        localId: token.id,
-        stateHash,
-        spent: isSpent === true,
-      };
+        // Parse TXF into SDK Token object
+        const sdkToken = await Token.fromJSON(txfToken);
+        const pubKeyBytes = Buffer.from(publicKey, "hex");
+
+        // Verify ownership - the publicKey must match the token's predicate
+        const { PredicateEngineService } = await import(
+          "@unicitylabs/state-transition-sdk/lib/predicate/PredicateEngineService"
+        );
+        const predicate = await PredicateEngineService.createPredicate(sdkToken.state.predicate);
+        const isOwner = await predicate.isOwner(pubKeyBytes);
+        if (!isOwner) {
+          console.warn(`⚠️ [SpentCheck] PublicKey does NOT match token predicate - wrong key being used`);
+        }
+
+        // Use SDK's method to calculate state hash (matches what TransferCommitment uses)
+        const calculatedStateHash = await sdkToken.state.calculateHash();
+
+        // Create RequestId exactly as SDK does internally
+        const requestId = await RequestId.create(pubKeyBytes, calculatedStateHash);
+
+        const calculatedStateHashStr = calculatedStateHash.toJSON();
+        const hashesMatch = !localStateHash || calculatedStateHashStr === localStateHash;
+
+        // CRITICAL FIX: If calculated hash doesn't match expected hash, DON'T query aggregator
+        // Querying with wrong hash will check wrong SMT slot and may return false "spent" result
+        // This protects against incorrectly archiving valid tokens
+        if (!hashesMatch) {
+          console.warn(`⚠️ [SpentCheck] Hash mismatch for ${tokenId.slice(0, 16)}... - treating as UNSPENT (safe default)`);
+
+          // Return unspent - don't archive tokens when we can't verify their state
+          return {
+            tokenId,
+            localId: token.id,
+            stateHash: localStateHash || calculatedStateHashStr,
+            spent: false,
+            error: "Hash mismatch - treating as unspent for safety",
+          };
+        }
+
+        // Query aggregator for inclusion/exclusion proof
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const response = await (client as any).getInclusionProof(requestId);
+
+        if (!response.inclusionProof) {
+          spent = false;
+        } else {
+          const proof = response.inclusionProof;
+
+          // CRITICAL: Verify the hashpath cryptographically corresponds to our RequestId
+          // This prevents accepting a proof meant for a different RequestId
+          const pathResult = await proof.merkleTreePath.verify(
+            requestId.toBitString().toBigInt()
+          );
+
+          if (!pathResult.isPathValid) {
+            // Hashpath doesn't hash to claimed root - invalid proof
+            throw new Error("Invalid hashpath - does not verify against root");
+          } else if (pathResult.isPathIncluded && proof.authenticator !== null) {
+            // Valid INCLUSION proof: path leads to RequestId AND authenticator present
+            spent = true;
+          } else if (!pathResult.isPathIncluded && proof.authenticator === null) {
+            // Valid EXCLUSION proof: path shows deviation point, no authenticator
+            spent = false;
+          } else if (pathResult.isPathIncluded && proof.authenticator === null) {
+            // SECURITY: Path leads to our RequestId but no authenticator!
+            // This is INVALID - a rogue aggregator might be hiding the spent status
+            console.error(`❌ SECURITY VIOLATION: pathIncluded=true but authenticator=null for token ${tokenId.slice(0, 16)}...`);
+            throw new Error("Invalid proof: path included but missing authenticator");
+          } else {
+            // Contradictory: authenticator present but path doesn't lead to RequestId
+            throw new Error("Invalid proof: authenticator present but path not included");
+          }
+        }
+        // Cache using SDK-calculated state hash
+        const sdkCacheKey = this.getSpentStateCacheKey(tokenId, calculatedStateHashStr, publicKey);
+        this.cacheSpentState(sdkCacheKey, spent);
+
+        return {
+          tokenId,
+          localId: token.id,
+          stateHash: calculatedStateHashStr,
+          spent,
+        };
+      } else {
+        // PRODUCTION MODE: Use SDK's isTokenStateSpent with full verification
+        const { Token } = await import(
+          "@unicitylabs/state-transition-sdk/lib/token/Token"
+        );
+        const sdkToken = await Token.fromJSON(txfToken);
+        const pubKeyBytes = Buffer.from(publicKey, "hex");
+
+        // Get state hash for caching/return
+        const prodStateHash = await sdkToken.state.calculateHash();
+        const prodStateHashStr = prodStateHash.toJSON();
+
+        // CRITICAL FIX: Check for hash mismatch in production mode too
+        const prodHashesMatch = !localStateHash || prodStateHashStr === localStateHash;
+        if (!prodHashesMatch) {
+          console.warn(`⚠️ [SpentCheck/Prod] Hash mismatch for ${tokenId.slice(0, 16)}... - treating as UNSPENT (safe default)`);
+
+          return {
+            tokenId,
+            localId: token.id,
+            stateHash: localStateHash || prodStateHashStr,
+            spent: false,
+            error: "Hash mismatch - treating as unspent for safety",
+          };
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const isSpent = await (client as any).isTokenStateSpent(
+          trustBase,
+          sdkToken,
+          pubKeyBytes
+        );
+
+        spent = isSpent === true;
+
+        // Cache using SDK-calculated state hash
+        const prodCacheKey = this.getSpentStateCacheKey(tokenId, prodStateHashStr, publicKey);
+        this.cacheSpentState(prodCacheKey, spent);
+
+        return {
+          tokenId,
+          localId: token.id,
+          stateHash: prodStateHashStr,
+          spent,
+        };
+      }
     } catch (err) {
+      // Don't cache errors - allow retry
       return {
         tokenId,
         localId: token.id,
-        stateHash,
+        stateHash: localStateHash || "",
         spent: false,
         error: err instanceof Error ? err.message : String(err),
       };
@@ -777,18 +1312,31 @@ export class TokenValidationService {
 
   /**
    * Check if object has valid TXF structure
-   * Uses SDK validation function
    */
   private hasValidTxfStructure(obj: unknown): boolean {
-    return sdkHasValidTxfStructure(obj);
+    if (!obj || typeof obj !== "object") return false;
+
+    const txf = obj as Record<string, unknown>;
+    return !!(
+      txf.genesis &&
+      typeof txf.genesis === "object" &&
+      txf.state &&
+      typeof txf.state === "object"
+    );
   }
 
   /**
    * Get list of uncommitted transactions
-   * Uses SDK validation function
    */
   private getUncommittedTransactions(txfToken: unknown): TxfTransaction[] {
-    return sdkGetUncommittedTransactions(txfToken) as TxfTransaction[];
+    const txf = txfToken as Record<string, unknown>;
+    const transactions = txf.transactions as TxfTransaction[] | undefined;
+
+    if (!transactions || !Array.isArray(transactions)) {
+      return [];
+    }
+
+    return transactions.filter((tx) => tx.inclusionProof === null);
   }
 
   /**
@@ -834,6 +1382,17 @@ export class TokenValidationService {
     txfToken: unknown
   ): Promise<{ success: boolean; error?: string }> {
     try {
+      // Skip SDK verification if trust base verification is bypassed (dev mode)
+      const { ServiceProvider } = await import("./ServiceProvider");
+      if (ServiceProvider.isTrustBaseVerificationSkipped()) {
+        return { success: true };
+      }
+
+      // Dynamic import to avoid bundling issues
+      const { Token } = await import(
+        "@unicitylabs/state-transition-sdk/lib/token/Token"
+      );
+
       // Parse token from JSON
       const sdkToken = await Token.fromJSON(txfToken);
 
@@ -848,6 +1407,7 @@ export class TokenValidationService {
       const result = await sdkToken.verify(trustBase as any);
 
       if (!result.isSuccessful) {
+        console.warn(`📦 SDK verify: FAILED - ${String(result)}`);
         return {
           success: false,
           error: String(result) || "Verification failed",
@@ -855,7 +1415,9 @@ export class TokenValidationService {
       }
 
       return { success: true };
-    } catch {
+    } catch (err) {
+      // Log the specific error for debugging
+      console.warn(`📦 SDK verification exception:`, err instanceof Error ? err.message : err);
       // Return success if SDK is not available - validation is optional
       return { success: true };
     }

@@ -57,6 +57,24 @@ export function ChatBubble({
     return 'bg-indigo-500';
   };
 
+  // Helper to determine mention text color from agent color (for assistant messages)
+  const getMentionTextColor = (agentColor: string): string => {
+    if (agentColor.includes('yellow')) return 'text-yellow-500';
+    if (agentColor.includes('indigo')) return 'text-indigo-500';
+    if (agentColor.includes('emerald')) return 'text-emerald-500';
+    if (agentColor.includes('teal')) return 'text-teal-500';
+    if (agentColor.includes('orange')) return 'text-orange-500';
+    if (agentColor.includes('red')) return 'text-red-500';
+    if (agentColor.includes('purple')) return 'text-purple-500';
+    if (agentColor.includes('pink')) return 'text-pink-500';
+    if (agentColor.includes('blue')) return 'text-blue-500';
+    if (agentColor.includes('green')) return 'text-green-500';
+    return 'text-blue-500';
+  };
+
+  // Mention color: white for user (colored bubble), agent color for assistant (gray bubble)
+  const mentionClassName = role === 'user' ? 'text-white' : getMentionTextColor(agentColor);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -107,7 +125,7 @@ export function ChatBubble({
 
         {/* Main content - only show if there's actual content */}
         {content && content.trim() && (
-          <div className="leading-relaxed"><MarkdownContent text={content} /></div>
+          <div className="leading-relaxed"><MarkdownContent text={content} mentionClassName={mentionClassName} /></div>
         )}
 
         {/* Custom content (cards, buttons, etc.) */}

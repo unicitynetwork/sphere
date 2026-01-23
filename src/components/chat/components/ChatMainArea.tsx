@@ -99,10 +99,13 @@ export function ChatMainArea(props: MainAreaProps) {
                         a.id === 'chat' ? 'bg-neutral-100 dark:bg-neutral-800/80' : ''
                       }`}
                     >
-                      <div className={`p-2 rounded-lg bg-linear-to-br ${a.color}`}>
+                      <div className={`p-2 rounded-lg bg-linear-to-br ${a.color} shrink-0`}>
                         <a.Icon className="w-4 h-4 text-white" />
                       </div>
-                      <span className="text-neutral-900 dark:text-white text-sm">{a.name}</span>
+                      <div className="text-left min-w-0">
+                        <div className="text-neutral-900 dark:text-white text-sm font-medium">{a.name}</div>
+                        <div className="text-neutral-500 dark:text-neutral-400 text-xs truncate">{a.description}</div>
+                      </div>
                     </button>
                   ))}
                 </motion.div>

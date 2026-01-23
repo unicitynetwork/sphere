@@ -1,9 +1,10 @@
 import { Wallet, Clock, Bell, MoreVertical } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { L3WalletView } from './L3/views/L3WalletView';
 import { useWallet } from './L3/hooks/useWallet';
 import { useIncomingPaymentRequests } from './L3/hooks/useIncomingPaymentRequests';
+import { useUIState } from '../../hooks/useUIState';
 import { L1WalletModal } from './L1/modals/L1WalletModal';
 import { AddressSelector } from './shared/components';
 
@@ -14,7 +15,42 @@ export function WalletPanel() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isL1WalletOpen, setIsL1WalletOpen] = useState(false);
   const { identity, nametag, isLoadingIdentity } = useWallet();
-  const { pendingCount } = useIncomingPaymentRequests();
+  const { pendingCount, requests } = useIncomingPaymentRequests();
+  const { setFullscreen } = useUIState();
+
+  // Track previous pending count to detect new requests
+  const prevPendingCountRef = useRef<number | null>(null);
+  const isInitializedRef = useRef(false);
+
+  // Auto-open PaymentRequestsModal when new pending request arrives
+  useEffect(() => {
+    console.log('🔔 WalletPanel useEffect:', {
+      pendingCount,
+      requestsLength: requests.length,
+      prevCount: prevPendingCountRef.current,
+      isInitialized: isInitializedRef.current
+    });
+
+    // Skip the very first render - wait for initial data load
+    if (!isInitializedRef.current) {
+      // Initialize after first real data arrives
+      if (requests.length > 0 || pendingCount === 0) {
+        prevPendingCountRef.current = pendingCount;
+        isInitializedRef.current = true;
+        console.log('🔔 WalletPanel initialized with pendingCount:', pendingCount);
+      }
+      return;
+    }
+
+    // Only open if pending count increased (new request arrived)
+    if (prevPendingCountRef.current !== null && pendingCount > prevPendingCountRef.current) {
+      console.log('💰 New payment request detected, opening modal...');
+      // Exit fullscreen so the modal is visible
+      setFullscreen(false);
+      setIsRequestsOpen(true);
+    }
+    prevPendingCountRef.current = pendingCount;
+  }, [pendingCount, requests.length, setFullscreen]);
 
   // Don't render wallet panel if not authenticated - WalletGate handles onboarding
   if (isLoadingIdentity || !identity || !nametag) {
@@ -29,7 +65,7 @@ export function WalletPanel() {
       <div className="absolute -bottom-20 -left-20 w-80 h-80 rounded-full blur-3xl bg-purple-500/5 dark:bg-purple-500/10" />
 
       {/* TOP BAR: Title & Actions */}
-      <div className="p-3 sm:p-4 lg:p-6 pb-2 relative z-20 shrink-0">
+      <div className="p-3 sm:p-4 lg:p-6 pb-2 relative shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 sm:gap-3">
             <motion.div
@@ -87,7 +123,7 @@ export function WalletPanel() {
       </div>
 
       {/* CONTENT AREA - L3 Only */}
-      <div className="flex-1 relative z-0 overflow-hidden">
+      <div className="flex-1 relative overflow-hidden">
         <L3WalletView
           showBalances={showBalances}
           setShowBalances={setShowBalances}

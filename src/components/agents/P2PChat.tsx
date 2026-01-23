@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import type { AgentConfig } from '../../config/activities';
 import { p2pListings, type SellerInfo } from '../../data/agentsMockData';
 import { AgentChat, type AgentMessage } from './shared';
+import { recordActivity } from '../../services/ActivityService';
 
 // Card data for P2P items
 interface P2PCardData {
@@ -29,7 +30,7 @@ export function P2PChat({ agent }: P2PChatProps) {
 
   const handleChatWithSeller = (seller: SellerInfo, productTitle?: string, productImage?: string, productPrice?: number, purchased?: boolean) => {
     const params = new URLSearchParams({
-      sellerId: seller.id,
+      nametag: seller.name,
       ...(productTitle && { product: productTitle }),
       ...(productImage && { image: productImage }),
       ...(productPrice && { price: productPrice.toString() }),
@@ -98,6 +99,17 @@ export function P2PChat({ agent }: P2PChatProps) {
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     setPurchaseStep('success');
+
+    // Record OTC purchase activity
+    recordActivity('otc_purchase', {
+      isPublic: true,
+      data: {
+        productName: pendingPurchase.title,
+        price: pendingPurchase.price,
+        sellerName: pendingPurchase.seller.name,
+      },
+    });
+
     await new Promise(resolve => setTimeout(resolve, 1500));
     setShowPurchaseModal(false);
     setPendingPurchase(null);

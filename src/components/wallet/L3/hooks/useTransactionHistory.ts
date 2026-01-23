@@ -1,29 +1,33 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { getTransactionHistory } from "../../../../services/TransactionHistoryService";
 import { useEffect } from "react";
 
 const KEYS = {
   TRANSACTION_HISTORY: ["wallet", "transaction-history"],
 };
 
-const walletRepo = WalletRepository.getInstance();
-
 export const useTransactionHistory = () => {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const handleWalletUpdate = () => {
-      console.log("♻️ Wallet update detected! Refreshing transaction history...");
+    const handleHistoryUpdate = () => {
+      console.log("♻️ Transaction history update detected! Refreshing...");
       queryClient.refetchQueries({ queryKey: KEYS.TRANSACTION_HISTORY });
     };
 
-    window.addEventListener("wallet-updated", handleWalletUpdate);
-    return () => window.removeEventListener("wallet-updated", handleWalletUpdate);
+    // Listen to both wallet updates (legacy) and transaction-history-updated (new)
+    window.addEventListener("wallet-updated", handleHistoryUpdate);
+    window.addEventListener("transaction-history-updated", handleHistoryUpdate);
+
+    return () => {
+      window.removeEventListener("wallet-updated", handleHistoryUpdate);
+      window.removeEventListener("transaction-history-updated", handleHistoryUpdate);
+    };
   }, [queryClient]);
 
   const historyQuery = useQuery({
     queryKey: KEYS.TRANSACTION_HISTORY,
-    queryFn: () => walletRepo.getTransactionHistory(),
+    queryFn: () => getTransactionHistory(),
     staleTime: 30000,
   });
 
