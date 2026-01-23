@@ -6,6 +6,7 @@ import { HashRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeInitializer } from './components/theme'
 import { ServicesProvider } from './contexts/ServicesProvider'
+import { ToastContainer } from './components/ui/Toast'
 import mixpanel from 'mixpanel-browser'
 
 // DEBUG: Check localStorage state at the VERY START before any app code runs
@@ -70,6 +71,7 @@ createRoot(document.getElementById('root')!).render(
           <HashRouter>
             <App />
           </HashRouter>
+          <ToastContainer />
         </ThemeInitializer>
       </ServicesProvider>
     </QueryClientProvider>

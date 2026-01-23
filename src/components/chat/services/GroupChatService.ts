@@ -17,6 +17,7 @@ import {
 import { GROUP_CHAT_CONFIG } from '../../../config/groupChat.config';
 import { Buffer } from 'buffer';
 import { NametagService } from '../../wallet/L3/services/NametagService';
+import { showToast } from '../../ui/toast-utils';
 
 /**
  * Extended filter interface for NIP-29 group queries.
@@ -443,7 +444,9 @@ export class GroupChatService {
           // If it's me who got kicked, remove the group from local storage
           if (removedPubkey === myPubkey) {
             console.log(`😢 I was kicked from group ${groupId}`);
+            const groupName = group.getDisplayName();
             this.repository.removeGroup(groupId);
+            showToast(`You were removed from "${groupName}"`, 'warning', 0);
             window.dispatchEvent(new CustomEvent('group-chat-updated'));
           } else {
             // Someone else was kicked, just remove them from member list
