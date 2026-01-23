@@ -68,10 +68,14 @@ export function TransactionHistoryModal({ isOpen, onClose }: TransactionHistoryM
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
               transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-              className="relative w-full max-w-md max-h-[600px] bg-white dark:bg-[#111] border border-neutral-200 dark:border-white/10 rounded-3xl shadow-2xl pointer-events-auto flex flex-col overflow-hidden"
+              className="relative w-full max-w-md max-h-[70dvh] sm:max-h-[600px] bg-white dark:bg-[#111] border border-neutral-200 dark:border-white/10 rounded-3xl shadow-2xl pointer-events-auto flex flex-col overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="px-6 py-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between shrink-0">
+              {/* Background Orbs */}
+              <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
+
+              <div className="relative z-10 px-6 py-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-3">
                   <motion.div
                     whileHover={{ scale: 1.05 }}
@@ -93,7 +97,7 @@ export function TransactionHistoryModal({ isOpen, onClose }: TransactionHistoryM
               </div>
 
               {/* Content - Scrollable */}
-              <div className="relative flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3 z-10 min-h-0">
+              <div className="relative flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3 z-10 min-h-0 bg-transparent">
                 {isLoading ? (
                   <div className="flex items-center justify-center py-20">
                     <Loader2 className="w-6 h-6 animate-spin text-orange-500" />
@@ -127,56 +131,65 @@ export function TransactionHistoryModal({ isOpen, onClose }: TransactionHistoryM
                         className="p-4 bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700/50 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
                       >
                         <div className="flex items-center gap-3">
-                          {/* Icon */}
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${entry.type === 'RECEIVED'
-                            ? 'bg-emerald-500/10 dark:bg-emerald-500/20'
-                            : 'bg-orange-500/10 dark:bg-orange-500/20'
-                            }`}>
-                            {entry.type === 'RECEIVED' ? (
-                              <ArrowDownLeft className="w-5 h-5 text-emerald-500" />
+                          {/* Icon with badge */}
+                          <div className="relative shrink-0">
+                            {entry.iconUrl ? (
+                              <img src={entry.iconUrl} className="w-10 h-10 rounded-full" alt="" />
                             ) : (
-                              <ArrowUpRight className="w-5 h-5 text-orange-500" />
+                              <div className="w-10 h-10 rounded-full bg-neutral-200 dark:bg-neutral-700 flex items-center justify-center">
+                                <span className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+                                  {entry.symbol.slice(0, 2)}
+                                </span>
+                              </div>
                             )}
-                          </div>
-
-                          {/* Main Info */}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-baseline gap-2 mb-1">
-                              <span className="text-sm font-medium text-neutral-900 dark:text-white">
-                                {entry.type === 'RECEIVED' ? 'Received' : 'Sent'}
-                              </span>
-                              {entry.recipientNametag && (
-                                <span className="text-xs text-neutral-500 dark:text-neutral-400 truncate">
-                                  to @{entry.recipientNametag}
-                                </span>
-                              )}
-                              {entry.senderPubkey && (
-                                <span className="text-xs text-neutral-500 dark:text-neutral-400 truncate">
-                                  from {entry.senderPubkey.slice(0, 8)}...{entry.senderPubkey.slice(-4)}
-                                </span>
+                            <div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center border-2 border-neutral-50 dark:border-neutral-800 ${
+                              entry.type === 'RECEIVED'
+                                ? 'bg-emerald-500'
+                                : 'bg-orange-500'
+                            }`}>
+                              {entry.type === 'RECEIVED' ? (
+                                <ArrowDownLeft className="w-3 h-3 text-white" />
+                              ) : (
+                                <ArrowUpRight className="w-3 h-3 text-white" />
                               )}
                             </div>
-                            <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-                              <span>{entry.date}</span>
-                              <span>•</span>
-                              <span>{entry.time}</span>
+                          </div>
+
+                          {/* Title & Subtitle */}
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-neutral-900 dark:text-white">
+                              {entry.type === 'RECEIVED' ? 'Received' : 'Sent'}
+                              <span className="hidden sm:inline text-neutral-500 dark:text-neutral-400 font-normal ml-1">
+                                {entry.type === 'RECEIVED' && entry.senderPubkey && (
+                                  <>from {entry.senderPubkey.slice(0, 4)}...{entry.senderPubkey.slice(-4)}</>
+                                )}
+                                {entry.type === 'SENT' && entry.recipientNametag && (
+                                  <>to @{entry.recipientNametag}</>
+                                )}
+                              </span>
+                            </div>
+                            {/* Mobile: from/to address */}
+                            <div className="sm:hidden text-xs text-neutral-500 dark:text-neutral-400 truncate">
+                              {entry.type === 'RECEIVED' && entry.senderPubkey && (
+                                <>From {entry.senderPubkey.slice(0, 4)}...{entry.senderPubkey.slice(-4)}</>
+                              )}
+                              {entry.type === 'SENT' && entry.recipientNametag && (
+                                <>To @{entry.recipientNametag}</>
+                              )}
+                            </div>
+                            {/* Desktop: date & time */}
+                            <div className="hidden sm:block text-[11px] text-neutral-400/70 dark:text-neutral-500/60">
+                              {entry.date} • {entry.time}
                             </div>
                           </div>
 
                           {/* Amount */}
-                          <div className="text-right">
-                            <div className={`text-sm font-semibold ${entry.type === 'RECEIVED'
+                          <div className={`text-sm font-semibold shrink-0 ${
+                            entry.type === 'RECEIVED'
                               ? 'text-emerald-600 dark:text-emerald-400'
                               : 'text-neutral-900 dark:text-white'
-                              }`}>
-                              {entry.type === 'RECEIVED' ? '+' : '-'}{entry.formattedAmount}
-                            </div>
-                            <div className="text-xs text-neutral-500 dark:text-neutral-400 flex items-center gap-1.5 justify-end mt-0.5">
-                              {entry.iconUrl && (
-                                <img src={entry.iconUrl} className="w-3 h-3 rounded-full" alt="" />
-                              )}
-                              <span>{entry.symbol}</span>
-                            </div>
+                          }`}>
+                            {entry.type === 'RECEIVED' ? '+' : '-'}{entry.formattedAmount} {entry.symbol}
                           </div>
                         </div>
                       </motion.div>
