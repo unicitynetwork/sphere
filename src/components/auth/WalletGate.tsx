@@ -1,10 +1,11 @@
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
 import { useWallet } from "../wallet/L3/hooks/useWallet";
 import { CreateWalletFlow } from "../wallet/onboarding/CreateWalletFlow";
 import { NostrPinPublisher } from "../wallet/L3/services/NostrPinPublisher";
 import { NOSTR_PIN_CONFIG } from "../../config/nostrPin.config";
+import { STORAGE_KEYS } from "../../config/storageKeys";
 
 interface WalletGateProps {
   children: ReactNode;
@@ -82,8 +83,30 @@ function OnboardingScreen() {
 export function WalletGate({ children }: WalletGateProps) {
   const { identity, nametag, isLoadingIdentity, isLoadingNametag } = useWallet();
 
+  // Track onboarding state - show onboarding screen until user clicks "Let's Go"
+  const [isOnboarding, setIsOnboarding] = useState(() => {
+    return localStorage.getItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS) === 'true';
+  });
+
+  // Listen for onboarding completion (when user clicks "Let's Go")
+  useEffect(() => {
+    const checkOnboardingFlag = () => {
+      const flag = localStorage.getItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
+      setIsOnboarding(flag === 'true');
+    };
+
+    // Check on wallet-updated event (fired when onboarding completes)
+    window.addEventListener('wallet-updated', checkOnboardingFlag);
+    window.addEventListener('storage', checkOnboardingFlag);
+
+    return () => {
+      window.removeEventListener('wallet-updated', checkOnboardingFlag);
+      window.removeEventListener('storage', checkOnboardingFlag);
+    };
+  }, []);
+
   const isLoading = isLoadingIdentity || (!!identity && isLoadingNametag);
-  const isAuthenticated = !!identity && !!nametag;
+  const isAuthenticated = !!identity && !!nametag && !isOnboarding;
 
   // Start NostrPinPublisher when authenticated
   // This enables automatic CID announcements to Nostr for pinning

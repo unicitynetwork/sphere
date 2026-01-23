@@ -725,12 +725,15 @@ export class UnifiedKeyManager {
    * Clear ALL wallet data from localStorage and reset singleton
    * Use this before creating/importing a new wallet to ensure clean slate
    * This is a static method that can be called without an instance
+   *
+   * @param fullCleanup - If true (default), deletes ALL data (use for logout).
+   *                      If false, preserves onboarding flags (use during onboarding).
    */
-  static clearAll(): void {
+  static clearAll(fullCleanup: boolean = true): void {
     console.log("🔐 Clearing all wallet data...");
 
     // Clear ALL sphere_* keys from localStorage in one go
-    clearAllSphereData();
+    clearAllSphereData(fullCleanup);
 
     // Reset singleton instance (in-memory state)
     if (UnifiedKeyManager.instance) {
