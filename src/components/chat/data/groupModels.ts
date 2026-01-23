@@ -40,6 +40,7 @@ export interface GroupData {
   unreadCount?: number;
   lastMessageTime?: number;
   lastMessageText?: string;
+  localJoinedAt?: number; // When the current user joined this group locally
 }
 
 export class Group {
@@ -55,6 +56,7 @@ export class Group {
   unreadCount: number;
   lastMessageTime: number;
   lastMessageText: string;
+  localJoinedAt: number; // When the current user joined this group locally
 
   constructor(data: GroupData) {
     this.id = data.id;
@@ -69,6 +71,7 @@ export class Group {
     this.unreadCount = data.unreadCount || 0;
     this.lastMessageTime = data.lastMessageTime || Date.now();
     this.lastMessageText = data.lastMessageText || '';
+    this.localJoinedAt = data.localJoinedAt || Date.now();
   }
 
   getDisplayName(): string {
@@ -109,6 +112,7 @@ export class Group {
       unreadCount: this.unreadCount,
       lastMessageTime: this.lastMessageTime,
       lastMessageText: this.lastMessageText,
+      localJoinedAt: this.localJoinedAt,
     };
   }
 

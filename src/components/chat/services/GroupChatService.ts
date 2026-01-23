@@ -398,7 +398,8 @@ export class GroupChatService {
     if (!groupId) return;
 
     // Only process if we're a member of this group
-    if (!this.repository.getGroup(groupId)) {
+    const group = this.repository.getGroup(groupId);
+    if (!group) {
       return;
     }
 
@@ -418,6 +419,13 @@ export class GroupChatService {
       window.dispatchEvent(new CustomEvent('group-chat-updated'));
     } else if (event.kind === NIP29_KINDS.REMOVE_USER) {
       // NIP-29 REMOVE_USER (kind 9001) has h tag for group and p tag for removed user
+      // Ignore REMOVE_USER events that happened before we joined (from history replay)
+      const eventTimestampMs = event.created_at * 1000;
+      if (eventTimestampMs < group.localJoinedAt) {
+        console.log(`⏭️ Ignoring old REMOVE_USER event from before we joined group ${groupId}`);
+        return;
+      }
+
       const pTags = event.tags.filter((t) => t[0] === 'p');
       const myPubkey = this.getMyPublicKey();
 
