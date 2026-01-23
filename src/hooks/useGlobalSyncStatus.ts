@@ -21,6 +21,7 @@ export interface GlobalSyncStatus {
   chatSyncing: boolean;
   chatStep: SyncStep;
   tokenSyncing: boolean;
+  inventorySyncing: boolean;
 
   // Combined state
   isAnySyncing: boolean;
@@ -29,10 +30,14 @@ export interface GlobalSyncStatus {
   statusMessage: string;
 }
 
+// Event name for inventory sync state changes (same as useInventorySync.ts)
+const INVENTORY_SYNC_STATE_EVENT = 'inventory-sync-state';
+
 export function useGlobalSyncStatus(): GlobalSyncStatus {
   const [chatSyncing, setChatSyncing] = useState(false);
   const [chatStep, setChatStep] = useState<SyncStep>('idle');
   const [tokenSyncing, setTokenSyncing] = useState(false);
+  const [inventorySyncing, setInventorySyncing] = useState(false);
 
   // Subscribe to chat history sync status
   useEffect(() => {
@@ -57,7 +62,7 @@ export function useGlobalSyncStatus(): GlobalSyncStatus {
     return unsubscribe;
   }, []);
 
-  // Subscribe to token storage sync status
+  // Subscribe to token storage sync status (IpfsStorageService)
   useEffect(() => {
     const identityManager = IdentityManager.getInstance(SESSION_KEY);
     const tokenService = IpfsStorageService.getInstance(identityManager);
@@ -86,7 +91,20 @@ export function useGlobalSyncStatus(): GlobalSyncStatus {
     };
   }, []);
 
-  const isAnySyncing = chatSyncing || tokenSyncing;
+  // Subscribe to inventory sync status (InventorySyncService)
+  useEffect(() => {
+    const handleInventorySyncEvent = (e: CustomEvent<{ isSyncing: boolean }>) => {
+      setInventorySyncing(e.detail.isSyncing);
+    };
+
+    window.addEventListener(INVENTORY_SYNC_STATE_EVENT, handleInventorySyncEvent as EventListener);
+
+    return () => {
+      window.removeEventListener(INVENTORY_SYNC_STATE_EVENT, handleInventorySyncEvent as EventListener);
+    };
+  }, []);
+
+  const isAnySyncing = chatSyncing || tokenSyncing || inventorySyncing;
 
   // Generate human-readable status message
   const getStatusMessage = useCallback((): string => {
@@ -131,17 +149,22 @@ export function useGlobalSyncStatus(): GlobalSyncStatus {
       parts.push('Syncing tokens...');
     }
 
+    if (inventorySyncing) {
+      parts.push('Syncing wallet data...');
+    }
+
     if (parts.length === 0) {
       return 'All data synced';
     }
 
     return parts.join(' ');
-  }, [chatSyncing, chatStep, tokenSyncing]);
+  }, [chatSyncing, chatStep, tokenSyncing, inventorySyncing]);
 
   return {
     chatSyncing,
     chatStep,
     tokenSyncing,
+    inventorySyncing,
     isAnySyncing,
     statusMessage: getStatusMessage(),
   };
