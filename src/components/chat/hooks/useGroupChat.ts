@@ -292,14 +292,17 @@ export const useGroupChat = (): UseGroupChatReturn => {
   }, [groupsQuery.data, searchQuery]);
 
   // Moderation: Check if current user is admin/moderator
+  // membersQuery.data is included to re-compute when members change (service reads from repository)
   const isCurrentUserAdmin = useMemo(() => {
     if (!selectedGroup || !groupChatService) return false;
     return groupChatService.isCurrentUserAdmin(selectedGroup.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedGroup, groupChatService, membersQuery.data]);
 
   const isCurrentUserModerator = useMemo(() => {
     if (!selectedGroup || !groupChatService) return false;
     return groupChatService.isCurrentUserModerator(selectedGroup.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedGroup, groupChatService, membersQuery.data]);
 
   // Delete message mutation
@@ -353,7 +356,7 @@ export const useGroupChat = (): UseGroupChatReturn => {
   // Resolve member nametags
   const resolveMemberNametags = useCallback(async () => {
     if (!selectedGroup || !groupChatService) return;
-    await groupChatService.resolveMemberNametags(selectedGroup.id);
+    await groupChatService.resolveMemberNametags();
     // Invalidate members query to refresh the UI
     queryClient.invalidateQueries({ queryKey: QUERY_KEYS.MEMBERS(selectedGroup.id) });
   }, [selectedGroup, groupChatService, queryClient]);

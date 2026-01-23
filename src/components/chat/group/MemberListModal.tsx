@@ -40,7 +40,7 @@ export function MemberListModal({
         onResolveMemberNametags().finally(() => setIsResolvingNametags(false));
       }
     }
-  }, [isOpen, onResolveMemberNametags, members.length]);
+  }, [isOpen, onResolveMemberNametags, members]);
 
   const handleKickClick = (pubkey: string) => {
     setShowKickConfirm(pubkey);

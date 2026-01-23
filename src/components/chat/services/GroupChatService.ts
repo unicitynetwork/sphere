@@ -1357,7 +1357,7 @@ export class GroupChatService {
    * Nametags are learned from message content when members send messages.
    * Reverse lookup (pubkey → nametag) is not possible due to privacy design.
    */
-  async resolveMemberNametags(_groupId: string): Promise<void> {
+  async resolveMemberNametags(): Promise<void> {
     // Nametags are resolved from message content when members send messages.
     // Members who haven't sent messages will show their pubkey only.
     // No-op since reverse lookup is not supported.
