@@ -2,7 +2,8 @@
  * useOnboardingFlow - Manages onboarding flow state and navigation
  */
 import { useState, useCallback, useEffect } from "react";
-import { useWallet } from "../../L3/hooks/useWallet";
+import { useQueryClient } from "@tanstack/react-query";
+import { useWallet, KEYS } from "../../L3/hooks/useWallet";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import {
   setImportInProgress,
@@ -16,6 +17,7 @@ import {
   checkNametagForAddress,
   hasTokensForAddress,
   setNametagForAddress,
+  getNametagForAddress,
   getInvalidatedNametagsForAddress,
 } from "../../L3/services/InventorySyncService";
 import {
@@ -71,7 +73,7 @@ export interface UseOnboardingFlowReturn {
   setNametagInput: (value: string) => void;
   processingStatus: string;
   isProcessingComplete: boolean;
-  handleCompleteOnboarding: () => void;
+  handleCompleteOnboarding: () => Promise<void>;
 
   // Address selection state
   derivedAddresses: DerivedAddressInfo[];
@@ -97,6 +99,7 @@ export interface UseOnboardingFlowReturn {
 }
 
 export function useOnboardingFlow(): UseOnboardingFlowReturn {
+  const queryClient = useQueryClient();
   const {
     identity,
     nametag,
@@ -604,8 +607,30 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   }, [nametagInput, checkNametagAvailability, mintNametag]);
 
   // Action: Complete onboarding (called when user clicks "Let's Go")
-  const handleCompleteOnboarding = useCallback(() => {
+  const handleCompleteOnboarding = useCallback(async () => {
     console.log("🎉 User clicked Let's Go - completing onboarding...");
+
+    // Pre-populate TanStack Query cache with identity and nametag data
+    // This prevents the delay when WalletPanel loads after onboarding
+    try {
+      const currentIdentity = await identityManager.getCurrentIdentity();
+      if (currentIdentity) {
+        // Set identity in cache (query key: ["wallet", "identity"])
+        queryClient.setQueryData(KEYS.IDENTITY, currentIdentity);
+        console.log("📦 Pre-populated identity cache");
+
+        // Get nametag from localStorage and set in cache
+        const nametagData = getNametagForAddress(currentIdentity.address);
+        if (nametagData?.name) {
+          // Query key: ["wallet", "nametag", address]
+          queryClient.setQueryData([...KEYS.NAMETAG, currentIdentity.address], nametagData.name);
+          console.log(`📦 Pre-populated nametag cache: @${nametagData.name}`);
+        }
+      }
+    } catch (err) {
+      console.warn("⚠️ Failed to pre-populate query cache:", err);
+      // Continue anyway - queries will fetch data normally
+    }
 
     // Mark user as authenticated (permanent flag - survives logout with fullCleanup=false)
     localStorage.setItem(STORAGE_KEYS.AUTHENTICATED, 'true');
@@ -621,7 +646,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     // Reset to start - this will trigger navigation away from onboarding
     // because identity and nametag now exist
     setStep("start");
-  }, []);
+  }, [queryClient]);
 
   // Action: Derive new address
   const handleDeriveNewAddress = useCallback(async () => {
