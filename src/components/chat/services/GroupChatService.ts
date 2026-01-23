@@ -246,14 +246,14 @@ export class GroupChatService {
       },
     });
 
-    // Subscribe to moderation events (message deletions)
+    // Subscribe to moderation events (message deletions, user removals)
     const moderationFilter = createNip29Filter({
-      kinds: [NIP29_KINDS.DELETE_EVENT],
+      kinds: [NIP29_KINDS.DELETE_EVENT, NIP29_KINDS.REMOVE_USER],
       '#h': groupIds,
     });
 
     this.client.subscribe(moderationFilter, {
-      onEvent: (event) => this.handleDeleteEvent(event),
+      onEvent: (event) => this.handleModerationEvent(event),
       onEndOfStoredEvents: () => {
         console.log('End of stored moderation events');
       },
@@ -278,14 +278,14 @@ export class GroupChatService {
       },
     });
 
-    // Subscribe to moderation events (message deletions) for this group
+    // Subscribe to moderation events (message deletions, user removals) for this group
     const moderationFilter = createNip29Filter({
-      kinds: [NIP29_KINDS.DELETE_EVENT],
+      kinds: [NIP29_KINDS.DELETE_EVENT, NIP29_KINDS.REMOVE_USER],
       '#h': [groupId],
     });
 
     this.client.subscribe(moderationFilter, {
-      onEvent: (event) => this.handleDeleteEvent(event),
+      onEvent: (event) => this.handleModerationEvent(event),
       onEndOfStoredEvents: () => {
         console.log(`End of stored moderation events for group ${groupId}`);
       },
@@ -388,8 +388,7 @@ export class GroupChatService {
     }
   }
 
-  private handleDeleteEvent(event: Event): void {
-    // NIP-29 DELETE_EVENT (kind 9005) has h tag for group and e tag for event to delete
+  private handleModerationEvent(event: Event): void {
     const groupId = this.getGroupIdFromEvent(event);
     if (!groupId) return;
 
@@ -398,18 +397,39 @@ export class GroupChatService {
       return;
     }
 
-    // Get the event ID(s) to delete from e tags
-    const eTags = event.tags.filter((t) => t[0] === 'e');
-    for (const tag of eTags) {
-      const messageId = tag[1];
-      if (messageId) {
-        console.log(`🗑️ Received delete event for message ${messageId} in group ${groupId}`);
-        this.repository.deleteMessage(messageId);
+    if (event.kind === NIP29_KINDS.DELETE_EVENT) {
+      // NIP-29 DELETE_EVENT (kind 9005) has h tag for group and e tag for event to delete
+      const eTags = event.tags.filter((t) => t[0] === 'e');
+      for (const tag of eTags) {
+        const messageId = tag[1];
+        if (messageId) {
+          console.log(`🗑️ Received delete event for message ${messageId} in group ${groupId}`);
+          this.repository.deleteMessage(messageId);
+        }
+      }
+      window.dispatchEvent(new CustomEvent('group-chat-updated'));
+    } else if (event.kind === NIP29_KINDS.REMOVE_USER) {
+      // NIP-29 REMOVE_USER (kind 9001) has h tag for group and p tag for removed user
+      const pTags = event.tags.filter((t) => t[0] === 'p');
+      const myPubkey = this.getMyPublicKey();
+
+      for (const tag of pTags) {
+        const removedPubkey = tag[1];
+        if (removedPubkey) {
+          console.log(`👢 User ${removedPubkey.slice(0, 8)}... removed from group ${groupId}`);
+
+          // If it's me who got kicked, remove the group from local storage
+          if (removedPubkey === myPubkey) {
+            console.log(`😢 I was kicked from group ${groupId}`);
+            this.repository.removeGroup(groupId);
+            window.dispatchEvent(new CustomEvent('group-chat-updated'));
+          } else {
+            // Someone else was kicked, just remove them from member list
+            this.repository.removeMember(groupId, removedPubkey);
+          }
+        }
       }
     }
-
-    // Notify UI of the deletion
-    window.dispatchEvent(new CustomEvent('group-chat-updated'));
   }
 
   private updateMembersFromEvent(groupId: string, event: Event): void {

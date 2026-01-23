@@ -103,6 +103,22 @@ export class GroupChatRepository {
     }
   }
 
+  removeGroup(groupId: string): void {
+    // Remove the group
+    const groups = this.getGroups().filter((g) => g.id !== groupId);
+    this.saveGroups(groups);
+
+    // Remove all messages for this group
+    const messages = this.getAllMessages().filter((m) => m.groupId !== groupId);
+    this.saveMessages(messages);
+
+    // Remove all members for this group
+    const members = this.getAllMembers().filter((m) => m.groupId !== groupId);
+    this.saveAllMembers(members);
+
+    this.notifyUpdate();
+  }
+
   getTotalUnreadCount(): number {
     return this.getGroups().reduce((sum, g) => sum + g.unreadCount, 0);
   }
