@@ -12,8 +12,6 @@ import { MessageModal, type MessageType } from "../components/modals/MessageModa
 import { ConnectionStatus } from "../components/ConnectionStatus";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
-import { CreateAddressModal } from "../../shared/modals";
-import { useSwitchAddress } from "../../shared/hooks";
 
 type ViewMode = "main" | "history";
 
@@ -22,7 +20,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const [viewMode, setViewMode] = useState<ViewMode>("main");
   const [txPlan, setTxPlan] = useState<TransactionPlan | null>(null);
   const [isSending, setIsSending] = useState(false);
-  const [isCreateAddressModalOpen, setIsCreateAddressModalOpen] = useState(false);
   const [messageModal, setMessageModal] = useState<{
     show: boolean;
     type: MessageType;
@@ -47,14 +44,10 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     vestingBalances,
     deleteWallet,
     analyzeTransaction,
-    invalidateWallet,
     invalidateBalance,
     invalidateTransactions,
     invalidateVesting,
   } = useL1Wallet(selectedAddress);
-
-  // Address switching hook (no page reload)
-  const { switchToAddress } = useSwitchAddress();
 
   // Derive addresses from wallet
   const addresses = wallet?.addresses.map((a) => a.address) ?? [];
@@ -97,18 +90,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       showMessage("error", "Error", "Failed to delete wallet");
     }
   };
-
-  // Open create address modal
-  const onNewAddress = useCallback(() => {
-    setIsCreateAddressModalOpen(true);
-  }, []);
-
-  // Handle address creation modal close
-  const handleCreateAddressModalClose = useCallback(() => {
-    setIsCreateAddressModalOpen(false);
-    // Refresh wallet data to show new address
-    invalidateWallet();
-  }, [invalidateWallet]);
 
   // Check if mnemonic is available for export
   const hasMnemonic = (() => {
@@ -227,17 +208,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     setViewMode("main");
   };
 
-  // Select address - sync with L3's selected address path (no page reload)
-  const onSelectAddress = useCallback(async (address: string) => {
-    // Find the selected address to get its path - path is the ONLY reliable identifier
-    const selectedAddr = wallet?.addresses.find(a => a.address === address);
-    if (!selectedAddr) return;
-
-    // Use hook to switch address without page reload
-    await switchToAddress(address, selectedAddr.path || null);
-    setSelectedAddress(address);
-  }, [wallet?.addresses, switchToAddress]);
-
   // Show connection status while connecting or on error
   if (!connection.isConnected) {
     return (
@@ -294,12 +264,9 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         selectedAddress={selectedAddress}
         selectedPrivateKey={selectedPrivateKey}
         addresses={addresses}
-        walletAddresses={wallet?.addresses}
         balance={balance}
         totalBalance={totalBalance}
         showBalances={showBalances}
-        onNewAddress={onNewAddress}
-        onSelectAddress={onSelectAddress}
         onShowHistory={onShowHistory}
         onSaveWallet={onSaveWallet}
         hasMnemonic={hasMnemonic}
@@ -318,12 +285,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         txids={messageModal.txids}
         onClose={closeMessage}
       />
-      {isCreateAddressModalOpen && (
-        <CreateAddressModal
-          isOpen={isCreateAddressModalOpen}
-          onClose={handleCreateAddressModalClose}
-        />
-      )}
     </div>
   );
 }

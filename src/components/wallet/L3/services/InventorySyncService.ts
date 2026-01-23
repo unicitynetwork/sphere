@@ -260,6 +260,11 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
   // Dispatch sync start event to lock wallet refetches
   window.dispatchEvent(new Event('inventory-sync-start'));
 
+  // Dispatch sync state event for useInventorySync hook (real-time UI updates)
+  window.dispatchEvent(new CustomEvent('inventory-sync-state', {
+    detail: { isSyncing: true, currentStep: 1, mode }
+  }));
+
   // SYNC LOCK: Prevent concurrent writes during sync
   // Per TOKEN_INVENTORY_SPEC.md Section 6.1: "Only inventorySync should be allowed to access the inventory in localStorage!"
   setSyncInProgress(true);
@@ -307,6 +312,10 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
     setSyncInProgress(false);
     // CRITICAL: Always dispatch sync-end, even on error (prevent deadlock)
     window.dispatchEvent(new Event('inventory-sync-end'));
+    // Dispatch sync state event for useInventorySync hook (real-time UI updates)
+    window.dispatchEvent(new CustomEvent('inventory-sync-state', {
+      detail: { isSyncing: false, currentStep: 0, mode }
+    }));
   }
 }
 

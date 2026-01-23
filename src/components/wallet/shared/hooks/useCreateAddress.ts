@@ -53,9 +53,19 @@ export interface CreateAddressState {
   progress: string;
 }
 
+export interface ExistingAddressData {
+  l1Address: string;
+  l3Address: string;
+  path: string;
+  index: number;
+  privateKey: string;
+  publicKey: string;
+}
+
 export interface UseCreateAddressReturn {
   state: CreateAddressState;
   startCreateAddress: () => Promise<void>;
+  setExistingAddress: (address: ExistingAddressData) => void;
   submitNametag: (nametag: string) => Promise<void>;
   reset: () => void;
   isNametagAvailable: (nametag: string) => Promise<boolean>;
@@ -221,6 +231,26 @@ export function useCreateAddress(): UseCreateAddressReturn {
   }, [setStep, setError, identityManager]);
 
   /**
+   * Set existing address (for addresses without nametag)
+   * Skips derivation step and goes straight to nametag input
+   */
+  const setExistingAddress = useCallback((address: ExistingAddressData) => {
+    setState({
+      step: 'nametag_input',
+      error: null,
+      progress: '',
+      newAddress: {
+        l1Address: address.l1Address,
+        l3Address: address.l3Address,
+        path: address.path,
+        index: address.index,
+        privateKey: address.privateKey,
+        publicKey: address.publicKey,
+      },
+    });
+  }, []);
+
+  /**
    * Check if nametag is available
    */
   const isNametagAvailable = useCallback(async (nametag: string): Promise<boolean> => {
@@ -285,28 +315,37 @@ export function useCreateAddress(): UseCreateAddressReturn {
         throw new Error("L1 wallet not found");
       }
 
-      // Save the address to L1 wallet
-      const keyManager = UnifiedKeyManager.getInstance(SESSION_KEY);
-      const derived = keyManager.deriveAddressFromPath(state.newAddress.path);
+      // Check if address already exists in wallet (for existing address flow)
+      const addressAlreadyExists = originalL1Wallet.addresses.some(
+        a => a.address === state.newAddress!.l1Address
+      );
 
-      const newWalletAddress = {
-        index: state.newAddress.index,
-        address: state.newAddress.l1Address,
-        privateKey: derived.privateKey,
-        publicKey: derived.publicKey,
-        path: state.newAddress.path,
-        isChange: false,
-        createdAt: new Date().toISOString(),
-      };
+      // Only save to L1 wallet if this is a new address
+      if (!addressAlreadyExists) {
+        const keyManager = UnifiedKeyManager.getInstance(SESSION_KEY);
+        const derived = keyManager.deriveAddressFromPath(state.newAddress.path);
 
-      const updatedWallet: L1Wallet = {
-        ...originalL1Wallet,
-        addresses: [...originalL1Wallet.addresses, newWalletAddress],
-      };
+        const newWalletAddress = {
+          index: state.newAddress.index,
+          address: state.newAddress.l1Address,
+          privateKey: derived.privateKey,
+          publicKey: derived.publicKey,
+          path: state.newAddress.path,
+          isChange: false,
+          createdAt: new Date().toISOString(),
+        };
 
-      saveWalletToStorage("main", updatedWallet);
-      walletModified = true;
-      console.log(`💾 Saved new address to L1 wallet: ${state.newAddress.l1Address.slice(0, 12)}...`);
+        const updatedWallet: L1Wallet = {
+          ...originalL1Wallet,
+          addresses: [...originalL1Wallet.addresses, newWalletAddress],
+        };
+
+        saveWalletToStorage("main", updatedWallet);
+        walletModified = true;
+        console.log(`💾 Saved new address to L1 wallet: ${state.newAddress.l1Address.slice(0, 12)}...`);
+      } else {
+        console.log(`📝 Address already exists in wallet, skipping save: ${state.newAddress.l1Address.slice(0, 12)}...`);
+      }
 
       // Set selected path for L3 identity
       localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, state.newAddress.path);
@@ -327,10 +366,21 @@ export function useCreateAddress(): UseCreateAddressReturn {
       const mintResult = await nametagService.mintNametagAndPublish(cleanTag);
 
       if (mintResult.status === 'error') {
-        throw new Error(mintResult.message);
+        // Check if the error is because nametag already exists (interrupted flow recovery)
+        if (mintResult.message?.includes('Identity already has a nametag')) {
+          console.log(`ℹ️ Nametag already exists - continuing with sync...`);
+          // Extract existing nametag name from error message if different from requested
+          const existingMatch = mintResult.message.match(/nametag: (\S+)/);
+          const existingNametag = existingMatch?.[1];
+          if (existingNametag && existingNametag !== cleanTag) {
+            console.log(`⚠️ Existing nametag "${existingNametag}" differs from requested "${cleanTag}"`);
+          }
+        } else {
+          throw new Error(mintResult.message);
+        }
+      } else {
+        console.log(`✅ Nametag minted: @${cleanTag}`);
       }
-
-      console.log(`✅ Nametag minted: @${cleanTag}`);
 
       // Wait for localStorage write to flush
       setProgress("Preparing to sync...");
@@ -410,6 +460,7 @@ export function useCreateAddress(): UseCreateAddressReturn {
   return {
     state,
     startCreateAddress,
+    setExistingAddress,
     submitNametag,
     reset,
     isNametagAvailable,

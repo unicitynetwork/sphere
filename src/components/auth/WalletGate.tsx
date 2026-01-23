@@ -87,6 +87,18 @@ export function WalletGate({ children }: WalletGateProps) {
   // Once authenticated, user stays authenticated - new addresses are created via modal
   const hasCompletedOnboarding = localStorage.getItem(STORAGE_KEYS.AUTHENTICATED) === 'true';
 
+  // Migration for existing users: if they have identity but no AUTHENTICATED flag,
+  // set the flag so they don't get kicked to onboarding when switching addresses
+  useEffect(() => {
+    if (identity && !hasCompletedOnboarding && !isLoadingIdentity) {
+      const isOnboarding = localStorage.getItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS) === 'true';
+      if (!isOnboarding) {
+        console.log('🔄 Migration: Setting AUTHENTICATED flag for existing user');
+        localStorage.setItem(STORAGE_KEYS.AUTHENTICATED, 'true');
+      }
+    }
+  }, [identity, hasCompletedOnboarding, isLoadingIdentity]);
+
   // Check if user is in onboarding flow (prevents premature transition to main app)
   // During onboarding, nametag is saved to localStorage immediately after minting,
   // but we need to wait for IPFS sync/verification before showing main app.

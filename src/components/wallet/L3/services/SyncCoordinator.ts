@@ -71,8 +71,10 @@ export class SyncCoordinator {
     // Request leadership on startup
     this.requestLeadership();
 
-    // Handle tab close
-    window.addEventListener("beforeunload", () => this.cleanup());
+    // Handle tab close - use pagehide instead of beforeunload
+    // beforeunload fires BEFORE the confirmation dialog, so cleanup would run
+    // even if user cancels the reload. pagehide only fires when page actually unloads.
+    window.addEventListener("pagehide", () => this.cleanup());
 
     console.log(`📋 SyncCoordinator initialized: ${this.instanceId.slice(0, 8)}...`);
   }

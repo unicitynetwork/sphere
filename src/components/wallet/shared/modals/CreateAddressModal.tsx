@@ -21,15 +21,17 @@ import {
   AlertCircle,
   Wallet,
 } from 'lucide-react';
-import { useCreateAddress, type CreateAddressStep } from '../hooks/useCreateAddress';
+import { useCreateAddress, type CreateAddressStep, type ExistingAddressData } from '../hooks/useCreateAddress';
 
 interface CreateAddressModalProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Optional: existing address that needs a nametag (skips derivation step) */
+  existingAddress?: ExistingAddressData;
 }
 
-export function CreateAddressModal({ isOpen, onClose }: CreateAddressModalProps) {
-  const { state, startCreateAddress, submitNametag, reset, isNametagAvailable } = useCreateAddress();
+export function CreateAddressModal({ isOpen, onClose, existingAddress }: CreateAddressModalProps) {
+  const { state, startCreateAddress, setExistingAddress, submitNametag, reset, isNametagAvailable } = useCreateAddress();
   const [nametagInput, setNametagInput] = useState('');
   const [isCheckingAvailability, setIsCheckingAvailability] = useState(false);
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
@@ -37,9 +39,15 @@ export function CreateAddressModal({ isOpen, onClose }: CreateAddressModalProps)
   // Start address creation when modal opens
   useEffect(() => {
     if (isOpen && state.step === 'idle') {
-      startCreateAddress();
+      if (existingAddress) {
+        // Use existing address - skip derivation, go straight to nametag input
+        setExistingAddress(existingAddress);
+      } else {
+        // Create new address
+        startCreateAddress();
+      }
     }
-  }, [isOpen, state.step, startCreateAddress]);
+  }, [isOpen, state.step, existingAddress, setExistingAddress, startCreateAddress]);
 
   // Reset when modal closes
   useEffect(() => {

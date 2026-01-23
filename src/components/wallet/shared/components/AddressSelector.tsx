@@ -6,6 +6,10 @@ import { useAddressNametags } from '../../L1/hooks/useAddressNametags';
 import { useSwitchAddress } from '../hooks/useSwitchAddress';
 import { STORAGE_KEYS } from '../../../../config/storageKeys';
 import { CreateAddressModal } from '../modals/CreateAddressModal';
+import { IdentityManager } from '../../L3/services/IdentityManager';
+import type { ExistingAddressData } from '../hooks/useCreateAddress';
+
+const SESSION_KEY = "user-pin-1234";
 
 /** Truncate long nametags: show first 6 chars + ... + last 3 chars */
 function truncateNametag(nametag: string, maxLength: number = 12): string {
@@ -24,6 +28,7 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
   const [showDropdown, setShowDropdown] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [existingAddressForNametag, setExistingAddressForNametag] = useState<ExistingAddressData | undefined>();
 
   const { wallet } = useL1Wallet();
   const { nametagState, addressesWithNametags } = useAddressNametags(wallet?.addresses);
@@ -73,11 +78,38 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
 
     // Use the hook to switch address without page reload
     await switchToAddress(selectedAddr.address, selectedAddr.path || null);
+
+    // Check if the selected address has a nametag
+    const addrNametagInfo = nametagState[selectedAddr.address];
+    const hasNametag = addrNametagInfo?.nametag;
+    const isStillLoading = addrNametagInfo?.ipnsLoading;
+
+    // If no nametag and not loading, prompt user to create one
+    if (!hasNametag && !isStillLoading && selectedAddr.path && selectedAddr.publicKey) {
+      try {
+        // Derive L3 identity for this address to get the private key
+        const identityManager = IdentityManager.getInstance(SESSION_KEY);
+        const l3Identity = await identityManager.deriveIdentityFromPath(selectedAddr.path);
+
+        setExistingAddressForNametag({
+          l1Address: selectedAddr.address,
+          l3Address: l3Identity.address,
+          path: selectedAddr.path,
+          index: selectedAddr.index ?? 0,
+          privateKey: l3Identity.privateKey,
+          publicKey: selectedAddr.publicKey,
+        });
+        setShowCreateModal(true);
+      } catch (err) {
+        console.error('Failed to derive L3 identity for nametag creation:', err);
+      }
+    }
   };
 
   const handleNewAddress = () => {
     if (!wallet || isAnyAddressLoading) return;
     setShowDropdown(false);
+    setExistingAddressForNametag(undefined); // Clear existing address - we're creating new
     setShowCreateModal(true);
   };
 
@@ -247,7 +279,11 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
         {showCreateModal && (
           <CreateAddressModal
             isOpen={showCreateModal}
-            onClose={() => setShowCreateModal(false)}
+            onClose={() => {
+              setShowCreateModal(false);
+              setExistingAddressForNametag(undefined);
+            }}
+            existingAddress={existingAddressForNametag}
           />
         )}
       </div>
@@ -349,7 +385,11 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
       {showCreateModal && (
         <CreateAddressModal
           isOpen={showCreateModal}
-          onClose={() => setShowCreateModal(false)}
+          onClose={() => {
+            setShowCreateModal(false);
+            setExistingAddressForNametag(undefined);
+          }}
+          existingAddress={existingAddressForNametag}
         />
       )}
     </div>

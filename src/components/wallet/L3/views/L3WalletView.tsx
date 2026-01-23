@@ -21,7 +21,6 @@ import { UnifiedKeyManager } from '../../shared/services/UnifiedKeyManager';
 import { SaveWalletModal } from '../../L1/components/modals';
 import { validateUnicityId, invalidateUnicityId, repairUnicityId, type UnicityIdValidationResult } from '../../../../utils/unicityIdValidator';
 import { getInvalidatedNametagsForAddress } from '../services/InventorySyncService';
-import { SyncProgressIndicator } from '../components/SyncProgressIndicator';
 import { useInventorySync } from '../hooks/useInventorySync';
 
 // Module-level tracking to prevent validation loops across component remounts
@@ -61,7 +60,6 @@ export function L3WalletView({
   const { balance: l1Balance, deleteWallet } = useL1Wallet();
   const {
     isSyncing: isInventorySyncing,
-    lastResult: lastSyncResult,
   } = useInventorySync();
 
   // Combined syncing state
@@ -699,14 +697,6 @@ export function L3WalletView({
         hasMnemonic={hasMnemonic}
       />
 
-      {/* Sync Progress Indicator - floating notification */}
-      {isIpfsEnabled && (
-        <SyncProgressIndicator
-          lastSyncResult={lastSyncResult}
-          isSyncing={isSyncing}
-          autoDismissMs={5000}
-        />
-      )}
     </div>
   );
 }

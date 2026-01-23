@@ -15,8 +15,6 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  generateAddress,
-  loadWalletFromStorage,
   createTransactionPlan,
   createAndSignTransaction,
   broadcast,
@@ -24,6 +22,7 @@ import {
 } from "../sdk";
 import { useL1Wallet, useConnectionStatus } from "../hooks";
 import { useAddressNametags } from "../hooks/useAddressNametags";
+import { useSwitchAddress } from "../../shared/hooks/useSwitchAddress";
 import { ConnectionStatus } from "../components/ConnectionStatus";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 import {
@@ -35,6 +34,11 @@ import {
 import { MessageModal, type MessageType } from "../components/modals/MessageModal";
 import { VestingDisplay } from "../components/VestingDisplay";
 import { HistoryView } from "../views";
+import { CreateAddressModal } from "../../shared/modals/CreateAddressModal";
+import { IdentityManager } from "../../L3/services/IdentityManager";
+import type { ExistingAddressData } from "../../shared/hooks/useCreateAddress";
+
+const SESSION_KEY = "user-pin-1234";
 
 interface L1WalletModalProps {
   isOpen: boolean;
@@ -58,6 +62,8 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
   const [showSendModal, setShowSendModal] = useState(false);
   const [showBridgeModal, setShowBridgeModal] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [showCreateAddressModal, setShowCreateAddressModal] = useState(false);
+  const [existingAddressForNametag, setExistingAddressForNametag] = useState<ExistingAddressData | undefined>();
   const [pendingDestination, setPendingDestination] = useState("");
   const [pendingAmount, setPendingAmount] = useState("");
   const [messageModal, setMessageModal] = useState<{
@@ -78,13 +84,13 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     isLoadingTransactions,
     currentBlockHeight,
     analyzeTransaction,
-    invalidateWallet,
     vestingBalances,
     isClassifyingVesting,
   } = useL1Wallet(selectedAddress);
 
   const addresses = wallet?.addresses.map((a) => a.address) ?? [];
   const { nametagState, addressesWithNametags } = useAddressNametags(wallet?.addresses);
+  const { switchToAddress, isSwitching } = useSwitchAddress();
 
   // Check if any address is still loading nametag from IPNS
   const isAnyAddressLoading = addressesWithNametags.some(addr => addr.ipnsLoading);
@@ -118,18 +124,10 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     }
   }, [isOpen]);
 
-  const onNewAddress = async () => {
+  const onNewAddress = () => {
     if (!wallet || isAnyAddressLoading) return;
-    try {
-      const addr = generateAddress(wallet);
-      const updated = loadWalletFromStorage("main");
-      if (updated) {
-        invalidateWallet();
-        setSelectedAddress(addr.address);
-      }
-    } catch {
-      showMessage("error", "Error", "Failed to generate address");
-    }
+    setExistingAddressForNametag(undefined); // Clear existing address - we're creating new
+    setShowCreateAddressModal(true);
   };
 
   const onSendTransaction = async (destination: string, amount: string) => {
@@ -189,14 +187,49 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     }
   };
 
-  const onSelectAddress = (address: string) => {
+  const onSelectAddress = async (address: string) => {
+    if (isSwitching) return;
+
     const selectedAddr = wallet?.addresses.find(a => a.address === address);
-    if (selectedAddr?.path) {
-      localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, selectedAddr.path);
-    } else {
-      localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
+    if (!selectedAddr) return;
+
+    // Don't switch if already on this address
+    if (selectedAddr.address === selectedAddress) {
+      setShowDropdown(false);
+      return;
     }
-    window.location.reload();
+
+    setShowDropdown(false);
+
+    // Use the hook to switch address without page reload
+    await switchToAddress(selectedAddr.address, selectedAddr.path || null);
+    setSelectedAddress(selectedAddr.address);
+
+    // Check if the selected address has a nametag
+    const addrNametagInfo = nametagState[selectedAddr.address];
+    const hasNametag = addrNametagInfo?.nametag;
+    const isStillLoading = addrNametagInfo?.ipnsLoading;
+
+    // If no nametag and not loading, prompt user to create one
+    if (!hasNametag && !isStillLoading && selectedAddr.path && selectedAddr.publicKey) {
+      try {
+        // Derive L3 identity for this address to get the private key
+        const identityManager = IdentityManager.getInstance(SESSION_KEY);
+        const l3Identity = await identityManager.deriveIdentityFromPath(selectedAddr.path);
+
+        setExistingAddressForNametag({
+          l1Address: selectedAddr.address,
+          l3Address: l3Identity.address,
+          path: selectedAddr.path,
+          index: selectedAddr.index ?? 0,
+          privateKey: l3Identity.privateKey,
+          publicKey: selectedAddr.publicKey,
+        });
+        setShowCreateAddressModal(true);
+      } catch (err) {
+        console.error('Failed to derive L3 identity for nametag creation:', err);
+      }
+    }
   };
 
   const formatBalance = (bal: number) => {
@@ -532,6 +565,15 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
               message={messageModal.message}
               txids={messageModal.txids}
               onClose={closeMessage}
+            />
+
+            <CreateAddressModal
+              isOpen={showCreateAddressModal}
+              onClose={() => {
+                setShowCreateAddressModal(false);
+                setExistingAddressForNametag(undefined);
+              }}
+              existingAddress={existingAddressForNametag}
             />
           </motion.div>
         </motion.div>
