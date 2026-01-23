@@ -44,29 +44,33 @@ export function SeedPhraseModal({ isOpen, onClose, seedPhrase }: SeedPhraseModal
           />
 
           {/* Modal */}
-          <div className="fixed inset-0 z-100 flex items-center justify-center p-4 pointer-events-none">
+          <div className="fixed inset-0 z-100 flex items-center justify-center p-4 sm:p-6 pointer-events-none">
             <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
               transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-              className="relative w-full max-w-md bg-white dark:bg-[#111] border border-neutral-200 dark:border-white/10 rounded-3xl shadow-2xl pointer-events-auto overflow-hidden"
+              className="relative w-full max-w-md max-h-[70dvh] sm:max-h-[600px] bg-white dark:bg-[#111] border border-neutral-200 dark:border-white/10 rounded-3xl shadow-2xl pointer-events-auto flex flex-col overflow-hidden"
             >
+              {/* Background Orbs */}
+              <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
+
               {/* Header */}
-              <div className="relative px-6 py-4 border-b border-neutral-200/50 dark:border-neutral-700/50 flex justify-between items-center">
+              <div className="relative z-10 px-6 py-4 border-b border-neutral-200/50 dark:border-neutral-700/50 flex justify-between items-center shrink-0">
                 <h3 className="text-lg font-bold text-neutral-900 dark:text-white">Recovery Phrase</h3>
                 <motion.button
-                  whileHover={{ scale: 1.1, rotate: 90 }}
+                  whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
                   onClick={onClose}
-                  className="w-9 h-9 flex items-center justify-center rounded-xl bg-neutral-200/80 dark:bg-neutral-800/80 hover:bg-neutral-300/80 dark:hover:bg-neutral-700/80 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-white transition-colors"
+                  className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-neutral-200/80 dark:hover:bg-neutral-800/80 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-white transition-colors"
                 >
                   <X className="w-4 h-4" />
                 </motion.button>
               </div>
 
               {/* Content */}
-              <div className="p-6">
+              <div className="relative flex-1 overflow-y-auto custom-scrollbar p-6 z-10 min-h-0">
                 {/* Warning */}
                 <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-3">
                   <ShieldAlert className="w-5 h-5 text-red-500 dark:text-red-400 shrink-0 mt-0.5" />
@@ -92,7 +96,7 @@ export function SeedPhraseModal({ isOpen, onClose, seedPhrase }: SeedPhraseModal
                     </div>
                   ) : (
                     <>
-                      <div className="grid grid-cols-3 gap-2 mb-4">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
                         {seedPhrase.map((word, index) => (
                           <motion.div
                             key={`seed-word-${index}`}

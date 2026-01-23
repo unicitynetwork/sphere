@@ -90,7 +90,7 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
   const handleCopyNametag = async () => {
     if (!currentNametag) return;
     try {
-      await navigator.clipboard.writeText(currentNametag);
+      await navigator.clipboard.writeText(`@${currentNametag}`);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {

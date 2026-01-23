@@ -1,4 +1,4 @@
-import { Wallet, Clock, Bell, MoreVertical } from 'lucide-react';
+import { Wallet, Clock, Bell, MoreVertical, Cloud, CloudOff, RefreshCw } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { L3WalletView } from './L3/views/L3WalletView';
@@ -7,6 +7,8 @@ import { useIncomingPaymentRequests } from './L3/hooks/useIncomingPaymentRequest
 import { useUIState } from '../../hooks/useUIState';
 import { L1WalletModal } from './L1/modals/L1WalletModal';
 import { AddressSelector } from './shared/components';
+import { useInventorySync } from './L3/hooks/useInventorySync';
+import { useIpfsStorage } from './L3/hooks/useIpfsStorage';
 
 export function WalletPanel() {
   const [showBalances, setShowBalances] = useState(true);
@@ -17,6 +19,14 @@ export function WalletPanel() {
   const { identity, nametag, isLoadingIdentity } = useWallet();
   const { pendingCount, requests } = useIncomingPaymentRequests();
   const { setFullscreen } = useUIState();
+  const { isSyncing: isIpfsSyncing, isEnabled: isIpfsEnabled } = useIpfsStorage();
+  const {
+    isSyncing: isInventorySyncing,
+    mode: syncMode,
+  } = useInventorySync();
+
+  // Combined syncing state
+  const isSyncing = isIpfsSyncing || isInventorySyncing;
 
   // Track previous pending count to detect new requests
   const prevPendingCountRef = useRef<number | null>(null);
@@ -79,7 +89,27 @@ export function WalletPanel() {
             </motion.div>
 
             <div className="flex flex-col">
-              <span className="text-sm sm:text-base text-neutral-900 dark:text-white font-medium tracking-wide">Wallet</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm sm:text-base text-neutral-900 dark:text-white font-medium tracking-wide">Wallet</span>
+                {isIpfsEnabled && (
+                  <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                    isSyncing
+                      ? 'bg-yellow-500/15 text-yellow-600 dark:text-yellow-400'
+                      : syncMode === 'LOCAL'
+                        ? 'bg-orange-500/15 text-orange-600 dark:text-orange-400'
+                        : 'bg-green-500/15 text-green-600 dark:text-green-400'
+                  }`}>
+                    {isSyncing ? (
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                    ) : syncMode === 'LOCAL' ? (
+                      <CloudOff className="w-3 h-3" />
+                    ) : (
+                      <Cloud className="w-3 h-3" />
+                    )}
+                    {isSyncing ? 'Syncing' : syncMode === 'LOCAL' ? 'Offline' : 'Synced'}
+                  </span>
+                )}
+              </div>
               <AddressSelector currentNametag={nametag} compact />
             </div>
           </div>

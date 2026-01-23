@@ -21,7 +21,6 @@ import { UnifiedKeyManager } from '../../shared/services/UnifiedKeyManager';
 import { SaveWalletModal } from '../../L1/components/modals';
 import { validateUnicityId, invalidateUnicityId, repairUnicityId, type UnicityIdValidationResult } from '../../../../utils/unicityIdValidator';
 import { getInvalidatedNametagsForAddress } from '../services/InventorySyncService';
-import { SyncModeSelector } from '../components/SyncModeSelector';
 import { SyncProgressIndicator } from '../components/SyncProgressIndicator';
 import { useInventorySync } from '../hooks/useInventorySync';
 
@@ -62,10 +61,7 @@ export function L3WalletView({
   const { balance: l1Balance, deleteWallet } = useL1Wallet();
   const {
     isSyncing: isInventorySyncing,
-    mode: syncMode,
     lastResult: lastSyncResult,
-    circuitBreaker,
-    retryIpfsSync
   } = useInventorySync();
 
   // Combined syncing state
@@ -385,16 +381,6 @@ export function L3WalletView({
             >
               {showBalances ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
             </motion.button>
-            {isIpfsEnabled && (
-              <SyncModeSelector
-                mode={syncMode}
-                circuitBreaker={circuitBreaker ?? undefined}
-                lastSyncResult={lastSyncResult}
-                isSyncing={isSyncing}
-                onRetrySync={async () => { await retryIpfsSync(); }}
-                compact={true}
-              />
-            )}
           </div>
         </div>
 
