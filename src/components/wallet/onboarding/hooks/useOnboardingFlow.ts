@@ -607,9 +607,11 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const handleCompleteOnboarding = useCallback(() => {
     console.log("🎉 User clicked Let's Go - completing onboarding...");
 
-    // Clear onboarding flags
+    // Mark user as authenticated (permanent flag - survives logout with fullCleanup=false)
+    localStorage.setItem(STORAGE_KEYS.AUTHENTICATED, 'true');
+
+    // Clear onboarding in-progress flag
     localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
-    localStorage.removeItem(STORAGE_KEYS.ONBOARDING_COMPLETE);
 
     // Signal wallet creation - this triggers Nostr service initialization
     window.dispatchEvent(new Event("wallet-loaded"));

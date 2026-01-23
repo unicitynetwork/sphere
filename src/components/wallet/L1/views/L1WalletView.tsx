@@ -1,7 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  generateAddress,
-  loadWalletFromStorage,
   createTransactionPlan,
   createAndSignTransaction,
   broadcast,
@@ -14,6 +12,8 @@ import { MessageModal, type MessageType } from "../components/modals/MessageModa
 import { ConnectionStatus } from "../components/ConnectionStatus";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
+import { CreateAddressModal } from "../../shared/modals";
+import { useSwitchAddress } from "../../shared/hooks";
 
 type ViewMode = "main" | "history";
 
@@ -22,6 +22,7 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
   const [viewMode, setViewMode] = useState<ViewMode>("main");
   const [txPlan, setTxPlan] = useState<TransactionPlan | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [isCreateAddressModalOpen, setIsCreateAddressModalOpen] = useState(false);
   const [messageModal, setMessageModal] = useState<{
     show: boolean;
     type: MessageType;
@@ -51,6 +52,9 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     invalidateTransactions,
     invalidateVesting,
   } = useL1Wallet(selectedAddress);
+
+  // Address switching hook (no page reload)
+  const { switchToAddress } = useSwitchAddress();
 
   // Derive addresses from wallet
   const addresses = wallet?.addresses.map((a) => a.address) ?? [];
@@ -94,23 +98,17 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     }
   };
 
-  // Generate new address
-  const onNewAddress = async () => {
-    if (!wallet) return;
+  // Open create address modal
+  const onNewAddress = useCallback(() => {
+    setIsCreateAddressModalOpen(true);
+  }, []);
 
-    try {
-      const addr = generateAddress(wallet);
-      // Reload wallet from storage to get updated addresses
-      const updated = loadWalletFromStorage("main");
-      if (updated) {
-        // Force refresh wallet query
-        invalidateWallet();
-        setSelectedAddress(addr.address);
-      }
-    } catch {
-      showMessage("error", "Error", "Failed to generate address");
-    }
-  };
+  // Handle address creation modal close
+  const handleCreateAddressModalClose = useCallback(() => {
+    setIsCreateAddressModalOpen(false);
+    // Refresh wallet data to show new address
+    invalidateWallet();
+  }, [invalidateWallet]);
 
   // Check if mnemonic is available for export
   const hasMnemonic = (() => {
@@ -229,22 +227,16 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     setViewMode("main");
   };
 
-  // Select address - sync with L3's selected address path
-  const onSelectAddress = (address: string) => {
+  // Select address - sync with L3's selected address path (no page reload)
+  const onSelectAddress = useCallback(async (address: string) => {
     // Find the selected address to get its path - path is the ONLY reliable identifier
     const selectedAddr = wallet?.addresses.find(a => a.address === address);
+    if (!selectedAddr) return;
 
-    // Sync to L3's selected address path
-    if (selectedAddr?.path) {
-      localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, selectedAddr.path);
-    } else {
-      // Fallback: remove path to trigger default behavior
-      localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
-    }
-
-    // Force page reload to restart NostrService with new identity
-    window.location.reload();
-  };
+    // Use hook to switch address without page reload
+    await switchToAddress(address, selectedAddr.path || null);
+    setSelectedAddress(address);
+  }, [wallet?.addresses, switchToAddress]);
 
   // Show connection status while connecting or on error
   if (!connection.isConnected) {
@@ -326,6 +318,12 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         txids={messageModal.txids}
         onClose={closeMessage}
       />
+      {isCreateAddressModalOpen && (
+        <CreateAddressModal
+          isOpen={isCreateAddressModalOpen}
+          onClose={handleCreateAddressModalClose}
+        />
+      )}
     </div>
   );
 }

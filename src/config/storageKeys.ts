@@ -292,6 +292,7 @@ export function clearAllSphereData(fullCleanup: boolean = true): void {
   const preserveKeys: Set<string> = fullCleanup
     ? new Set<string>()
     : new Set([
+        STORAGE_KEYS.AUTHENTICATED,
         STORAGE_KEYS.ONBOARDING_IN_PROGRESS,
         STORAGE_KEYS.ONBOARDING_COMPLETE,
         STORAGE_KEYS.WELCOME_ACCEPTED,
