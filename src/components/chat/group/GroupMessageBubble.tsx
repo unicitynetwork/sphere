@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trash2, Loader2 } from 'lucide-react';
+import { Trash2, Loader2, Reply, CornerDownRight } from 'lucide-react';
 import { GroupMessage } from '../data/groupModels';
 import { MarkdownContent } from '../../../utils/markdown';
 import { getMentionClickHandler } from '../../../utils/mentionHandler';
@@ -12,6 +12,8 @@ interface GroupMessageBubbleProps {
   canDelete?: boolean;
   onDelete?: (messageId: string) => Promise<boolean>;
   isDeleting?: boolean;
+  onReply?: (message: GroupMessage) => void;
+  replyToMessage?: GroupMessage | null;
 }
 
 /**
@@ -49,6 +51,8 @@ export function GroupMessageBubble({
   canDelete = false,
   onDelete,
   isDeleting = false,
+  onReply,
+  replyToMessage,
 }: GroupMessageBubbleProps) {
   const senderColor = getColorFromPubkey(message.senderPubkey);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -109,7 +113,18 @@ export function GroupMessageBubble({
           {message.getSenderDisplayName()}
         </button>
 
-        {/* Message bubble with delete button */}
+        {/* Reply-to preview */}
+        {replyToMessage && (
+          <div className={`flex items-start gap-2 mb-1 text-xs ${isOwnMessage ? 'flex-row-reverse' : ''}`}>
+            <CornerDownRight className="w-3 h-3 text-neutral-400 shrink-0 mt-0.5" />
+            <div className="px-2 py-1 rounded-lg bg-neutral-200/50 dark:bg-neutral-700/50 text-neutral-500 dark:text-neutral-400 max-w-[200px] truncate">
+              <span className="font-medium">{replyToMessage.getSenderDisplayName()}: </span>
+              {replyToMessage.content.slice(0, 50)}{replyToMessage.content.length > 50 ? '...' : ''}
+            </div>
+          </div>
+        )}
+
+        {/* Message bubble with delete/reply buttons */}
         <div className="relative">
           <motion.div
             whileHover={{ scale: 1.01 }}
@@ -128,24 +143,43 @@ export function GroupMessageBubble({
             </div>
           </motion.div>
 
-          {/* Delete button - absolutely positioned on the right */}
+          {/* Action buttons - absolutely positioned */}
           <AnimatePresence>
-            {canDelete && isHovering && !showDeleteConfirm && (
-              <motion.button
+            {isHovering && !showDeleteConfirm && (
+              <motion.div
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.8 }}
-                onClick={handleDeleteClick}
-                disabled={isDeleting}
-                className="absolute -right-10 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-500 transition-colors"
-                title="Delete message"
+                className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 ${
+                  isOwnMessage ? '-left-16' : '-right-16'
+                }`}
               >
-                {isDeleting ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Trash2 className="w-4 h-4" />
+                {/* Reply button */}
+                {onReply && (
+                  <button
+                    onClick={() => onReply(message)}
+                    className="p-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 transition-colors"
+                    title="Reply"
+                  >
+                    <Reply className="w-4 h-4" />
+                  </button>
                 )}
-              </motion.button>
+                {/* Delete button */}
+                {canDelete && (
+                  <button
+                    onClick={handleDeleteClick}
+                    disabled={isDeleting}
+                    className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-500 transition-colors"
+                    title="Delete message"
+                  >
+                    {isDeleting ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
+                  </button>
+                )}
+              </motion.div>
             )}
           </AnimatePresence>
 

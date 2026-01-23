@@ -247,9 +247,9 @@ export class GroupChatService {
       },
     });
 
-    // Subscribe to moderation events (message deletions, user removals)
+    // Subscribe to moderation events (message deletions, user removals, group deletions)
     const moderationFilter = createNip29Filter({
-      kinds: [NIP29_KINDS.DELETE_EVENT, NIP29_KINDS.REMOVE_USER],
+      kinds: [NIP29_KINDS.DELETE_EVENT, NIP29_KINDS.REMOVE_USER, NIP29_KINDS.DELETE_GROUP],
       '#h': groupIds,
     });
 
@@ -279,9 +279,9 @@ export class GroupChatService {
       },
     });
 
-    // Subscribe to moderation events (message deletions, user removals) for this group
+    // Subscribe to moderation events (message deletions, user removals, group deletions) for this group
     const moderationFilter = createNip29Filter({
-      kinds: [NIP29_KINDS.DELETE_EVENT, NIP29_KINDS.REMOVE_USER],
+      kinds: [NIP29_KINDS.DELETE_EVENT, NIP29_KINDS.REMOVE_USER, NIP29_KINDS.DELETE_GROUP],
       '#h': [groupId],
     });
 
@@ -455,6 +455,19 @@ export class GroupChatService {
           }
         }
       }
+    } else if (event.kind === NIP29_KINDS.DELETE_GROUP) {
+      // NIP-29 DELETE_GROUP (kind 9008) - group was deleted by admin
+      if (this.repository.isEventProcessed(event.id)) {
+        return;
+      }
+      this.repository.addProcessedEventId(event.id);
+
+      console.log(`🗑️ Group ${groupId} was deleted`);
+      const groupName = group.getDisplayName();
+      this.repository.removeGroup(groupId);
+      showToast(`Group "${groupName}" was deleted`, 'info', 0);
+      window.dispatchEvent(new CustomEvent('group-deleted', { detail: { groupId } }));
+      window.dispatchEvent(new CustomEvent('group-chat-updated'));
     }
   }
 
@@ -1183,11 +1196,43 @@ export class GroupChatService {
       });
 
       if (eventId) {
-        // The relay should respond with the group metadata
-        // For now, create a local group with the event ID as temporary ID
+        console.log(`✅ Group create request sent, waiting for relay confirmation...`);
+
+        // Wait a moment for the relay to process and return metadata
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        // Refresh available groups to get the newly created group with correct ID
+        const availableGroups = await this.fetchAvailableGroups();
+        const newGroup = availableGroups.find(
+          (g) => g.name === options.name &&
+          Math.abs(g.createdAt - Date.now()) < 10000 // Created within last 10 seconds
+        );
+
+        if (newGroup) {
+          // Save and subscribe to the new group
+          this.repository.saveGroup(newGroup);
+          this.subscribeToGroup(newGroup.id);
+
+          // Add ourselves as admin
+          const myPubkey = this.getMyPublicKey();
+          if (myPubkey) {
+            const member = new GroupMember({
+              pubkey: myPubkey,
+              groupId: newGroup.id,
+              role: GroupRole.ADMIN,
+              joinedAt: Date.now(),
+            });
+            this.repository.saveMember(member);
+          }
+
+          window.dispatchEvent(new CustomEvent('group-chat-updated'));
+          return newGroup;
+        }
+
+        // Fallback: create local group if relay didn't return metadata
         const group = new Group({
-          id: eventId.slice(0, 12), // Temporary ID until relay confirms
-          relayUrl: this.relayUrls[0], // Primary relay URL
+          id: eventId.slice(0, 12),
+          relayUrl: this.relayUrls[0],
           name: options.name,
           description: options.description,
           picture: options.picture,
@@ -1195,13 +1240,101 @@ export class GroupChatService {
           createdAt: Date.now(),
         });
 
-        console.log(`✅ Group create request sent`);
+        this.repository.saveGroup(group);
+        this.subscribeToGroup(group.id);
+        window.dispatchEvent(new CustomEvent('group-chat-updated'));
         return group;
       }
 
       return null;
     } catch (error) {
       console.error('Failed to create group', error);
+      return null;
+    }
+  }
+
+  /**
+   * Delete a group entirely (admin only).
+   * Sends a DELETE_GROUP (kind 9008) to the relay.
+   */
+  async deleteGroup(groupId: string): Promise<boolean> {
+    if (!this.client) await this.start();
+    if (!this.client) return false;
+
+    // Check if current user is an admin
+    if (!this.isCurrentUserAdmin(groupId)) {
+      console.error('❌ Cannot delete group: not an admin');
+      return false;
+    }
+
+    const group = this.repository.getGroup(groupId);
+    if (!group) {
+      console.error('❌ Group not found');
+      return false;
+    }
+
+    try {
+      const eventId = await this.client.createAndPublishEvent({
+        kind: NIP29_KINDS.DELETE_GROUP,
+        tags: [['h', groupId]],
+        content: '',
+      });
+
+      if (eventId) {
+        console.log(`🗑️ Delete request sent for group ${groupId}`);
+        const groupName = group.getDisplayName();
+        this.repository.removeGroup(groupId);
+        showToast(`Group "${groupName}" deleted`, 'success');
+        window.dispatchEvent(new CustomEvent('group-deleted', { detail: { groupId } }));
+        window.dispatchEvent(new CustomEvent('group-chat-updated'));
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error('Failed to delete group', error);
+      return false;
+    }
+  }
+
+  /**
+   * Create an invite code for a group (admin only).
+   * Sends a CREATE_INVITE (kind 9009) to the relay.
+   * Returns the invite code if successful.
+   */
+  async createInvite(groupId: string): Promise<string | null> {
+    if (!this.client) await this.start();
+    if (!this.client) return null;
+
+    // Check if current user is an admin
+    if (!this.isCurrentUserAdmin(groupId)) {
+      console.error('❌ Cannot create invite: not an admin');
+      return null;
+    }
+
+    try {
+      // Generate a random invite code
+      const inviteCode = Array.from(crypto.getRandomValues(new Uint8Array(8)))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+
+      const eventId = await this.client.createAndPublishEvent({
+        kind: NIP29_KINDS.CREATE_INVITE,
+        tags: [
+          ['h', groupId],
+          ['code', inviteCode],
+        ],
+        content: '',
+      });
+
+      if (eventId) {
+        console.log(`🎟️ Invite code created for group ${groupId}: ${inviteCode}`);
+        return inviteCode;
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Failed to create invite', error);
       return null;
     }
   }
