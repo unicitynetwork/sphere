@@ -389,6 +389,11 @@ export class GroupChatService {
   }
 
   private handleModerationEvent(event: Event): void {
+    // Deduplicate - important to prevent old REMOVE_USER events from kicking rejoined users
+    if (this.repository.isEventProcessed(event.id)) {
+      return;
+    }
+
     const groupId = this.getGroupIdFromEvent(event);
     if (!groupId) return;
 
@@ -396,6 +401,9 @@ export class GroupChatService {
     if (!this.repository.getGroup(groupId)) {
       return;
     }
+
+    // Mark as processed to prevent reprocessing on reconnect/rejoin
+    this.repository.addProcessedEventId(event.id);
 
     if (event.kind === NIP29_KINDS.DELETE_EVENT) {
       // NIP-29 DELETE_EVENT (kind 9005) has h tag for group and e tag for event to delete
