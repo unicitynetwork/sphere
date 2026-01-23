@@ -169,8 +169,17 @@ export class GroupChatService {
       this.reconnectAttempts = 0;
       console.log('✅ Connected to group chat relays');
 
-      // Subscribe to events for joined groups
-      await this.subscribeToJoinedGroups();
+      // Check if we have any local groups
+      const localGroups = this.repository.getGroups();
+
+      if (localGroups.length === 0) {
+        // No local groups - try to restore from relay (e.g., after wallet import)
+        console.log('📥 No local groups found, attempting to restore from relay...');
+        await this.restoreJoinedGroups();
+      } else {
+        // Subscribe to events for existing joined groups
+        await this.subscribeToJoinedGroups();
+      }
     } catch (error) {
       console.error('❌ Failed to connect to group chat relays', error);
       this.scheduleReconnect();
@@ -346,6 +355,107 @@ export class GroupChatService {
 
       this.repository.saveMember(member);
     }
+  }
+
+  // ==========================================
+  // Group Membership Restoration
+  // ==========================================
+
+  /**
+   * Restore joined groups after wallet import.
+   * Queries the relay for GROUP_MEMBERS events to find groups where
+   * the current user is a member, then saves them locally.
+   * This is called automatically on connect when no local groups exist.
+   */
+  async restoreJoinedGroups(): Promise<Group[]> {
+    if (!this.client) await this.start();
+    if (!this.client) return [];
+
+    const myPubkey = this.getMyPublicKey();
+    if (!myPubkey) {
+      console.log('❌ Cannot restore groups: no public key available');
+      return [];
+    }
+
+    console.log(`🔍 Searching for groups where ${myPubkey.slice(0, 8)}... is a member`);
+
+    return new Promise((resolve) => {
+      const groupIdsWithMembership = new Set<string>();
+      let membersComplete = false;
+
+      // Fetch all GROUP_MEMBERS events
+      const membersFilter = new Filter({ kinds: [NIP29_KINDS.GROUP_MEMBERS] });
+      this.client!.subscribe(membersFilter, {
+        onEvent: (event) => {
+          const groupId = this.getGroupIdFromMetadataEvent(event);
+          if (!groupId) return;
+
+          // Check if our pubkey is in the member list
+          const pTags = event.tags.filter((t) => t[0] === 'p');
+          const isMember = pTags.some((tag) => tag[1] === myPubkey);
+
+          if (isMember) {
+            groupIdsWithMembership.add(groupId);
+          }
+        },
+        onEndOfStoredEvents: async () => {
+          membersComplete = true;
+
+          if (groupIdsWithMembership.size === 0) {
+            console.log('ℹ️ No group memberships found on relay');
+            resolve([]);
+            return;
+          }
+
+          console.log(`📋 Found ${groupIdsWithMembership.size} groups to restore:`, Array.from(groupIdsWithMembership));
+
+          // Now fetch metadata for each group and save locally
+          const restoredGroups: Group[] = [];
+
+          for (const groupId of groupIdsWithMembership) {
+            try {
+              // Check if already saved locally (race condition protection)
+              if (this.repository.getGroup(groupId)) {
+                console.log(`ℹ️ Group ${groupId} already exists locally, skipping`);
+                continue;
+              }
+
+              const group = await this.fetchGroupMetadata(groupId);
+              if (group) {
+                this.repository.saveGroup(group);
+                restoredGroups.push(group);
+                console.log(`✅ Restored group: ${group.name} (${groupId})`);
+
+                // Fetch members and messages for the restored group
+                await Promise.all([
+                  this.fetchAndSaveMembers(groupId),
+                  this.fetchMessages(groupId),
+                ]);
+              }
+            } catch (err) {
+              console.error(`Failed to restore group ${groupId}:`, err);
+            }
+          }
+
+          // Subscribe to restored groups for new messages
+          if (restoredGroups.length > 0) {
+            await this.subscribeToJoinedGroups();
+            window.dispatchEvent(new CustomEvent('group-chat-updated'));
+          }
+
+          console.log(`✅ Restored ${restoredGroups.length} groups from relay`);
+          resolve(restoredGroups);
+        },
+      });
+
+      // Timeout after 15 seconds
+      setTimeout(() => {
+        if (!membersComplete) {
+          console.warn('⚠️ Group restoration timed out');
+          resolve([]);
+        }
+      }, 15000);
+    });
   }
 
   // ==========================================
