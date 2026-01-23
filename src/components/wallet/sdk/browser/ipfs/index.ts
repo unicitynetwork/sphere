@@ -1,16 +1,68 @@
 /**
  * Browser IPFS/IPNS Submodule
  *
- * Browser-specific IPFS storage and IPNS resolution:
- * - IPFS storage provider for token persistence
- * - IPNS client for key derivation, publishing, and resolution
- * - State persistence using localStorage
- * - Nametag fetching via IPNS
+ * Re-exports platform-independent modules from sdk/ipfs/
+ * plus browser-specific implementations:
+ * - localStorage state persistence
+ * - IPNS client with Helia
+ * - IPFS storage provider
+ * - Nametag fetcher
  */
 
-// Types
+// ==========================================
+// Re-export from sdk/ipfs/ (platform-independent)
+// ==========================================
+
+export {
+  // Crypto
+  IPNS_HKDF_INFO,
+  deriveEd25519KeyMaterial,
+  deriveIpnsNameFromPrivateKey,
+  deriveEd25519KeyPair,
+  derivePeerIdFromPrivateKey,
+  computeCidFromContent,
+  verifyCid,
+  // Cache
+  IpfsCache,
+  getIpfsCache,
+  type IpnsGatewayResult,
+  // Metrics
+  IpfsMetricsCollector,
+  getIpfsMetrics,
+  resetIpfsMetrics,
+  type IpfsOperation,
+  type IpfsSource,
+  type IpfsOperationMetric,
+  type IpfsMetricsSnapshot,
+  // HTTP Resolver
+  IpfsHttpResolver,
+  createIpfsHttpResolver,
+  type IpnsResolutionResult,
+  type IpfsHttpResolverConfig,
+  // Publisher
+  IpfsPublisher,
+  createIpfsPublisher,
+  type PublishResult,
+  type IpfsPublisherConfig,
+  // Sync Queue
+  SyncQueue,
+  createSyncQueue,
+  SyncPriority,
+  type SyncPriority as SyncPriorityType,
+  type SyncOptions,
+  type SyncResultBase,
+  type QueueStatus,
+  type SyncQueueConfig,
+  type SyncExecutor,
+  type ErrorResultFactory,
+} from '../../ipfs';
+
+// ==========================================
+// Browser-specific: Types
+// ==========================================
+
 export type {
-  IpnsGatewayResult,
+  IpnsGatewayResult as IpnsGatewayResultLegacy,
   IpnsProgressiveResult,
   IpnsPublishResult,
   IpfsStorageConfig,
@@ -21,7 +73,10 @@ export type {
 
 export { DEFAULT_IPFS_CONFIG } from './ipfs-types';
 
-// IPNS Client
+// ==========================================
+// Browser-specific: IPNS Client (Helia-based)
+// ==========================================
+
 export {
   deriveIpnsKeyPair,
   createSignedIpnsRecord,
@@ -35,22 +90,34 @@ export {
   uint8ArrayToBase64,
 } from './ipns-client';
 
-// IPFS Storage Provider
+// ==========================================
+// Browser-specific: Storage Provider
+// ==========================================
+
 export {
   IpfsStorageProvider,
   createIpfsStorageProvider,
 } from './ipfs-storage-provider';
 
-// Browser State Persistence
+// ==========================================
+// Browser-specific: State Persistence (localStorage)
+// ==========================================
+
 export {
   BrowserIpfsStatePersistence,
   createBrowserIpfsStatePersistence,
 } from './ipfs-state-persistence-browser';
 
-// Nametag Fetcher
+// ==========================================
+// Browser-specific: Nametag Fetcher
+// ==========================================
+
 export {
   fetchNametagFromIpns,
   fetchNametagsForKeys,
   type IpnsNametagResult,
   type IpnsNametagConfig,
 } from './ipns-nametag-fetcher';
+
+// Legacy alias for backwards compatibility
+export type { IpnsGatewayResult as IpnsCacheResult } from '../../ipfs';

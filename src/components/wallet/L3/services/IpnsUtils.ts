@@ -2,9 +2,7 @@
  * IPNS Name Derivation Utility
  *
  * This module re-exports from the SDK for backwards compatibility.
- * All implementation is now in ../../sdk/ipns/
- *
- * NOTE: hexToBytes/bytesToHex moved to sdk/core/utils - import from there
+ * All implementation is now in ../../sdk/ipfs/
  */
 
 export {
@@ -15,10 +13,10 @@ export {
   deriveIpnsNameFromPrivateKey,
   deriveEd25519KeyPair,
   derivePeerIdFromPrivateKey,
-} from "../../sdk/ipns";
+} from "../../sdk/ipfs";
 
 // Re-export hex utilities from core for backwards compatibility
 export { hexToBytes, bytesToHex } from "../../sdk/core/utils";
 
 // Re-export the main function under original name for backwards compatibility
-export { deriveIpnsNameFromPrivateKey as default } from "../../sdk/ipns";
+export { deriveIpnsNameFromPrivateKey as default } from "../../sdk/ipfs";

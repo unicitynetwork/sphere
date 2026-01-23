@@ -37,8 +37,8 @@ export { SyncPriority, type SyncOptions } from "./SyncQueue";
 import { getBootstrapPeers, getConfiguredCustomPeers, getBackendPeerId, getAllBackendGatewayUrls, IPNS_RESOLUTION_CONFIG, IPFS_CONFIG } from "../../../../config/ipfs.config";
 // Fast HTTP-based IPNS resolution and content fetching (target: <2s sync)
 import { getIpfsHttpResolver, computeCidFromContent } from "./IpfsHttpResolver";
-import { getIpfsMetrics, type IpfsMetricsSnapshot, type IpfsSource } from "./IpfsMetrics";
-import { getIpfsCache } from "./IpfsCache";
+import { getIpfsMetrics, type IpfsMetricsSnapshot, type IpfsSource } from "../../sdk/browser/ipfs";
+import { getIpfsCache } from "../../sdk/browser/ipfs";
 import { STORAGE_KEY_PREFIXES } from "../../../../config/storageKeys";
 import { isNametagCorrupted } from "../../../../utils/tokenValidation";
 

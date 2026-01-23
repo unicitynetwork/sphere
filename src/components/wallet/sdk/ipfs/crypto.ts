@@ -1,11 +1,11 @@
 /**
- * IPNS Name Derivation Utility (Platform-Independent)
+ * IPFS/IPNS Cryptographic Utilities (Platform-Independent)
  *
- * Derives IPNS names from secp256k1 private keys without requiring
- * full Helia/IPFS initialization. Uses the same derivation logic
- * as IpfsStorageService for compatibility.
+ * Pure cryptographic functions with no I/O:
+ * - IPNS name derivation from wallet private key
+ * - CID computation from content
  *
- * Derivation path:
+ * Derivation path for IPNS:
  *   secp256k1 privateKey (hex)
  *     → HKDF(sha256, key, info="ipfs-storage-ed25519-v1", 32 bytes)
  *     → Ed25519 key pair
@@ -17,6 +17,9 @@ import { hkdf } from "@noble/hashes/hkdf";
 import { sha256 } from "@noble/hashes/sha256";
 import { generateKeyPairFromSeed } from "@libp2p/crypto/keys";
 import { peerIdFromPrivateKey } from "@libp2p/peer-id";
+import { CID } from "multiformats/cid";
+import * as jsonCodec from "multiformats/codecs/json";
+import { sha256 as sha256Multiformats } from "multiformats/hashes/sha2";
 
 // Import hex utilities from core to avoid duplication
 import { hexToBytes } from "../core/utils";
@@ -32,7 +35,7 @@ import { hexToBytes } from "../core/utils";
 export const IPNS_HKDF_INFO = "ipfs-storage-ed25519-v1";
 
 // ==========================================
-// IPNS Derivation
+// IPNS Key Derivation
 // ==========================================
 
 /**
@@ -85,9 +88,7 @@ export async function deriveIpnsNameFromPrivateKey(
  * @param privateKeyHex - The secp256k1 private key in hex format
  * @returns Ed25519 key pair
  */
-export async function deriveEd25519KeyPair(
-  privateKeyHex: string
-) {
+export async function deriveEd25519KeyPair(privateKeyHex: string) {
   const derivedKey = deriveEd25519KeyMaterial(privateKeyHex);
   return generateKeyPairFromSeed("Ed25519", derivedKey);
 }
@@ -104,4 +105,43 @@ export async function derivePeerIdFromPrivateKey(
 ): Promise<ReturnType<typeof peerIdFromPrivateKey>> {
   const keyPair = await deriveEd25519KeyPair(privateKeyHex);
   return peerIdFromPrivateKey(keyPair);
+}
+
+// ==========================================
+// CID Computation
+// ==========================================
+
+/**
+ * Compute CID from content for integrity verification.
+ * Uses the same approach as @helia/json:
+ * - Encode with multiformats/codecs/json (JSON.stringify as bytes)
+ * - Hash with SHA-256
+ * - Create CIDv1 with json codec (0x0200)
+ *
+ * @param content - Any JSON-serializable content
+ * @returns CID string (e.g., "bafyrei...")
+ */
+export async function computeCidFromContent(content: unknown): Promise<string> {
+  // Encode content as JSON (same as @helia/json uses)
+  const encoded = jsonCodec.encode(content);
+  // Hash with SHA-256 (same as @helia/json default)
+  const hash = await sha256Multiformats.digest(encoded);
+  // Create CIDv1 with json codec (0x0200) - same as @helia/json
+  const computedCid = CID.createV1(jsonCodec.code, hash);
+  return computedCid.toString();
+}
+
+/**
+ * Verify that content matches expected CID
+ *
+ * @param content - Content to verify
+ * @param expectedCid - Expected CID string
+ * @returns true if content hashes to the expected CID
+ */
+export async function verifyCid(
+  content: unknown,
+  expectedCid: string
+): Promise<boolean> {
+  const computedCid = await computeCidFromContent(content);
+  return computedCid === expectedCid;
 }

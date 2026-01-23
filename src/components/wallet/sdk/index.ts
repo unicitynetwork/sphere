@@ -644,7 +644,7 @@ export {
   deriveIpnsNameFromPrivateKey,
   deriveEd25519KeyPair,
   derivePeerIdFromPrivateKey,
-} from './ipns';
+} from './ipfs';
 
 // ============================================================================
 // TYPES MODULE
