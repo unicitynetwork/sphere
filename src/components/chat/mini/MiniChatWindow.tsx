@@ -101,7 +101,7 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
         width: WINDOW_WIDTH,
         height: WINDOW_HEIGHT,
       }}
-      className="fixed bottom-4 z-[9999] bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-2xl flex flex-col overflow-hidden"
+      className="fixed bottom-4 z-100000 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-2xl flex flex-col overflow-hidden"
     >
       <div className="p-3 border-b border-neutral-200 dark:border-neutral-700 flex items-center gap-3 bg-linear-to-r from-white to-neutral-50 dark:from-neutral-900 dark:to-neutral-800 shrink-0">
         <div className="w-9 h-9 rounded-lg bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center text-white font-medium text-sm shadow-md shrink-0">

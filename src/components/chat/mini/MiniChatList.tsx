@@ -75,7 +75,7 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
       animate={{ opacity: 1, x: 0, scale: 1 }}
       exit={{ opacity: 0, x: -20, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="fixed left-4 bottom-20 z-[9999] w-80 max-h-[70vh] bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-700 shadow-2xl overflow-hidden flex flex-col"
+      className="fixed left-4 bottom-20 z-100000 w-80 max-h-[70vh] bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-700 shadow-2xl overflow-hidden flex flex-col"
     >
       <div className="p-4 border-b border-neutral-200 dark:border-neutral-700 flex items-center justify-between shrink-0">
         <h3 className="text-lg font-semibold text-neutral-900 dark:text-white">Messages</h3>
