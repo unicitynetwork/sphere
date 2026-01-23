@@ -246,6 +246,19 @@ export class GroupChatService {
         console.log('End of stored group metadata');
       },
     });
+
+    // Subscribe to moderation events (message deletions)
+    const moderationFilter = createNip29Filter({
+      kinds: [NIP29_KINDS.DELETE_EVENT],
+      '#h': groupIds,
+    });
+
+    this.client.subscribe(moderationFilter, {
+      onEvent: (event) => this.handleDeleteEvent(event),
+      onEndOfStoredEvents: () => {
+        console.log('End of stored moderation events');
+      },
+    });
   }
 
   subscribeToGroup(groupId: string): void {
@@ -263,6 +276,19 @@ export class GroupChatService {
       onEvent: (event) => this.handleGroupEvent(event),
       onEndOfStoredEvents: () => {
         console.log(`End of stored messages for group ${groupId}`);
+      },
+    });
+
+    // Subscribe to moderation events (message deletions) for this group
+    const moderationFilter = createNip29Filter({
+      kinds: [NIP29_KINDS.DELETE_EVENT],
+      '#h': [groupId],
+    });
+
+    this.client.subscribe(moderationFilter, {
+      onEvent: (event) => this.handleDeleteEvent(event),
+      onEndOfStoredEvents: () => {
+        console.log(`End of stored moderation events for group ${groupId}`);
       },
     });
   }
@@ -361,6 +387,30 @@ export class GroupChatService {
       // Update admin list - mark these members as admins
       this.updateAdminsFromEvent(groupId, event);
     }
+  }
+
+  private handleDeleteEvent(event: Event): void {
+    // NIP-29 DELETE_EVENT (kind 9005) has h tag for group and e tag for event to delete
+    const groupId = this.getGroupIdFromEvent(event);
+    if (!groupId) return;
+
+    // Only process if we're a member of this group
+    if (!this.repository.getGroup(groupId)) {
+      return;
+    }
+
+    // Get the event ID(s) to delete from e tags
+    const eTags = event.tags.filter((t) => t[0] === 'e');
+    for (const tag of eTags) {
+      const messageId = tag[1];
+      if (messageId) {
+        console.log(`🗑️ Received delete event for message ${messageId} in group ${groupId}`);
+        this.repository.deleteMessage(messageId);
+      }
+    }
+
+    // Notify UI of the deletion
+    window.dispatchEvent(new CustomEvent('group-chat-updated'));
   }
 
   private updateMembersFromEvent(groupId: string, event: Event): void {
