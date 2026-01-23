@@ -17,7 +17,6 @@ import {
 import { GROUP_CHAT_CONFIG } from '../../../config/groupChat.config';
 import { Buffer } from 'buffer';
 import { NametagService } from '../../wallet/L3/services/NametagService';
-import { NostrService } from '../../wallet/L3/services/NostrService';
 
 /**
  * Extended filter interface for NIP-29 group queries.
