@@ -8,9 +8,19 @@ interface GroupMessageListProps {
   messages: GroupMessage[];
   isLoading: boolean;
   myPubkey: string | null;
+  canDeleteMessages?: boolean;
+  onDeleteMessage?: (messageId: string) => Promise<boolean>;
+  isDeletingMessage?: boolean;
 }
 
-export function GroupMessageList({ messages, isLoading, myPubkey }: GroupMessageListProps) {
+export function GroupMessageList({
+  messages,
+  isLoading,
+  myPubkey,
+  canDeleteMessages = false,
+  onDeleteMessage,
+  isDeletingMessage = false,
+}: GroupMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when messages change
@@ -67,6 +77,9 @@ export function GroupMessageList({ messages, isLoading, myPubkey }: GroupMessage
               message={message}
               isOwnMessage={message.senderPubkey === myPubkey}
               delay={groupIndex === groupedMessages.length - 1 ? messageIndex * 0.05 : 0}
+              canDelete={canDeleteMessages}
+              onDelete={onDeleteMessage}
+              isDeleting={isDeletingMessage}
             />
           ))}
         </div>

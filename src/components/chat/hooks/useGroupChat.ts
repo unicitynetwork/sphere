@@ -53,6 +53,17 @@ export interface UseGroupChatReturn {
 
   // Connection
   isConnected: boolean;
+
+  // Moderation
+  isCurrentUserAdmin: boolean;
+  isCurrentUserModerator: boolean;
+  deleteMessage: (messageId: string) => Promise<boolean>;
+  kickUser: (userPubkey: string, reason?: string) => Promise<boolean>;
+  isDeleting: boolean;
+  isKicking: boolean;
+
+  // Nametag resolution
+  resolveMemberNametags: () => Promise<void>;
 }
 
 export const useGroupChat = (): UseGroupChatReturn => {
@@ -277,6 +288,73 @@ export const useGroupChat = (): UseGroupChatReturn => {
     );
   }, [groupsQuery.data, searchQuery]);
 
+  // Moderation: Check if current user is admin/moderator
+  const isCurrentUserAdmin = useMemo(() => {
+    if (!selectedGroup || !groupChatService) return false;
+    return groupChatService.isCurrentUserAdmin(selectedGroup.id);
+  }, [selectedGroup, groupChatService, membersQuery.data]);
+
+  const isCurrentUserModerator = useMemo(() => {
+    if (!selectedGroup || !groupChatService) return false;
+    return groupChatService.isCurrentUserModerator(selectedGroup.id);
+  }, [selectedGroup, groupChatService, membersQuery.data]);
+
+  // Delete message mutation
+  const deleteMessageMutation = useMutation({
+    mutationFn: async (messageId: string) => {
+      if (!selectedGroup) throw new Error('No group selected');
+      if (!groupChatService) throw new Error('Group chat service not available');
+      return groupChatService.deleteMessage(selectedGroup.id, messageId);
+    },
+    onSuccess: () => {
+      if (selectedGroup) {
+        queryClient.invalidateQueries({
+          queryKey: QUERY_KEYS.MESSAGES(selectedGroup.id),
+        });
+      }
+    },
+  });
+
+  // Kick user mutation
+  const kickUserMutation = useMutation({
+    mutationFn: async ({ userPubkey, reason }: { userPubkey: string; reason?: string }) => {
+      if (!selectedGroup) throw new Error('No group selected');
+      if (!groupChatService) throw new Error('Group chat service not available');
+      return groupChatService.kickUser(selectedGroup.id, userPubkey, reason);
+    },
+    onSuccess: () => {
+      if (selectedGroup) {
+        queryClient.invalidateQueries({
+          queryKey: QUERY_KEYS.MEMBERS(selectedGroup.id),
+        });
+      }
+    },
+  });
+
+  // Delete message
+  const deleteMessage = useCallback(
+    async (messageId: string): Promise<boolean> => {
+      return deleteMessageMutation.mutateAsync(messageId);
+    },
+    [deleteMessageMutation]
+  );
+
+  // Kick user
+  const kickUser = useCallback(
+    async (userPubkey: string, reason?: string): Promise<boolean> => {
+      return kickUserMutation.mutateAsync({ userPubkey, reason });
+    },
+    [kickUserMutation]
+  );
+
+  // Resolve member nametags
+  const resolveMemberNametags = useCallback(async () => {
+    if (!selectedGroup || !groupChatService) return;
+    await groupChatService.resolveMemberNametags(selectedGroup.id);
+    // Invalidate members query to refresh the UI
+    queryClient.invalidateQueries({ queryKey: QUERY_KEYS.MEMBERS(selectedGroup.id) });
+  }, [selectedGroup, groupChatService, queryClient]);
+
   return {
     // Groups
     groups: groupsQuery.data || [],
@@ -316,5 +394,16 @@ export const useGroupChat = (): UseGroupChatReturn => {
 
     // Connection
     isConnected,
+
+    // Moderation
+    isCurrentUserAdmin,
+    isCurrentUserModerator,
+    deleteMessage,
+    kickUser,
+    isDeleting: deleteMessageMutation.isPending,
+    isKicking: kickUserMutation.isPending,
+
+    // Nametag resolution
+    resolveMemberNametags,
   };
 };

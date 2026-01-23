@@ -17,6 +17,7 @@ import {
 import { GROUP_CHAT_CONFIG } from '../../../config/groupChat.config';
 import { Buffer } from 'buffer';
 import { NametagService } from '../../wallet/L3/services/NametagService';
+import { NostrService } from '../../wallet/L3/services/NostrService';
 
 /**
  * Extended filter interface for NIP-29 group queries.
@@ -308,6 +309,15 @@ export class GroupChatService {
     this.repository.saveMessage(message);
     this.repository.addProcessedEventId(event.id);
 
+    // Update member's nametag if we learned it from this message
+    if (senderNametag) {
+      const member = this.repository.getMember(groupId, event.pubkey);
+      if (member && member.nametag !== senderNametag) {
+        member.nametag = senderNametag;
+        this.repository.saveMember(member);
+      }
+    }
+
     // Notify listeners
     this.notifyMessageListeners(message);
     window.dispatchEvent(new CustomEvent('group-message-received', { detail: message }));
@@ -335,6 +345,9 @@ export class GroupChatService {
     } else if (event.kind === NIP29_KINDS.GROUP_MEMBERS) {
       // Update member list
       this.updateMembersFromEvent(groupId, event);
+    } else if (event.kind === NIP29_KINDS.GROUP_ADMINS) {
+      // Update admin list - mark these members as admins
+      this.updateAdminsFromEvent(groupId, event);
     }
   }
 
@@ -354,6 +367,35 @@ export class GroupChatService {
       });
 
       this.repository.saveMember(member);
+    }
+  }
+
+  private updateAdminsFromEvent(groupId: string, event: Event): void {
+    // NIP-29 GROUP_ADMINS event has p tags with admin pubkeys
+    const pTags = event.tags.filter((t) => t[0] === 'p');
+
+    console.log(`👑 Updating admins for group ${groupId}: ${pTags.length} admins`);
+
+    for (const tag of pTags) {
+      const pubkey = tag[1];
+
+      // Check if member already exists
+      const existingMember = this.repository.getMember(groupId, pubkey);
+
+      if (existingMember) {
+        // Update existing member to admin role
+        existingMember.role = GroupRole.ADMIN;
+        this.repository.saveMember(existingMember);
+      } else {
+        // Create new member with admin role
+        const member = new GroupMember({
+          pubkey,
+          groupId,
+          role: GroupRole.ADMIN,
+          joinedAt: event.created_at * 1000,
+        });
+        this.repository.saveMember(member);
+      }
     }
   }
 
@@ -597,15 +639,71 @@ export class GroupChatService {
   }
 
   /**
-   * Fetch group members and save them to the repository.
+   * Fetch group admins from the relay.
+   * Returns array of pubkeys that are admins for the group.
+   */
+  async fetchGroupAdmins(groupId: string): Promise<string[]> {
+    if (!this.client) await this.start();
+    if (!this.client) return [];
+
+    return new Promise((resolve) => {
+      const adminPubkeys: string[] = [];
+      const filter = new Filter({
+        kinds: [NIP29_KINDS.GROUP_ADMINS],
+        '#d': [groupId],
+      });
+
+      this.client!.subscribe(filter, {
+        onEvent: (event) => {
+          const pTags = event.tags.filter((t) => t[0] === 'p');
+          for (const tag of pTags) {
+            if (!adminPubkeys.includes(tag[1])) {
+              adminPubkeys.push(tag[1]);
+            }
+          }
+        },
+        onEndOfStoredEvents: () => {
+          resolve(adminPubkeys);
+        },
+      });
+
+      setTimeout(() => resolve(adminPubkeys), 5000);
+    });
+  }
+
+  /**
+   * Fetch group members and admins, then save them to the repository.
    * This updates the group's memberCount via repository.saveMember().
    */
   private async fetchAndSaveMembers(groupId: string): Promise<void> {
-    const members = await this.fetchGroupMembers(groupId);
-    console.log(`📋 Fetched ${members.length} members for group ${groupId}`);
+    // Fetch members and admins in parallel
+    const [members, adminPubkeys] = await Promise.all([
+      this.fetchGroupMembers(groupId),
+      this.fetchGroupAdmins(groupId),
+    ]);
 
+    console.log(`📋 Fetched ${members.length} members and ${adminPubkeys.length} admins for group ${groupId}`);
+
+    // Save members, marking admins appropriately
     for (const member of members) {
+      if (adminPubkeys.includes(member.pubkey)) {
+        member.role = GroupRole.ADMIN;
+      }
       this.repository.saveMember(member);
+    }
+
+    // Save any admins that weren't in the member list
+    for (const pubkey of adminPubkeys) {
+      const existingMember = this.repository.getMember(groupId, pubkey);
+      if (!existingMember) {
+        const adminMember = new GroupMember({
+          pubkey,
+          groupId,
+          role: GroupRole.ADMIN,
+          joinedAt: Date.now(),
+        });
+        this.repository.saveMember(adminMember);
+      }
     }
   }
 
@@ -825,6 +923,15 @@ export class GroupChatService {
           messages.push(message);
           this.repository.saveMessage(message);
           this.repository.addProcessedEventId(event.id);
+
+          // Update member's nametag if we learned it from this message
+          if (senderNametag) {
+            const member = this.repository.getMember(groupId, event.pubkey);
+            if (member && member.nametag !== senderNametag) {
+              member.nametag = senderNametag;
+              this.repository.saveMember(member);
+            }
+          }
         },
         onEndOfStoredEvents: () => {
           console.log(`Fetched ${messages.length} messages for group ${groupId}`);
@@ -837,8 +944,101 @@ export class GroupChatService {
   }
 
   // ==========================================
-  // Admin Operations (Future)
+  // Admin/Moderation Operations
   // ==========================================
+
+  /**
+   * Delete a message from the group (admin/moderator only).
+   * Sends a DELETE_EVENT (kind 9005) to the relay.
+   */
+  async deleteMessage(groupId: string, messageId: string): Promise<boolean> {
+    if (!this.client) await this.start();
+    if (!this.client) return false;
+
+    // Check if current user is a moderator
+    if (!this.isCurrentUserModerator(groupId)) {
+      console.error('❌ Cannot delete message: not a moderator');
+      return false;
+    }
+
+    try {
+      // NIP-29: DELETE_EVENT (kind 9005) with h tag for group and e tag for event to delete
+      const eventId = await this.client.createAndPublishEvent({
+        kind: NIP29_KINDS.DELETE_EVENT,
+        tags: [
+          ['h', groupId],
+          ['e', messageId],
+        ],
+        content: '',
+      });
+
+      if (eventId) {
+        console.log(`🗑️ Delete request sent for message ${messageId} in group ${groupId}`);
+
+        // Remove from local storage
+        this.repository.deleteMessage(messageId);
+        window.dispatchEvent(new CustomEvent('group-chat-updated'));
+
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error('Failed to delete message', error);
+      return false;
+    }
+  }
+
+  /**
+   * Kick/remove a user from the group (admin only).
+   * Sends a REMOVE_USER (kind 9001) to the relay.
+   */
+  async kickUser(groupId: string, userPubkey: string, reason?: string): Promise<boolean> {
+    if (!this.client) await this.start();
+    if (!this.client) return false;
+
+    // Check if current user is an admin
+    if (!this.isCurrentUserAdmin(groupId)) {
+      console.error('❌ Cannot kick user: not an admin');
+      return false;
+    }
+
+    // Prevent kicking yourself
+    const myPubkey = this.getMyPublicKey();
+    if (myPubkey === userPubkey) {
+      console.error('❌ Cannot kick yourself');
+      return false;
+    }
+
+    try {
+      // NIP-29: REMOVE_USER (kind 9001) with h tag for group and p tag for user
+      const tags: string[][] = [
+        ['h', groupId],
+        ['p', userPubkey],
+      ];
+
+      const eventId = await this.client.createAndPublishEvent({
+        kind: NIP29_KINDS.REMOVE_USER,
+        tags,
+        content: reason || '',
+      });
+
+      if (eventId) {
+        console.log(`👢 Kick request sent for user ${userPubkey.slice(0, 8)}... from group ${groupId}`);
+
+        // Remove from local storage
+        this.repository.removeMember(groupId, userPubkey);
+        window.dispatchEvent(new CustomEvent('group-chat-updated'));
+
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error('Failed to kick user', error);
+      return false;
+    }
+  }
 
   async createGroup(options: CreateGroupOptions): Promise<Group | null> {
     if (!this.client) await this.start();
@@ -1017,5 +1217,49 @@ export class GroupChatService {
 
   getRelayUrls(): string[] {
     return this.relayUrls;
+  }
+
+  /**
+   * Check if the current user is an admin of the specified group.
+   */
+  isCurrentUserAdmin(groupId: string): boolean {
+    const myPubkey = this.getMyPublicKey();
+    if (!myPubkey) return false;
+
+    const member = this.repository.getMember(groupId, myPubkey);
+    return member?.isAdmin() || false;
+  }
+
+  /**
+   * Check if the current user is a moderator (admin or moderator) of the specified group.
+   */
+  isCurrentUserModerator(groupId: string): boolean {
+    const myPubkey = this.getMyPublicKey();
+    if (!myPubkey) return false;
+
+    const member = this.repository.getMember(groupId, myPubkey);
+    return member?.isModerator() || false;
+  }
+
+  /**
+   * Get the current user's role in the specified group.
+   */
+  getCurrentUserRole(groupId: string): GroupRole | null {
+    const myPubkey = this.getMyPublicKey();
+    if (!myPubkey) return null;
+
+    const member = this.repository.getMember(groupId, myPubkey);
+    return member?.role || null;
+  }
+
+  /**
+   * Resolve nametags for members who don't have one.
+   * Nametags are learned from message content when members send messages.
+   * Reverse lookup (pubkey → nametag) is not possible due to privacy design.
+   */
+  async resolveMemberNametags(_groupId: string): Promise<void> {
+    // Nametags are resolved from message content when members send messages.
+    // Members who haven't sent messages will show their pubkey only.
+    // No-op since reverse lookup is not supported.
   }
 }

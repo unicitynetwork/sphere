@@ -10,6 +10,7 @@ import { GroupList } from './GroupList';
 import { GroupMessageList } from './GroupMessageList';
 import { DMChatInput } from '../dm/DMChatInput';
 import { JoinGroupModal } from './JoinGroupModal';
+import { MemberListModal } from './MemberListModal';
 import { agents } from '../../../config/activities';
 import { setMentionClickHandler } from '../../../utils/mentionHandler';
 import type { ChatModeChangeHandler } from '../../../types';
@@ -40,12 +41,25 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     setSearchQuery,
     totalUnreadCount,
     isConnected,
+    // Moderation
+    isCurrentUserAdmin,
+    isCurrentUserModerator,
+    deleteMessage,
+    kickUser,
+    isDeleting,
+    isKicking,
+    // Members
+    members,
+    isLoadingMembers,
+    // Nametag resolution
+    resolveMemberNametags,
   } = useGroupChat();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showJoinGroup, setShowJoinGroup] = useState(false);
   const [showAgentPicker, setShowAgentPicker] = useState(false);
+  const [showMemberList, setShowMemberList] = useState(false);
   const [inviteLinkFromUrl, setInviteLinkFromUrl] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -268,10 +282,13 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
                       {selectedGroup.getDisplayName()}
                     </h3>
                     {selectedGroup.memberCount !== undefined && (
-                      <p className="text-sm text-neutral-500 dark:text-neutral-400 flex items-center gap-1">
+                      <button
+                        onClick={() => setShowMemberList(true)}
+                        className="text-sm text-neutral-500 dark:text-neutral-400 flex items-center gap-1 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
+                      >
                         <Users className="w-3 h-3" />
                         {selectedGroup.memberCount} members
-                      </p>
+                      </button>
                     )}
                   </div>
                 </>
@@ -291,20 +308,36 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
             </div>
           </div>
 
-          {/* Fullscreen toggle */}
-          <motion.button
-            onClick={() => setFullscreen(!isFullscreen)}
-            className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-          >
-            {isFullscreen ? (
-              <Minimize2 className="w-5 h-5" />
-            ) : (
-              <Maximize2 className="w-5 h-5" />
+          <div className="flex items-center gap-2">
+            {/* Member count button (visible in fullscreen when group selected) */}
+            {isFullscreen && selectedGroup && selectedGroup.memberCount !== undefined && (
+              <motion.button
+                onClick={() => setShowMemberList(true)}
+                className="px-3 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50 flex items-center gap-2 text-sm"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                title="View members"
+              >
+                <Users className="w-4 h-4" />
+                {selectedGroup.memberCount}
+              </motion.button>
             )}
-          </motion.button>
+
+            {/* Fullscreen toggle */}
+            <motion.button
+              onClick={() => setFullscreen(!isFullscreen)}
+              className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            >
+              {isFullscreen ? (
+                <Minimize2 className="w-5 h-5" />
+              ) : (
+                <Maximize2 className="w-5 h-5" />
+              )}
+            </motion.button>
+          </div>
         </div>
 
         {/* Messages */}
@@ -313,6 +346,9 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
             messages={messages}
             isLoading={isLoadingMessages}
             myPubkey={myPubkey}
+            canDeleteMessages={isCurrentUserModerator}
+            onDeleteMessage={deleteMessage}
+            isDeletingMessage={isDeleting}
           />
         ) : (
           <div className="flex flex-col items-center justify-center text-center p-8 min-h-0">
@@ -365,6 +401,19 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
         onRefresh={refreshAvailableGroups}
         onJoin={handleJoinGroup}
         initialInviteLink={inviteLinkFromUrl || undefined}
+      />
+
+      {/* Member List Modal */}
+      <MemberListModal
+        isOpen={showMemberList}
+        onClose={() => setShowMemberList(false)}
+        members={members}
+        isLoading={isLoadingMembers}
+        isCurrentUserAdmin={isCurrentUserAdmin}
+        myPubkey={myPubkey}
+        onKickUser={kickUser}
+        isKicking={isKicking}
+        onResolveMemberNametags={resolveMemberNametags}
       />
     </>
   );
