@@ -438,13 +438,20 @@ export class GroupChatService {
 
     for (const tag of pTags) {
       const pubkey = tag[1];
-      const role = tag[3] as GroupRole || GroupRole.MEMBER;
+      const roleFromTag = tag[3] as GroupRole | undefined;
+
+      // Check if member already exists to preserve admin status
+      const existingMember = this.repository.getMember(groupId, pubkey);
+
+      // Use role from tag if provided, otherwise preserve existing role, otherwise default to MEMBER
+      const role = roleFromTag || existingMember?.role || GroupRole.MEMBER;
 
       const member = new GroupMember({
         pubkey,
         groupId,
         role,
-        joinedAt: event.created_at * 1000,
+        nametag: existingMember?.nametag, // Preserve existing nametag
+        joinedAt: existingMember?.joinedAt || event.created_at * 1000,
       });
 
       this.repository.saveMember(member);
