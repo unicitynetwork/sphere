@@ -389,11 +389,6 @@ export class GroupChatService {
   }
 
   private handleModerationEvent(event: Event): void {
-    // Deduplicate - important to prevent old REMOVE_USER events from kicking rejoined users
-    if (this.repository.isEventProcessed(event.id)) {
-      return;
-    }
-
     const groupId = this.getGroupIdFromEvent(event);
     if (!groupId) return;
 
@@ -403,28 +398,39 @@ export class GroupChatService {
       return;
     }
 
-    // Mark as processed to prevent reprocessing on reconnect/rejoin
-    this.repository.addProcessedEventId(event.id);
-
     if (event.kind === NIP29_KINDS.DELETE_EVENT) {
       // NIP-29 DELETE_EVENT (kind 9005) has h tag for group and e tag for event to delete
+      // Always process DELETE_EVENT - deletion is idempotent and we need to ensure
+      // deleted messages stay deleted even after rejoin
       const eTags = event.tags.filter((t) => t[0] === 'e');
       for (const tag of eTags) {
         const messageId = tag[1];
         if (messageId) {
-          console.log(`🗑️ Received delete event for message ${messageId} in group ${groupId}`);
-          this.repository.deleteMessage(messageId);
+          const message = this.repository.getMessage(messageId);
+          if (message) {
+            console.log(`🗑️ Received delete event for message ${messageId} in group ${groupId}`);
+            this.repository.deleteMessage(messageId);
+          }
         }
       }
       window.dispatchEvent(new CustomEvent('group-chat-updated'));
     } else if (event.kind === NIP29_KINDS.REMOVE_USER) {
       // NIP-29 REMOVE_USER (kind 9001) has h tag for group and p tag for removed user
+      // Deduplicate REMOVE_USER to prevent old events from kicking rejoined users
+      if (this.repository.isEventProcessed(event.id)) {
+        return;
+      }
+
       // Ignore REMOVE_USER events that happened before we joined (from history replay)
       const eventTimestampMs = event.created_at * 1000;
       if (eventTimestampMs < group.localJoinedAt) {
         console.log(`⏭️ Ignoring old REMOVE_USER event from before we joined group ${groupId}`);
+        this.repository.addProcessedEventId(event.id);
         return;
       }
+
+      // Mark as processed to prevent reprocessing on reconnect/rejoin
+      this.repository.addProcessedEventId(event.id);
 
       const pTags = event.tags.filter((t) => t[0] === 'p');
       const myPubkey = this.getMyPublicKey();
