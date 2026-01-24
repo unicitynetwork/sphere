@@ -325,6 +325,9 @@ export class IpfsHttpResolver {
         `📦 IPNS resolved: ${ipnsName.slice(0, 16)}... -> seq=${sequence}, cid=${cid.slice(0, 16)}... (routing: ${routingLatencyMs.toFixed(0)}ms, total: ${latencyMs.toFixed(0)}ms)`
       );
 
+      // Auto-subscribe to WebSocket updates for this IPNS name
+      this.ensureSubscription(ipnsName);
+
       return {
         success: true,
         cid,
@@ -543,6 +546,23 @@ export class IpfsHttpResolver {
   }
 
   /**
+   * Ensure WebSocket subscription exists for an IPNS name.
+   * Called automatically after successful resolution.
+   */
+  private ensureSubscription(ipnsName: string): void {
+    if (!ipnsName || this.activeSubscriptions.has(ipnsName)) {
+      return;
+    }
+
+    console.log(`[IPNS-WS] Auto-subscribing to updates for ${ipnsName.slice(0, 16)}...`);
+
+    const unsubscribe = this.subscriptionClient.subscribe(ipnsName, (update) =>
+      this.handleWebSocketUpdate(update)
+    );
+    this.activeSubscriptions.set(ipnsName, unsubscribe);
+  }
+
+  /**
    * Subscribe to IPNS updates via WebSocket.
    * When the backend detects a newer IPNS record, it pushes the update.
    *
@@ -596,7 +616,7 @@ export class IpfsHttpResolver {
    */
   private handleWebSocketUpdate(update: IpnsUpdate): void {
     console.log(
-      `[IpfsHttpResolver] Received WebSocket update: ${update.name.slice(0, 16)}... seq=${update.sequence}`
+      `[IPNS-WS] Received update: ${update.name.slice(0, 16)}... seq=${update.sequence}`
     );
 
     // Update cache with new sequence/CID
@@ -611,7 +631,18 @@ export class IpfsHttpResolver {
           sequence: BigInt(update.sequence),
         });
         console.log(
-          `[IpfsHttpResolver] Cache updated via WebSocket: seq ${currentSeq} -> ${update.sequence}`
+          `[IPNS-WS] Cache updated: seq ${currentSeq} -> ${update.sequence}`
+        );
+
+        // Dispatch event for IpfsStorageService to trigger sync
+        window.dispatchEvent(
+          new CustomEvent("ipns-remote-update", {
+            detail: {
+              ipnsName: update.name,
+              sequence: update.sequence,
+              cid: update.cid,
+            },
+          })
         );
       }
     }
@@ -623,7 +654,7 @@ export class IpfsHttpResolver {
         try {
           callback(update);
         } catch (e) {
-          console.warn("[IpfsHttpResolver] Update callback error:", e);
+          console.warn("[IPNS-WS] Update callback error:", e);
         }
       }
     }

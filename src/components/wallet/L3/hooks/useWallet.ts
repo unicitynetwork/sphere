@@ -328,6 +328,44 @@ export const useWallet = () => {
     };
   }, [queryClient]);
 
+  // Listen for IPNS WebSocket updates from remote devices
+  // When backend pushes a new IPNS sequence, trigger inventory sync
+  useEffect(() => {
+    let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const SYNC_DEBOUNCE_MS = 500; // Coalesce rapid updates
+
+    const handleIpnsRemoteUpdate = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      console.log(`[IPNS-WS] Remote update detected: seq=${detail?.sequence}, triggering sync...`);
+
+      // Debounce to avoid multiple syncs for rapid updates
+      if (syncDebounceTimer) {
+        clearTimeout(syncDebounceTimer);
+      }
+
+      syncDebounceTimer = setTimeout(() => {
+        const identity = identityQuery.data;
+        if (identity?.address && identity?.publicKey && identity?.ipnsName) {
+          console.log('[IPNS-WS] Triggering inventory sync from WebSocket update');
+          inventorySync({
+            address: identity.address,
+            publicKey: identity.publicKey,
+            ipnsName: identity.ipnsName,
+          }).catch(err => {
+            console.error('[IPNS-WS] Inventory sync failed:', err);
+          });
+        }
+      }, SYNC_DEBOUNCE_MS);
+    };
+
+    window.addEventListener('ipns-remote-update', handleIpnsRemoteUpdate);
+
+    return () => {
+      window.removeEventListener('ipns-remote-update', handleIpnsRemoteUpdate);
+      if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
+    };
+  }, [identityQuery.data]);
+
   // Ensure registry is loaded before aggregating assets
   const registryQuery = useQuery({
     queryKey: KEYS.REGISTRY,
