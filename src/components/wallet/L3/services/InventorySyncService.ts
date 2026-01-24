@@ -47,7 +47,8 @@ import {
   fetchProofByRequestId,
   isInclusionProofNotExclusion,
   submitMintCommitmentToAggregator,
-  waitForMintProofWithSDK
+  waitForMintProofWithSDK,
+  tryRecoverFromOutbox
 } from '../../../../utils/devTools';
 
 // Nametag token type identifier (sha256 of "nametag-type")
@@ -1956,6 +1957,114 @@ async function step8_6_recoverNametagInvalidatedTokens(ctx: SyncContext): Promis
           }
         } else {
           console.warn(`  ❌ Token ${tokenIdShort}... cannot reconstruct commitment: ${result.error}`);
+          stillInvalid++;
+          continue;
+        }
+      }
+
+      // Step 1.5: Refresh transaction inclusion proofs (if any)
+      // IMPORTANT: requestId is derived from the STATE being spent, NOT from transactionHash!
+      // - requestId = RequestId.create(ownerPublicKey, stateHashBeingSpent)
+      // - transactionHash is the VALUE stored in the SMT leaf (the tx data hash)
+      // For each transaction at index N:
+      //   - If N == 0: state being spent = genesis state hash
+      //   - If N > 0: state being spent = previous transaction's newStateHash
+      if (tokenClone.transactions && Array.isArray(tokenClone.transactions) && tokenClone.transactions.length > 0) {
+        console.log(`  🔄 Token ${tokenIdShort}... has ${tokenClone.transactions.length} transaction(s), checking proofs`);
+
+        // Import SDK types for requestId calculation
+        const { RequestId } = await import("@unicitylabs/state-transition-sdk/lib/api/RequestId");
+        const { DataHash } = await import("@unicitylabs/state-transition-sdk/lib/hash/DataHash");
+
+        let allTxProofsValid = true;
+
+        for (let txIndex = 0; txIndex < tokenClone.transactions.length; txIndex++) {
+          const tx = tokenClone.transactions[txIndex];
+          const txLabel = `tx #${txIndex}`;
+
+          // Skip if proof is already valid (inclusion, not exclusion)
+          if (isInclusionProofNotExclusion(tx.inclusionProof)) {
+            console.log(`  ✓ Token ${tokenIdShort}... ${txLabel} proof already valid`);
+            continue;
+          }
+
+          // Proof is stale - try to refresh
+          console.log(`  🔍 Token ${tokenIdShort}... ${txLabel} proof stale, refreshing...`);
+
+          try {
+            // Determine the state hash being spent by this transaction
+            let stateHashBeingSpent: string;
+
+            if (txIndex === 0) {
+              // First transaction spends the genesis state
+              // Genesis state hash = tokenId with "0000" prefix, or from genesis.inclusionProof.authenticator.stateHash
+              const genesisStateHash = tokenClone.genesis?.inclusionProof?.authenticator?.stateHash;
+              if (genesisStateHash) {
+                stateHashBeingSpent = genesisStateHash;
+              } else {
+                // Fallback: use tokenId with "0000" prefix
+                stateHashBeingSpent = tokenId.startsWith("0000") ? tokenId : `0000${tokenId}`;
+              }
+            } else {
+              // Subsequent transactions spend the previous transaction's newStateHash
+              const prevTx = tokenClone.transactions[txIndex - 1];
+              if (!prevTx.newStateHash) {
+                console.warn(`  ⚠️ Token ${tokenIdShort}... ${txLabel} missing previous tx newStateHash`);
+                allTxProofsValid = false;
+                continue;
+              }
+              stateHashBeingSpent = prevTx.newStateHash;
+            }
+
+            // Calculate requestId from state hash being spent
+            // requestId = key/leaf position in SMT, derived from (pubKey, stateHash)
+            const pubKeyBytes = Buffer.from(ctx.publicKey, "hex");
+            const stateHashObj = DataHash.fromJSON(stateHashBeingSpent);
+            const requestId = await RequestId.create(pubKeyBytes, stateHashObj);
+            const requestIdStr = requestId.toJSON();
+
+            console.log(`  📍 Token ${tokenIdShort}... ${txLabel} requestId derived from state ${stateHashBeingSpent.slice(0, 16)}...`);
+
+            // Fetch fresh proof using the correctly calculated requestId
+            let newTxProof = await fetchProofByRequestId(requestIdStr);
+
+            if (!isInclusionProofNotExclusion(newTxProof)) {
+              // Proof fetch failed - try outbox recovery (has full commitment for resubmission)
+              console.log(`  ⚠️ Token ${tokenIdShort}... ${txLabel} direct fetch failed, trying outbox recovery...`);
+
+              const recovery = await tryRecoverFromOutbox(tokenId, true);
+
+              if (recovery.recovered && recovery.proof && isInclusionProofNotExclusion(recovery.proof)) {
+                newTxProof = recovery.proof;
+                console.log(`  ✅ Token ${tokenIdShort}... ${txLabel} recovered via outbox`);
+              } else {
+                // Outbox recovery failed - likely a received token (no outbox entry)
+                console.warn(`  ⚠️ Token ${tokenIdShort}... ${txLabel} outbox recovery failed: ${recovery.message}`);
+                console.log(`      💡 Hint: If this is a received token, request sender to re-transfer`);
+                allTxProofsValid = false;
+                continue;
+              }
+            }
+
+            if (isInclusionProofNotExclusion(newTxProof)) {
+              tokenClone.transactions[txIndex] = {
+                ...tx,
+                inclusionProof: newTxProof,
+              };
+              console.log(`  ✅ Token ${tokenIdShort}... ${txLabel} proof refreshed`);
+            } else {
+              console.warn(`  ❌ Token ${tokenIdShort}... ${txLabel} could not refresh proof`);
+              allTxProofsValid = false;
+            }
+          } catch (err) {
+            console.warn(`  ❌ Token ${tokenIdShort}... ${txLabel} refresh error:`, err);
+            allTxProofsValid = false;
+          }
+        }
+
+        // If any transaction proof couldn't be refreshed, mark token as still invalid
+        if (!allTxProofsValid) {
+          console.warn(`  ❌ Token ${tokenIdShort}... one or more transaction proofs could not be refreshed`);
           stillInvalid++;
           continue;
         }

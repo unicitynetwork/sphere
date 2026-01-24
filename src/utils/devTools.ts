@@ -142,7 +142,7 @@ interface ProofRequest {
  * Submit a commitment to the aggregator
  * Returns: "SUCCESS" | "REQUEST_ID_EXISTS" | error message
  */
-async function submitCommitmentToAggregator(
+export async function submitTransferCommitmentToAggregator(
   commitment: TransferCommitment
 ): Promise<{ success: boolean; status: string }> {
   try {
@@ -287,7 +287,7 @@ export async function waitForMintProofWithSDK(
 /**
  * Wait for inclusion proof using the SDK (handles longer waits for block inclusion)
  */
-async function waitForProofWithSDK(
+export async function waitForTransferProofWithSDK(
   commitment: TransferCommitment,
   timeoutMs: number = 30000
 ): Promise<TxfInclusionProof | null> {
@@ -451,7 +451,7 @@ export async function fetchProofByRequestId(
  * @param forceResubmit - If true, accept any entry with commitmentJson (for tree reset scenario)
  *                        If false, only accept uncommitted entries (READY_TO_SUBMIT, SUBMITTED)
  */
-async function tryRecoverFromOutbox(
+export async function tryRecoverFromOutbox(
   tokenId: string,
   forceResubmit: boolean = false
 ): Promise<{ recovered: boolean; proof?: TxfInclusionProof; message: string }> {
@@ -485,7 +485,7 @@ async function tryRecoverFromOutbox(
     const commitment = await TransferCommitment.fromJSON(commitmentData);
 
     // Submit commitment (idempotent - REQUEST_ID_EXISTS is OK)
-    const submitResult = await submitCommitmentToAggregator(commitment);
+    const submitResult = await submitTransferCommitmentToAggregator(commitment);
     console.log(`   Submission result: ${submitResult.status}`);
 
     if (!submitResult.success) {
@@ -494,7 +494,7 @@ async function tryRecoverFromOutbox(
 
     // Wait for inclusion proof
     console.log(`   Waiting for inclusion proof...`);
-    const proof = await waitForProofWithSDK(commitment, 60000); // 60 second timeout
+    const proof = await waitForTransferProofWithSDK(commitment, 60000); // 60 second timeout
 
     if (!proof) {
       return { recovered: false, message: "Timeout waiting for inclusion proof" };
