@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Hash, Lock, MoreVertical, LogOut } from 'lucide-react';
+import { Hash, Lock, MoreVertical, LogOut, Trash2, Link, Loader2 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { Group, GroupVisibility } from '../data/groupModels';
 
@@ -8,9 +8,24 @@ interface GroupItemProps {
   isSelected: boolean;
   onClick: () => void;
   onLeave: () => void;
+  isAdmin?: boolean;
+  onDeleteGroup?: () => Promise<boolean>;
+  onCreateInvite?: () => Promise<string | null>;
+  isDeletingGroup?: boolean;
+  isCreatingInvite?: boolean;
 }
 
-export function GroupItem({ group, isSelected, onClick, onLeave }: GroupItemProps) {
+export function GroupItem({
+  group,
+  isSelected,
+  onClick,
+  onLeave,
+  isAdmin = false,
+  onDeleteGroup,
+  onCreateInvite,
+  isDeletingGroup = false,
+  isCreatingInvite = false,
+}: GroupItemProps) {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -94,8 +109,54 @@ export function GroupItem({ group, isSelected, onClick, onLeave }: GroupItemProp
               <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="absolute right-0 top-full mt-1 w-32 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg overflow-hidden z-50"
+                className="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg overflow-hidden z-50"
               >
+                {/* Admin: Create Invite (for private groups) */}
+                {isAdmin && onCreateInvite && group.visibility === GroupVisibility.PRIVATE && (
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const code = await onCreateInvite();
+                      if (code) {
+                        // Copy to clipboard
+                        const inviteUrl = `${window.location.origin}${window.location.pathname}?join=${group.relayUrl}'${group.id}~${code}`;
+                        navigator.clipboard.writeText(inviteUrl);
+                      }
+                      setShowMenu(false);
+                    }}
+                    disabled={isCreatingInvite}
+                    className="w-full px-3 py-2 text-left text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {isCreatingInvite ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Link className="w-4 h-4" />
+                    )}
+                    Copy Invite Link
+                  </button>
+                )}
+                {/* Admin: Delete Group */}
+                {isAdmin && onDeleteGroup && (
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (confirm(`Are you sure you want to delete "${group.getDisplayName()}"? This cannot be undone.`)) {
+                        await onDeleteGroup();
+                      }
+                      setShowMenu(false);
+                    }}
+                    disabled={isDeletingGroup}
+                    className="w-full px-3 py-2 text-left text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {isDeletingGroup ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
+                    Delete Group
+                  </button>
+                )}
+                {/* Leave Group */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

@@ -11,6 +11,7 @@ interface GroupMessageListProps {
   canDeleteMessages?: boolean;
   onDeleteMessage?: (messageId: string) => Promise<boolean>;
   isDeletingMessage?: boolean;
+  onReplyToMessage?: (message: GroupMessage) => void;
 }
 
 export function GroupMessageList({
@@ -20,7 +21,10 @@ export function GroupMessageList({
   canDeleteMessages = false,
   onDeleteMessage,
   isDeletingMessage = false,
+  onReplyToMessage,
 }: GroupMessageListProps) {
+  // Create a map for quick lookup of messages by ID (for reply-to)
+  const messagesById = new Map(messages.map((m) => [m.id, m]));
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when messages change
@@ -80,6 +84,8 @@ export function GroupMessageList({
               canDelete={canDeleteMessages}
               onDelete={onDeleteMessage}
               isDeleting={isDeletingMessage}
+              onReply={onReplyToMessage}
+              replyToMessage={message.replyToId ? messagesById.get(message.replyToId) : null}
             />
           ))}
         </div>

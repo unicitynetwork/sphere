@@ -10,6 +10,7 @@ interface GroupListProps {
   onSelect: (group: Group) => void;
   onLeave: (groupId: string) => void;
   onJoinGroup: () => void;
+  onCreateGroup: () => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
   isOpen: boolean;
@@ -18,6 +19,12 @@ interface GroupListProps {
   onCollapse: () => void;
   totalUnreadCount: number;
   onModeChange: ChatModeChangeHandler;
+  // Admin features
+  isAdminOfGroup: (groupId: string) => boolean;
+  onDeleteGroup: (groupId: string) => Promise<boolean>;
+  onCreateInvite: (groupId: string) => Promise<string | null>;
+  isDeletingGroup: boolean;
+  isCreatingInvite: boolean;
 }
 
 export function GroupList({
@@ -26,6 +33,7 @@ export function GroupList({
   onSelect,
   onLeave,
   onJoinGroup,
+  onCreateGroup,
   searchQuery,
   onSearchChange,
   isOpen,
@@ -34,6 +42,11 @@ export function GroupList({
   onCollapse,
   totalUnreadCount,
   onModeChange,
+  isAdminOfGroup,
+  onDeleteGroup,
+  onCreateInvite,
+  isDeletingGroup,
+  isCreatingInvite,
 }: GroupListProps) {
   return (
     <>
@@ -76,11 +89,21 @@ export function GroupList({
               )}
             </div>
             <div className="flex items-center gap-2">
+              {/* Create group button */}
+              <motion.button
+                onClick={onCreateGroup}
+                className="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
+                title="Create group"
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                <Hash className="w-4 h-4" />
+              </motion.button>
               {/* Join group button */}
               <motion.button
                 onClick={onJoinGroup}
                 className="p-2 rounded-lg bg-linear-to-br from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/30"
-                title="Join group"
+                title="Browse groups"
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
               >
@@ -172,6 +195,11 @@ export function GroupList({
                     isSelected={selectedGroup?.id === group.id}
                     onClick={() => onSelect(group)}
                     onLeave={() => onLeave(group.id)}
+                    isAdmin={isAdminOfGroup(group.id)}
+                    onDeleteGroup={() => onDeleteGroup(group.id)}
+                    onCreateInvite={() => onCreateInvite(group.id)}
+                    isDeletingGroup={isDeletingGroup}
+                    isCreatingInvite={isCreatingInvite}
                   />
                 </motion.div>
               ))}

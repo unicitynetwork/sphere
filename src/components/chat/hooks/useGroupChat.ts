@@ -14,6 +14,8 @@ const QUERY_KEYS = {
 
 const groupRepository = GroupChatRepository.getInstance();
 
+import type { CreateGroupOptions } from '../services/GroupChatService';
+
 export interface UseGroupChatReturn {
   // Groups
   groups: Group[];
@@ -64,6 +66,14 @@ export interface UseGroupChatReturn {
 
   // Nametag resolution
   resolveMemberNametags: () => Promise<void>;
+
+  // Admin actions
+  createGroup: (options: CreateGroupOptions) => Promise<Group | null>;
+  deleteGroup: (groupId: string) => Promise<boolean>;
+  createInvite: (groupId: string) => Promise<string | null>;
+  isCreatingGroup: boolean;
+  isDeletingGroup: boolean;
+  isCreatingInvite: boolean;
 }
 
 export const useGroupChat = (): UseGroupChatReturn => {
@@ -124,14 +134,24 @@ export const useGroupChat = (): UseGroupChatReturn => {
       }
     };
 
+    const handleGroupDeleted = (event: CustomEvent<{ groupId: string }>) => {
+      const { groupId } = event.detail;
+      // If we're viewing the deleted group, deselect it
+      if (selectedGroup && selectedGroup.id === groupId) {
+        setSelectedGroup(null);
+      }
+    };
+
     window.addEventListener('group-chat-updated', handleGroupChatUpdate);
     window.addEventListener('group-message-received', handleGroupMessageReceived as EventListener);
     window.addEventListener('group-kicked', handleGroupKicked as EventListener);
+    window.addEventListener('group-deleted', handleGroupDeleted as EventListener);
 
     return () => {
       window.removeEventListener('group-chat-updated', handleGroupChatUpdate);
       window.removeEventListener('group-message-received', handleGroupMessageReceived as EventListener);
       window.removeEventListener('group-kicked', handleGroupKicked as EventListener);
+      window.removeEventListener('group-deleted', handleGroupDeleted as EventListener);
     };
   }, [queryClient, selectedGroup]);
 
@@ -371,6 +391,68 @@ export const useGroupChat = (): UseGroupChatReturn => {
     queryClient.invalidateQueries({ queryKey: QUERY_KEYS.MEMBERS(selectedGroup.id) });
   }, [selectedGroup, groupChatService, queryClient]);
 
+  // Create group mutation (admin)
+  const createGroupMutation = useMutation({
+    mutationFn: async (options: CreateGroupOptions) => {
+      if (!groupChatService) throw new Error('Group chat service not available');
+      return groupChatService.createGroup(options);
+    },
+    onSuccess: (group) => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.GROUPS });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.AVAILABLE_GROUPS });
+      if (group) {
+        setSelectedGroup(group);
+      }
+    },
+  });
+
+  // Delete group mutation (admin)
+  const deleteGroupMutation = useMutation({
+    mutationFn: async (groupId: string) => {
+      if (!groupChatService) throw new Error('Group chat service not available');
+      return groupChatService.deleteGroup(groupId);
+    },
+    onSuccess: (_, groupId) => {
+      if (selectedGroup?.id === groupId) {
+        setSelectedGroup(null);
+      }
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.GROUPS });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.AVAILABLE_GROUPS });
+    },
+  });
+
+  // Create invite mutation (admin)
+  const createInviteMutation = useMutation({
+    mutationFn: async (groupId: string) => {
+      if (!groupChatService) throw new Error('Group chat service not available');
+      return groupChatService.createInvite(groupId);
+    },
+  });
+
+  // Create group
+  const createGroup = useCallback(
+    async (options: CreateGroupOptions): Promise<Group | null> => {
+      return createGroupMutation.mutateAsync(options);
+    },
+    [createGroupMutation]
+  );
+
+  // Delete group
+  const deleteGroup = useCallback(
+    async (groupId: string): Promise<boolean> => {
+      return deleteGroupMutation.mutateAsync(groupId);
+    },
+    [deleteGroupMutation]
+  );
+
+  // Create invite
+  const createInvite = useCallback(
+    async (groupId: string): Promise<string | null> => {
+      return createInviteMutation.mutateAsync(groupId);
+    },
+    [createInviteMutation]
+  );
+
   return {
     // Groups
     groups: groupsQuery.data || [],
@@ -421,5 +503,13 @@ export const useGroupChat = (): UseGroupChatReturn => {
 
     // Nametag resolution
     resolveMemberNametags,
+
+    // Admin actions
+    createGroup,
+    deleteGroup,
+    createInvite,
+    isCreatingGroup: createGroupMutation.isPending,
+    isDeletingGroup: deleteGroupMutation.isPending,
+    isCreatingInvite: createInviteMutation.isPending,
   };
 };
