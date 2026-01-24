@@ -19,6 +19,10 @@ import { unmarshalIPNSRecord } from "ipns";
 import { CID } from "multiformats/cid";
 import * as jsonCodec from "multiformats/codecs/json";
 import { sha256 } from "multiformats/hashes/sha2";
+import {
+  getIpnsSubscriptionClient,
+  type IpnsUpdate,
+} from "./IpnsSubscriptionClient";
 
 export interface IpnsResolutionResult {
   success: boolean;
@@ -205,6 +209,10 @@ async function fetchContentByCidWithVerification(
  */
 export class IpfsHttpResolver {
   private cache = getIpfsCache();
+  private subscriptionClient = getIpnsSubscriptionClient();
+  private activeSubscriptions: Map<string, () => void> = new Map();
+  private updateCallbacks: Map<string, Set<(update: IpnsUpdate) => void>> =
+    new Map();
 
   /**
    * Resolve IPNS name across all configured nodes in parallel
@@ -532,6 +540,107 @@ export class IpfsHttpResolver {
    */
   getCacheStats() {
     return this.cache.getStats();
+  }
+
+  /**
+   * Subscribe to IPNS updates via WebSocket.
+   * When the backend detects a newer IPNS record, it pushes the update.
+   *
+   * @param ipnsName The IPNS name to subscribe to
+   * @param callback Function called when updates are received
+   * @returns Unsubscribe function
+   */
+  subscribeToUpdates(
+    ipnsName: string,
+    callback: (update: IpnsUpdate) => void
+  ): () => void {
+    if (!ipnsName || typeof ipnsName !== "string") {
+      return () => {};
+    }
+
+    // Add callback to our list
+    if (!this.updateCallbacks.has(ipnsName)) {
+      this.updateCallbacks.set(ipnsName, new Set());
+    }
+    this.updateCallbacks.get(ipnsName)!.add(callback);
+
+    // Subscribe to WebSocket updates if not already subscribed
+    if (!this.activeSubscriptions.has(ipnsName)) {
+      const unsubscribe = this.subscriptionClient.subscribe(
+        ipnsName,
+        (update) => this.handleWebSocketUpdate(update)
+      );
+      this.activeSubscriptions.set(ipnsName, unsubscribe);
+    }
+
+    // Return unsubscribe function
+    return () => {
+      const callbacks = this.updateCallbacks.get(ipnsName);
+      if (callbacks) {
+        callbacks.delete(callback);
+        if (callbacks.size === 0) {
+          this.updateCallbacks.delete(ipnsName);
+          // Unsubscribe from WebSocket if no more callbacks
+          const unsubscribe = this.activeSubscriptions.get(ipnsName);
+          if (unsubscribe) {
+            unsubscribe();
+            this.activeSubscriptions.delete(ipnsName);
+          }
+        }
+      }
+    };
+  }
+
+  /**
+   * Handle WebSocket update from backend
+   */
+  private handleWebSocketUpdate(update: IpnsUpdate): void {
+    console.log(
+      `[IpfsHttpResolver] Received WebSocket update: ${update.name.slice(0, 16)}... seq=${update.sequence}`
+    );
+
+    // Update cache with new sequence/CID
+    if (update.cid) {
+      const currentRecord = this.cache.getIpnsRecord(update.name);
+      const currentSeq = currentRecord?.sequence ?? 0n;
+
+      // Only update if new sequence is higher
+      if (BigInt(update.sequence) > currentSeq) {
+        this.cache.setIpnsRecord(update.name, {
+          cid: update.cid,
+          sequence: BigInt(update.sequence),
+        });
+        console.log(
+          `[IpfsHttpResolver] Cache updated via WebSocket: seq ${currentSeq} -> ${update.sequence}`
+        );
+      }
+    }
+
+    // Notify all callbacks for this IPNS name
+    const callbacks = this.updateCallbacks.get(update.name);
+    if (callbacks) {
+      for (const callback of callbacks) {
+        try {
+          callback(update);
+        } catch (e) {
+          console.warn("[IpfsHttpResolver] Update callback error:", e);
+        }
+      }
+    }
+  }
+
+  /**
+   * Check if WebSocket is connected
+   */
+  isWebSocketConnected(): boolean {
+    return this.subscriptionClient.isConnected();
+  }
+
+  /**
+   * Get count of active WebSocket subscriptions
+   */
+  getActiveSubscriptionCount(): number {
+    return this.activeSubscriptions.size;
   }
 }
 
