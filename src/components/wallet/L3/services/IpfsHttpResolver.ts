@@ -53,40 +53,8 @@ async function fetchWithTimeout(
 }
 
 /**
- * Try resolving IPNS via gateway path (fast path)
- * Returns both CID and content
- */
-async function tryGatewayPath(
-  ipnsName: string,
-  gatewayUrl: string,
-  timeoutMs: number = 5000
-): Promise<{ content: TxfStorageData; cid?: string } | null> {
-  try {
-    // Request raw JSON (not dag-json) to preserve original encoding for CID verification
-    const url = `${gatewayUrl}/ipns/${ipnsName}`;
-
-    const response = await fetchWithTimeout(url, timeoutMs, {
-      headers: {
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const content = (await response.json()) as TxfStorageData;
-    return { content, cid: content._cid as string | undefined };
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      console.debug(`Gateway path timeout for ${ipnsName} on ${gatewayUrl}`);
-    }
-    return null;
-  }
-}
-
-/**
- * Try resolving IPNS via routing API (fallback path)
+ * Try resolving IPNS via routing API
+ * Uses sidecar cache (5-20ms) with Kubo DHT fallback (1-5s)
  * Returns IPNS record with CID and sequence number
  */
 async function tryRoutingApi(
@@ -295,87 +263,66 @@ export class IpfsHttpResolver {
     }
 
     try {
-      // Query BOTH gateway path (fast content) AND routing API (authoritative sequence) in parallel
-      // This ensures we get the correct sequence number for publishing
-      const [gatewayResult, routingResult] = await Promise.all([
-        this.resolveViaGatewayPath(ipnsName, gateways),
-        this.resolveViaRoutingApi(ipnsName, gateways),
-      ]);
+      // OPTIMIZED: Use only routing API for IPNS resolution
+      // The routing API uses the sidecar cache (5-20ms) with Kubo DHT fallback
+      // This bypasses the slow /ipns/{name} gateway path which doesn't use sidecar
+      const routingResult = await this.resolveViaRoutingApi(ipnsName, gateways);
 
-      const latencyMs = performance.now() - startTime;
-
-      // Prefer routing API sequence (authoritative), gateway path content (fast)
-      const sequence = routingResult?.sequence ?? 0n;
-      const authoritativeCid = routingResult?.cid ?? gatewayResult?.cid ?? "unknown";
-      let content = gatewayResult?.content ?? null;
-      let contentSource = "gateway-path";
-
-      // CRITICAL FIX: Verify gateway content matches authoritative CID
-      // Gateway path returns cached content from gateway's stale IPNS record
-      // Routing API returns authoritative seq/CID
-      // If mismatch, gateway content is stale - fetch fresh content by CID
-      const gatewayCid = gatewayResult?.cid;
-      const routingCid = routingResult?.cid;
-      const gatewayHasRealCid = gatewayCid && gatewayCid !== "unknown";
-
-      if (content && routingCid && gatewayCid) {
-        // Gateway returned content with its own CID - check if it matches routing API CID
-        if (gatewayCid !== routingCid) {
-          // Only warn if gateway provided a real CID that differs (actual staleness)
-          // Suppress warning when gateway didn't provide CID verification ("unknown")
-          if (gatewayHasRealCid) {
-            console.warn(`⚠️ Gateway content CID mismatch: gateway=${gatewayCid.slice(0, 16)}..., routing=${routingCid.slice(0, 16)}...`);
-          }
-
-          // Fetch content by the authoritative CID
-          for (const gateway of gateways) {
-            const freshResult = await fetchContentByCidWithVerification(routingCid, gateway);
-            if (freshResult) {
-              content = freshResult.content;
-              contentSource = "cid-fetch";
-              break;
-            }
-          }
-
-          if (contentSource !== "cid-fetch") {
-            // Couldn't fetch by CID - clear stale content to prevent using incorrect version
-            console.warn(`⚠️ Could not fetch content by CID ${routingCid.slice(0, 16)}... - returning null content`);
-            content = null;
-          }
-        }
-      }
-
-      const cid = authoritativeCid;
-
-      if (gatewayResult || routingResult) {
-        // Store in cache with authoritative sequence
-        this.cache.setIpnsRecord(ipnsName, {
-          cid,
-          sequence,
-          _cachedContent: content ?? undefined,
-        });
-
-        console.log(
-          `📦 IPNS resolved: ${ipnsName.slice(0, 16)}... -> seq=${sequence}, cid=${cid.slice(0, 16)}..., content=${contentSource}`
-        );
-
+      if (!routingResult) {
+        const latencyMs = performance.now() - startTime;
+        this.cache.recordFailure(ipnsName);
         return {
-          success: true,
-          cid,
-          content,
-          sequence,
-          source: routingResult ? "http-routing" : "http-gateway",
+          success: false,
+          error: "IPNS routing resolution failed",
+          source: "none",
           latencyMs,
         };
       }
 
-      // Both methods failed
-      this.cache.recordFailure(ipnsName);
+      const { cid, sequence } = routingResult;
+      const routingLatencyMs = performance.now() - startTime;
+
+      // Fetch content by CID in parallel across all gateways
+      // Content is cached by nginx (7d for /ipfs/) so this is fast after first fetch
+      const contentPromises = gateways.map((gateway) =>
+        fetchContentByCidWithVerification(cid, gateway)
+      );
+
+      let content: TxfStorageData | null = null;
+      try {
+        const result = await Promise.any(
+          contentPromises.map((p) =>
+            p.then((fetchResult) => {
+              if (fetchResult === null) throw new Error("No content");
+              return fetchResult.content;
+            })
+          )
+        );
+        content = result;
+      } catch {
+        // All gateways failed to fetch content - continue without content
+        console.warn(`⚠️ Could not fetch content for CID ${cid.slice(0, 16)}...`);
+      }
+
+      const latencyMs = performance.now() - startTime;
+
+      // Store in cache with authoritative sequence
+      this.cache.setIpnsRecord(ipnsName, {
+        cid,
+        sequence,
+        _cachedContent: content ?? undefined,
+      });
+
+      console.log(
+        `📦 IPNS resolved: ${ipnsName.slice(0, 16)}... -> seq=${sequence}, cid=${cid.slice(0, 16)}... (routing: ${routingLatencyMs.toFixed(0)}ms, total: ${latencyMs.toFixed(0)}ms)`
+      );
 
       return {
-        success: false,
-        error: "All IPFS gateways failed",
-        source: "none",
+        success: true,
+        cid,
+        content,
+        sequence,
+        source: "http-routing",
         latencyMs,
       };
     } catch (error) {
@@ -388,44 +335,6 @@ export class IpfsHttpResolver {
         source: "none",
         latencyMs,
       };
-    }
-  }
-
-  /**
-   * Query all gateways in parallel with gateway path
-   * Returns as soon as ANY gateway responds successfully
-   */
-  private async resolveViaGatewayPath(
-    ipnsName: string,
-    gateways: string[]
-  ): Promise<{ cid: string; content: TxfStorageData } | null> {
-    const promises = gateways.map((gateway) =>
-      tryGatewayPath(ipnsName, gateway)
-        .then((result) => ({
-          success: result !== null,
-          data: result,
-          gateway,
-        }))
-        .catch(() => ({ success: false, data: null, gateway }))
-    );
-
-    // Use Promise.any to get first success
-    try {
-      const result = await Promise.any(
-        promises.map((p) =>
-          p.then((r) => {
-            if (!r.success) throw new Error("Failed");
-            return r;
-          })
-        )
-      );
-
-      return {
-        cid: result.data?.cid || "unknown",
-        content: result.data!.content,
-      };
-    } catch {
-      return null;
     }
   }
 
