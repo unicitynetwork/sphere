@@ -1233,6 +1233,14 @@ export class GroupChatService {
     }
     console.log(`🔑 Creator pubkey: ${creatorPubkey}`);
 
+    // Check if current user is a relay admin
+    const isAdmin = await this.isCurrentUserRelayAdmin();
+    if (!isAdmin) {
+      console.error('❌ Cannot create group: not a relay admin');
+      showToast('Only relay admins can create groups', 'error');
+      return null;
+    }
+
     // Generate a proposed group ID (relay may override this)
     const proposedGroupId = options.name
       .toLowerCase()
@@ -1386,16 +1394,18 @@ export class GroupChatService {
   }
 
   /**
-   * Delete a group entirely (admin only).
+   * Delete a group entirely (relay admin only).
    * Sends a DELETE_GROUP (kind 9008) to the relay.
    */
   async deleteGroup(groupId: string): Promise<boolean> {
     if (!this.client) await this.start();
     if (!this.client) return false;
 
-    // Check if current user is an admin
-    if (!this.isCurrentUserAdmin(groupId)) {
-      console.error('❌ Cannot delete group: not an admin');
+    // Check if current user is a relay admin
+    const isAdmin = await this.isCurrentUserRelayAdmin();
+    if (!isAdmin) {
+      console.error('❌ Cannot delete group: not a relay admin');
+      showToast('Only relay admins can delete groups', 'error');
       return false;
     }
 
