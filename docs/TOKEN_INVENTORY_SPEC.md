@@ -1287,7 +1287,25 @@ interface RecoveryMintEntry extends OutboxEntry {
 2. Wait for inclusion proof via `waitInclusionProof()` (60s timeout)
 3. Update `genesis.inclusionProof` with fresh proof
 4. Save updated token to storage
-5. Return updated token for immediate use
+5. **Recover previously invalidated tokens** (see below)
+6. Return updated token for immediate use
+
+**Token Recovery After Nametag Proof Fix:**
+
+Tokens that were invalidated due to nametag inclusion proof failures can now be recovered:
+
+1. Load `_invalid` array from localStorage
+2. Filter for tokens with:
+   - `reason === "SDK_VALIDATION"`
+   - `details` contains "Inclusion proof verification failed" or "Nametag verification"
+3. Re-validate each token using `TokenValidationService.validateToken()`
+   - The validation will now pass because the nametag has a valid inclusion proof
+4. For tokens that pass validation:
+   - Add back to active inventory via `addToken()`
+   - Remove from `_invalid` array
+5. Trigger `wallet-updated` event for UI refresh
+
+**Implementation:** `TokenRecoveryService.recoverNametagInvalidatedTokens()` called after successful nametag proof recovery.
 
 **Idempotency:**
 - Salt is preserved from original genesis data (NEVER regenerated)
@@ -1308,8 +1326,11 @@ interface RecoveryMintEntry extends OutboxEntry {
 - If re-submission fails: throw error with clear message
 - If proof timeout (60s): throw error, user may retry later
 - If SDK validation fails after recovery: propagate original error
+- Token recovery failures are non-fatal: logged but don't prevent nametag recovery from completing
 
-**Implementation Location:** `NametagService.recoverNametagProofs()` called from `refreshNametagProof()` when exclusion proof detected.
+**Implementation Locations:**
+- `NametagService.recoverNametagProofs()` - called from `refreshNametagProof()` when exclusion proof detected
+- `TokenRecoveryService.recoverNametagInvalidatedTokens()` - called after successful nametag proof recovery
 
 ---
 

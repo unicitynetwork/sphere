@@ -19,12 +19,17 @@ import {
   addToken,
   removeToken
 } from "./InventorySyncService";
+import type { InvalidTokenEntry, TxfStorageData } from "./types/TxfTypes";
+import { STORAGE_KEY_GENERATORS } from "../../../../config/storageKeys";
 import { IdentityManager } from "./IdentityManager";
-// import { ServiceProvider } from "./ServiceProvider"; // TODO: Uncomment when aggregator token lookup is implemented
+import { ServiceProvider } from "./ServiceProvider";
 import type { TxfToken, TxfTransaction } from "./types/TxfTypes";
 import { getCurrentStateHash, tokenToTxf } from "./TxfSerializer";
 import { getTokenValidationService } from "./TokenValidationService";
 import { Buffer } from "buffer";
+
+// Unicity ID (nametag) token type identifier
+const UNICITY_TOKEN_TYPE_HEX = "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9ef0efbe397867509";
 
 // ==========================================
 // Error Classification Types (Aggregator Failures)
@@ -103,6 +108,24 @@ export interface OrphanCandidate {
   archivedTokenId: string;
   archivedTxf: TxfToken;
   possibleSplitAmounts: { splitAmount: string; remainderAmount: string; coinId: string }[];
+}
+
+// ==========================================
+// Nametag-Invalidated Token Recovery Types
+// ==========================================
+
+/**
+ * Result of recovering tokens invalidated due to nametag proof issues
+ */
+export interface NametagRecoveryResult {
+  /** Number of tokens recovered */
+  recovered: number;
+  /** Number of tokens still invalid after re-validation */
+  stillInvalid: number;
+  /** Token IDs that were recovered */
+  recoveredTokenIds: string[];
+  /** Errors encountered during recovery */
+  errors: string[];
 }
 
 // ==========================================
@@ -202,6 +225,180 @@ export class TokenRecoveryService {
       return result;
     } finally {
       this.isRecovering = false;
+    }
+  }
+
+  /**
+   * Recover tokens that were invalidated due to nametag inclusion proof failures.
+   *
+   * Per TOKEN_INVENTORY_SPEC.md Section 13.26:
+   * After the nametag proof has been recovered, tokens that previously failed
+   * validation due to "Inclusion proof verification failed" in nametag verification
+   * can now be re-validated and moved back to active inventory.
+   *
+   * This method:
+   * 1. Loads invalid tokens from localStorage
+   * 2. Filters for tokens that failed due to nametag-related issues
+   * 3. Re-validates each token using TokenValidationService
+   * 4. Moves recovered tokens back to active inventory
+   * 5. Removes recovered tokens from the _invalid array
+   *
+   * @returns Recovery statistics including count of recovered and still-invalid tokens
+   */
+  async recoverNametagInvalidatedTokens(): Promise<NametagRecoveryResult> {
+    const result: NametagRecoveryResult = {
+      recovered: 0,
+      stillInvalid: 0,
+      recoveredTokenIds: [],
+      errors: [],
+    };
+
+    try {
+      // Get identity context
+      const identity = await this.identityManager.getCurrentIdentity();
+      if (!identity) {
+        result.errors.push("No identity available");
+        return result;
+      }
+
+      if (!identity.ipnsName) {
+        result.errors.push("No IPNS name available");
+        return result;
+      }
+
+      // Load invalid tokens from localStorage
+      const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(identity.address);
+      const json = localStorage.getItem(storageKey);
+      if (!json) {
+        console.log("🔧 No wallet data in localStorage - nothing to recover");
+        return result;
+      }
+
+      let storageData: TxfStorageData;
+      try {
+        storageData = JSON.parse(json);
+      } catch {
+        result.errors.push("Failed to parse localStorage data");
+        return result;
+      }
+
+      const invalidTokens = storageData._invalid || [];
+      if (invalidTokens.length === 0) {
+        console.log("🔧 No invalid tokens to recover");
+        return result;
+      }
+
+      console.log(`🔧 Scanning ${invalidTokens.length} invalid tokens for nametag-related failures...`);
+
+      // Filter for tokens that failed due to nametag inclusion proof issues
+      // These have SDK_VALIDATION reason with "Inclusion proof verification failed" in details
+      const nametagFailures = invalidTokens.filter((entry: InvalidTokenEntry) => {
+        if (entry.reason !== "SDK_VALIDATION") return false;
+
+        const details = entry.details || "";
+        // Check for nametag-related inclusion proof failures
+        return (
+          details.includes("Inclusion proof verification failed") ||
+          details.includes("Nametag verification")
+        );
+      });
+
+      if (nametagFailures.length === 0) {
+        console.log("🔧 No nametag-related failures found in invalid tokens");
+        return result;
+      }
+
+      console.log(`🔧 Found ${nametagFailures.length} tokens with nametag-related failures, attempting recovery...`);
+
+      // Get validation service
+      const validationService = getTokenValidationService();
+
+      // Track which tokens to remove from _invalid
+      const recoveredEntries: InvalidTokenEntry[] = [];
+      const stillInvalidEntries: InvalidTokenEntry[] = [];
+
+      // Re-validate each token
+      for (const entry of nametagFailures) {
+        const tokenId = entry.token.genesis?.data?.tokenId || "unknown";
+        const tokenIdShort = tokenId.slice(0, 8);
+
+        try {
+          console.log(`🔧 Re-validating token ${tokenIdShort}...`);
+
+          // Convert TxfToken to LocalToken for validation
+          const localToken = new Token({
+            id: tokenId,
+            name: entry.token.genesis?.data?.tokenType === UNICITY_TOKEN_TYPE_HEX ? "Nametag" : "Token",
+            type: "UCT",
+            timestamp: entry.timestamp,
+            status: TokenStatus.CONFIRMED,
+            amount: entry.token.genesis?.data?.coinData?.[0]?.[1] || "0",
+            coinId: entry.token.genesis?.data?.coinData?.[0]?.[0] || "",
+            symbol: "UCT",
+            jsonData: JSON.stringify(entry.token),
+          });
+
+          // Re-validate with current nametag (which now has valid proof)
+          const validationResult = await validationService.validateToken(localToken);
+
+          if (validationResult.isValid && validationResult.token) {
+            console.log(`✅ Token ${tokenIdShort}... passed validation - recovering`);
+
+            // Add back to active inventory via inventorySync
+            await addToken(
+              identity.address,
+              identity.publicKey,
+              identity.ipnsName,
+              validationResult.token,
+              { local: true }
+            );
+
+            recoveredEntries.push(entry);
+            result.recovered++;
+            result.recoveredTokenIds.push(tokenId);
+          } else {
+            console.log(`❌ Token ${tokenIdShort}... still invalid: ${validationResult.reason}`);
+            stillInvalidEntries.push(entry);
+            result.stillInvalid++;
+          }
+        } catch (err) {
+          const errorMsg = `Failed to re-validate token ${tokenIdShort}...: ${err instanceof Error ? err.message : String(err)}`;
+          console.error(`🔧 ${errorMsg}`);
+          result.errors.push(errorMsg);
+          stillInvalidEntries.push(entry);
+          result.stillInvalid++;
+        }
+      }
+
+      // Remove recovered tokens from _invalid array
+      if (recoveredEntries.length > 0) {
+        const recoveredTokenIds = new Set(recoveredEntries.map(e => e.token.genesis?.data?.tokenId));
+
+        // Filter out recovered entries from _invalid
+        storageData._invalid = invalidTokens.filter((entry: InvalidTokenEntry) => {
+          const tokenId = entry.token.genesis?.data?.tokenId;
+          return !recoveredTokenIds.has(tokenId);
+        });
+
+        // Save updated storage data
+        localStorage.setItem(storageKey, JSON.stringify(storageData));
+
+        console.log(`🔧 Removed ${recoveredEntries.length} recovered tokens from _invalid list`);
+      }
+
+      console.log(`🔧 Nametag token recovery complete: ${result.recovered} recovered, ${result.stillInvalid} still invalid`);
+
+      // Trigger wallet update event
+      if (result.recovered > 0) {
+        window.dispatchEvent(new Event("wallet-updated"));
+      }
+
+      return result;
+    } catch (err) {
+      const errorMsg = `Nametag token recovery failed: ${err instanceof Error ? err.message : String(err)}`;
+      console.error(`🔧 ${errorMsg}`);
+      result.errors.push(errorMsg);
+      return result;
     }
   }
 
@@ -844,20 +1041,88 @@ export class TokenRecoveryService {
 
   /**
    * Check if a token exists on the aggregator by its state hash
+   *
+   * Per TOKEN_INVENTORY_SPEC v3.2 Section 13.13:
+   * Query aggregator to verify orphaned token exists before recovery.
+   *
+   * For a freshly minted change token, the tokenId IS the genesis state hash.
+   * We query the aggregator for an inclusion proof using this state hash.
+   * If an INCLUSION proof exists (pathIncluded=true, authenticator present),
+   * the token has been spent at that state - meaning it was minted and exists.
+   *
+   * Note: For a newly minted token that hasn't been transferred, we expect
+   * an EXCLUSION proof (unspent). For orphan recovery, we're looking for
+   * ANY evidence the token exists on-chain, so both inclusion and exclusion
+   * proofs indicate the token exists.
    */
   private async checkTokenExistsOnAggregator(tokenId: string): Promise<boolean> {
     try {
-      // The aggregator client can check if a token ID has any recorded state
-      // We can use getInclusionProof with a constructed state hash
-      // For now, return false and log - this needs proper SDK integration
-      // TODO: Use ServiceProvider.stateTransitionClient.getTokenState(tokenId) when available
+      console.log(`🔧 Checking aggregator for token ${tokenId.slice(0, 8)}...`);
 
-      console.log(`🔧 Checking aggregator for token ${tokenId.slice(0, 8)}... (requires SDK integration)`);
+      // Get identity for public key
+      const identity = await this.identityManager.getCurrentIdentity();
+      if (!identity) {
+        console.warn(`🔧 No identity available for aggregator check`);
+        return false;
+      }
 
-      // TODO: Implement proper aggregator query using SDK
-      // Example: await stateTransitionClient.getTokenState(tokenId);
+      // Import SDK modules
+      const { RequestId } = await import(
+        "@unicitylabs/state-transition-sdk/lib/api/RequestId"
+      );
+      const { DataHash } = await import(
+        "@unicitylabs/state-transition-sdk/lib/hash/DataHash"
+      );
 
-      return false; // Placeholder - needs SDK method for token lookup
+      // Get aggregator client
+      const client = ServiceProvider.aggregatorClient;
+
+      // The tokenId is derived from genesis data hash, which serves as the genesis state hash
+      // Construct RequestId from owner's public key and the genesis state hash
+      const pubKeyBytes = Buffer.from(identity.publicKey, "hex");
+
+      // For genesis state, the stateHash is the tokenId with "0000" prefix (Unicity format)
+      const stateHashStr = tokenId.startsWith("0000") ? tokenId : `0000${tokenId}`;
+      const stateHashObj = DataHash.fromJSON(stateHashStr);
+
+      const requestId = await RequestId.create(pubKeyBytes, stateHashObj);
+
+      // Query aggregator for inclusion/exclusion proof
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const response = await (client as any).getInclusionProof(requestId);
+
+      if (!response.inclusionProof) {
+        // No proof at all - token may not exist
+        console.log(`🔧 No proof returned for token ${tokenId.slice(0, 8)}... - token may not exist`);
+        return false;
+      }
+
+      const proof = response.inclusionProof;
+
+      // Verify the hashpath is valid for our RequestId
+      const pathResult = await proof.merkleTreePath.verify(
+        requestId.toBitString().toBigInt()
+      );
+
+      if (!pathResult.isPathValid) {
+        console.warn(`🔧 Invalid hashpath for token ${tokenId.slice(0, 8)}...`);
+        return false;
+      }
+
+      // Check if we have a valid proof (either inclusion or exclusion)
+      if (pathResult.isPathIncluded && proof.authenticator !== null) {
+        // INCLUSION proof: state was committed (token exists and was spent at this state)
+        console.log(`🔧 Found INCLUSION proof for token ${tokenId.slice(0, 8)}... - token exists (spent at genesis)`);
+        return true;
+      } else if (!pathResult.isPathIncluded && proof.authenticator === null) {
+        // EXCLUSION proof: state is known but unspent (token was minted but not yet transferred)
+        console.log(`🔧 Found EXCLUSION proof for token ${tokenId.slice(0, 8)}... - token exists (unspent)`);
+        return true;
+      }
+
+      // Unexpected proof state
+      console.warn(`🔧 Unexpected proof state for token ${tokenId.slice(0, 8)}... - assuming not exists`);
+      return false;
     } catch (err) {
       console.error(`🔧 Aggregator check failed for ${tokenId.slice(0, 8)}...:`, err);
       return false;

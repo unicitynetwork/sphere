@@ -591,7 +591,29 @@ export class NametagService {
 
       console.log(`✅ Nametag proofs recovered successfully`);
 
-      // Step 5: Return updated token for immediate use
+      // Step 5: Trigger recovery of tokens that were invalidated due to nametag proof issues
+      // Per TOKEN_INVENTORY_SPEC.md Section 13.26: After nametag recovery, re-validate
+      // previously invalidated tokens that failed due to nametag inclusion proof issues
+      try {
+        const { TokenRecoveryService } = await import("./TokenRecoveryService");
+        const recoveryService = TokenRecoveryService.getInstance();
+        const recoveryResult = await recoveryService.recoverNametagInvalidatedTokens();
+
+        if (recoveryResult.recovered > 0) {
+          console.log(`📦 Recovered ${recoveryResult.recovered} token(s) after nametag proof recovery`);
+        }
+        if (recoveryResult.errors.length > 0) {
+          console.warn(`📦 Token recovery had ${recoveryResult.errors.length} error(s)`);
+        }
+      } catch (tokenRecoveryError) {
+        // Token recovery is best-effort - don't fail nametag recovery if this fails
+        console.warn(
+          `📦 Token recovery after nametag fix failed (non-fatal):`,
+          tokenRecoveryError instanceof Error ? tokenRecoveryError.message : String(tokenRecoveryError)
+        );
+      }
+
+      // Step 6: Return updated token for immediate use
       return await Token.fromJSON(nametagTxf);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
