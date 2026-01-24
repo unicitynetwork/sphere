@@ -20,7 +20,7 @@ import {
 import { tokenToTxf, getCurrentStateHash } from "../services/TxfSerializer";
 import { NametagService } from "../services/NametagService";
 import { RegistryService } from "../services/RegistryService";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { TokenSplitExecutor, type SplitPersistenceCallbacks } from "../services/transfer/TokenSplitExecutor";
 import { TokenSplitCalculator } from "../services/transfer/TokenSplitCalculator";
@@ -35,6 +35,7 @@ import { isNametagCorrupted } from "../../../../utils/tokenValidation";
 import { getTokenValidationService } from "../services/TokenValidationService";
 import { OutboxRepository } from "../../../../repositories/OutboxRepository";
 import { addSentTransaction } from "../../../../services/TransactionHistoryService";
+import { STORAGE_KEY_GENERATORS } from "../../../../config/storageKeys";
 
 export const KEYS = {
   IDENTITY: ["wallet", "identity"],
@@ -104,6 +105,7 @@ export const useWallet = () => {
   const WALLET_UPDATE_DEBOUNCE_MS = 200;
 
   // Track token list hash to detect actual changes (avoid redundant spent checks)
+  // Persisted to localStorage to survive page reloads
   const lastTokenHashRef = useRef<string>('');
 
   // Prevent refetch during active inventory sync
@@ -112,6 +114,9 @@ export const useWallet = () => {
   // Rate-limit consecutive spent checks
   const lastSpentCheckTimeRef = useRef<number>(0);
   const MIN_SPENT_CHECK_INTERVAL_MS = 2000; // 2 second minimum between checks
+
+  // Track background token validation state (for UI indicator)
+  const [isValidatingTokens, setIsValidatingTokens] = useState(false);
 
   useEffect(() => {
     const handleWalletUpdate = () => {
@@ -251,6 +256,19 @@ export const useWallet = () => {
     }
   }, [identityQuery.data]);
 
+  // Load cached token hash from localStorage when identity changes
+  // This allows skipping spent checks on page reload when token list hasn't changed
+  useEffect(() => {
+    const address = identityQuery.data?.address;
+    if (address) {
+      const cachedHash = localStorage.getItem(STORAGE_KEY_GENERATORS.tokenListHash(address));
+      if (cachedHash) {
+        lastTokenHashRef.current = cachedHash;
+        console.log(`📦 [useWallet] Loaded cached token hash for address: ${cachedHash}`);
+      }
+    }
+  }, [identityQuery.data?.address]);
+
   // NOTE: OutboxRecoveryService lifecycle is now managed centrally in ServicesProvider.tsx
   // This prevents the repeated start/stop cycles that occurred when multiple components
   // using useWallet() each had their own lifecycle management.
@@ -328,6 +346,7 @@ export const useWallet = () => {
       if (!identity?.address) return [];
 
       // Get tokens directly from InventorySyncService (no wallet concept needed)
+      // Returns immediately - spent check runs in background
       console.log(`📦 [tokensQuery] Loading tokens for address: ${identity.address.slice(0, 30)}...`);
       let tokens = getTokensForAddress(identity.address);
 
@@ -349,71 +368,91 @@ export const useWallet = () => {
         }
       }
 
-      // Hash-based change detection to avoid redundant spent checks
-      const currentTokenHash = computeTokenListHash(tokens);
-      const tokenListUnchanged = currentTokenHash === lastTokenHashRef.current;
-
-      // Check for spent tokens on aggregator (prevents zombie token resurrection)
-      // This catches tokens that were spent but not properly removed from localStorage
-      if (tokens.length > 0 && identity.publicKey) {
-        // Skip expensive spent check if token list hasn't changed
-        if (tokenListUnchanged) {
-          console.log(`⏩ [tokensQuery] Token list hash unchanged (${currentTokenHash}), skipping spent check`);
-          return tokens;
-        }
-
-        // Token list changed - record new hash
-        lastTokenHashRef.current = currentTokenHash;
-
-        console.log(`📦 [tokensQuery] Token list changed (hash: ${currentTokenHash}) - running spent check for ${tokens.length} token(s)...`);
-        try {
-          const validationService = getTokenValidationService();
-
-          // Clear UNSPENT cache entries to force fresh aggregator check
-          // SPENT entries remain cached (immutable)
-          validationService.clearUnspentCacheEntries();
-
-          const spentCheck = await validationService.checkSpentTokens(
-            tokens,
-            identity.publicKey,
-            { batchSize: 3 }
-          );
-
-          console.log(`📦 [tokensQuery] Spent check complete: ${spentCheck.spentTokens.length} spent, ${tokens.length - spentCheck.spentTokens.length} valid`);
-
-          if (spentCheck.spentTokens.length > 0) {
-            console.warn(`⚠️ Found ${spentCheck.spentTokens.length} spent token(s) on aggregator during wallet load`);
-            for (const spent of spentCheck.spentTokens) {
-              console.log(`  💀 Archiving spent token: ${spent.tokenId.slice(0, 16)}... (state: ${spent.stateHash.slice(0, 8)}...)`);
-
-              // Remove token via InventorySyncService
-              if (identity.publicKey && identity.ipnsName) {
-                await removeTokenFromInventory(
-                  identity.address,
-                  identity.publicKey,
-                  identity.ipnsName,
-                  spent.tokenId,
-                  spent.stateHash
-                ).catch(err => {
-                  console.error(`Failed to remove spent token ${spent.tokenId.slice(0, 8)}:`, err);
-                });
-              }
-            }
-            // Return updated token list after removing spent tokens
-            return getTokensForAddress(identity.address);
-          }
-        } catch (err) {
-          // Don't fail wallet load if spent check fails - just log warning
-          console.warn('📦 [tokensQuery] Failed to check spent tokens:', err);
-        }
-      } else {
-        console.log(`📦 [tokensQuery] Skipping spent check: tokens=${tokens.length}, hasPublicKey=${!!identity.publicKey}`);
-      }
-
       return tokens;
     },
     enabled: !!identityQuery.data?.address,
   });
+
+  // Background spent token validation - runs after tokens are displayed
+  // This validates tokens against aggregator without blocking the UI
+  const isValidatingRef = useRef(false);
+  useEffect(() => {
+    const identity = identityQuery.data;
+    const tokens = tokensQuery.data;
+
+    // Skip if no identity, no tokens, or already validating
+    if (!identity?.address || !identity?.publicKey || !tokens || tokens.length === 0 || isValidatingRef.current) {
+      return;
+    }
+
+    // Hash-based change detection to avoid redundant spent checks
+    const currentTokenHash = computeTokenListHash(tokens);
+    const tokenListUnchanged = currentTokenHash === lastTokenHashRef.current;
+
+    if (tokenListUnchanged) {
+      console.log(`⏩ [backgroundValidation] Token list hash unchanged (${currentTokenHash}), skipping spent check`);
+      return;
+    }
+
+    // Mark as validating to prevent concurrent runs
+    isValidatingRef.current = true;
+    setIsValidatingTokens(true);
+
+    const runBackgroundValidation = async () => {
+      console.log(`🔄 [backgroundValidation] Running spent check for ${tokens.length} token(s) in background...`);
+
+      try {
+        const validationService = getTokenValidationService();
+
+        // Clear UNSPENT cache entries to force fresh aggregator check
+        validationService.clearUnspentCacheEntries();
+
+        const spentCheck = await validationService.checkSpentTokens(
+          tokens,
+          identity.publicKey,
+          { batchSize: 10 }
+        );
+
+        console.log(`🔄 [backgroundValidation] Spent check complete: ${spentCheck.spentTokens.length} spent, ${tokens.length - spentCheck.spentTokens.length} valid`);
+
+        if (spentCheck.spentTokens.length > 0) {
+          console.warn(`⚠️ [backgroundValidation] Found ${spentCheck.spentTokens.length} spent token(s)`);
+
+          for (const spent of spentCheck.spentTokens) {
+            console.log(`  💀 Removing spent token: ${spent.tokenId.slice(0, 16)}...`);
+
+            if (identity.ipnsName) {
+              await removeTokenFromInventory(
+                identity.address,
+                identity.publicKey,
+                identity.ipnsName,
+                spent.tokenId,
+                spent.stateHash
+              ).catch(err => {
+                console.error(`Failed to remove spent token ${spent.tokenId.slice(0, 8)}:`, err);
+              });
+            }
+          }
+
+          // Refetch tokens after removing spent ones
+          queryClient.invalidateQueries({ queryKey: KEYS.TOKENS });
+        }
+
+        // Update hash after successful validation (in memory and localStorage)
+        lastTokenHashRef.current = currentTokenHash;
+        localStorage.setItem(STORAGE_KEY_GENERATORS.tokenListHash(identity.address), currentTokenHash);
+
+      } catch (err) {
+        console.warn('🔄 [backgroundValidation] Failed to check spent tokens:', err);
+      } finally {
+        isValidatingRef.current = false;
+        setIsValidatingTokens(false);
+      }
+    };
+
+    // Run validation in background (non-blocking)
+    runBackgroundValidation();
+  }, [identityQuery.data, tokensQuery.data, queryClient]);
 
   const aggregatedAssetsQuery = useQuery({
     queryKey: [
@@ -1246,8 +1285,11 @@ export const useWallet = () => {
 
     assets: aggregatedAssetsQuery.data || [],
     isLoadingAssets: aggregatedAssetsQuery.isLoading,
+    assetsUpdatedAt: aggregatedAssetsQuery.dataUpdatedAt,
 
     tokens: tokensQuery.data || [],
+    tokensUpdatedAt: tokensQuery.dataUpdatedAt,
+    isValidatingTokens,
     createWallet: createWalletMutation.mutateAsync,
     restoreWallet: restoreWalletMutation.mutateAsync,
     mintNametag: mintNametagMutation.mutateAsync,

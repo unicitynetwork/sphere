@@ -1,4 +1,4 @@
-import { Wallet, Clock, Bell, MoreVertical, Cloud, CloudOff, RefreshCw } from 'lucide-react';
+import { Wallet, Clock, Bell, MoreVertical, Cloud, CloudOff, RefreshCw, ShieldCheck } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { L3WalletView } from './L3/views/L3WalletView';
@@ -16,7 +16,7 @@ export function WalletPanel() {
   const [isRequestsOpen, setIsRequestsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isL1WalletOpen, setIsL1WalletOpen] = useState(false);
-  const { identity, nametag, isLoadingIdentity } = useWallet();
+  const { identity, nametag, isLoadingIdentity, isValidatingTokens } = useWallet();
   const { pendingCount, requests } = useIncomingPaymentRequests();
   const { setFullscreen } = useUIState();
   const { isSyncing: isIpfsSyncing, isEnabled: isIpfsEnabled } = useIpfsStorage();
@@ -95,18 +95,22 @@ export function WalletPanel() {
                   <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
                     isSyncing
                       ? 'bg-yellow-500/15 text-yellow-600 dark:text-yellow-400'
-                      : syncMode === 'LOCAL'
-                        ? 'bg-orange-500/15 text-orange-600 dark:text-orange-400'
-                        : 'bg-green-500/15 text-green-600 dark:text-green-400'
+                      : isValidatingTokens
+                        ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
+                        : syncMode === 'LOCAL'
+                          ? 'bg-orange-500/15 text-orange-600 dark:text-orange-400'
+                          : 'bg-green-500/15 text-green-600 dark:text-green-400'
                   }`}>
                     {isSyncing ? (
                       <RefreshCw className="w-3 h-3 animate-spin" />
+                    ) : isValidatingTokens ? (
+                      <ShieldCheck className="w-3 h-3 animate-pulse" />
                     ) : syncMode === 'LOCAL' ? (
                       <CloudOff className="w-3 h-3" />
                     ) : (
                       <Cloud className="w-3 h-3" />
                     )}
-                    {isSyncing ? 'Syncing' : syncMode === 'LOCAL' ? 'Offline' : 'Synced'}
+                    {isSyncing ? 'Syncing' : isValidatingTokens ? 'Verifying' : syncMode === 'LOCAL' ? 'Offline' : 'Synced'}
                   </span>
                 )}
               </div>

@@ -105,7 +105,9 @@ export function WalletGate({ children }: WalletGateProps) {
   // The onboarding flag is cleared when user clicks "Let's go!" button.
   const isOnboarding = localStorage.getItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS) === 'true';
 
-  const isLoading = isLoadingIdentity || (!!identity && isLoadingNametag);
+  // Only wait for nametag if user hasn't completed onboarding yet
+  // If hasCompletedOnboarding is true, we can show the app immediately after identity loads
+  const isLoading = isLoadingIdentity || (!hasCompletedOnboarding && !!identity && isLoadingNametag);
 
   // User is authenticated if:
   // 1. They have identity AND have completed onboarding before (sphere_authenticated flag), OR

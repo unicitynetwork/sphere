@@ -228,6 +228,9 @@ export const STORAGE_KEY_GENERATORS = {
 
   // IPFS chat sequence: `sphere_ipfs_chat_seq_${ipnsName}`
   ipfsChatSeq: (ipnsName: string) => `sphere_ipfs_chat_seq_${ipnsName}` as const,
+
+  // Token list hash for spent check optimization: `sphere_token_hash_${address}`
+  tokenListHash: (address: string) => `sphere_token_hash_${address}` as const,
 } as const;
 
 // ============================================================================
