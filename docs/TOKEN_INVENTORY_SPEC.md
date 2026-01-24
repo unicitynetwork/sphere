@@ -1292,20 +1292,31 @@ interface RecoveryMintEntry extends OutboxEntry {
 
 **Token Recovery After Nametag Proof Fix:**
 
-Tokens that were invalidated due to nametag inclusion proof failures can now be recovered:
+Tokens that were invalidated due to nametag inclusion proof failures can now be recovered.
 
+**CRITICAL INSIGHT - Embedded Nametags:**
+Each received token has an **embedded copy** of the nametag in its `nametags` array. The SDK's `Token.verify()` validates this embedded nametag, NOT the main stored nametag. Simply updating the main nametag does NOT fix already-finalized tokens - we must update the EMBEDDED nametag within each invalid token.
+
+**Recovery Flow:**
 1. Load `_invalid` array from localStorage
-2. Filter for tokens with:
+2. Get current nametag with fresh inclusion proof from storage
+3. Filter for tokens with:
    - `reason === "SDK_VALIDATION"`
    - `details` contains "Inclusion proof verification failed" or "Nametag verification"
-3. Re-validate each token using `TokenValidationService.validateToken()`
-   - The validation will now pass because the nametag has a valid inclusion proof
-4. For tokens that pass validation:
+4. **For each invalid token, update the EMBEDDED nametag's proof:**
+   - Parse token's `nametags` array
+   - Find embedded nametag matching our nametag's `tokenId`
+   - Replace embedded nametag's `genesis.inclusionProof` with fresh proof
+5. Re-validate each token using `TokenValidationService.validateToken()`
+   - Validation now passes because the embedded nametag has valid proof
+6. For tokens that pass validation:
    - Add back to active inventory via `addToken()`
    - Remove from `_invalid` array
-5. Trigger `wallet-updated` event for UI refresh
+7. Trigger `wallet-updated` event for UI refresh
 
-**Implementation:** `TokenRecoveryService.recoverNametagInvalidatedTokens()` called after successful nametag proof recovery.
+**Implementation:**
+- `TokenRecoveryService.recoverNametagInvalidatedTokens()` - called after successful nametag proof recovery
+- `TokenRecoveryService.updateEmbeddedNametagProof()` - helper to fix embedded nametag
 
 **Idempotency:**
 - Salt is preserved from original genesis data (NEVER regenerated)
@@ -1331,6 +1342,7 @@ Tokens that were invalidated due to nametag inclusion proof failures can now be 
 **Implementation Locations:**
 - `NametagService.recoverNametagProofs()` - called from `refreshNametagProof()` when exclusion proof detected
 - `TokenRecoveryService.recoverNametagInvalidatedTokens()` - called after successful nametag proof recovery
+- `TokenRecoveryService.updateEmbeddedNametagProof()` - updates embedded nametag's proof within a token
 
 ---
 

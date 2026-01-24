@@ -24,6 +24,7 @@ import { STORAGE_KEY_GENERATORS } from "../../../../config/storageKeys";
 import { IdentityManager } from "./IdentityManager";
 import { ServiceProvider } from "./ServiceProvider";
 import type { TxfToken, TxfTransaction } from "./types/TxfTypes";
+import { getNametagForAddress } from "./InventorySyncService";
 import { getCurrentStateHash, tokenToTxf } from "./TxfSerializer";
 import { getTokenValidationService } from "./TokenValidationService";
 import { Buffer } from "buffer";
@@ -236,12 +237,18 @@ export class TokenRecoveryService {
    * validation due to "Inclusion proof verification failed" in nametag verification
    * can now be re-validated and moved back to active inventory.
    *
+   * CRITICAL: Each token has an EMBEDDED copy of the nametag in its `nametags` array.
+   * The SDK's Token.verify() validates this embedded nametag, NOT the main stored nametag.
+   * Therefore, we must UPDATE THE EMBEDDED NAMETAG within each token before re-validation.
+   *
    * This method:
    * 1. Loads invalid tokens from localStorage
-   * 2. Filters for tokens that failed due to nametag-related issues
-   * 3. Re-validates each token using TokenValidationService
-   * 4. Moves recovered tokens back to active inventory
-   * 5. Removes recovered tokens from the _invalid array
+   * 2. Gets the current nametag with fresh proof
+   * 3. Filters for tokens that failed due to nametag-related issues
+   * 4. Updates the EMBEDDED nametag within each token with the fresh proof
+   * 5. Re-validates each token using TokenValidationService
+   * 6. Moves recovered tokens back to active inventory
+   * 7. Removes recovered tokens from the _invalid array
    *
    * @returns Recovery statistics including count of recovered and still-invalid tokens
    */
@@ -265,6 +272,24 @@ export class TokenRecoveryService {
         result.errors.push("No IPNS name available");
         return result;
       }
+
+      // Get the current nametag with fresh proof
+      const nametagData = getNametagForAddress(identity.address);
+      if (!nametagData?.token) {
+        result.errors.push("No nametag available - cannot recover tokens");
+        return result;
+      }
+
+      const freshNametagTxf = nametagData.token as TxfToken;
+      const freshNametagTokenId = freshNametagTxf.genesis?.data?.tokenId;
+      const freshInclusionProof = freshNametagTxf.genesis?.inclusionProof;
+
+      if (!freshNametagTokenId || !freshInclusionProof) {
+        result.errors.push("Nametag missing tokenId or inclusion proof");
+        return result;
+      }
+
+      console.log(`🔧 Will use fresh nametag proof for tokenId: ${freshNametagTokenId.slice(0, 8)}...`);
 
       // Load invalid tokens from localStorage
       const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(identity.address);
@@ -325,6 +350,14 @@ export class TokenRecoveryService {
         try {
           console.log(`🔧 Re-validating token ${tokenIdShort}...`);
 
+          // CRITICAL: Update the EMBEDDED nametag within the token with fresh proof
+          // The SDK validates the token.nametags array, not the main stored nametag
+          const tokenWithFixedNametag = this.updateEmbeddedNametagProof(
+            entry.token,
+            freshNametagTokenId,
+            freshInclusionProof
+          );
+
           // Convert TxfToken to LocalToken for validation
           const localToken = new Token({
             id: tokenId,
@@ -335,10 +368,10 @@ export class TokenRecoveryService {
             amount: entry.token.genesis?.data?.coinData?.[0]?.[1] || "0",
             coinId: entry.token.genesis?.data?.coinData?.[0]?.[0] || "",
             symbol: "UCT",
-            jsonData: JSON.stringify(entry.token),
+            jsonData: JSON.stringify(tokenWithFixedNametag),
           });
 
-          // Re-validate with current nametag (which now has valid proof)
+          // Re-validate with fixed embedded nametag
           const validationResult = await validationService.validateToken(localToken);
 
           if (validationResult.isValid && validationResult.token) {
@@ -400,6 +433,71 @@ export class TokenRecoveryService {
       result.errors.push(errorMsg);
       return result;
     }
+  }
+
+  /**
+   * Update the embedded nametag's inclusion proof within a token.
+   *
+   * CRITICAL: Each received token has an EMBEDDED copy of the nametag in its `nametags` array.
+   * The SDK's Token.verify() validates this embedded nametag, NOT the main stored nametag.
+   * This method finds and updates the matching nametag with a fresh inclusion proof.
+   *
+   * Note: The nametags array is typed as string[] in TxfTypes but at runtime contains
+   * full token objects (SDK embeds them as objects, not strings).
+   *
+   * @param token - The token with potentially stale embedded nametag
+   * @param nametagTokenId - The tokenId of the nametag to update
+   * @param freshInclusionProof - The fresh inclusion proof to apply
+   * @returns A new token object with the embedded nametag updated
+   */
+  private updateEmbeddedNametagProof(
+    token: TxfToken,
+    nametagTokenId: string,
+    freshInclusionProof: unknown
+  ): TxfToken {
+    // Deep clone to avoid mutating the original
+    // Use 'any' here because we're working with runtime structures that differ from types
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updatedToken = JSON.parse(JSON.stringify(token)) as any;
+
+    // Check if token has embedded nametags
+    if (!updatedToken.nametags || !Array.isArray(updatedToken.nametags)) {
+      console.log(`🔧 Token has no embedded nametags array`);
+      return updatedToken as TxfToken;
+    }
+
+    let updated = false;
+
+    // Find and update matching nametag(s)
+    // At runtime, nametags contains full token objects (not strings as typed)
+    for (let i = 0; i < updatedToken.nametags.length; i++) {
+      const embeddedNametag = updatedToken.nametags[i];
+
+      // Skip if not an object (defensive check)
+      if (!embeddedNametag || typeof embeddedNametag !== "object") {
+        continue;
+      }
+
+      // Match by tokenId
+      const embeddedTokenId = embeddedNametag?.genesis?.data?.tokenId;
+      if (embeddedTokenId === nametagTokenId) {
+        console.log(`🔧 Updating embedded nametag at index ${i} with fresh proof`);
+
+        // Update the genesis inclusion proof
+        if (embeddedNametag.genesis) {
+          embeddedNametag.genesis.inclusionProof = freshInclusionProof;
+          updated = true;
+        }
+      }
+    }
+
+    if (updated) {
+      console.log(`🔧 Successfully updated embedded nametag proof`);
+    } else {
+      console.log(`🔧 No matching embedded nametag found for tokenId ${nametagTokenId.slice(0, 8)}...`);
+    }
+
+    return updatedToken as TxfToken;
   }
 
   // ==========================================
