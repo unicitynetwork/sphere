@@ -163,7 +163,7 @@ async function submitCommitmentToAggregator(
  * Submit a mint commitment to the aggregator
  * Returns: "SUCCESS" | "REQUEST_ID_EXISTS" | error message
  */
-async function submitMintCommitmentToAggregator(
+export async function submitMintCommitmentToAggregator(
   commitment: MintCommitment<IMintTransactionReason>
 ): Promise<{ success: boolean; status: string }> {
   try {
@@ -187,7 +187,7 @@ async function submitMintCommitmentToAggregator(
  * Uses MintTransactionData.fromJSON() to parse the genesis data and
  * then creates a MintCommitment from it.
  */
-async function reconstructMintCommitment(
+export async function reconstructMintCommitment(
   genesis: TxfGenesis
 ): Promise<{ commitment: MintCommitment<IMintTransactionReason> | null; error?: string }> {
   try {
@@ -243,7 +243,7 @@ async function reconstructMintCommitment(
  * - If authenticator is present: inclusion proof (commitment exists in tree)
  * - If authenticator is null: exclusion proof (commitment NOT in tree, e.g., after tree reset)
  */
-function isInclusionProofNotExclusion(proofJson: TxfInclusionProof | null): boolean {
+export function isInclusionProofNotExclusion(proofJson: TxfInclusionProof | null): boolean {
   if (!proofJson) return false;
 
   try {
@@ -261,7 +261,7 @@ function isInclusionProofNotExclusion(proofJson: TxfInclusionProof | null): bool
 /**
  * Wait for mint inclusion proof using the SDK
  */
-async function waitForMintProofWithSDK(
+export async function waitForMintProofWithSDK(
   commitment: MintCommitment<IMintTransactionReason>,
   timeoutMs: number = 30000
 ): Promise<TxfInclusionProof | null> {

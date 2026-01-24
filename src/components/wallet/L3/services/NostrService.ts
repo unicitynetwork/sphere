@@ -602,22 +602,50 @@ export class NostrService {
             if (errorMessage.includes("Nametag tokens verification failed")) {
               console.log("📦 Nametag proof appears stale, refreshing and retrying...");
 
-              const refreshedNametag = await nametagService.refreshNametagProof();
-              if (!refreshedNametag) {
-                console.error("Failed to refresh nametag proof");
+              try {
+                const refreshedNametag = await nametagService.refreshNametagProof();
+                if (!refreshedNametag) {
+                  console.error("Failed to refresh nametag proof");
+                  throw finalizeError;
+                }
+
+                // Retry with refreshed nametag
+                myNametagToken = refreshedNametag;
+                finalizedToken = await client.finalizeTransaction(
+                  rootTrustBase,
+                  sourceToken,
+                  recipientState,
+                  transferTx,
+                  [myNametagToken]
+                );
+                console.log("✅ Finalization succeeded after proof refresh");
+              } catch (refreshError: unknown) {
+                const refreshErrorMsg = refreshError instanceof Error ? refreshError.message : String(refreshError);
+
+                // Check if this is a recovery failure or exclusion proof error
+                // With automatic recovery (TOKEN_INVENTORY_SPEC.md Section 13.26), we now
+                // attempt to re-submit the commitment before giving up
+                if (refreshErrorMsg.includes("recovery failed") || refreshErrorMsg.includes("exclusion proof")) {
+                  console.error("❌ Nametag recovery failed after all attempts.");
+
+                  // Dispatch custom event for UI notification
+                  window.dispatchEvent(new CustomEvent("nametag-recovery-failed", {
+                    detail: {
+                      message: "Your nametag proof could not be recovered automatically. Please re-register your nametag.",
+                      error: refreshErrorMsg
+                    }
+                  }));
+
+                  // Re-throw with user-friendly message
+                  throw new Error(
+                    "Cannot receive token: Automatic nametag proof recovery failed. " +
+                    "Please go to Settings and re-register your nametag."
+                  );
+                }
+
+                // Other refresh errors - re-throw original
                 throw finalizeError;
               }
-
-              // Retry with refreshed nametag
-              myNametagToken = refreshedNametag;
-              finalizedToken = await client.finalizeTransaction(
-                rootTrustBase,
-                sourceToken,
-                recipientState,
-                transferTx,
-                [myNametagToken]
-              );
-              console.log("✅ Finalization succeeded after proof refresh");
             } else {
               // Different error, re-throw
               throw finalizeError;

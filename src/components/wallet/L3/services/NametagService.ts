@@ -19,6 +19,12 @@ import {
   getNametagForAddress,
   setNametagForAddress,
 } from "./InventorySyncService";
+import {
+  reconstructMintCommitment,
+  submitMintCommitmentToAggregator,
+  waitForMintProofWithSDK,
+  isInclusionProofNotExclusion,
+} from "../../../../utils/devTools";
 import { OutboxRepository } from "../../../../repositories/OutboxRepository";
 import { createMintOutboxEntry, type MintOutboxEntry } from "./types/OutboxTypes";
 import { IpfsStorageService, SyncPriority } from "./IpfsStorageService";
@@ -442,15 +448,39 @@ export class NametagService {
       const response = await client.getInclusionProof(requestId);
 
       if (!response.inclusionProof) {
-        console.warn("📦 No inclusion proof available from aggregator");
-        // Return the existing token without update
-        return await Token.fromJSON(nametagTxf);
+        console.error("📦 No inclusion proof available from aggregator - nametag may be invalid");
+        // Throw error instead of returning stale token that will fail verification
+        throw new Error(
+          `Nametag "${nametagData.name}" has no proof on aggregator. ` +
+          `The aggregator may have lost state or your nametag was never fully minted. ` +
+          `Please try re-registering your nametag.`
+        );
       }
 
       // Check if it's an inclusion proof (has authenticator) vs exclusion proof
+      // Exclusion proof (authenticator === null) means the nametag is NOT in the aggregator's Merkle tree
       if (response.inclusionProof.authenticator === null) {
-        console.warn("📦 Got exclusion proof - nametag may need re-minting");
-        return await Token.fromJSON(nametagTxf);
+        console.log("📦 Got exclusion proof - attempting automatic recovery...");
+
+        // Per TOKEN_INVENTORY_SPEC.md Section 13.26: Automatic Nametag Proof Recovery
+        // Instead of throwing an error, attempt to recover by re-submitting the commitment
+        try {
+          const recoveredToken = await this.recoverNametagProofs();
+
+          if (recoveredToken) {
+            console.log(`✅ Nametag automatically recovered via re-submission`);
+            return recoveredToken;
+          }
+        } catch (recoveryError) {
+          const recoveryErrorMsg = recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
+          console.error("📦 Automatic recovery failed:", recoveryErrorMsg);
+        }
+
+        // Recovery failed - throw descriptive error
+        throw new Error(
+          `Nametag "${nametagData.name}" proof recovery failed. ` +
+          `Please try re-registering your nametag.`
+        );
       }
 
       // Update the token with fresh proof
@@ -466,12 +496,107 @@ export class NametagService {
       return await Token.fromJSON(nametagTxf);
     } catch (error) {
       console.error("📦 Failed to refresh nametag proof:", error);
-      // Return existing token on error - let caller decide how to handle
+
+      // If this is a recovery failure, exclusion proof, or missing proof error, propagate it
+      // These indicate the nametag is genuinely not on the aggregator or recovery failed
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (
+        errorMessage.includes("recovery failed") ||
+        errorMessage.includes("exclusion proof") ||
+        errorMessage.includes("no proof on aggregator")
+      ) {
+        throw error; // Let caller handle - returning stale token will fail SDK verification
+      }
+
+      // For other errors (network issues, parsing errors, etc.), return existing token
+      // This is a best-effort fallback for transient failures
       try {
         return await Token.fromJSON(nametagTxf);
       } catch {
         return null;
       }
+    }
+  }
+
+  /**
+   * Automatically recover nametag proofs by re-submitting commitments.
+   * Called when refreshNametagProof() encounters an exclusion proof.
+   *
+   * Per TOKEN_INVENTORY_SPEC.md Section 13.26:
+   * - Reconstructs MintCommitment from stored genesis data (preserving exact salt)
+   * - Re-submits to aggregator (idempotent - REQUEST_ID_EXISTS is success)
+   * - Waits for fresh inclusion proof (60s timeout)
+   * - Updates stored token with fresh proof
+   *
+   * @returns The recovered token with fresh inclusion proof, or null if recovery failed
+   */
+  async recoverNametagProofs(): Promise<Token<any> | null> {
+    const identity = await this.identityManager.getCurrentIdentity();
+    if (!identity) {
+      console.log("📦 No identity - cannot recover nametag proofs");
+      return null;
+    }
+
+    const nametagData = getNametagForAddress(identity.address);
+    if (!nametagData?.token) {
+      console.log("📦 No nametag token to recover");
+      return null;
+    }
+
+    const nametagTxf = nametagData.token as any;
+
+    // CRITICAL: Salt must exist for recovery - it's part of the original commitment
+    if (!nametagTxf.genesis?.data?.salt) {
+      console.error("📦 Cannot recover - missing genesis data or salt");
+      return null;
+    }
+
+    try {
+      console.log(`📦 Recovering nametag proofs for "${nametagData.name}"...`);
+
+      // Step 1: Reconstruct MintCommitment from stored genesis data
+      // This uses the EXACT same salt as the original mint
+      const txfGenesis = {
+        data: nametagTxf.genesis.data,
+        inclusionProof: nametagTxf.genesis.inclusionProof,
+      };
+
+      console.log(`📦 Reconstructing mint commitment...`);
+      const result = await reconstructMintCommitment(txfGenesis);
+      if (!result.commitment) {
+        throw new Error(`Cannot reconstruct commitment: ${result.error}`);
+      }
+
+      // Step 2: Re-submit to aggregator (idempotent)
+      console.log(`📦 Re-submitting genesis commitment...`);
+      const submitResult = await submitMintCommitmentToAggregator(result.commitment);
+
+      if (!submitResult.success) {
+        throw new Error(`Submission failed: ${submitResult.status}`);
+      }
+
+      console.log(`📦 Submission ${submitResult.status === "REQUEST_ID_EXISTS" ? "already exists" : "accepted"}`);
+
+      // Step 3: Wait for fresh inclusion proof (60s timeout)
+      console.log(`📦 Waiting for inclusion proof...`);
+      const freshProof = await waitForMintProofWithSDK(result.commitment, 60000);
+
+      if (!isInclusionProofNotExclusion(freshProof)) {
+        throw new Error("Failed to obtain valid inclusion proof after resubmission");
+      }
+
+      // Step 4: Update stored token with fresh proof
+      nametagTxf.genesis.inclusionProof = freshProof;
+      setNametagForAddress(identity.address, { ...nametagData, token: nametagTxf });
+
+      console.log(`✅ Nametag proofs recovered successfully`);
+
+      // Step 5: Return updated token for immediate use
+      return await Token.fromJSON(nametagTxf);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`📦 Nametag recovery failed:`, errorMessage);
+      throw error;
     }
   }
 

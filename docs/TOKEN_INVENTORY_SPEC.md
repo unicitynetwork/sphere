@@ -1269,6 +1269,48 @@ interface RecoveryMintEntry extends OutboxEntry {
 
 **Rationale:** This ensures no value is permanently lost due to transient failures. The original owner can manually retry transfers after recovery.
 
+### 13.26 Automatic Nametag Proof Recovery
+
+**Scenario:** During nametag proof refresh, the aggregator returns an exclusion proof for the genesis commitment.
+
+**Problem:** When a nametag token's genesis commitment returns an exclusion proof from the aggregator (meaning the aggregator's Merkle tree doesn't contain the commitment), the user cannot receive tokens because SDK verification fails. The commitment was previously accepted but is no longer in the tree (e.g., after aggregator reset).
+
+**Detection:** In `refreshNametagProof()`:
+1. Reconstruct MintCommitment from stored genesis data
+2. Query aggregator with `getInclusionProof(requestId)`
+3. If `authenticator === null`: trigger automatic recovery
+
+**Resolution:**
+1. Re-submit genesis MintCommitment via `submitMintCommitment()`
+   - `SUCCESS`: New commitment accepted
+   - `REQUEST_ID_EXISTS`: Commitment already exists (idempotent)
+2. Wait for inclusion proof via `waitInclusionProof()` (60s timeout)
+3. Update `genesis.inclusionProof` with fresh proof
+4. Save updated token to storage
+5. Return updated token for immediate use
+
+**Idempotency:**
+- Salt is preserved from original genesis data (NEVER regenerated)
+- requestId is deterministically derived from tokenId
+- Re-submission is safe (idempotent) - same commitment can be resubmitted
+
+**Technical Note - Salt's Role in Commitment:**
+| Component | Affected by Salt? | Explanation |
+|-----------|------------------|-------------|
+| tokenId | ❌ NO | `tokenId = SHA256(nametag)` |
+| requestId | ❌ NO | `requestId = f(tokenId)` only |
+| transactionHash | ✅ YES | `transactionHash = SHA256(CBOR(...salt...))` |
+| authenticator | ✅ YES | Signature over transactionHash |
+
+**Implication:** We can fetch the proof using just tokenId → requestId, but the reconstructed Token must use the exact same salt for SDK verification to pass (transactionHash must match authenticator signature).
+
+**Error Handling:**
+- If re-submission fails: throw error with clear message
+- If proof timeout (60s): throw error, user may retry later
+- If SDK validation fails after recovery: propagate original error
+
+**Implementation Location:** `NametagService.recoverNametagProofs()` called from `refreshNametagProof()` when exclusion proof detected.
+
 ---
 
 ## Appendix: Data Structures
