@@ -1626,6 +1626,94 @@ export class GroupChatService {
     return isAdmin;
   }
 
+  // Cache for relay admin status
+  private relayAdminPubkeys: Set<string> | null = null;
+  private relayAdminFetchPromise: Promise<Set<string>> | null = null;
+
+  /**
+   * Fetch the list of relay admins from the relay.
+   * Relay admins are stored in GROUP_ADMINS (kind 39001) with 'd' tag of empty string or '_'.
+   */
+  async fetchRelayAdmins(): Promise<Set<string>> {
+    if (this.relayAdminPubkeys) {
+      return this.relayAdminPubkeys;
+    }
+
+    // Avoid multiple concurrent fetches
+    if (this.relayAdminFetchPromise) {
+      return this.relayAdminFetchPromise;
+    }
+
+    this.relayAdminFetchPromise = this.doFetchRelayAdmins();
+    const result = await this.relayAdminFetchPromise;
+    this.relayAdminFetchPromise = null;
+    return result;
+  }
+
+  private async doFetchRelayAdmins(): Promise<Set<string>> {
+    if (!this.client) await this.start();
+    if (!this.client) return new Set();
+
+    return new Promise((resolve) => {
+      const adminPubkeys = new Set<string>();
+
+      // Query for relay-level admins (GROUP_ADMINS with d tag of '' or '_')
+      const filter = new Filter({
+        kinds: [NIP29_KINDS.GROUP_ADMINS],
+        '#d': ['', '_'],
+      });
+
+      this.client!.subscribe(filter, {
+        onEvent: (event) => {
+          const pTags = event.tags.filter((t) => t[0] === 'p');
+          for (const tag of pTags) {
+            if (tag[1]) {
+              adminPubkeys.add(tag[1]);
+            }
+          }
+        },
+        onEndOfStoredEvents: () => {
+          console.log(`👑 Fetched ${adminPubkeys.size} relay admins`);
+          this.relayAdminPubkeys = adminPubkeys;
+          resolve(adminPubkeys);
+        },
+      });
+
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        if (!this.relayAdminPubkeys) {
+          console.warn('⚠️ Timeout fetching relay admins');
+          this.relayAdminPubkeys = adminPubkeys;
+          resolve(adminPubkeys);
+        }
+      }, 5000);
+    });
+  }
+
+  /**
+   * Check if the current user is a relay admin (can create/delete groups).
+   */
+  async isCurrentUserRelayAdmin(): Promise<boolean> {
+    const myPubkey = this.getMyPublicKey();
+    if (!myPubkey) return false;
+
+    const admins = await this.fetchRelayAdmins();
+    const isAdmin = admins.has(myPubkey);
+    console.log(`👑 isCurrentUserRelayAdmin: ${isAdmin} (${admins.size} relay admins)`);
+    return isAdmin;
+  }
+
+  /**
+   * Synchronous check for relay admin status (uses cached value).
+   * Returns false if not yet fetched.
+   */
+  isCurrentUserRelayAdminSync(): boolean {
+    const myPubkey = this.getMyPublicKey();
+    if (!myPubkey) return false;
+    if (!this.relayAdminPubkeys) return false;
+    return this.relayAdminPubkeys.has(myPubkey);
+  }
+
   /**
    * Check if the current user is a moderator (admin or moderator) of the specified group.
    */

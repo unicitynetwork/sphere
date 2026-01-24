@@ -55,7 +55,8 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     isLoadingMembers,
     // Nametag resolution
     resolveMemberNametags,
-    // Admin actions
+    // Admin actions (relay admin only)
+    isRelayAdmin,
     createGroup,
     deleteGroup,
     createInvite,
@@ -219,6 +220,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
         onCollapse={() => setSidebarCollapsed(true)}
         totalUnreadCount={totalUnreadCount}
         onModeChange={onModeChange}
+        isRelayAdmin={isRelayAdmin}
         isAdminOfGroup={isAdminOfGroup}
         onDeleteGroup={deleteGroup}
         onCreateInvite={createInvite}

@@ -9,6 +9,7 @@ interface GroupItemProps {
   onClick: () => void;
   onLeave: () => void;
   isAdmin?: boolean;
+  isRelayAdmin?: boolean;
   onDeleteGroup?: () => Promise<boolean>;
   onCreateInvite?: () => Promise<string | null>;
   isDeletingGroup?: boolean;
@@ -21,6 +22,7 @@ export function GroupItem({
   onClick,
   onLeave,
   isAdmin = false,
+  isRelayAdmin = false,
   onDeleteGroup,
   onCreateInvite,
   isDeletingGroup = false,
@@ -135,8 +137,8 @@ export function GroupItem({
                     Copy Invite Link
                   </button>
                 )}
-                {/* Admin: Delete Group */}
-                {isAdmin && onDeleteGroup && (
+                {/* Admin: Delete Group - only for relay admins */}
+                {isRelayAdmin && onDeleteGroup && (
                   <button
                     onClick={async (e) => {
                       e.stopPropagation();

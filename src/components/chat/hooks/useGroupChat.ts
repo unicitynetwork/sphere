@@ -10,6 +10,7 @@ const QUERY_KEYS = {
   MEMBERS: (groupId: string) => ['groupChat', 'members', groupId],
   AVAILABLE_GROUPS: ['groupChat', 'available'],
   UNREAD_COUNT: ['groupChat', 'unreadCount'],
+  RELAY_ADMIN: ['groupChat', 'relayAdmin'],
 };
 
 const groupRepository = GroupChatRepository.getInstance();
@@ -67,7 +68,8 @@ export interface UseGroupChatReturn {
   // Nametag resolution
   resolveMemberNametags: () => Promise<void>;
 
-  // Admin actions
+  // Admin actions (relay admin only)
+  isRelayAdmin: boolean;
   createGroup: (options: CreateGroupOptions) => Promise<Group | null>;
   deleteGroup: (groupId: string) => Promise<boolean>;
   createInvite: (groupId: string) => Promise<string | null>;
@@ -200,6 +202,17 @@ export const useGroupChat = (): UseGroupChatReturn => {
     queryKey: QUERY_KEYS.UNREAD_COUNT,
     queryFn: () => groupRepository.getTotalUnreadCount(),
     staleTime: 30000,
+  });
+
+  // Query relay admin status
+  const relayAdminQuery = useQuery({
+    queryKey: QUERY_KEYS.RELAY_ADMIN,
+    queryFn: async () => {
+      if (!groupChatService) return false;
+      return groupChatService.isCurrentUserRelayAdmin();
+    },
+    staleTime: 300000, // Cache for 5 minutes
+    enabled: !!groupChatService && isConnected,
   });
 
   // Join group mutation
@@ -504,7 +517,8 @@ export const useGroupChat = (): UseGroupChatReturn => {
     // Nametag resolution
     resolveMemberNametags,
 
-    // Admin actions
+    // Admin actions (relay admin only)
+    isRelayAdmin: relayAdminQuery.data || false,
     createGroup,
     deleteGroup,
     createInvite,
