@@ -812,8 +812,15 @@ export class GroupChatService {
     console.log(`📋 Fetched ${members.length} members and ${adminPubkeys.length} admins for group ${groupId}`);
 
     // Save members, marking admins appropriately
+    // But preserve existing admin status (relay might not have caught up yet)
     for (const member of members) {
+      const existingMember = this.repository.getMember(groupId, member.pubkey);
+
+      // Determine role: admin from relay list, or preserve existing admin status, or from member data
       if (adminPubkeys.includes(member.pubkey)) {
+        member.role = GroupRole.ADMIN;
+      } else if (existingMember?.isAdmin()) {
+        // Preserve existing admin status - don't downgrade
         member.role = GroupRole.ADMIN;
       }
       this.repository.saveMember(member);
@@ -830,6 +837,18 @@ export class GroupChatService {
           joinedAt: Date.now(),
         });
         this.repository.saveMember(adminMember);
+      }
+    }
+
+    // Also ensure current user's admin status is preserved if they were set as admin locally
+    const myPubkey = this.getMyPublicKey();
+    if (myPubkey) {
+      const myMember = this.repository.getMember(groupId, myPubkey);
+      // If we don't have ourselves in the member list at all after fetching,
+      // and we're the group creator, we should still be admin
+      if (!myMember && adminPubkeys.length === 0 && members.length === 0) {
+        // Relay returned empty - preserve local state by not doing anything
+        console.log(`⚠️ Relay returned empty member list for ${groupId}, preserving local state`);
       }
     }
   }
@@ -927,6 +946,14 @@ export class GroupChatService {
 
       return false;
     } catch (error) {
+      // If the relay says the group doesn't exist, remove it locally anyway
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('group not found') || errorMessage.includes('not a member')) {
+        console.log(`ℹ️ Group ${groupId} not found on relay, removing locally`);
+        this.repository.deleteGroup(groupId);
+        return true;
+      }
+
       console.error('Failed to leave group', error);
       return false;
     }
@@ -941,8 +968,20 @@ export class GroupChatService {
     content: string,
     replyToId?: string
   ): Promise<GroupMessage | null> {
+    console.log(`📤 Attempting to send message to group ${groupId}: "${content.slice(0, 50)}..."`);
+
     if (!this.client) await this.start();
-    if (!this.client) return null;
+    if (!this.client) {
+      console.error('❌ Cannot send message: client not connected');
+      return null;
+    }
+
+    // Check if we have the group locally
+    const group = this.repository.getGroup(groupId);
+    if (!group) {
+      console.error(`❌ Cannot send message: group ${groupId} not found in local storage`);
+      return null;
+    }
 
     try {
       const identity = await this.identityManager.getCurrentIdentity();
@@ -973,6 +1012,7 @@ export class GroupChatService {
       // Wrap content with sender's nametag for recipients to see who sent it
       const wrappedContent = this.wrapMessageContent(content, senderNametag);
 
+      console.log(`📡 Publishing message event kind=${kind} to group ${groupId}`);
       const eventId = await this.client.createAndPublishEvent({
         kind,
         tags,
@@ -980,6 +1020,7 @@ export class GroupChatService {
       });
 
       if (eventId) {
+        console.log(`✅ Message published with event ID: ${eventId}`);
         const message = new GroupMessage({
           id: eventId,
           groupId,
@@ -998,9 +1039,10 @@ export class GroupChatService {
         return message;
       }
 
+      console.warn(`⚠️ Message publish returned no event ID for group ${groupId}`);
       return null;
     } catch (error) {
-      console.error('Failed to send group message', error);
+      console.error('❌ Failed to send group message:', error);
       return null;
     }
   }
@@ -1183,10 +1225,126 @@ export class GroupChatService {
     if (!this.client) await this.start();
     if (!this.client) return null;
 
+    // Ensure we have our pubkey before proceeding
+    const creatorPubkey = this.getMyPublicKey();
+    if (!creatorPubkey) {
+      console.error('❌ Cannot create group: no pubkey available');
+      return null;
+    }
+    console.log(`🔑 Creator pubkey: ${creatorPubkey}`);
+
+    // Generate a proposed group ID (relay may override this)
+    const proposedGroupId = options.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+      .slice(0, 20) || crypto.randomUUID().slice(0, 12);
+
     try {
+      // Subscribe to GROUP_METADATA events BEFORE creating so we can catch the relay's response
+      const groupPromise = new Promise<Group | null>((resolve) => {
+        const myPubkey = creatorPubkey; // Use the pubkey we already verified
+        const creationTime = Math.floor(Date.now() / 1000);
+
+        // Set up subscription to catch the new group's metadata from the relay
+        const metadataFilter = new Filter({
+          kinds: [NIP29_KINDS.GROUP_METADATA],
+          since: creationTime - 5, // A bit before creation to catch it
+        });
+
+        let resolved = false;
+
+        this.client!.subscribe(metadataFilter, {
+          onEvent: (event) => {
+            if (resolved) return;
+
+            // Parse the metadata and check if it matches our creation
+            const group = this.parseGroupMetadata(event);
+            if (!group) return;
+
+            // Check if this is our group by matching name or proposed ID
+            const isOurGroup = (group.name === options.name || group.id === proposedGroupId) &&
+                               event.created_at >= creationTime - 5;
+            if (isOurGroup) {
+              resolved = true;
+              console.log(`✅ Relay confirmed group creation: ${group.id}`);
+
+              // Override with what we requested (relay might not echo these correctly)
+              if (!group.name || group.name === 'Unnamed Group') {
+                group.name = options.name;
+              }
+              if (options.description && !group.description) {
+                group.description = options.description;
+              }
+              group.visibility = options.visibility || GroupVisibility.PUBLIC;
+
+              // Save the group
+              this.repository.saveGroup(group);
+              this.subscribeToGroup(group.id);
+
+              // Add ourselves as admin locally first (immediate feedback)
+              console.log(`👤 My pubkey for admin membership: ${myPubkey}`);
+              if (myPubkey) {
+                const member = new GroupMember({
+                  pubkey: myPubkey,
+                  groupId: group.id,
+                  role: GroupRole.ADMIN,
+                  joinedAt: Date.now(),
+                });
+                this.repository.saveMember(member);
+                console.log(`✅ Saved myself as admin for group ${group.id}`);
+
+                // Verify it was saved
+                const savedMember = this.repository.getMember(group.id, myPubkey);
+                console.log(`🔍 Verification - saved member:`, savedMember?.toJSON());
+                console.log(`🔍 Is admin?`, savedMember?.isAdmin());
+              } else {
+                console.warn(`⚠️ No pubkey available, cannot save admin membership`);
+              }
+
+              // Send explicit join request to ensure we're registered as member
+              // Some relays require this even for the creator
+              this.client!.createAndPublishEvent({
+                kind: NIP29_KINDS.JOIN_REQUEST,
+                tags: [['h', group.id]],
+                content: '',
+              }).catch((err) => {
+                // Ignore "already a member" errors
+                const msg = err instanceof Error ? err.message : String(err);
+                if (!msg.includes('already a member')) {
+                  console.warn('Join request after create failed:', err);
+                }
+              });
+
+              // Also fetch members from relay to get proper admin list
+              this.fetchAndSaveMembers(group.id).catch(console.error);
+
+              showToast(`Group "${group.name}" created!`, 'success');
+              window.dispatchEvent(new CustomEvent('group-chat-updated'));
+              resolve(group);
+            }
+          },
+          onEndOfStoredEvents: () => {
+            // Continue listening for new events
+          },
+        });
+
+        // Timeout after 10 seconds
+        setTimeout(() => {
+          if (!resolved) {
+            console.warn('⚠️ Timeout waiting for group creation confirmation from relay');
+            showToast('Group creation timed out - relay may not have responded', 'warning');
+            resolve(null);
+          }
+        }, 10000);
+      });
+
+      console.log(`📤 Creating group with proposed ID: ${proposedGroupId}`);
+
+      // Now send the create group request
+      // Include 'h' tag with proposed group ID as some relays require it
       const eventId = await this.client.createAndPublishEvent({
         kind: NIP29_KINDS.CREATE_GROUP,
-        tags: [],
+        tags: [['h', proposedGroupId]],
         content: JSON.stringify({
           name: options.name,
           about: options.description,
@@ -1196,53 +1354,27 @@ export class GroupChatService {
       });
 
       if (eventId) {
-        console.log(`✅ Group create request sent, waiting for relay confirmation...`);
+        console.log(`✅ Group create request sent (${eventId}), waiting for relay confirmation...`);
+        const group = await groupPromise;
 
-        // Wait a moment for the relay to process and return metadata
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-
-        // Refresh available groups to get the newly created group with correct ID
-        const availableGroups = await this.fetchAvailableGroups();
-        const newGroup = availableGroups.find(
-          (g) => g.name === options.name &&
-          Math.abs(g.createdAt - Date.now()) < 10000 // Created within last 10 seconds
-        );
-
-        if (newGroup) {
-          // Save and subscribe to the new group
-          this.repository.saveGroup(newGroup);
-          this.subscribeToGroup(newGroup.id);
-
-          // Add ourselves as admin
+        // If we got a group back but somehow the member wasn't saved, save it now
+        if (group) {
           const myPubkey = this.getMyPublicKey();
           if (myPubkey) {
-            const member = new GroupMember({
-              pubkey: myPubkey,
-              groupId: newGroup.id,
-              role: GroupRole.ADMIN,
-              joinedAt: Date.now(),
-            });
-            this.repository.saveMember(member);
+            const existingMember = this.repository.getMember(group.id, myPubkey);
+            if (!existingMember) {
+              console.log(`⚠️ Member not saved during creation, saving now as admin`);
+              const member = new GroupMember({
+                pubkey: myPubkey,
+                groupId: group.id,
+                role: GroupRole.ADMIN,
+                joinedAt: Date.now(),
+              });
+              this.repository.saveMember(member);
+            }
           }
-
-          window.dispatchEvent(new CustomEvent('group-chat-updated'));
-          return newGroup;
         }
 
-        // Fallback: create local group if relay didn't return metadata
-        const group = new Group({
-          id: eventId.slice(0, 12),
-          relayUrl: this.relayUrls[0],
-          name: options.name,
-          description: options.description,
-          picture: options.picture,
-          visibility: options.visibility || GroupVisibility.PUBLIC,
-          createdAt: Date.now(),
-        });
-
-        this.repository.saveGroup(group);
-        this.subscribeToGroup(group.id);
-        window.dispatchEvent(new CustomEvent('group-chat-updated'));
         return group;
       }
 
@@ -1483,10 +1615,15 @@ export class GroupChatService {
    */
   isCurrentUserAdmin(groupId: string): boolean {
     const myPubkey = this.getMyPublicKey();
-    if (!myPubkey) return false;
+    if (!myPubkey) {
+      console.log(`🔍 isCurrentUserAdmin(${groupId}): no pubkey`);
+      return false;
+    }
 
     const member = this.repository.getMember(groupId, myPubkey);
-    return member?.isAdmin() || false;
+    const isAdmin = member?.isAdmin() || false;
+    console.log(`🔍 isCurrentUserAdmin(${groupId}): pubkey=${myPubkey?.slice(0, 8)}, member=${!!member}, role=${member?.role}, isAdmin=${isAdmin}`);
+    return isAdmin;
   }
 
   /**
