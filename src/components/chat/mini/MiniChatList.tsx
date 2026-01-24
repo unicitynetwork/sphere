@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { ChatRepository } from '../data/ChatRepository';
 import { useMiniChatStore } from './miniChatStore';
 import type { ChatConversation } from '../data/models';
+import { getColorFromPubkey } from '../utils/avatarColors';
 
 interface MiniChatListProps {
   onClose: () => void;
@@ -75,7 +76,7 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
       animate={{ opacity: 1, x: 0, scale: 1 }}
       exit={{ opacity: 0, x: -20, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="fixed left-4 bottom-20 z-[9999] w-80 max-h-[70vh] bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-700 shadow-2xl overflow-hidden flex flex-col"
+      className="fixed left-4 bottom-20 z-100000 w-80 max-h-[70vh] bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-700 shadow-2xl overflow-hidden flex flex-col"
     >
       <div className="p-4 border-b border-neutral-200 dark:border-neutral-700 flex items-center justify-between shrink-0">
         <h3 className="text-lg font-semibold text-neutral-900 dark:text-white">Messages</h3>
@@ -128,7 +129,7 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.99 }}
                 >
-                  <div className="w-10 h-10 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center text-white font-medium text-sm shrink-0 shadow-md">
+                  <div className={`w-10 h-10 rounded-xl bg-linear-to-br ${getColorFromPubkey(conversation.participantPubkey).gradient} flex items-center justify-center text-white font-medium text-sm shrink-0 shadow-md`}>
                     {conversation.getAvatar()}
                   </div>
                   <div className="flex-1 min-w-0 text-left">

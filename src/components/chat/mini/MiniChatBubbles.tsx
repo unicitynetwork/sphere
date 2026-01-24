@@ -103,7 +103,7 @@ export function MiniChatBubbles() {
   return createPortal(
     <>
       {/* Hidden on mobile (< 768px) */}
-      <div className="hidden md:flex fixed left-4 bottom-4 z-[9998] flex-col-reverse items-start gap-3">
+      <div className="hidden md:flex fixed left-4 bottom-4 z-100000 flex-col-reverse items-start gap-3">
         <button
           onMouseDown={(e) => e.stopPropagation()}
           onClick={toggleList}

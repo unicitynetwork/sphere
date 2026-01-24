@@ -11,6 +11,7 @@ import { DMChatInput } from './DMChatInput';
 import { NewConversationModal } from './NewConversationModal';
 import { agents } from '../../../config/activities';
 import { setMentionClickHandler } from '../../../utils/mentionHandler';
+import { getColorFromPubkey } from '../utils/avatarColors';
 import type { ChatModeChangeHandler } from '../../../types';
 
 interface DMChatSectionProps {
@@ -252,8 +253,7 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
               {selectedConversation ? (
                 <>
                   <motion.div whileHover={{ scale: 1.05 }} className="relative">
-                    <div className="absolute inset-0 bg-orange-500 rounded-xl blur-lg opacity-50" />
-                    <div className="relative w-12 h-12 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-xl text-white font-medium">
+                    <div className={`relative w-12 h-12 rounded-xl bg-linear-to-br ${getColorFromPubkey(selectedConversation.participantPubkey).gradient} flex items-center justify-center shadow-xl text-white font-medium`}>
                       {selectedConversation.getAvatar()}
                     </div>
                   </motion.div>

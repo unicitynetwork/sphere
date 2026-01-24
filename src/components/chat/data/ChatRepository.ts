@@ -82,9 +82,12 @@ export class ChatRepository {
   updateConversationLastMessage(conversationId: string, text: string, timestamp: number): void {
     const conversation = this.getConversation(conversationId);
     if (conversation) {
-      conversation.lastMessageText = text;
-      conversation.lastMessageTime = timestamp;
-      this.saveConversation(conversation);
+      // Only update if this message is newer than the current last message
+      if (timestamp >= conversation.lastMessageTime) {
+        conversation.lastMessageText = text;
+        conversation.lastMessageTime = timestamp;
+        this.saveConversation(conversation);
+      }
     }
   }
 

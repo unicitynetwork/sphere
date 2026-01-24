@@ -1,13 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ArrowDownUp, Loader2, TrendingUp, CheckCircle, ArrowDown } from 'lucide-react';
+import { ArrowDownUp, Loader2, TrendingUp, CheckCircle, ArrowDown } from 'lucide-react';
 import { useWallet } from '../hooks/useWallet';
 import { AggregatedAsset } from '../data/model';
 import { CurrencyUtils } from '../utils/currency';
 import { FaucetService } from '../services/FaucetService';
 import { RegistryService } from '../services/RegistryService';
 import { ApiService } from '../services/api';
+import { BaseModal, ModalHeader, Button } from '../../ui';
 
 type Step = 'swap' | 'processing' | 'success';
 
@@ -187,62 +188,42 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
     return amount <= maxAmount;
   }, [fromAsset, fromAmount]);
 
-  if (!isOpen) return null;
+  const getTitle = () => {
+    switch (step) {
+      case 'swap': return 'Swap Tokens';
+      case 'processing': return 'Processing Swap...';
+      case 'success': return 'Swap Complete!';
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={handleClose}
-        className="absolute inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm"
-      />
+    <BaseModal isOpen={isOpen} onClose={handleClose} showOrbs={false}>
+      <ModalHeader title={getTitle()} onClose={handleClose} />
 
-      <motion.div
-        initial={{ scale: 0.95, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        className="relative w-full max-w-md bg-white dark:bg-[#111] border border-neutral-200 dark:border-white/10 rounded-3xl shadow-2xl overflow-hidden"
-      >
-        {/* Header */}
-        <div className="p-6 border-b border-neutral-200 dark:border-white/5 flex justify-between items-center">
-          <h3 className="text-lg font-semibold text-neutral-900 dark:text-white">
-            {step === 'swap' && 'Swap Tokens'}
-            {step === 'processing' && 'Processing Swap...'}
-            {step === 'success' && 'Swap Complete!'}
-          </h3>
-          <button
-            onClick={handleClose}
-            className="p-2 hover:bg-neutral-100 dark:hover:bg-white/5 rounded-full transition-colors"
-          >
-            <X className="w-5 h-5 text-neutral-500 dark:text-neutral-400" />
-          </button>
-        </div>
+      <div className="p-6">
+        <AnimatePresence mode="wait">
 
-        <div className="p-6">
-          <AnimatePresence mode="wait">
+          {/* SWAP INTERFACE */}
+          {step === 'swap' && (
+            <motion.div
+              key="swap"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              {/* FROM Section */}
+              <div className="mb-2">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">From</span>
+                  {fromAsset && (
+                    <span className="text-xs text-neutral-500 dark:text-neutral-400 truncate ml-2">
+                      Balance: <span className="text-neutral-900 dark:text-white">{fromAsset.getFormattedAmount()}</span>
+                    </span>
+                  )}
+                </div>
 
-            {/* SWAP INTERFACE */}
-            {step === 'swap' && (
-              <motion.div
-                key="swap"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-              >
-                {/* FROM Section */}
-                <div className="mb-2">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">From</span>
-                    {fromAsset && (
-                      <span className="text-xs text-neutral-500 dark:text-neutral-400 truncate ml-2">
-                        Balance: <span className="text-neutral-900 dark:text-white">{fromAsset.getFormattedAmount()}</span>
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="bg-neutral-50 dark:bg-neutral-900/50 rounded-2xl p-3 sm:p-4">
-                    <div className="flex items-center gap-2 sm:gap-3">
+                <div className="bg-neutral-50 dark:bg-neutral-900/50 rounded-2xl p-3 sm:p-4">
+                  <div className="flex items-center gap-2 sm:gap-3">
                     {/* Token Selector */}
                     <div className="relative shrink-0">
                       <button
@@ -295,37 +276,37 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
                     />
                   </div>
 
-                    {fromAsset && fromAmount && (
-                      <div className="mt-2 text-right text-xs text-neutral-500 dark:text-neutral-400">
-                        ≈ ${(parseFloat(fromAmount) * fromAsset.priceUsd).toFixed(2)}
-                      </div>
-                    )}
-                  </div>
+                  {fromAsset && fromAmount && (
+                    <div className="mt-2 text-right text-xs text-neutral-500 dark:text-neutral-400">
+                      ≈ ${(parseFloat(fromAmount) * fromAsset.priceUsd).toFixed(2)}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Flip Button */}
+              <div className="flex justify-center items-center mt-4 mb-1 relative z-10">
+                <button
+                  onClick={handleFlipAssets}
+                  className="p-2 bg-white dark:bg-neutral-900 border-2 border-neutral-200 dark:border-neutral-700 rounded-full hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+                >
+                  <ArrowDownUp className="w-5 h-5 text-neutral-600 dark:text-neutral-400" />
+                </button>
+              </div>
+
+              {/* TO Section */}
+              <div className="mb-4">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">To</span>
+                  {toAsset && (
+                    <span className="text-xs text-neutral-500 dark:text-neutral-400 truncate ml-2">
+                      Balance: <span className="text-neutral-900 dark:text-white">{getUserBalance(toAsset.coinId)}</span>
+                    </span>
+                  )}
                 </div>
 
-                {/* Flip Button */}
-                <div className="flex justify-center items-center mt-4 mb-1 relative z-10">
-                  <button
-                    onClick={handleFlipAssets}
-                    className="p-2 bg-white dark:bg-neutral-900 border-2 border-neutral-200 dark:border-neutral-700 rounded-full hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
-                  >
-                    <ArrowDownUp className="w-5 h-5 text-neutral-600 dark:text-neutral-400" />
-                  </button>
-                </div>
-
-                {/* TO Section */}
-                <div className="mb-4">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">To</span>
-                    {toAsset && (
-                      <span className="text-xs text-neutral-500 dark:text-neutral-400 truncate ml-2">
-                        Balance: <span className="text-neutral-900 dark:text-white">{getUserBalance(toAsset.coinId)}</span>
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="bg-neutral-50 dark:bg-neutral-900/50 rounded-2xl p-3 sm:p-4">
-                    <div className="flex items-center gap-2 sm:gap-3">
+                <div className="bg-neutral-50 dark:bg-neutral-900/50 rounded-2xl p-3 sm:p-4">
+                  <div className="flex items-center gap-2 sm:gap-3">
                     {/* Token Selector */}
                     <div className="relative shrink-0">
                       <button
@@ -372,90 +353,89 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
                     </div>
                   </div>
 
-                    {exchangeInfo && (
-                      <div className="mt-2 text-right text-xs text-neutral-500 dark:text-neutral-400">
-                        ≈ ${exchangeInfo.toValueUSD.toFixed(2)}
-                      </div>
-                    )}
+                  {exchangeInfo && (
+                    <div className="mt-2 text-right text-xs text-neutral-500 dark:text-neutral-400">
+                      ≈ ${exchangeInfo.toValueUSD.toFixed(2)}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Exchange Rate Info */}
+              {exchangeInfo && fromAsset && toAsset && (
+                <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-xl">
+                  <div className="flex items-center gap-2 mb-2">
+                    <TrendingUp className="w-4 h-4 text-blue-500" />
+                    <span className="text-sm font-medium text-blue-600 dark:text-blue-400">Exchange Rate</span>
+                  </div>
+                  <div className="text-sm text-neutral-700 dark:text-neutral-300">
+                    1 {fromAsset.symbol} = {exchangeInfo.rate.toFixed(6)} {toAsset.symbol}
                   </div>
                 </div>
+              )}
 
-                {/* Exchange Rate Info */}
-                {exchangeInfo && fromAsset && toAsset && (
-                  <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-xl">
-                    <div className="flex items-center gap-2 mb-2">
-                      <TrendingUp className="w-4 h-4 text-blue-500" />
-                      <span className="text-sm font-medium text-blue-600 dark:text-blue-400">Exchange Rate</span>
-                    </div>
-                    <div className="text-sm text-neutral-700 dark:text-neutral-300">
-                      1 {fromAsset.symbol} = {exchangeInfo.rate.toFixed(6)} {toAsset.symbol}
-                    </div>
-                  </div>
-                )}
-
-                {/* Error Message */}
-                {error && (
-                  <div className="mb-4 p-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl">
-                    <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-                  </div>
-                )}
-
-                {/* Swap Button */}
-                <button
-                  onClick={handleSwap}
-                  disabled={!isValidAmount || !toAsset || !exchangeInfo}
-                  className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  <ArrowDownUp className="w-5 h-5" />
-                  Swap Tokens
-                </button>
-              </motion.div>
-            )}
-
-            {/* PROCESSING */}
-            {step === 'processing' && (
-              <motion.div
-                key="processing"
-                className="py-10 text-center"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-              >
-                <Loader2 className="w-12 h-12 text-orange-500 animate-spin mx-auto mb-4" />
-                <h3 className="text-neutral-900 dark:text-white font-medium text-lg">Processing Swap...</h3>
-                <p className="text-neutral-500 text-sm mt-2">Sending tokens and requesting swap</p>
-              </motion.div>
-            )}
-
-            {/* SUCCESS */}
-            {step === 'success' && fromAsset && toAsset && exchangeInfo && (
-              <motion.div
-                key="success"
-                className="py-10 text-center"
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-              >
-                <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/50">
-                  <CheckCircle className="w-8 h-8 text-emerald-500" />
+              {/* Error Message */}
+              {error && (
+                <div className="mb-4 p-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl">
+                  <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
                 </div>
-                <h3 className="text-neutral-900 dark:text-white font-bold text-2xl mb-2">Swap Complete!</h3>
-                <p className="text-neutral-500 dark:text-neutral-400 mb-1">
-                  Swapped <b>{fromAmount} {fromAsset.symbol}</b>
-                </p>
-                <p className="text-neutral-500 dark:text-neutral-400">
-                  for <b>{exchangeInfo.toAmount.toFixed(6)} {toAsset.symbol}</b>
-                </p>
-                <button
-                  onClick={handleClose}
-                  className="mt-8 px-8 py-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white transition-colors"
-                >
-                  Close
-                </button>
-              </motion.div>
-            )}
+              )}
 
-          </AnimatePresence>
-        </div>
-      </motion.div>
-    </div>
+              {/* Swap Button */}
+              <Button
+                onClick={handleSwap}
+                disabled={!isValidAmount || !toAsset || !exchangeInfo}
+                icon={ArrowDownUp}
+                fullWidth
+              >
+                Swap Tokens
+              </Button>
+            </motion.div>
+          )}
+
+          {/* PROCESSING */}
+          {step === 'processing' && (
+            <motion.div
+              key="processing"
+              className="py-10 text-center"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+            >
+              <Loader2 className="w-12 h-12 text-orange-500 animate-spin mx-auto mb-4" />
+              <h3 className="text-neutral-900 dark:text-white font-medium text-lg">Processing Swap...</h3>
+              <p className="text-neutral-500 text-sm mt-2">Sending tokens and requesting swap</p>
+            </motion.div>
+          )}
+
+          {/* SUCCESS */}
+          {step === 'success' && fromAsset && toAsset && exchangeInfo && (
+            <motion.div
+              key="success"
+              className="py-10 text-center"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+            >
+              <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/50">
+                <CheckCircle className="w-8 h-8 text-emerald-500" />
+              </div>
+              <h3 className="text-neutral-900 dark:text-white font-bold text-2xl mb-2">Swap Complete!</h3>
+              <p className="text-neutral-500 dark:text-neutral-400 mb-1">
+                Swapped <b>{fromAmount} {fromAsset.symbol}</b>
+              </p>
+              <p className="text-neutral-500 dark:text-neutral-400">
+                for <b>{exchangeInfo.toAmount.toFixed(6)} {toAsset.symbol}</b>
+              </p>
+              <button
+                onClick={handleClose}
+                className="mt-8 px-8 py-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white transition-colors"
+              >
+                Close
+              </button>
+            </motion.div>
+          )}
+
+        </AnimatePresence>
+      </div>
+    </BaseModal>
   );
 }
