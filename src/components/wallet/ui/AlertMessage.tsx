@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { XCircle, AlertTriangle, CheckCircle, Info, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 type AlertVariant = 'error' | 'warning' | 'success' | 'info';
 

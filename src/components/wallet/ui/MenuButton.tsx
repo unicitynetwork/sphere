@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { ChevronRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 type MenuButtonColor = 'blue' | 'green' | 'red' | 'orange' | 'purple' | 'neutral';
 

@@ -1,13 +1,13 @@
 import { motion } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { ButtonHTMLAttributes, ReactNode } from 'react';
+import type { ComponentPropsWithoutRef } from 'react';
 
 type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'success';
 type ButtonSize = 'sm' | 'md' | 'lg';
 type IconPosition = 'left' | 'right';
 
-interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
+interface ButtonProps extends Omit<ComponentPropsWithoutRef<typeof motion.button>, 'children'> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   /** Icon */
@@ -19,7 +19,7 @@ interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'chi
   /** Loading text (defaults to "Loading...") */
   loadingText?: string;
   /** Button content */
-  children: ReactNode;
+  children: React.ReactNode;
   /** Full width */
   fullWidth?: boolean;
 }
