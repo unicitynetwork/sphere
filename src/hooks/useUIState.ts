@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 const UI_STATE_KEY = ['ui', 'state'] as const;
@@ -20,21 +21,21 @@ export function useUIState() {
     gcTime: Infinity,
   });
 
-  const setFullscreen = (value: boolean) => {
+  const setFullscreen = useCallback((value: boolean) => {
     queryClient.setQueryData<UIState>(UI_STATE_KEY, (prev) => ({
       ...prev,
       ...defaultState,
       isFullscreen: value,
     }));
-  };
+  }, [queryClient]);
 
-  const toggleFullscreen = () => {
+  const toggleFullscreen = useCallback(() => {
     queryClient.setQueryData<UIState>(UI_STATE_KEY, (prev) => ({
       ...prev,
       ...defaultState,
       isFullscreen: !prev?.isFullscreen,
     }));
-  };
+  }, [queryClient]);
 
   return {
     isFullscreen: uiState.isFullscreen,

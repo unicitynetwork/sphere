@@ -47,7 +47,6 @@ export function WalletPanel() {
       if (requests.length > 0 || pendingCount === 0) {
         prevPendingCountRef.current = pendingCount;
         isInitializedRef.current = true;
-        console.log('🔔 WalletPanel initialized with pendingCount:', pendingCount);
       }
       return;
     }

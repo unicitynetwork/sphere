@@ -89,9 +89,12 @@ export function detectSyncMode(params: SyncModeParams): SyncMode {
 /**
  * Checks if the current mode should skip IPFS operations
  * LOCAL mode skips all IPFS read/write operations
+ * Also skips if IPFS is disabled via VITE_ENABLE_IPFS=false
  */
 export function shouldSkipIpfs(mode: SyncMode): boolean {
-  return mode === 'LOCAL';
+  // Check if IPFS is disabled via environment variable
+  const ipfsDisabled = import.meta.env.VITE_ENABLE_IPFS === 'false';
+  return mode === 'LOCAL' || ipfsDisabled;
 }
 
 /**

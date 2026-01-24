@@ -33,9 +33,8 @@ export function useIpfsStorage() {
   const [isServiceReady, setIsServiceReady] = useState(false);
   const [isSyncingRealtime, setIsSyncingRealtime] = useState(false);
 
-  // IPFS is always enabled since useWallet starts the service unconditionally
-  // The env var VITE_ENABLE_IPFS is checked elsewhere but useWallet starts IPFS regardless
-  const isEnabled = true;
+  // Check if IPFS is disabled via environment variable
+  const isEnabled = import.meta.env.VITE_ENABLE_IPFS !== 'false';
 
   // Get storage service instance - useWallet will have started this
   const storageService = IpfsStorageService.getInstance(identityManager);
@@ -322,7 +321,7 @@ export function useIpfsStorage() {
 
     // Sync operations
     sync: syncMutation.mutateAsync,
-    isSyncing: syncMutation.isPending || isSyncingRealtime || (storageService?.isCurrentlySyncing() ?? false),
+    isSyncing: isEnabled && (syncMutation.isPending || isSyncingRealtime || (storageService?.isCurrentlySyncing() ?? false)),
     syncError: syncMutation.error,
 
     // Restore operations

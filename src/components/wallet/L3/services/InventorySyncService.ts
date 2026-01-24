@@ -39,6 +39,7 @@ import { getTokenValidationService } from './TokenValidationService';
 import type { InvalidReasonCode } from '../types/SyncTypes';
 import { NostrService } from './NostrService';
 import { IdentityManager } from './IdentityManager';
+import { invalidateWalletQueries } from '../../../../lib/queryClient';
 
 // ============================================
 // Sync Lock State (moved from WalletRepository)
@@ -213,13 +214,17 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
 
   // If a sync is already in progress...
   if (_currentSyncPromise) {
-    // If caller has new data, queue it for the current/next sync
+    // If caller has new data, save it immediately - no need for follow-up sync
+    // since saveTokenImmediately writes directly to localStorage
     if (hasNewData) {
       if (params.incomingTokens) {
         for (const token of params.incomingTokens) {
-          queuePendingToken(token);
+          // IMMEDIATE: Save token to localStorage right away so UI shows it
+          saveTokenImmediately(params.address, token);
         }
-        console.log(`📥 [InventorySync] Queued ${params.incomingTokens.length} incoming token(s) for ongoing sync`);
+        console.log(`📥 [InventorySync] Saved ${params.incomingTokens.length} token(s) immediately during coalescing`);
+        // Update UI immediately - don't wait for sync
+        dispatchWalletUpdated();
       }
       // Note: completedList and outboxTokens are less common; for now they'll wait
     }
@@ -229,8 +234,9 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
     console.log(`⏳ [InventorySync] Coalescing: waiting for ongoing sync (hasNewData=${hasNewData})...`);
     try {
       const result = await _currentSyncPromise;
-      // If we queued new data, a follow-up sync may be needed - but DON'T trigger it here
-      // The next wallet-updated event or periodic sync will pick it up
+      // NOTE: No follow-up sync needed - tokens were already saved via saveTokenImmediately
+      // Follow-up syncs were causing infinite loops when multiple useWallet instances
+      // each triggered refetches on sync completion
       return result;
     } catch {
       // If previous sync failed, fall through to start a new sync
@@ -298,6 +304,12 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
     // Execute full sync pipeline
     const result = await executeFullSync(ctx, params);
     resolveCurrentSync!(result);
+
+    // Notify UI of wallet changes after successful sync
+    if (result.status === 'SUCCESS' || result.status === 'PARTIAL_SUCCESS') {
+      dispatchWalletUpdated();
+    }
+
     return result;
 
   } catch (error) {
@@ -2172,14 +2184,20 @@ export function getTokensForAddress(address: string): Token[] {
   try {
     const data = JSON.parse(json) as Record<string, unknown>;
     const tokens: Token[] = [];
+    const allKeys = Object.keys(data);
+    const tokenKeys = allKeys.filter(k => isTokenKey(k));
+
+    console.log(`📦 [getTokensForAddress] Found ${tokenKeys.length} token keys out of ${allKeys.length} total keys`);
 
     // Check for new TxfStorageData format (tokens stored as _<tokenId> keys)
-    for (const key of Object.keys(data)) {
+    for (const key of allKeys) {
       if (isTokenKey(key)) {
         const txf = data[key] as TxfToken;
         const token = txfToToken(tokenIdFromKey(key), txf);
         if (token) {
           tokens.push(token);
+        } else {
+          console.warn(`📦 [getTokensForAddress] txfToToken returned null for key ${key}`);
         }
       }
     }
@@ -2194,9 +2212,10 @@ export function getTokensForAddress(address: string): Token[] {
       }
     }
 
+    console.log(`📦 [getTokensForAddress] Returning ${tokens.length} tokens`);
     return tokens;
-  } catch {
-    console.warn(`[getTokensForAddress] Failed to parse localStorage data for ${address.slice(0, 20)}...`);
+  } catch (e) {
+    console.warn(`[getTokensForAddress] Failed to parse localStorage data for ${address.slice(0, 20)}...: ${e}`);
     return [];
   }
 }
@@ -2521,11 +2540,82 @@ export function clearNametagForAddress(address: string): void {
 }
 
 /**
- * Dispatch wallet-updated event to notify UI components of changes
- * Use this when wallet state has changed and components need to refresh
+ * Save a token directly to localStorage without waiting for sync.
+ * Use this for immediate UI updates when sync is blocked.
+ * Validation happens in background sync.
+ */
+export function saveTokenImmediately(address: string, token: Token): void {
+  console.log(`💾 [IMMEDIATE] saveTokenImmediately called for token ${token.id.slice(0, 8)}...`);
+  console.log(`💾 [IMMEDIATE] Token has jsonData: ${!!token.jsonData}, length: ${token.jsonData?.length || 0}`);
+
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const json = localStorage.getItem(storageKey);
+
+  let data: TxfStorageData;
+  if (json) {
+    try {
+      data = JSON.parse(json) as TxfStorageData;
+    } catch {
+      data = {
+        _meta: {
+          version: 1,
+          address,
+          ipnsName: '',
+          formatVersion: '2.0',
+        },
+      };
+    }
+  } else {
+    data = {
+      _meta: {
+        version: 1,
+        address,
+        ipnsName: '',
+        formatVersion: '2.0',
+      },
+    };
+  }
+
+  // Convert Token to TxfToken and save
+  const txf = tokenToTxf(token);
+  if (!txf) {
+    console.warn(`💾 [IMMEDIATE] Token ${token.id.slice(0, 8)}... could not be converted to TXF format`);
+    // Log more details to understand why
+    if (token.jsonData) {
+      try {
+        const parsed = JSON.parse(token.jsonData);
+        console.warn(`💾 [IMMEDIATE] jsonData keys: ${Object.keys(parsed).join(', ')}`);
+        console.warn(`💾 [IMMEDIATE] has genesis: ${!!parsed.genesis}, has state: ${!!parsed.state}`);
+      } catch (e) {
+        console.warn(`💾 [IMMEDIATE] Failed to parse jsonData: ${e}`);
+      }
+    }
+    return;
+  }
+
+  // CRITICAL: Use SDK token ID (txf.genesis.data.tokenId) as key, NOT the UI UUID (token.id)
+  // This ensures consistency with the normal sync path which uses SDK token ID
+  const sdkTokenId = txf.genesis.data.tokenId;
+  const tokenKey = `_${sdkTokenId}`;
+
+  // Only save if not already present
+  if (!data[tokenKey]) {
+    data[tokenKey] = txf;
+    data._meta = data._meta || { version: 0, address, ipnsName: '', formatVersion: '2.0' };
+    data._meta.version = (data._meta.version || 0) + 1;
+    localStorage.setItem(storageKey, JSON.stringify(data));
+    console.log(`💾 [IMMEDIATE] Token ${sdkTokenId.slice(0, 8)}... saved directly to localStorage`);
+  }
+}
+
+/**
+ * Notify UI components of wallet changes via TanStack Query invalidation.
+ * This triggers refetch of token and aggregated queries.
  */
 export function dispatchWalletUpdated(): void {
-  window.dispatchEvent(new Event('wallet-updated'));
+  // Use TanStack Query for reactive updates instead of custom events
+  // Direct import (not dynamic) to avoid potential memory leaks from repeated imports
+  invalidateWalletQueries();
 }
 
 // ============================================
