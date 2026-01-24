@@ -86,7 +86,7 @@ export const AssetRow = memo(function AssetRow({ asset, showBalances, delay, onC
   const fiatValue = asset.getTotalFiatValue("USD");
   const numericAmount = Number(asset.totalAmount) / Math.pow(10, asset.decimals);
 
-  const className = "p-3 rounded-xl transition-all cursor-pointer group border border-transparent hover:border-neutral-200/50 dark:hover:border-white/5 hover:translate-x-1";
+  const className = `p-3 rounded-xl transition-all group border border-transparent hover:border-neutral-200/50 dark:hover:border-white/5 ${onClick ? 'cursor-pointer hover:translate-x-1' : ''}`;
 
   const content = (
     <div className="flex items-center justify-between">
