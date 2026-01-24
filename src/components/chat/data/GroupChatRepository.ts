@@ -81,9 +81,12 @@ export class GroupChatRepository {
   updateGroupLastMessage(groupId: string, text: string, timestamp: number): void {
     const group = this.getGroup(groupId);
     if (group) {
-      group.lastMessageText = text;
-      group.lastMessageTime = timestamp;
-      this.saveGroup(group);
+      // Only update if this message is newer than the current last message
+      if (timestamp >= group.lastMessageTime) {
+        group.lastMessageText = text;
+        group.lastMessageTime = timestamp;
+        this.saveGroup(group);
+      }
     }
   }
 

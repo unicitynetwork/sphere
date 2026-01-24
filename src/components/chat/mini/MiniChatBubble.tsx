@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { ChatConversation } from '../data/models';
+import { getColorFromPubkey } from '../utils/avatarColors';
 
 interface MiniChatBubbleProps {
   conversation: ChatConversation;
@@ -8,6 +9,8 @@ interface MiniChatBubbleProps {
 }
 
 export function MiniChatBubble({ conversation, onClick, index }: MiniChatBubbleProps) {
+  const avatarColor = getColorFromPubkey(conversation.participantPubkey);
+
   return (
     <motion.button
       initial={{ opacity: 0, x: -20 }}
@@ -21,7 +24,7 @@ export function MiniChatBubble({ conversation, onClick, index }: MiniChatBubbleP
       <motion.div
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.95 }}
-        className="w-14 h-14 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center text-white font-semibold text-base shadow-lg shadow-orange-500/30 cursor-pointer"
+        className={`w-14 h-14 rounded-xl bg-linear-to-br ${avatarColor.gradient} flex items-center justify-center text-white font-semibold text-base shadow-lg cursor-pointer`}
       >
         {conversation.getAvatar()}
       </motion.div>

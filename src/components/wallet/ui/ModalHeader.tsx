@@ -40,7 +40,7 @@ export function ModalHeader({
   const iconStyles = iconVariantClasses[iconVariant];
 
   return (
-    <div className="relative z-10 px-6 py-2 border-b border-neutral-200/50 dark:border-neutral-700/50 flex justify-between items-center shrink-0">
+    <div className="relative z-10 px-6 py-3 border-b border-neutral-200/50 dark:border-neutral-700/50 flex justify-between items-center shrink-0">
       <div className="flex items-center gap-3">
         {Icon && (
           <motion.div
