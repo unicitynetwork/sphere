@@ -405,7 +405,7 @@ export async function waitInclusionProofWithDevBypass(
  * Fetch a proof from the aggregator using requestId with retry logic
  * Uses the SDK's StateTransitionClient.getInclusionProof() method
  */
-async function fetchProofByRequestId(
+export async function fetchProofByRequestId(
   requestIdStr: string,
   maxRetries: number = 3
 ): Promise<TxfInclusionProof | null> {

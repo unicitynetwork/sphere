@@ -5,7 +5,7 @@
  * This is the central orchestrator for all token inventory operations.
  */
 
-import type { Token } from '../data/model';
+import { Token, TokenStatus } from '../data/model';
 import type {
   SyncMode, SyncResult,
   SyncOperationStats, TokenInventoryStats, CircuitBreakerState,
@@ -19,6 +19,8 @@ import {
   shouldSkipSpentDetection,
   shouldAcquireSyncLock
 } from './utils/SyncModeDetector';
+import { getCircuitBreakerService } from './CircuitBreakerService';
+import { getSyncCoordinator } from './SyncCoordinator';
 import {
   createDefaultSyncOperationStats,
   createDefaultCircuitBreakerState
@@ -40,6 +42,16 @@ import type { InvalidReasonCode } from '../types/SyncTypes';
 import { NostrService } from './NostrService';
 import { IdentityManager } from './IdentityManager';
 import { invalidateWalletQueries } from '../../../../lib/queryClient';
+import {
+  reconstructMintCommitment,
+  fetchProofByRequestId,
+  isInclusionProofNotExclusion,
+  submitMintCommitmentToAggregator,
+  waitForMintProofWithSDK
+} from '../../../../utils/devTools';
+
+// Nametag token type identifier (sha256 of "nametag-type")
+const UNICITY_TOKEN_TYPE_HEX = "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9ef0efbe397867509";
 
 // ============================================
 // Sync Lock State (moved from WalletRepository)
@@ -253,13 +265,21 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
 
   const startTime = Date.now();
 
-  // Detect sync mode based on inputs
+  // Check circuit breaker - force LOCAL mode if active
+  const circuitBreaker = getCircuitBreakerService();
+  const circuitBreakerActive = circuitBreaker.isLocalModeActive();
+
+  // Detect sync mode based on inputs (circuit breaker can override to LOCAL)
   const mode = detectSyncMode({
-    local: params.local,
+    local: params.local || circuitBreakerActive,
     nametag: params.nametag,
     incomingTokens: params.incomingTokens as Token[] | undefined,
     outboxTokens: params.outboxTokens
   });
+
+  if (circuitBreakerActive) {
+    console.log(`🔧 [InventorySync] Circuit breaker active - forcing LOCAL mode`);
+  }
 
   console.log(`🔄 [InventorySync] Starting sync in ${mode} mode`);
 
@@ -295,10 +315,19 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
       return result;
     }
 
-    // All other modes: acquire sync lock
+    // All other modes: acquire cross-tab sync lock via SyncCoordinator
+    // Per TOKEN_INVENTORY_SPEC.md Section 8.1: coordinate sync across browser tabs
+    let syncLockAcquired = false;
     if (shouldAcquireSyncLock(mode)) {
-      // TODO: Integrate with SyncCoordinator
-      // For now, proceed without lock
+      const coordinator = getSyncCoordinator();
+      // Try to acquire lock with 30-second timeout per spec
+      syncLockAcquired = await coordinator.acquireLock(30000);
+      if (syncLockAcquired) {
+        console.log(`📋 [InventorySync] Cross-tab sync lock acquired`);
+      } else {
+        // Timeout - proceed anyway per spec Section 8.1
+        console.log(`📋 [InventorySync] Cross-tab lock timeout - proceeding anyway`);
+      }
     }
 
     // Execute full sync pipeline
@@ -318,6 +347,17 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
     resolveCurrentSync!(errorResult);
     return errorResult;
   } finally {
+    // Release cross-tab lock if acquired (check via coordinator)
+    try {
+      const coordinator = getSyncCoordinator();
+      if (coordinator.hasLock()) {
+        coordinator.releaseLock();
+        console.log(`📋 [InventorySync] Cross-tab sync lock released`);
+      }
+    } catch {
+      // Ignore errors during lock release
+    }
+
     // CRITICAL: Clear the mutex promise so next sync can proceed
     _currentSyncPromise = null;
     // CRITICAL: Always release sync lock, even on error (prevent deadlock)
@@ -398,6 +438,11 @@ async function executeFullSync(ctx: SyncContext, params: SyncParams): Promise<Sy
   // Step 8.5: Ensure nametag bindings are registered with Nostr
   // Best-effort, non-blocking - failures don't stop sync
   await step8_5_ensureNametagNostrBinding(ctx);
+
+  // Step 8.6: Attempt recovery of nametag-invalidated tokens
+  // Per TOKEN_INVENTORY_SPEC.md Section 13.26: After nametag proof is valid,
+  // attempt to recover tokens that were invalidated due to stale embedded nametag proofs
+  await step8_6_recoverNametagInvalidatedTokens(ctx);
 
   // Step 9: Prepare for Storage
   step9_prepareStorage(ctx);
@@ -657,6 +702,8 @@ async function loadFromStoredWalletFormat(ctx: SyncContext, data: Record<string,
 async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
   console.log(`🌐 [Step 2] Load from IPFS`);
 
+  const circuitBreaker = getCircuitBreakerService();
+
   // Early validation: skip IPFS loading if IPNS name is not available
   // This is normal for new wallets that haven't published to IPNS yet
   if (!ctx.ipnsName || ctx.ipnsName.trim().length === 0) {
@@ -673,31 +720,43 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
   }
 
   let remoteData: TxfStorageData | null = null;
+  let ipfsOperationFailed = false;
 
   if (transport) {
     // Initialize transport with identity so cachedIpnsName gets set
     // This ensures IPFS is ready even if we don't need to upload later
-    const initialized = await transport.ensureInitialized();
-    if (!initialized) {
-      console.log(`  ⚠️ Transport initialization failed, falling back to HTTP resolver`);
+    try {
+      const initialized = await transport.ensureInitialized();
+      if (!initialized) {
+        console.log(`  ⚠️ Transport initialization failed, falling back to HTTP resolver`);
+        transport = null;
+      }
+    } catch (err) {
+      console.warn(`  ⚠️ Transport initialization error:`, err);
       transport = null;
+      ipfsOperationFailed = true;
     }
   }
 
   if (transport) {
     // Use full transport API (better sequence tracking, dual DHT+HTTP)
     console.log(`  Using IpfsTransport for IPNS resolution...`);
-    const resolution = await transport.resolveIpns();
+    try {
+      const resolution = await transport.resolveIpns();
 
-    if (resolution.cid) {
-      ctx.remoteCid = resolution.cid;
-      ctx.remoteVersion = resolution.content?._meta?.version || 0;
-      remoteData = resolution.content || null;
-      console.log(`  Transport resolved: CID=${resolution.cid.slice(0, 16)}..., seq=${resolution.sequence}, version=${ctx.remoteVersion}`);
-    } else {
-      // Transport returned no CID - this can happen if IPFS isn't fully initialized yet
-      // (cachedIpnsName not set). Fall through to HTTP resolver which doesn't require Helia.
-      console.log(`  Transport IPNS resolution returned no CID, trying HTTP resolver...`);
+      if (resolution.cid) {
+        ctx.remoteCid = resolution.cid;
+        ctx.remoteVersion = resolution.content?._meta?.version || 0;
+        remoteData = resolution.content || null;
+        console.log(`  Transport resolved: CID=${resolution.cid.slice(0, 16)}..., seq=${resolution.sequence}, version=${ctx.remoteVersion}`);
+      } else {
+        // Transport returned no CID - this can happen if IPFS isn't fully initialized yet
+        // (cachedIpnsName not set). Fall through to HTTP resolver which doesn't require Helia.
+        console.log(`  Transport IPNS resolution returned no CID, trying HTTP resolver...`);
+      }
+    } catch (err) {
+      console.warn(`  ⚠️ Transport IPNS resolution error:`, err);
+      ipfsOperationFailed = true;
     }
   }
 
@@ -708,27 +767,45 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
     console.log(`  Using HTTP resolver for IPNS resolution...`);
     const resolver = getIpfsHttpResolver();
 
-    // 1. Resolve IPNS name to get CID and content
-    const resolution = await resolver.resolveIpnsName(ctx.ipnsName);
+    try {
+      // 1. Resolve IPNS name to get CID and content
+      const resolution = await resolver.resolveIpnsName(ctx.ipnsName);
 
-    if (!resolution.success) {
-      console.warn(`  IPNS resolution failed: ${resolution.error || 'unknown error'}`);
+      if (!resolution.success) {
+        console.warn(`  IPNS resolution failed: ${resolution.error || 'unknown error'}`);
+        ipfsOperationFailed = true;
+        // Record failure with circuit breaker
+        circuitBreaker.recordIpfsFailure();
+        return; // Continue with local-only data
+      }
+
+      if (!resolution.content) {
+        console.log(`  IPNS resolved but no content (new wallet or empty IPNS)`);
+        // Not a failure - just no content yet
+        return;
+      }
+
+      ctx.remoteCid = resolution.cid || null;
+      remoteData = resolution.content;
+    } catch (err) {
+      console.warn(`  ⚠️ HTTP resolver error:`, err);
+      ipfsOperationFailed = true;
+      // Record failure with circuit breaker
+      circuitBreaker.recordIpfsFailure();
       return; // Continue with local-only data
     }
-
-    if (!resolution.content) {
-      console.log(`  IPNS resolved but no content (new wallet or empty IPNS)`);
-      return;
-    }
-
-    ctx.remoteCid = resolution.cid || null;
-    remoteData = resolution.content;
   }
 
   if (!remoteData) {
     console.log(`  No remote data available`);
+    if (ipfsOperationFailed) {
+      circuitBreaker.recordIpfsFailure();
+    }
     return;
   }
+
+  // IPFS load succeeded - record success with circuit breaker
+  circuitBreaker.recordIpfsSuccess();
 
   // Extract remote version
   if (remoteData._meta) {
@@ -1779,6 +1856,216 @@ async function step8_5_ensureNametagNostrBinding(ctx: SyncContext): Promise<void
 }
 
 /**
+ * Step 8.6: Recover Nametag-Invalidated Tokens
+ *
+ * Per TOKEN_INVENTORY_SPEC.md Section 13.26:
+ * When tokens were invalidated due to stale embedded nametag proofs, and the
+ * nametag proof is now valid, attempt to recover those tokens by:
+ * 1. Updating the embedded nametag's inclusion proof within each invalid token
+ * 2. Re-validating the token
+ * 3. Moving recovered tokens back to active inventory
+ *
+ * This is triggered on every sync to catch tokens that were invalidated before
+ * the nametag was recovered.
+ */
+async function step8_6_recoverNametagInvalidatedTokens(ctx: SyncContext): Promise<void> {
+  console.log(`🔧 [Step 8.6] Recover Nametag-Invalidated Tokens`);
+
+  // Skip if no invalid tokens
+  if (ctx.invalid.length === 0) {
+    console.log(`  No invalid tokens to recover`);
+    return;
+  }
+
+  // Skip if no nametag with valid proof
+  if (ctx.nametags.length === 0) {
+    console.log(`  No nametag available - skipping recovery`);
+    return;
+  }
+
+  // Get the first nametag (each identity has one nametag)
+  const nametagData = ctx.nametags[0];
+  const nametagToken = nametagData?.token as TxfToken | undefined;
+  if (!nametagToken?.genesis?.data?.tokenId || !nametagToken?.genesis?.inclusionProof) {
+    console.log(`  Nametag missing tokenId or inclusion proof - skipping recovery`);
+    return;
+  }
+
+  const nametagTokenId = nametagToken.genesis.data.tokenId;
+  const freshInclusionProof = nametagToken.genesis.inclusionProof;
+
+  // Filter for tokens that failed due to nametag-related SDK_VALIDATION errors
+  const nametagFailures = ctx.invalid.filter((entry: InvalidTokenEntry) => {
+    if (entry.reason !== "SDK_VALIDATION") return false;
+    const details = entry.details || "";
+    return (
+      details.includes("Inclusion proof verification failed") ||
+      details.includes("Nametag verification")
+    );
+  });
+
+  if (nametagFailures.length === 0) {
+    console.log(`  No nametag-related failures found in ${ctx.invalid.length} invalid tokens`);
+    return;
+  }
+
+  console.log(`  Found ${nametagFailures.length} tokens with nametag-related failures, attempting recovery...`);
+
+  // Get validation service
+  const validationService = getTokenValidationService();
+
+  let recovered = 0;
+  let stillInvalid = 0;
+  const recoveredTokenIds = new Set<string>();
+
+  for (const entry of nametagFailures) {
+    const tokenId = entry.token.genesis?.data?.tokenId || "unknown";
+    const tokenIdShort = tokenId.slice(0, 8);
+
+    try {
+      // Deep clone to avoid mutating original
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tokenClone = JSON.parse(JSON.stringify(entry.token)) as any;
+
+      // Step 1: Refresh the token's own genesis inclusion proof
+      if (tokenClone.genesis?.data) {
+        console.log(`  🔍 Token ${tokenIdShort}... refreshing genesis proof`);
+        const result = await reconstructMintCommitment(tokenClone.genesis);
+
+        if (result.commitment) {
+          const derivedRequestId = result.commitment.requestId.toJSON();
+          let newGenesisProof = await fetchProofByRequestId(derivedRequestId);
+
+          if (!isInclusionProofNotExclusion(newGenesisProof)) {
+            // Try resubmission if exclusion proof or null
+            console.log(`  ⚠️ Token ${tokenIdShort}... got exclusion/null, resubmitting genesis...`);
+            const submitResult = await submitMintCommitmentToAggregator(result.commitment);
+
+            if (submitResult.success) {
+              newGenesisProof = await waitForMintProofWithSDK(result.commitment, 60000);
+            }
+          }
+
+          if (isInclusionProofNotExclusion(newGenesisProof)) {
+            tokenClone.genesis.inclusionProof = newGenesisProof;
+            console.log(`  ✅ Token ${tokenIdShort}... genesis proof refreshed`);
+          } else {
+            console.warn(`  ❌ Token ${tokenIdShort}... could not refresh genesis proof`);
+            stillInvalid++;
+            continue;
+          }
+        } else {
+          console.warn(`  ❌ Token ${tokenIdShort}... cannot reconstruct commitment: ${result.error}`);
+          stillInvalid++;
+          continue;
+        }
+      }
+
+      // Step 2: Update the embedded nametag's inclusion proof within the token
+      const tokenWithFixedNametag = updateEmbeddedNametagProof(
+        tokenClone as TxfToken,
+        nametagTokenId,
+        freshInclusionProof
+      );
+
+      // Convert to LocalToken for validation
+      const localToken = new Token({
+        id: tokenId,
+        name: entry.token.genesis?.data?.tokenType === UNICITY_TOKEN_TYPE_HEX ? "Nametag" : "Token",
+        type: "UCT",
+        timestamp: entry.timestamp,
+        status: TokenStatus.CONFIRMED,
+        amount: entry.token.genesis?.data?.coinData?.[0]?.[1] || "0",
+        coinId: entry.token.genesis?.data?.coinData?.[0]?.[0] || "",
+        symbol: "UCT",
+        jsonData: JSON.stringify(tokenWithFixedNametag),
+      });
+
+      // Re-validate with fixed embedded nametag AND refreshed genesis proof
+      const validationResult = await validationService.validateToken(localToken);
+
+      if (validationResult.isValid && validationResult.token) {
+        // Convert validated Token back to TxfToken for storage
+        const recoveredTxf = tokenToTxf(validationResult.token);
+
+        if (recoveredTxf) {
+          console.log(`  ✅ Token ${tokenIdShort}... fully recovered`);
+
+          // Move to active inventory
+          ctx.tokens.set(tokenId, recoveredTxf);
+          ctx.stats.tokensRecovered = (ctx.stats.tokensRecovered || 0) + 1;
+          recovered++;
+
+          // Track for removal from invalid list
+          recoveredTokenIds.add(tokenId);
+        } else {
+          console.warn(`  ⚠️ Token ${tokenIdShort}... validated but failed TxfToken conversion`);
+          stillInvalid++;
+        }
+      } else {
+        console.log(`  ❌ Token ${tokenIdShort}... still invalid: ${validationResult.reason}`);
+        stillInvalid++;
+      }
+    } catch (err) {
+      console.warn(`  ❌ Token ${tokenIdShort}... recovery failed:`, err);
+      stillInvalid++;
+    }
+  }
+
+  // Remove recovered tokens from invalid list
+  if (recovered > 0) {
+    ctx.invalid = ctx.invalid.filter((entry: InvalidTokenEntry) => {
+      const entryTokenId = entry.token.genesis?.data?.tokenId;
+      return !entryTokenId || !recoveredTokenIds.has(entryTokenId);
+    });
+    ctx.uploadNeeded = true; // Content changed, need to sync
+    console.log(`  Recovery complete: ${recovered} recovered, ${stillInvalid} still invalid`);
+  } else {
+    console.log(`  No tokens recovered (${stillInvalid} still invalid)`);
+  }
+}
+
+/**
+ * Update the embedded nametag's inclusion proof within a token.
+ *
+ * CRITICAL: Each received token has an EMBEDDED copy of the nametag in its `nametags` array.
+ * The SDK's Token.verify() validates this embedded nametag, NOT the main stored nametag.
+ * This method finds and updates the matching nametag with a fresh inclusion proof.
+ */
+function updateEmbeddedNametagProof(
+  token: TxfToken,
+  nametagTokenId: string,
+  freshInclusionProof: unknown
+): TxfToken {
+  // Deep clone to avoid mutating the original
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const updatedToken = JSON.parse(JSON.stringify(token)) as any;
+
+  // Check if token has embedded nametags
+  if (!updatedToken.nametags || !Array.isArray(updatedToken.nametags)) {
+    return updatedToken as TxfToken;
+  }
+
+  // Find and update matching nametag(s)
+  for (let i = 0; i < updatedToken.nametags.length; i++) {
+    const embeddedNametag = updatedToken.nametags[i];
+
+    // Skip if not an object
+    if (!embeddedNametag || typeof embeddedNametag !== "object") {
+      continue;
+    }
+
+    // Match by tokenId
+    const embeddedTokenId = embeddedNametag?.genesis?.data?.tokenId;
+    if (embeddedTokenId === nametagTokenId && embeddedNametag.genesis) {
+      embeddedNametag.genesis.inclusionProof = freshInclusionProof;
+    }
+  }
+
+  return updatedToken as TxfToken;
+}
+
+/**
  * Compare two TxfStorageData objects for content equality.
  * Ignores _meta.version and _meta.lastCid since those change every sync.
  * Returns true if content (tokens, nametags, tombstones, etc.) is identical.
@@ -2025,6 +2312,8 @@ function step9_prepareStorage(ctx: SyncContext): void {
 async function step10_uploadIpfs(ctx: SyncContext): Promise<void> {
   console.log(`📤 [Step 10] Upload to IPFS`);
 
+  const circuitBreaker = getCircuitBreakerService();
+
   if (!ctx.uploadNeeded) {
     console.log(`  ⏭️ Skipping IPFS upload: no changes to upload`);
     return;
@@ -2036,13 +2325,23 @@ async function step10_uploadIpfs(ctx: SyncContext): Promise<void> {
     transport = getIpfsTransport();
   } catch {
     console.log(`  ⏭️ Skipping IPFS upload: transport not available`);
+    circuitBreaker.recordIpfsFailure();
     return;
   }
 
   // Check if transport is initialized
-  const initialized = await transport.ensureInitialized();
+  let initialized = false;
+  try {
+    initialized = await transport.ensureInitialized();
+  } catch (err) {
+    console.warn(`  ❌ Transport initialization error:`, err);
+    circuitBreaker.recordIpfsFailure();
+    return;
+  }
+
   if (!initialized) {
     console.log(`  ⏭️ Skipping IPFS upload: transport not initialized`);
+    circuitBreaker.recordIpfsFailure();
     return;
   }
 
@@ -2072,12 +2371,25 @@ async function step10_uploadIpfs(ctx: SyncContext): Promise<void> {
 
   // Upload content to IPFS
   console.log(`  📤 Uploading content to IPFS...`);
-  const uploadResult = await transport.uploadContent(storageData);
+  let uploadResult;
+  try {
+    uploadResult = await transport.uploadContent(storageData);
+  } catch (err) {
+    console.warn(`  ❌ IPFS upload error:`, err);
+    ctx.errors.push(`IPFS upload error: ${err instanceof Error ? err.message : String(err)}`);
+    circuitBreaker.recordIpfsFailure();
+    return;
+  }
+
   if (!uploadResult.success) {
     console.warn(`  ❌ IPFS upload failed: ${uploadResult.error}`);
     ctx.errors.push(uploadResult.error || 'IPFS upload failed');
+    circuitBreaker.recordIpfsFailure();
     return;
   }
+
+  // IPFS upload succeeded - record success
+  circuitBreaker.recordIpfsSuccess();
 
   ctx.remoteCid = uploadResult.cid;
   transport.setLastCid(uploadResult.cid);
@@ -2108,9 +2420,19 @@ function buildSuccessResult(ctx: SyncContext): SyncResult {
   // - PARTIAL_SUCCESS: Content uploaded but IPNS publish failed
   const hasUploadedContent = ctx.remoteCid !== null && ctx.uploadNeeded;
   const ipnsPublishPending = hasUploadedContent && !ctx.ipnsPublished;
+  const status = ipnsPublishPending ? 'PARTIAL_SUCCESS' : 'SUCCESS';
+
+  // If sync completed successfully in NORMAL mode, clear circuit breaker
+  const circuitBreaker = getCircuitBreakerService();
+  if (status === 'SUCCESS' && ctx.mode === 'NORMAL') {
+    circuitBreaker.recordFullSyncSuccess();
+  }
+
+  // Get current circuit breaker state for result
+  const circuitBreakerState = circuitBreaker.getState();
 
   return {
-    status: ipnsPublishPending ? 'PARTIAL_SUCCESS' : 'SUCCESS',
+    status,
     syncMode: ctx.mode,
     operationStats: ctx.stats,
     inventoryStats: buildInventoryStats(ctx),
@@ -2121,7 +2443,7 @@ function buildSuccessResult(ctx: SyncContext): SyncResult {
     syncDurationMs: Date.now() - ctx.startTime,
     timestamp: Date.now(),
     version: ctx.localVersion,
-    circuitBreaker: ctx.circuitBreaker,
+    circuitBreaker: circuitBreakerState,
     validationIssues: ctx.errors.length > 0 ? ctx.errors : undefined
   };
 }
