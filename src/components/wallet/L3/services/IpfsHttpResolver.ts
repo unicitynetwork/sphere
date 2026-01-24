@@ -193,22 +193,33 @@ async function fetchContentByCidWithVerification(
     // Get raw bytes for CID verification
     const rawBytes = new Uint8Array(await response.arrayBuffer());
 
-    // Verify CID from raw bytes
-    // IPFS backend uses raw codec (0x55) by default, so try that first
-    const hash = await sha256.digest(rawBytes);
-    const rawCodec = 0x55; // raw codec (bafkrei... prefix)
-    const computedCidRaw = CID.createV1(rawCodec, hash);
+    // Extract codec from the expected CID
+    // CID prefixes indicate codec: bafybei... = dag-pb (0x70), bafkrei... = raw (0x55), bagaaie... = dag-json (0x0200)
+    const expectedCid = CID.parse(cid);
+    const expectedCodec = expectedCid.code;
 
-    if (computedCidRaw.toString() !== cid) {
-      // Also try with json codec (0x0200) for legacy Helia-created CIDs
-      const computedCidJson = CID.createV1(jsonCodec.code, hash);
+    // Verification strategy depends on codec:
+    // - dag-pb (0x70): Cannot verify client-side. The CID is over protobuf-wrapped UnixFS content,
+    //   but gateway returns unwrapped raw bytes. IPFS already verified it during content routing.
+    // - raw (0x55): Hash raw bytes directly
+    // - dag-json (0x0200): Encode with JSON codec, then hash
+    const DAG_PB_CODEC = 0x70;
 
-      if (computedCidJson.toString() !== cid) {
-        console.warn(`⚠️ CID mismatch: expected ${cid}, got raw=${computedCidRaw.toString()}, json=${computedCidJson.toString()}`);
-        // Don't fail - content may still be valid, just different codec
-        // Log for debugging but continue with the content
+    if (expectedCodec !== DAG_PB_CODEC) {
+      // For raw and dag-json codecs, we can verify by hashing the raw bytes
+      const hash = await sha256.digest(rawBytes);
+      const computedCid = CID.createV1(expectedCodec, hash);
+
+      if (computedCid.toString() !== cid) {
+        // Genuine mismatch - content may be corrupted or tampered
+        console.warn(
+          `⚠️ CID verification failed: expected ${cid.slice(0, 16)}..., ` +
+          `computed ${computedCid.toString().slice(0, 16)}... ` +
+          `(codec=0x${expectedCodec.toString(16)})`
+        );
       }
     }
+    // For dag-pb: Trust IPFS content routing - the gateway already verified the content
 
     // Parse the verified bytes as JSON
     const textDecoder = new TextDecoder();
@@ -303,26 +314,32 @@ export class IpfsHttpResolver {
       // Gateway path returns cached content from gateway's stale IPNS record
       // Routing API returns authoritative seq/CID
       // If mismatch, gateway content is stale - fetch fresh content by CID
-      if (content && routingResult?.cid && gatewayResult?.cid) {
+      const gatewayCid = gatewayResult?.cid;
+      const routingCid = routingResult?.cid;
+      const gatewayHasRealCid = gatewayCid && gatewayCid !== "unknown";
+
+      if (content && routingCid && gatewayCid) {
         // Gateway returned content with its own CID - check if it matches routing API CID
-        if (gatewayResult.cid !== routingResult.cid) {
-          console.warn(`⚠️ Gateway content CID mismatch: gateway=${gatewayResult.cid.slice(0, 16)}..., routing=${routingResult.cid.slice(0, 16)}...`);
-          console.log(`📦 Fetching fresh content by authoritative CID...`);
+        if (gatewayCid !== routingCid) {
+          // Only warn if gateway provided a real CID that differs (actual staleness)
+          // Suppress warning when gateway didn't provide CID verification ("unknown")
+          if (gatewayHasRealCid) {
+            console.warn(`⚠️ Gateway content CID mismatch: gateway=${gatewayCid.slice(0, 16)}..., routing=${routingCid.slice(0, 16)}...`);
+          }
 
           // Fetch content by the authoritative CID
           for (const gateway of gateways) {
-            const freshResult = await fetchContentByCidWithVerification(routingResult.cid, gateway);
+            const freshResult = await fetchContentByCidWithVerification(routingCid, gateway);
             if (freshResult) {
               content = freshResult.content;
               contentSource = "cid-fetch";
-              console.log(`📦 Fetched fresh content from ${gateway}: version=${content?._meta?.version}`);
               break;
             }
           }
 
           if (contentSource !== "cid-fetch") {
             // Couldn't fetch by CID - clear stale content to prevent using incorrect version
-            console.warn(`⚠️ Could not fetch content by CID ${routingResult.cid.slice(0, 16)}... - returning null content`);
+            console.warn(`⚠️ Could not fetch content by CID ${routingCid.slice(0, 16)}... - returning null content`);
             content = null;
           }
         }
