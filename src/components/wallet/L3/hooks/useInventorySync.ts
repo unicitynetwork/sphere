@@ -150,9 +150,9 @@ export function useInventorySync() {
 
       emitSyncState({ isSyncing: false, currentStep: 0, mode: result.syncMode });
 
-      // Invalidate wallet queries to refresh UI
-      queryClient.invalidateQueries({ queryKey: ['wallet'] });
-      window.dispatchEvent(new Event('wallet-updated'));
+      // NOTE: Don't invalidate queries here - InventorySyncService.dispatchWalletUpdated()
+      // already calls invalidateWalletQueries(). Duplicate invalidation causes cascading
+      // refetches and infinite loops when multiple useWallet instances are mounted.
 
       return result;
     } catch (error) {

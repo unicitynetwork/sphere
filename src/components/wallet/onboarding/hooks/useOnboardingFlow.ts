@@ -2,7 +2,8 @@
  * useOnboardingFlow - Manages onboarding flow state and navigation
  */
 import { useState, useCallback, useEffect } from "react";
-import { useWallet } from "../../L3/hooks/useWallet";
+import { useQueryClient } from "@tanstack/react-query";
+import { useWallet, KEYS } from "../../L3/hooks/useWallet";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import {
   setImportInProgress,
@@ -16,6 +17,7 @@ import {
   checkNametagForAddress,
   hasTokensForAddress,
   setNametagForAddress,
+  getNametagForAddress,
   getInvalidatedNametagsForAddress,
 } from "../../L3/services/InventorySyncService";
 import {
@@ -25,6 +27,7 @@ import {
   type Wallet as L1Wallet,
 } from "../../L1/sdk";
 import type { DerivedAddressInfo } from "../components/AddressSelectionScreen";
+import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 export type OnboardingStep =
   | "start"
@@ -69,6 +72,8 @@ export interface UseOnboardingFlowReturn {
   nametagInput: string;
   setNametagInput: (value: string) => void;
   processingStatus: string;
+  isProcessingComplete: boolean;
+  handleCompleteOnboarding: () => Promise<void>;
 
   // Address selection state
   derivedAddresses: DerivedAddressInfo[];
@@ -94,6 +99,7 @@ export interface UseOnboardingFlowReturn {
 }
 
 export function useOnboardingFlow(): UseOnboardingFlowReturn {
+  const queryClient = useQueryClient();
   const {
     identity,
     nametag,
@@ -122,6 +128,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   // Nametag state
   const [nametagInput, setNametagInput] = useState("");
   const [processingStatus, setProcessingStatus] = useState("");
+  const [isProcessingComplete, setIsProcessingComplete] = useState(false);
 
   // Address selection state
   const [derivedAddresses, setDerivedAddresses] = useState<DerivedAddressInfo[]>([]);
@@ -403,6 +410,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const handleCreateKeys = useCallback(async () => {
     if (isBusy) return;
 
+    // Mark onboarding flag BEFORE clearAll - it will be preserved
+    localStorage.setItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS, 'true');
+    console.log('🎯 Onboarding flag set - starting wallet creation');
+
     setIsBusy(true);
     setError(null);
     try {
@@ -411,7 +422,8 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       // (because generateNewIdentity saves mnemonic BEFORE wallet creation)
       setImportInProgress();
 
-      UnifiedKeyManager.clearAll();
+      // Pass false to preserve onboarding flags during cleanup
+      UnifiedKeyManager.clearAll(false);
       await createWallet();
 
       // Save L1 wallet to storage (same as import flow)
@@ -444,6 +456,9 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     } catch (e) {
       // Clear import flag on error
       clearImportInProgress();
+      // Clear onboarding flag on error
+      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
+      console.log('🎯 Onboarding flag cleared after wallet creation error');
       const message = e instanceof Error ? e.message : "Failed to generate keys";
       setError(message);
     } finally {
@@ -461,6 +476,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       return;
     }
 
+    // Mark onboarding flag BEFORE clearAll - it will be preserved
+    localStorage.setItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS, 'true');
+    console.log('🎯 Onboarding flag set for wallet restore');
+
     setIsBusy(true);
     setError(null);
 
@@ -469,7 +488,8 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       // This allows wallet creation even though credentials exist
       setImportInProgress();
 
-      UnifiedKeyManager.clearAll();
+      // Pass false to preserve onboarding flags during cleanup
+      UnifiedKeyManager.clearAll(false);
       const mnemonic = words.join(" ");
       const keyManager = getUnifiedKeyManager();
       await keyManager.createFromMnemonic(mnemonic);
@@ -479,6 +499,9 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     } catch (e) {
       // Clear import flag on error
       clearImportInProgress();
+      // Clear onboarding flag on error
+      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
+      console.log('🎯 Onboarding flag cleared after restore error');
       const message = e instanceof Error ? e.message : "Invalid recovery phrase";
       setError(message);
       setIsBusy(false);
@@ -490,8 +513,25 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const handleMintNametag = useCallback(async () => {
     if (!nametagInput.trim()) return;
 
+    // Check if onboarding is in progress
+    const onboardingFlag = localStorage.getItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
+    if (onboardingFlag !== 'true') {
+      localStorage.setItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS, 'true');
+      console.log('🎯 Onboarding flag set for nametag minting');
+    }
+
+    // Add beforeunload handler to warn user about closing during sync
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = 'Your wallet is being set up. Are you sure you want to leave?';
+      return e.returnValue;
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
     setIsBusy(true);
     setError(null);
+    setIsProcessingComplete(false);
 
     try {
       const cleanTag = nametagInput.trim().replace("@", "");
@@ -500,6 +540,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       if (!isNametagAvailable) {
         setError(`${cleanTag} already exists.`);
         setIsBusy(false);
+        window.removeEventListener("beforeunload", handleBeforeUnload);
         return;
       }
 
@@ -537,28 +578,75 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       console.log("🏷️ Step 4: Recording wallet creation activity...");
       recordActivity("wallet_created", { isPublic: false });
 
-      // Step 5: Notify app that wallet is ready (instead of reload)
-      console.log("🏷️ Step 5: All steps completed, notifying app...");
+      // Remove beforeunload handler - sync is complete
+      window.removeEventListener("beforeunload", handleBeforeUnload);
 
-      // Signal wallet creation - this triggers Nostr service initialization
-      window.dispatchEvent(new Event("wallet-loaded"));
-      // Trigger UI updates
-      window.dispatchEvent(new Event("wallet-updated"));
+      // Step 5: Mark processing as complete and wait for user to click "Let's Go"
+      console.log("🏷️ Step 5: All steps completed, waiting for user confirmation...");
+      setProcessingStatus("Setup complete!");
+      setIsProcessingComplete(true);
 
-      // Wait a moment for Nostr to initialize, then close onboarding
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Mark onboarding as complete (but not yet finished - user needs to click Let's Go)
+      localStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETE, 'true');
 
-      // Set step to null/complete to trigger navigation away from onboarding
-      setStep("start"); // This will trigger the existing identity/nametag check in useEffect
     } catch (e) {
       const message = e instanceof Error ? e.message : "Minting failed";
       console.error("❌ Nametag minting failed:", e);
       setError(message);
       setStep("nametag");
+
+      // Remove beforeunload handler on error
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+
+      // Clear onboarding flags on error
+      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
+      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_COMPLETE);
     } finally {
       setIsBusy(false);
     }
   }, [nametagInput, checkNametagAvailability, mintNametag]);
+
+  // Action: Complete onboarding (called when user clicks "Let's Go")
+  const handleCompleteOnboarding = useCallback(async () => {
+    console.log("🎉 User clicked Let's Go - completing onboarding...");
+
+    // Pre-populate TanStack Query cache with identity and nametag data
+    // This prevents the delay when WalletPanel loads after onboarding
+    try {
+      const currentIdentity = await identityManager.getCurrentIdentity();
+      if (currentIdentity) {
+        // Set identity in cache (query key: ["wallet", "identity"])
+        queryClient.setQueryData(KEYS.IDENTITY, currentIdentity);
+        console.log("📦 Pre-populated identity cache");
+
+        // Get nametag from localStorage and set in cache
+        const nametagData = getNametagForAddress(currentIdentity.address);
+        if (nametagData?.name) {
+          // Query key: ["wallet", "nametag", address]
+          queryClient.setQueryData([...KEYS.NAMETAG, currentIdentity.address], nametagData.name);
+          console.log(`📦 Pre-populated nametag cache: @${nametagData.name}`);
+        }
+      }
+    } catch (err) {
+      console.warn("⚠️ Failed to pre-populate query cache:", err);
+      // Continue anyway - queries will fetch data normally
+    }
+
+    // Mark user as authenticated (permanent flag - survives logout with fullCleanup=false)
+    localStorage.setItem(STORAGE_KEYS.AUTHENTICATED, 'true');
+
+    // Clear onboarding in-progress flag
+    localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
+
+    // Signal wallet creation - this triggers Nostr service initialization
+    window.dispatchEvent(new Event("wallet-loaded"));
+    // Trigger UI updates
+    window.dispatchEvent(new Event("wallet-updated"));
+
+    // Reset to start - this will trigger navigation away from onboarding
+    // because identity and nametag now exist
+    setStep("start");
+  }, [queryClient]);
 
   // Action: Derive new address
   const handleDeriveNewAddress = useCallback(async () => {
@@ -802,6 +890,8 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     nametagInput,
     setNametagInput,
     processingStatus,
+    isProcessingComplete,
+    handleCompleteOnboarding,
 
     // Address selection state
     derivedAddresses,

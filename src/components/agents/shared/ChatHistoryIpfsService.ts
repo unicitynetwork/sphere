@@ -236,6 +236,12 @@ export class ChatHistoryIpfsService {
   }
 
   private async ensureInitialized(): Promise<boolean> {
+    // Check if IPFS is disabled via environment variable
+    if (import.meta.env.VITE_ENABLE_IPFS === 'false') {
+      console.log("💬 IPFS disabled via VITE_ENABLE_IPFS=false");
+      return false;
+    }
+
     const identity = await this.identityManager.getCurrentIdentity();
     if (!identity) {
       console.warn("💬 No wallet identity - skipping chat IPFS init");

@@ -113,23 +113,40 @@ export function LogoutConfirmModal({
                       <motion.div
                         initial={{ scale: 0 }}
                         animate={{ scale: 1 }}
-                        transition={{ delay: 0.1, type: "spring" }}
-                        className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center mb-4"
+                        transition={{ delay: 0.1, type: "spring", stiffness: 200, damping: 15 }}
+                        className="relative w-20 h-20 mb-4"
                       >
-                        <Check className="w-8 h-8 text-green-500" />
+                        {/* Success Glow */}
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          className="absolute inset-0 bg-green-500/30 rounded-full blur-xl"
+                        />
+                        {/* Success Ring */}
+                        <div className="absolute inset-0 border-3 border-green-500/30 rounded-full" />
+                        {/* Success Icon */}
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <motion.div
+                            initial={{ scale: 0, rotate: -180 }}
+                            animate={{ scale: 1, rotate: 0 }}
+                            transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
+                          >
+                            <Check className="w-10 h-10 text-green-500" strokeWidth={3} />
+                          </motion.div>
+                        </div>
                       </motion.div>
                     )}
 
                     <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">
-                      {isAnySyncing ? "Sync in Progress" : "Sync Complete"}
+                      {isAnySyncing ? "Sync in Progress" : "All Data Synced"}
                     </h3>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">
                       {isAnySyncing
                         ? "Please wait while your data is being synchronized."
-                        : "All data has been synchronized."}
+                        : "Your wallet data has been safely backed up to decentralized storage. You can now logout."}
                     </p>
 
-                    {/* Status message with pulsing dot */}
+                    {/* Status message with pulsing dot - shown when syncing */}
                     {isAnySyncing && (
                       <motion.div
                         key={statusMessage}
@@ -150,6 +167,20 @@ export function LogoutConfirmModal({
                         />
                         <span className="text-left text-sm font-medium">
                           {statusMessage}
+                        </span>
+                      </motion.div>
+                    )}
+
+                    {/* Success confirmation - shown when sync complete */}
+                    {!isAnySyncing && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex items-center gap-3 text-green-700 dark:text-green-300 bg-green-50 dark:bg-green-900/20 px-4 py-3 rounded-xl backdrop-blur-sm border border-green-200 dark:border-green-700/30 mb-3"
+                      >
+                        <Check className="w-5 h-5 text-green-500 shrink-0" />
+                        <span className="text-left text-sm font-medium">
+                          Safe to logout
                         </span>
                       </motion.div>
                     )}
@@ -182,13 +213,15 @@ export function LogoutConfirmModal({
                       onClick={canLogout ? handleForceLogout : undefined}
                       disabled={!canLogout}
                       className={`w-full flex items-center justify-center gap-2 py-3.5 font-semibold rounded-xl transition-all ${
-                        canLogout
-                          ? "bg-red-600 text-white hover:bg-red-500"
-                          : "bg-neutral-200 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 cursor-not-allowed"
+                        !isAnySyncing
+                          ? "bg-green-600 text-white hover:bg-green-500"
+                          : canLogout
+                            ? "bg-red-600 text-white hover:bg-red-500"
+                            : "bg-neutral-200 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 cursor-not-allowed"
                       }`}
                     >
                       <LogOut className="w-4 h-4" />
-                      {isAnySyncing ? "Logout Now" : "Logout"}
+                      {isAnySyncing ? "Logout Anyway" : "Logout Safely"}
                     </motion.button>
 
                     <button

@@ -1,10 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getTransactionHistory } from "../../../../services/TransactionHistoryService";
 import { useEffect } from "react";
-
-const KEYS = {
-  TRANSACTION_HISTORY: ["wallet", "transaction-history"],
-};
+import { QUERY_KEYS } from "../../../../config/queryKeys";
 
 export const useTransactionHistory = () => {
   const queryClient = useQueryClient();
@@ -12,7 +9,7 @@ export const useTransactionHistory = () => {
   useEffect(() => {
     const handleHistoryUpdate = () => {
       console.log("♻️ Transaction history update detected! Refreshing...");
-      queryClient.refetchQueries({ queryKey: KEYS.TRANSACTION_HISTORY });
+      queryClient.refetchQueries({ queryKey: QUERY_KEYS.TRANSACTION_HISTORY });
     };
 
     // Listen to both wallet updates (legacy) and transaction-history-updated (new)
@@ -26,7 +23,7 @@ export const useTransactionHistory = () => {
   }, [queryClient]);
 
   const historyQuery = useQuery({
-    queryKey: KEYS.TRANSACTION_HISTORY,
+    queryKey: QUERY_KEYS.TRANSACTION_HISTORY,
     queryFn: () => getTransactionHistory(),
     staleTime: 30000,
   });

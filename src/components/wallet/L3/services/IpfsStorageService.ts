@@ -393,6 +393,12 @@ export class IpfsStorageService implements IpfsTransport {
    * Part of IpfsTransport interface
    */
   public async ensureInitialized(): Promise<boolean> {
+    // Check if IPFS is disabled via environment variable
+    if (import.meta.env.VITE_ENABLE_IPFS === 'false') {
+      console.log("📦 IPFS disabled via VITE_ENABLE_IPFS=false");
+      return false;
+    }
+
     // First, check if identity changed - we need to do this BEFORE the early return
     const identity = await this.identityManager.getCurrentIdentity();
     if (!identity) {
@@ -3467,6 +3473,14 @@ export class IpfsStorageService implements IpfsTransport {
    * @param options.coalesce For LOW priority: batch multiple requests (default: true)
    */
   async syncNow(options?: SyncOptions): Promise<StorageResult> {
+    // If IPFS is disabled, return success immediately (no-op)
+    if (import.meta.env.VITE_ENABLE_IPFS === 'false') {
+      return {
+        success: true,
+        timestamp: Date.now(),
+        // No CID when IPFS is disabled
+      };
+    }
     return this.getSyncQueue().enqueue(options ?? {});
   }
 

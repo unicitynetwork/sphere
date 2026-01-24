@@ -1,5 +1,5 @@
 import { Plus, ArrowUpRight, ArrowDownUp, Sparkles, Loader2, Coins, Layers, CheckCircle, XCircle, Download, Upload, Eye, EyeOff, AlertTriangle, X } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useMotionValue, useTransform, animate } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
 import { AggregatedAsset } from '../data/model';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
@@ -21,7 +21,6 @@ import { UnifiedKeyManager } from '../../shared/services/UnifiedKeyManager';
 import { SaveWalletModal } from '../../L1/components/modals';
 import { validateUnicityId, invalidateUnicityId, repairUnicityId, type UnicityIdValidationResult } from '../../../../utils/unicityIdValidator';
 import { getInvalidatedNametagsForAddress } from '../services/InventorySyncService';
-import { SyncProgressIndicator } from '../components/SyncProgressIndicator';
 import { useInventorySync } from '../hooks/useInventorySync';
 
 // Module-level tracking to prevent validation loops across component remounts
@@ -30,6 +29,60 @@ const validatedNametags = new Set<string>();
 const invalidatedNametags = new Set<string>(); // Track invalidated nametags to never restore them
 
 type Tab = 'assets' | 'tokens';
+
+// Animated balance display with smooth number transitions
+function BalanceDisplay({
+  totalValue,
+  showBalances,
+  onToggle,
+  isLoading
+}: {
+  totalValue: number;
+  showBalances: boolean;
+  onToggle: () => void;
+  isLoading?: boolean;
+}) {
+  const motionValue = useMotionValue(0);
+  const displayed = useTransform(motionValue, (v) =>
+    `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  );
+
+  useEffect(() => {
+    // Only animate if current value differs from target
+    if (Math.abs(motionValue.get() - totalValue) > 0.001) {
+      const controls = animate(motionValue, totalValue, {
+        duration: 0.5,
+        ease: 'easeOut',
+      });
+      return controls.stop;
+    }
+  }, [totalValue, motionValue]);
+
+  return (
+    <div className="flex items-center gap-3">
+      <h2 className="text-4xl text-neutral-900 dark:text-white font-bold tracking-tight">
+        {isLoading ? (
+          <span className="inline-flex items-center gap-2">
+            <span className="inline-block w-32 h-9 bg-neutral-200 dark:bg-neutral-700 rounded-lg animate-pulse" />
+          </span>
+        ) : showBalances ? (
+          <motion.span>{displayed}</motion.span>
+        ) : (
+          '••••••'
+        )}
+      </h2>
+      <motion.button
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={onToggle}
+        className="p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg transition-colors text-neutral-400 dark:text-neutral-500 hover:text-neutral-900 dark:hover:text-white"
+        title={showBalances ? "Hide balances" : "Show balances"}
+      >
+        {showBalances ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+      </motion.button>
+    </div>
+  );
+}
 
 interface L3WalletViewProps {
   showBalances: boolean;
@@ -56,12 +109,11 @@ export function L3WalletView({
   setIsL1WalletOpen,
 }: L3WalletViewProps) {
   const navigate = useNavigate();
-  const { identity, assets, tokens, isLoadingAssets, isLoadingIdentity, nametag, getSeedPhrase } = useWallet();
+  const { identity, assets, tokens, isLoadingAssets, isLoadingIdentity, nametag, getSeedPhrase, tokensUpdatedAt, assetsUpdatedAt } = useWallet();
   const { exportTxf, importTxf, isExportingTxf, isImportingTxf, isSyncing: isIpfsSyncing, isEnabled: isIpfsEnabled } = useIpfsStorage();
   const { balance: l1Balance, deleteWallet } = useL1Wallet();
   const {
     isSyncing: isInventorySyncing,
-    lastResult: lastSyncResult,
   } = useInventorySync();
 
   // Combined syncing state
@@ -81,6 +133,70 @@ export function L3WalletView({
   const hasSyncStarted = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Track previous token/asset IDs to detect truly new items
+  // Uses TanStack Query's dataUpdatedAt to know when data actually changed
+  const prevTokenIdsRef = useRef<Set<string>>(new Set());
+  const prevAssetCoinIdsRef = useRef<Set<string>>(new Set());
+  const prevTokensUpdatedAt = useRef<number>(0);
+  const prevAssetsUpdatedAt = useRef<number>(0);
+
+  // Compute new token IDs by comparing with previous snapshot
+  const newTokenIds = useMemo(() => {
+    // If this is the first load or data hasn't changed, no animations
+    if (prevTokensUpdatedAt.current === 0) {
+      return new Set<string>(); // First load - no animations
+    }
+    if (tokensUpdatedAt === prevTokensUpdatedAt.current) {
+      return new Set<string>(); // Data unchanged - no animations
+    }
+
+    // Data changed - find truly new tokens
+    const newIds = new Set<string>();
+    tokens.filter(t => t.type !== 'Nametag').forEach(token => {
+      if (!prevTokenIdsRef.current.has(token.id)) {
+        newIds.add(token.id);
+      }
+    });
+    return newIds;
+  }, [tokens, tokensUpdatedAt]);
+
+  // Compute new asset IDs by comparing with previous snapshot
+  const newAssetCoinIds = useMemo(() => {
+    // If this is the first load or data hasn't changed, no animations
+    if (prevAssetsUpdatedAt.current === 0) {
+      return new Set<string>(); // First load - no animations
+    }
+    if (assetsUpdatedAt === prevAssetsUpdatedAt.current) {
+      return new Set<string>(); // Data unchanged - no animations
+    }
+
+    // Data changed - find truly new assets
+    const newIds = new Set<string>();
+    if (l1Balance > 0 && !prevAssetCoinIdsRef.current.has('l1-alpha')) {
+      newIds.add('l1-alpha');
+    }
+    assets.forEach(asset => {
+      if (!prevAssetCoinIdsRef.current.has(asset.coinId)) {
+        newIds.add(asset.coinId);
+      }
+    });
+    return newIds;
+  }, [assets, l1Balance, assetsUpdatedAt]);
+
+  // Update previous snapshots after render (for next comparison)
+  useEffect(() => {
+    const currentIds = new Set(tokens.filter(t => t.type !== 'Nametag').map(t => t.id));
+    prevTokenIdsRef.current = currentIds;
+    prevTokensUpdatedAt.current = tokensUpdatedAt;
+  }, [tokens, tokensUpdatedAt]);
+
+  useEffect(() => {
+    const currentIds = new Set(assets.map(a => a.coinId));
+    if (l1Balance > 0) currentIds.add('l1-alpha');
+    prevAssetCoinIdsRef.current = currentIds;
+    prevAssetsUpdatedAt.current = assetsUpdatedAt;
+  }, [assets, l1Balance, assetsUpdatedAt]);
+
   // New modal states
   const [isBackupOpen, setIsBackupOpen] = useState(false);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
@@ -88,6 +204,11 @@ export function L3WalletView({
 
   // Unicity ID validation state
   const [unicityIdWarning, setUnicityIdWarning] = useState<string | null>(null);
+
+  // Stable callback for toggling balance visibility (for memoized BalanceDisplay)
+  const handleToggleBalances = useCallback(() => {
+    setShowBalances(!showBalances);
+  }, [showBalances, setShowBalances]);
 
   // Track when initial IPFS sync completes (latches true after first sync has ended)
   useEffect(() => {
@@ -366,22 +487,12 @@ export function L3WalletView({
       {/* Main Balance - Centered with Eye Toggle */}
       <div className="px-6 mb-6 shrink-0">
         <div className="flex flex-col items-center justify-center mb-6 pt-2">
-          <div className="flex items-center gap-3">
-            <h2 className="text-4xl text-neutral-900 dark:text-white font-bold tracking-tight">
-              {showBalances
-                ? `$${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                : '••••••'}
-            </h2>
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setShowBalances(!showBalances)}
-              className="p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg transition-colors text-neutral-400 dark:text-neutral-500 hover:text-neutral-900 dark:hover:text-white"
-              title={showBalances ? "Hide balances" : "Show balances"}
-            >
-              {showBalances ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
-            </motion.button>
-          </div>
+          <BalanceDisplay
+            totalValue={totalValue}
+            showBalances={showBalances}
+            onToggle={handleToggleBalances}
+            isLoading={isLoadingAssets && totalValue === 0}
+          />
         </div>
 
         {/* Actions - Speed focused */}
@@ -576,17 +687,10 @@ export function L3WalletView({
               <Loader2 className="w-6 h-6 text-orange-500 animate-spin mx-auto" />
             </div>
           ) : (
-            <AnimatePresence mode="wait">
+            <>
+              {/* ASSETS VIEW - no container animation, only item animations */}
               {activeTab === 'assets' && (
-                /* ASSETS VIEW */
-                <motion.div
-                  key="assets"
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  transition={{ duration: 0.2 }}
-                  className="space-y-2"
-                >
+                <div className="space-y-2">
                   {assets.length === 0 && l1Balance === 0 ? (
                     <EmptyState />
                   ) : (
@@ -597,8 +701,9 @@ export function L3WalletView({
                           key="l1-alpha"
                           asset={l1AlphaAsset}
                           showBalances={showBalances}
-                          delay={0}
+                          delay={newAssetCoinIds.has('l1-alpha') ? 0 : 0}
                           layer="L1"
+                          isNew={newAssetCoinIds.has('l1-alpha')}
                           onClick={() => setIsL1WalletOpen(true)}
                         />
                       )}
@@ -608,24 +713,19 @@ export function L3WalletView({
                           key={asset.coinId}
                           asset={asset}
                           showBalances={showBalances}
-                          delay={(index + 1) * 0.05}
+                          delay={newAssetCoinIds.has(asset.coinId) ? (index + 1) * 0.05 : 0}
                           layer="L3"
+                          isNew={newAssetCoinIds.has(asset.coinId)}
                         />
                       ))}
                     </>
                   )}
-                </motion.div>
+                </div>
               )}
 
+              {/* TOKENS VIEW - no container animation, only item animations */}
               {activeTab === 'tokens' && (
-                <motion.div
-                  key="tokens"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  transition={{ duration: 0.2 }}
-                  className="space-y-2"
-                >
+                <div className="space-y-2">
                   {tokens.filter(t => t.type !== 'Nametag').length === 0 ? (
                     <EmptyState text="No individual tokens found." />
                   ) : (
@@ -636,13 +736,14 @@ export function L3WalletView({
                         <TokenRow
                           key={token.id}
                           token={token}
-                          delay={index * 0.05}
+                          delay={newTokenIds.has(token.id) ? index * 0.05 : 0}
+                          isNew={newTokenIds.has(token.id)}
                         />
                       ))
                   )}
-                </motion.div>
+                </div>
               )}
-            </AnimatePresence>
+            </>
           )}
 
           {/* Overlay spinner for initial IPFS sync
@@ -699,14 +800,6 @@ export function L3WalletView({
         hasMnemonic={hasMnemonic}
       />
 
-      {/* Sync Progress Indicator - floating notification */}
-      {isIpfsEnabled && (
-        <SyncProgressIndicator
-          lastSyncResult={lastSyncResult}
-          isSyncing={isSyncing}
-          autoDismissMs={5000}
-        />
-      )}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { useWallet } from "../wallet/L3/hooks/useWallet";
 import { CreateWalletFlow } from "../wallet/onboarding/CreateWalletFlow";
 import { NostrPinPublisher } from "../wallet/L3/services/NostrPinPublisher";
 import { NOSTR_PIN_CONFIG } from "../../config/nostrPin.config";
+import { STORAGE_KEYS } from "../../config/storageKeys";
 
 interface WalletGateProps {
   children: ReactNode;
@@ -82,8 +83,38 @@ function OnboardingScreen() {
 export function WalletGate({ children }: WalletGateProps) {
   const { identity, nametag, isLoadingIdentity, isLoadingNametag } = useWallet();
 
-  const isLoading = isLoadingIdentity || (!!identity && isLoadingNametag);
-  const isAuthenticated = !!identity && !!nametag;
+  // Check if user has completed initial onboarding (created or imported wallet)
+  // Once authenticated, user stays authenticated - new addresses are created via modal
+  const hasCompletedOnboarding = localStorage.getItem(STORAGE_KEYS.AUTHENTICATED) === 'true';
+
+  // Migration for existing users: if they have identity but no AUTHENTICATED flag,
+  // set the flag so they don't get kicked to onboarding when switching addresses
+  useEffect(() => {
+    if (identity && !hasCompletedOnboarding && !isLoadingIdentity) {
+      const isOnboarding = localStorage.getItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS) === 'true';
+      if (!isOnboarding) {
+        console.log('🔄 Migration: Setting AUTHENTICATED flag for existing user');
+        localStorage.setItem(STORAGE_KEYS.AUTHENTICATED, 'true');
+      }
+    }
+  }, [identity, hasCompletedOnboarding, isLoadingIdentity]);
+
+  // Check if user is in onboarding flow (prevents premature transition to main app)
+  // During onboarding, nametag is saved to localStorage immediately after minting,
+  // but we need to wait for IPFS sync/verification before showing main app.
+  // The onboarding flag is cleared when user clicks "Let's go!" button.
+  const isOnboarding = localStorage.getItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS) === 'true';
+
+  // Only wait for nametag if user hasn't completed onboarding yet
+  // If hasCompletedOnboarding is true, we can show the app immediately after identity loads
+  const isLoading = isLoadingIdentity || (!hasCompletedOnboarding && !!identity && isLoadingNametag);
+
+  // User is authenticated if:
+  // 1. They have identity AND have completed onboarding before (sphere_authenticated flag), OR
+  // 2. They have identity and nametag AND not in initial onboarding
+  // NOTE: We always require identity to exist - the authenticated flag alone is not enough
+  // because user may have cleared wallet data while flag remained
+  const isAuthenticated = (hasCompletedOnboarding && !!identity) || (!!identity && !!nametag && !isOnboarding);
 
   // Start NostrPinPublisher when authenticated
   // This enables automatic CID announcements to Nostr for pinning

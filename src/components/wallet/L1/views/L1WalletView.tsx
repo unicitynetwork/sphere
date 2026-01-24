@@ -1,7 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  generateAddress,
-  loadWalletFromStorage,
   createTransactionPlan,
   createAndSignTransaction,
   broadcast,
@@ -46,7 +44,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     vestingBalances,
     deleteWallet,
     analyzeTransaction,
-    invalidateWallet,
     invalidateBalance,
     invalidateTransactions,
     invalidateVesting,
@@ -91,24 +88,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
       setSelectedAddress("");
     } catch {
       showMessage("error", "Error", "Failed to delete wallet");
-    }
-  };
-
-  // Generate new address
-  const onNewAddress = async () => {
-    if (!wallet) return;
-
-    try {
-      const addr = generateAddress(wallet);
-      // Reload wallet from storage to get updated addresses
-      const updated = loadWalletFromStorage("main");
-      if (updated) {
-        // Force refresh wallet query
-        invalidateWallet();
-        setSelectedAddress(addr.address);
-      }
-    } catch {
-      showMessage("error", "Error", "Failed to generate address");
     }
   };
 
@@ -229,23 +208,6 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
     setViewMode("main");
   };
 
-  // Select address - sync with L3's selected address path
-  const onSelectAddress = (address: string) => {
-    // Find the selected address to get its path - path is the ONLY reliable identifier
-    const selectedAddr = wallet?.addresses.find(a => a.address === address);
-
-    // Sync to L3's selected address path
-    if (selectedAddr?.path) {
-      localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, selectedAddr.path);
-    } else {
-      // Fallback: remove path to trigger default behavior
-      localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
-    }
-
-    // Force page reload to restart NostrService with new identity
-    window.location.reload();
-  };
-
   // Show connection status while connecting or on error
   if (!connection.isConnected) {
     return (
@@ -302,12 +264,9 @@ export function L1WalletView({ showBalances }: { showBalances: boolean }) {
         selectedAddress={selectedAddress}
         selectedPrivateKey={selectedPrivateKey}
         addresses={addresses}
-        walletAddresses={wallet?.addresses}
         balance={balance}
         totalBalance={totalBalance}
         showBalances={showBalances}
-        onNewAddress={onNewAddress}
-        onSelectAddress={onSelectAddress}
         onShowHistory={onShowHistory}
         onSaveWallet={onSaveWallet}
         hasMnemonic={hasMnemonic}

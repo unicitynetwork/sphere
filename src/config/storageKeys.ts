@@ -29,6 +29,22 @@ export const STORAGE_KEYS = {
   WELCOME_ACCEPTED: 'sphere_welcome_accepted',
 
   // ============================================================================
+  // ONBOARDING & AUTHENTICATION
+  // ============================================================================
+
+  // Flag indicating user has completed onboarding and is authenticated
+  AUTHENTICATED: 'sphere_authenticated',
+
+  // Flag indicating onboarding is currently in progress (prevents auto-sync)
+  ONBOARDING_IN_PROGRESS: 'sphere_onboarding_in_progress',
+
+  // Flag indicating onboarding steps are complete (before final auth)
+  ONBOARDING_COMPLETE: 'sphere_onboarding_complete',
+
+  // Flag indicating address creation is in progress via modal (prevents auto-sync)
+  ADDRESS_CREATION_IN_PROGRESS: 'sphere_address_creation_in_progress',
+
+  // ============================================================================
   // UNIFIED KEY MANAGER (Core Wallet Keys - Encrypted)
   // ============================================================================
 
@@ -212,6 +228,9 @@ export const STORAGE_KEY_GENERATORS = {
 
   // IPFS chat sequence: `sphere_ipfs_chat_seq_${ipnsName}`
   ipfsChatSeq: (ipnsName: string) => `sphere_ipfs_chat_seq_${ipnsName}` as const,
+
+  // Token list hash for spent check optimization: `sphere_token_hash_${address}`
+  tokenListHash: (address: string) => `sphere_token_hash_${address}` as const,
 } as const;
 
 // ============================================================================
@@ -266,21 +285,32 @@ export const STORAGE_KEY_PREFIXES = {
 
 /**
  * Clear all Sphere app data from localStorage.
- * Use this on wallet logout to ensure no data leaks between sessions.
+ *
+ * @param fullCleanup - If true (default), deletes ALL sphere_* keys (use for logout).
+ *                      If false, preserves onboarding flags (use during wallet create/import in onboarding).
  */
-export function clearAllSphereData(): void {
+export function clearAllSphereData(fullCleanup: boolean = true): void {
   const keysToRemove: string[] = [];
+
+  const preserveKeys: Set<string> = fullCleanup
+    ? new Set<string>()
+    : new Set([
+        STORAGE_KEYS.AUTHENTICATED,
+        STORAGE_KEYS.ONBOARDING_IN_PROGRESS,
+        STORAGE_KEYS.ONBOARDING_COMPLETE,
+        STORAGE_KEYS.WELCOME_ACCEPTED,
+      ]);
 
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
-    if (key?.startsWith(STORAGE_KEY_PREFIXES.APP)) {
+    if (key && key.startsWith(STORAGE_KEY_PREFIXES.APP) && !preserveKeys.has(key)) {
       keysToRemove.push(key);
     }
   }
 
   keysToRemove.forEach(key => localStorage.removeItem(key));
 
-  console.log(`🧹 Cleared ${keysToRemove.length} sphere_* keys from localStorage`);
+  console.log(`🧹 Cleared ${keysToRemove.length} sphere_* keys from localStorage${fullCleanup ? '' : ' (preserved onboarding flags)'}`);
 }
 
 // ============================================================================

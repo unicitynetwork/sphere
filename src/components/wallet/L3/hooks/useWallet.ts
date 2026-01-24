@@ -20,7 +20,7 @@ import {
 import { tokenToTxf, getCurrentStateHash } from "../services/TxfSerializer";
 import { NametagService } from "../services/NametagService";
 import { RegistryService } from "../services/RegistryService";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { TokenSplitExecutor, type SplitPersistenceCallbacks } from "../services/transfer/TokenSplitExecutor";
 import { TokenSplitCalculator } from "../services/transfer/TokenSplitCalculator";
@@ -35,15 +35,11 @@ import { isNametagCorrupted } from "../../../../utils/tokenValidation";
 import { getTokenValidationService } from "../services/TokenValidationService";
 import { OutboxRepository } from "../../../../repositories/OutboxRepository";
 import { addSentTransaction } from "../../../../services/TransactionHistoryService";
+import { STORAGE_KEY_GENERATORS } from "../../../../config/storageKeys";
+import { QUERY_KEYS } from "../../../../config/queryKeys";
 
-export const KEYS = {
-  IDENTITY: ["wallet", "identity"],
-  TOKENS: ["wallet", "tokens"],
-  PRICES: ["market", "prices"],
-  REGISTRY: ["market", "registry"],
-  AGGREGATED: ["wallet", "aggregated"],
-  NAMETAG: ["wallet", "nametag"],
-};
+// Re-export for backward compatibility
+export const KEYS = QUERY_KEYS;
 
 // Sync lifecycle event names (type-safe constants)
 const SYNC_EVENTS = {
@@ -93,6 +89,10 @@ function computeTokenListHash(tokens: Token[]): string {
   return (hash >>> 0).toString(16);
 }
 
+// Module-level flag to prevent multiple useWallet instances from triggering initial sync
+// Each useWallet has its own useEffect, but sync should only run once on page load
+let _initialSyncTriggered = false;
+
 export const useWallet = () => {
   const queryClient = useQueryClient();
   const { identityManager, nostrService } = useServices();
@@ -104,20 +104,28 @@ export const useWallet = () => {
   const WALLET_UPDATE_DEBOUNCE_MS = 200;
 
   // Track token list hash to detect actual changes (avoid redundant spent checks)
+  // Persisted to localStorage to survive page reloads
   const lastTokenHashRef = useRef<string>('');
 
   // Prevent refetch during active inventory sync
   const skipRefetchDuringSyncRef = useRef<boolean>(false);
 
+  // Track if wallet-updated events were skipped during sync (need refetch when sync ends)
+  const pendingUpdateDuringSyncRef = useRef<boolean>(false);
+
   // Rate-limit consecutive spent checks
   const lastSpentCheckTimeRef = useRef<number>(0);
   const MIN_SPENT_CHECK_INTERVAL_MS = 2000; // 2 second minimum between checks
 
+  // Track background token validation state (for UI indicator)
+  const [isValidatingTokens, setIsValidatingTokens] = useState(false);
+
   useEffect(() => {
     const handleWalletUpdate = () => {
-      // Skip if we're in the middle of inventory sync
+      // Skip if we're in the middle of inventory sync, but mark as pending
       if (skipRefetchDuringSyncRef.current) {
-        console.log('⏭️  [useWallet] Skipping wallet-updated refetch during active inventory sync');
+        console.log('⏭️  [useWallet] Skipping wallet-updated refetch during active inventory sync (marked pending)');
+        pendingUpdateDuringSyncRef.current = true;
         return;
       }
 
@@ -185,7 +193,7 @@ export const useWallet = () => {
       const identity = await identityManager.getCurrentIdentity();
       return identity;
     },
-    staleTime: 5000, // Allow refetch after 5 seconds instead of never
+    staleTime: Infinity, // Identity rarely changes - only refetch on explicit invalidation
   });
 
   const nametagQuery = useQuery({
@@ -230,26 +238,48 @@ export const useWallet = () => {
       return nametagData?.name || null;
     },
     enabled: !!identityQuery.data?.address,
+    staleTime: Infinity, // Only refetch on explicit invalidation (no auto-refetch)
   });
 
   // Initialize inventory sync when identity is available
   // This triggers IPFS sync to recover tokens and nametag from remote storage.
   // Uses InventorySyncService.inventorySync() instead of deprecated IpfsStorageService.startAutoSync()
-  useEffect(() => {
-    const identity = identityQuery.data;
+  // Extract primitive values to prevent effect from re-running when object reference changes
+  const identityAddress = identityQuery.data?.address;
+  const identityPublicKey = identityQuery.data?.publicKey;
+  const identityIpnsName = identityQuery.data?.ipnsName;
 
+  useEffect(() => {
     // Run inventory sync when user has identity - this will recover nametag and tokens from IPFS
-    if (identity?.address && identity?.publicKey && identity?.ipnsName) {
+    // Use module-level flag to ensure only ONE instance triggers the initial sync
+    // (multiple useWallet hooks are mounted across the app)
+    if (identityAddress && identityPublicKey && identityIpnsName && !_initialSyncTriggered) {
+      _initialSyncTriggered = true;
+      console.log('🔄 [useWallet] Triggering initial inventory sync (once per page load)');
       // Trigger sync to merge local and remote state
       inventorySync({
-        address: identity.address,
-        publicKey: identity.publicKey,
-        ipnsName: identity.ipnsName,
+        address: identityAddress,
+        publicKey: identityPublicKey,
+        ipnsName: identityIpnsName,
       }).catch(err => {
         console.error('❌ [useWallet] Initial inventory sync failed:', err);
       });
     }
-  }, [identityQuery.data]);
+  }, [identityAddress, identityPublicKey, identityIpnsName]);
+
+  // Load cached token hash from localStorage when identity changes
+  // This allows skipping spent checks on page reload when token list hasn't changed
+  useEffect(() => {
+    const address = identityQuery.data?.address;
+    if (address) {
+      const cachedHash = localStorage.getItem(STORAGE_KEY_GENERATORS.tokenListHash(address));
+      // Only update and log if hash actually changed (prevents spam from multiple useWallet instances)
+      if (cachedHash && cachedHash !== lastTokenHashRef.current) {
+        lastTokenHashRef.current = cachedHash;
+        console.log(`📦 [useWallet] Loaded cached token hash for address: ${cachedHash}`);
+      }
+    }
+  }, [identityQuery.data?.address]);
 
   // NOTE: OutboxRecoveryService lifecycle is now managed centrally in ServicesProvider.tsx
   // This prevents the repeated start/stop cycles that occurred when multiple components
@@ -281,16 +311,11 @@ export const useWallet = () => {
       }
       console.log('🔓 [useWallet] Unlocking refetch after inventory sync completes');
 
-      // CRITICAL: Trigger refetch after sync completes
-      // This catches any wallet-updated events that were skipped during sync
-      // Using small delay to let any final writes settle
-      setTimeout(() => {
-        console.log('🔄 [useWallet] Post-sync refetch triggered');
-        lastSpentCheckTimeRef.current = Date.now(); // Record check time
-        queryClient.refetchQueries({ queryKey: KEYS.TOKENS });
-        queryClient.refetchQueries({ queryKey: KEYS.AGGREGATED });
-        queryClient.invalidateQueries({ queryKey: KEYS.NAMETAG });
-      }, 100);
+      // NOTE: We no longer trigger refetch here because:
+      // 1. dispatchWalletUpdated() in InventorySyncService already calls invalidateWalletQueries()
+      // 2. Multiple useWallet instances each have their own handleSyncEnd, causing cascading refetches
+      // Just clear the pending flag without triggering another refetch
+      pendingUpdateDuringSyncRef.current = false;
     };
 
     window.addEventListener(SYNC_EVENTS.START, handleSyncStart);
@@ -328,8 +353,10 @@ export const useWallet = () => {
       if (!identity?.address) return [];
 
       // Get tokens directly from InventorySyncService (no wallet concept needed)
-      console.log(`📦 [tokensQuery] Loading tokens for address: ${identity.address.slice(0, 30)}...`);
+      // Returns immediately - spent check runs in background
+      console.log(`📦 [tokensQuery] QUERY FN INVOKED for address: ${identity.address.slice(0, 30)}...`);
       let tokens = getTokensForAddress(identity.address);
+      console.log(`📦 [tokensQuery] Got ${tokens.length} tokens from localStorage`);
 
       // Check for tokens with pending outbox entries (in-transit transfers)
       // These should be filtered out as they're being transferred
@@ -349,71 +376,93 @@ export const useWallet = () => {
         }
       }
 
-      // Hash-based change detection to avoid redundant spent checks
-      const currentTokenHash = computeTokenListHash(tokens);
-      const tokenListUnchanged = currentTokenHash === lastTokenHashRef.current;
-
-      // Check for spent tokens on aggregator (prevents zombie token resurrection)
-      // This catches tokens that were spent but not properly removed from localStorage
-      if (tokens.length > 0 && identity.publicKey) {
-        // Skip expensive spent check if token list hasn't changed
-        if (tokenListUnchanged) {
-          console.log(`⏩ [tokensQuery] Token list hash unchanged (${currentTokenHash}), skipping spent check`);
-          return tokens;
-        }
-
-        // Token list changed - record new hash
-        lastTokenHashRef.current = currentTokenHash;
-
-        console.log(`📦 [tokensQuery] Token list changed (hash: ${currentTokenHash}) - running spent check for ${tokens.length} token(s)...`);
-        try {
-          const validationService = getTokenValidationService();
-
-          // Clear UNSPENT cache entries to force fresh aggregator check
-          // SPENT entries remain cached (immutable)
-          validationService.clearUnspentCacheEntries();
-
-          const spentCheck = await validationService.checkSpentTokens(
-            tokens,
-            identity.publicKey,
-            { batchSize: 3 }
-          );
-
-          console.log(`📦 [tokensQuery] Spent check complete: ${spentCheck.spentTokens.length} spent, ${tokens.length - spentCheck.spentTokens.length} valid`);
-
-          if (spentCheck.spentTokens.length > 0) {
-            console.warn(`⚠️ Found ${spentCheck.spentTokens.length} spent token(s) on aggregator during wallet load`);
-            for (const spent of spentCheck.spentTokens) {
-              console.log(`  💀 Archiving spent token: ${spent.tokenId.slice(0, 16)}... (state: ${spent.stateHash.slice(0, 8)}...)`);
-
-              // Remove token via InventorySyncService
-              if (identity.publicKey && identity.ipnsName) {
-                await removeTokenFromInventory(
-                  identity.address,
-                  identity.publicKey,
-                  identity.ipnsName,
-                  spent.tokenId,
-                  spent.stateHash
-                ).catch(err => {
-                  console.error(`Failed to remove spent token ${spent.tokenId.slice(0, 8)}:`, err);
-                });
-              }
-            }
-            // Return updated token list after removing spent tokens
-            return getTokensForAddress(identity.address);
-          }
-        } catch (err) {
-          // Don't fail wallet load if spent check fails - just log warning
-          console.warn('📦 [tokensQuery] Failed to check spent tokens:', err);
-        }
-      } else {
-        console.log(`📦 [tokensQuery] Skipping spent check: tokens=${tokens.length}, hasPublicKey=${!!identity.publicKey}`);
-      }
-
+      console.log(`📦 [tokensQuery] Returning ${tokens.length} tokens after filtering`);
       return tokens;
     },
     enabled: !!identityQuery.data?.address,
+    staleTime: Infinity, // Only refetch on explicit invalidation - data comes from localStorage
   });
+
+  // Background spent token validation - runs after tokens are displayed
+  // This validates tokens against aggregator without blocking the UI
+  const isValidatingRef = useRef(false);
+  useEffect(() => {
+    const identity = identityQuery.data;
+    const tokens = tokensQuery.data;
+
+    // Skip if no identity, no tokens, or already validating
+    if (!identity?.address || !identity?.publicKey || !tokens || tokens.length === 0 || isValidatingRef.current) {
+      return;
+    }
+
+    // Hash-based change detection to avoid redundant spent checks
+    const currentTokenHash = computeTokenListHash(tokens);
+    const tokenListUnchanged = currentTokenHash === lastTokenHashRef.current;
+
+    if (tokenListUnchanged) {
+      console.log(`⏩ [backgroundValidation] Token list hash unchanged (${currentTokenHash}), skipping spent check`);
+      return;
+    }
+
+    // Mark as validating to prevent concurrent runs
+    isValidatingRef.current = true;
+    setIsValidatingTokens(true);
+
+    const runBackgroundValidation = async () => {
+      console.log(`🔄 [backgroundValidation] Running spent check for ${tokens.length} token(s) in background...`);
+
+      try {
+        const validationService = getTokenValidationService();
+
+        // Clear UNSPENT cache entries to force fresh aggregator check
+        validationService.clearUnspentCacheEntries();
+
+        const spentCheck = await validationService.checkSpentTokens(
+          tokens,
+          identity.publicKey,
+          { batchSize: 10 }
+        );
+
+        console.log(`🔄 [backgroundValidation] Spent check complete: ${spentCheck.spentTokens.length} spent, ${tokens.length - spentCheck.spentTokens.length} valid`);
+
+        if (spentCheck.spentTokens.length > 0) {
+          console.warn(`⚠️ [backgroundValidation] Found ${spentCheck.spentTokens.length} spent token(s)`);
+
+          for (const spent of spentCheck.spentTokens) {
+            console.log(`  💀 Removing spent token: ${spent.tokenId.slice(0, 16)}...`);
+
+            if (identity.ipnsName) {
+              await removeTokenFromInventory(
+                identity.address,
+                identity.publicKey,
+                identity.ipnsName,
+                spent.tokenId,
+                spent.stateHash
+              ).catch(err => {
+                console.error(`Failed to remove spent token ${spent.tokenId.slice(0, 8)}:`, err);
+              });
+            }
+          }
+
+          // Refetch tokens after removing spent ones
+          queryClient.invalidateQueries({ queryKey: KEYS.TOKENS });
+        }
+
+        // Update hash after successful validation (in memory and localStorage)
+        lastTokenHashRef.current = currentTokenHash;
+        localStorage.setItem(STORAGE_KEY_GENERATORS.tokenListHash(identity.address), currentTokenHash);
+
+      } catch (err) {
+        console.warn('🔄 [backgroundValidation] Failed to check spent tokens:', err);
+      } finally {
+        isValidatingRef.current = false;
+        setIsValidatingTokens(false);
+      }
+    };
+
+    // Run validation in background (non-blocking)
+    runBackgroundValidation();
+  }, [identityQuery.data, tokensQuery.data, queryClient]);
 
   const aggregatedAssetsQuery = useQuery({
     queryKey: [
@@ -629,10 +678,8 @@ export const useWallet = () => {
 
       return true;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: KEYS.TOKENS });
-      queryClient.invalidateQueries({ queryKey: KEYS.AGGREGATED });
-    },
+    // NOTE: No onSuccess invalidation needed - removeTokenFromInventory() calls
+    // inventorySync() which calls dispatchWalletUpdated() → invalidateWalletQueries()
   });
 
   const sendAmountMutation = useMutation({
@@ -898,12 +945,9 @@ export const useWallet = () => {
 
       return true;
     },
-    onSuccess: () => {
-      setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: KEYS.TOKENS });
-        queryClient.invalidateQueries({ queryKey: KEYS.AGGREGATED });
-      }, 200);
-    },
+    // NOTE: No onSuccess invalidation needed - dispatchWalletUpdated() is called
+    // when change token is saved (persistenceCallbacks.onTokenMinted) and after
+    // inventorySync completes. Redundant invalidation removed.
   });
 
   const executeDirectTransfer = async (
@@ -974,27 +1018,32 @@ export const useWallet = () => {
     outboxRepo.addEntry(outboxEntry);
     console.log(`📤 Outbox: Created entry ${outboxEntry.id.slice(0, 8)}... for direct transfer`);
 
-    // 5. CRITICAL: Sync to IPFS and WAIT for success
-    // Uses HIGH priority so it jumps ahead of auto-syncs in the queue
-    try {
-      const ipfsService = IpfsStorageService.getInstance(identityManager);
-      const syncResult = await ipfsService.syncNow({
-        priority: SyncPriority.HIGH,
-        timeout: 60000,
-        callerContext: 'outbox-pre-transfer',
-      });
+    // 5. Sync to IPFS if enabled (skip if IPFS is disabled)
+    const isIpfsEnabled = import.meta.env.VITE_ENABLE_IPFS !== 'false';
+    if (isIpfsEnabled) {
+      // Uses HIGH priority so it jumps ahead of auto-syncs in the queue
+      try {
+        const ipfsService = IpfsStorageService.getInstance(identityManager);
+        const syncResult = await ipfsService.syncNow({
+          priority: SyncPriority.HIGH,
+          timeout: 60000,
+          callerContext: 'outbox-pre-transfer',
+        });
 
-      if (!syncResult.success) {
-        // Remove outbox entry since we didn't start the transfer
+        if (!syncResult.success) {
+          // Remove outbox entry since we didn't start the transfer
+          outboxRepo.removeEntry(outboxEntry.id);
+          throw new Error(`Failed to sync outbox to IPFS - aborting transfer: ${syncResult.error}`);
+        }
+
+        console.log(`📤 Outbox entry synced to IPFS: ${syncResult.cid?.slice(0, 12)}...`);
+      } catch (err) {
+        // Remove outbox entry if IPFS sync failed
         outboxRepo.removeEntry(outboxEntry.id);
-        throw new Error(`Failed to sync outbox to IPFS - aborting transfer: ${syncResult.error}`);
+        throw err;
       }
-
-      console.log(`📤 Outbox entry synced to IPFS: ${syncResult.cid?.slice(0, 12)}...`);
-    } catch (err) {
-      // Remove outbox entry if IPFS sync failed
-      outboxRepo.removeEntry(outboxEntry.id);
-      throw err;
+    } else {
+      console.log(`📤 IPFS disabled - skipping outbox sync`);
     }
 
     // 6. Update status: ready to submit
@@ -1246,8 +1295,11 @@ export const useWallet = () => {
 
     assets: aggregatedAssetsQuery.data || [],
     isLoadingAssets: aggregatedAssetsQuery.isLoading,
+    assetsUpdatedAt: aggregatedAssetsQuery.dataUpdatedAt,
 
     tokens: tokensQuery.data || [],
+    tokensUpdatedAt: tokensQuery.dataUpdatedAt,
+    isValidatingTokens,
     createWallet: createWalletMutation.mutateAsync,
     restoreWallet: restoreWalletMutation.mutateAsync,
     mintNametag: mintNametagMutation.mutateAsync,
