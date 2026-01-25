@@ -490,6 +490,11 @@ async function executeFullSync(ctx: SyncContext, params: SyncParams): Promise<Sy
   // Best-effort, non-blocking - failures don't stop sync
   await step8_5_ensureNametagNostrBinding(ctx);
 
+  // Step 8.5a: Ensure nametag genesis commitments are on aggregator
+  // Per TOKEN_INVENTORY_SPEC.md Section 8.5a: If exclusion proof, trigger recovery
+  // Best-effort, non-blocking - failures don't stop sync
+  await step8_5a_ensureNametagAggregatorRegistration(ctx);
+
   // Step 8.6: Attempt recovery of nametag-invalidated tokens
   // Per TOKEN_INVENTORY_SPEC.md Section 13.26: After nametag proof is valid,
   // attempt to recover tokens that were invalidated due to stale embedded nametag proofs
@@ -2167,6 +2172,119 @@ async function step8_5_ensureNametagNostrBinding(ctx: SyncContext): Promise<void
   }
 
   console.log(`  Nametag binding summary: ${published} published, ${skipped} skipped, ${failed} failed (total: ${ctx.nametags.length})`);
+}
+
+/**
+ * Step 8.5a: Ensure Nametag-Aggregator Registration
+ *
+ * Per TOKEN_INVENTORY_SPEC.md Section 8.5a:
+ * For each nametag, verify the genesis commitment is on the aggregator.
+ * If an exclusion proof is returned (authenticator === null), trigger recovery.
+ *
+ * This is a PROACTIVE check that runs during sync, before any token operations,
+ * ensuring users don't get surprised by nametag issues during transfers.
+ *
+ * @param ctx - Sync context
+ */
+async function step8_5a_ensureNametagAggregatorRegistration(ctx: SyncContext): Promise<void> {
+  console.log(`🏷️ [Step 8.5a] Ensure Nametag-Aggregator Registration`);
+
+  // Skip in NAMETAG mode (read-only operation per spec)
+  if (ctx.mode === 'NAMETAG') {
+    console.log(`  Skipping in NAMETAG mode (read-only)`);
+    return;
+  }
+
+  if (ctx.nametags.length === 0) {
+    console.log(`  No nametags to process`);
+    return;
+  }
+
+  let recovered = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const nametag of ctx.nametags) {
+    if (!nametag.name) {
+      console.warn(`  Skipping nametag without name`);
+      skipped++;
+      continue;
+    }
+
+    // Check if nametag token has genesis data with salt (required for recovery)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nametagToken = nametag.token as any;
+    if (!nametagToken?.genesis?.data?.salt) {
+      console.log(`  ⏭️ Skipping ${nametag.name}: no genesis data or salt for recovery`);
+      skipped++;
+      continue;
+    }
+
+    try {
+      // Reconstruct MintCommitment to get requestId
+      const genesisData = nametagToken.genesis.data;
+      const { MintTransactionData } = await import('@unicitylabs/state-transition-sdk/lib/transaction/MintTransactionData');
+      const { MintCommitment } = await import('@unicitylabs/state-transition-sdk/lib/transaction/MintCommitment');
+
+      const mintDataJson = {
+        tokenId: genesisData.tokenId,
+        tokenType: genesisData.tokenType,
+        tokenData: genesisData.tokenData || null,
+        coinData: genesisData.coinData && genesisData.coinData.length > 0 ? genesisData.coinData : null,
+        recipient: genesisData.recipient,
+        salt: genesisData.salt,
+        recipientDataHash: genesisData.recipientDataHash,
+        reason: genesisData.reason ? JSON.parse(genesisData.reason) : null,
+      };
+
+      const mintTransactionData = await MintTransactionData.fromJSON(mintDataJson);
+      const commitment = await MintCommitment.create(mintTransactionData);
+      const requestId = commitment.requestId;
+
+      // Query aggregator for inclusion proof
+      const { ServiceProvider } = await import('./ServiceProvider');
+      const client = ServiceProvider.stateTransitionClient;
+      const response = await client.getInclusionProof(requestId);
+
+      // Check if it's an inclusion proof (has authenticator) vs exclusion proof (authenticator === null)
+      if (response.inclusionProof && response.inclusionProof.authenticator !== null) {
+        console.log(`  ✓ ${nametag.name}: already on aggregator`);
+        skipped++;
+        continue;
+      }
+
+      // Exclusion proof - need to recover
+      console.log(`  ⚠️ ${nametag.name}: NOT on aggregator (exclusion proof), triggering recovery...`);
+
+      // Get NametagService and trigger recovery
+      const { NametagService } = await import('./NametagService');
+      const nametagService = NametagService.getInstance(IdentityManager.getInstance());
+
+      try {
+        const recoveredToken = await nametagService.recoverNametagProofs();
+        if (recoveredToken) {
+          console.log(`  ✓ ${nametag.name}: recovered successfully`);
+          recovered++;
+          ctx.stats.nametagsRecovered = (ctx.stats.nametagsRecovered || 0) + 1;
+        } else {
+          console.warn(`  ✗ ${nametag.name}: recovery returned null`);
+          failed++;
+        }
+      } catch (recoveryError) {
+        // Recovery failed - log but don't block sync
+        const errMsg = recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
+        console.warn(`  ✗ ${nametag.name}: recovery failed: ${errMsg}`);
+        failed++;
+      }
+    } catch (error) {
+      // Best-effort - don't fail sync on aggregator check errors
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.warn(`  ✗ ${nametag.name}: error checking aggregator: ${errMsg}`);
+      failed++;
+    }
+  }
+
+  console.log(`  Aggregator check summary: ${recovered} recovered, ${skipped} verified/skipped, ${failed} failed (total: ${ctx.nametags.length})`);
 }
 
 /**

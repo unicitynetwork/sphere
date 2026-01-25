@@ -750,6 +750,21 @@ Keep one copy, merge any additional data (proofs, metadata).
 - **Rationale:** Nametags can exist locally/IPFS but lack Nostr registration (e.g., imported from another device, recovered from backup, or initial publish failed)
 - Track result in `SyncResult.stats.nametagsPublished` counter
 
+**8.5a) Nametag-Aggregator Registration:** (skip if NAMETAG mode is TRUE)
+- For each nametag token extracted in 8.4:
+  - Reconstruct MintCommitment from `genesis.data` (preserving exact salt)
+  - Query aggregator for inclusion proof: `getInclusionProof(requestId)`
+  - If `authenticator !== null`: nametag is registered, no action needed
+  - If `authenticator === null` (exclusion proof): trigger recovery via `recoverNametagProofs()`
+- **Recovery Flow:**
+  1. Re-submit genesis MintCommitment to aggregator (idempotent)
+  2. Wait for inclusion proof (30s timeout in sync context)
+  3. Update stored nametag token with fresh proof
+  4. Trigger `step8_6_recoverNametagInvalidatedTokens()` to recover affected tokens
+- **Best-effort, non-blocking:** Recovery failures logged but do NOT block sync completion
+- **CRITICAL:** Salt must exist in `genesis.data.salt` for recovery to succeed
+- Track result in `SyncResult.stats.nametagsRecovered` counter
+
 #### Step 9: Prepare IPFS Sync
 
 **9.1) Normalization:**
@@ -1372,6 +1387,12 @@ interface RecoveryMintEntry extends OutboxEntry {
 **Scenario:** During nametag proof refresh, the aggregator returns an exclusion proof for the genesis commitment.
 
 **Problem:** When a nametag token's genesis commitment returns an exclusion proof from the aggregator (meaning the aggregator's Merkle tree doesn't contain the commitment), the user cannot receive tokens because SDK verification fails. The commitment was previously accepted but is no longer in the tree (e.g., after aggregator reset).
+
+**Trigger Points:**
+Recovery is triggered from three locations:
+1. **Token receipt finalization** (reactive): When `refreshNametagProof()` is called during token finalization and detects an exclusion proof
+2. **Inventory sync Step 8.5a** (proactive): During `inventorySync()`, checks aggregator registration and triggers recovery if missing
+3. **L3WalletView validation** (proactive): On wallet load, `validateUnicityId()` checks aggregator and triggers recovery if `isOnAggregator === false`
 
 **Detection:** In `refreshNametagProof()`:
 1. Reconstruct MintCommitment from stored genesis data
