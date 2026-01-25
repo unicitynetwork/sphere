@@ -15,7 +15,8 @@ import {
   addToken as addTokenToInventory,
   removeToken as removeTokenFromInventory,
   dispatchWalletUpdated,
-  inventorySync
+  inventorySync,
+  saveTokenImmediately,
 } from "../services/InventorySyncService";
 import { tokenToTxf, getCurrentStateHash } from "../services/TxfSerializer";
 import { NametagService } from "../services/NametagService";
@@ -820,21 +821,28 @@ export const useWallet = () => {
         // before any further aggregator submissions (critical for crash safety)
         const ipfsService = IpfsStorageService.getInstance(identityManager);
         const persistenceCallbacks: SplitPersistenceCallbacks = {
-          onTokenMinted: async (sdkToken: SdkToken<any>, isChangeToken: boolean) => {
+          onTokenMinted: async (
+            sdkToken: SdkToken<any>,
+            isChangeToken: boolean,
+            options?: { skipSync?: boolean }
+          ) => {
             if (isChangeToken && identity.ipnsName) {
-              // Save change token IMMEDIATELY after mint proof received
-              // This is the critical safety point - token is now persisted locally
-              await saveChangeTokenToWallet(sdkToken, params.coinId, {
-                address: identity.address,
-                publicKey: identity.publicKey,
-                ipnsName: identity.ipnsName,
-              });
-
-              // CRITICAL: Dispatch wallet-updated to ensure UI and IPFS sync sees this token
-              // Without this, the token may be missed if onPreTransferSync is called immediately after
-              dispatchWalletUpdated();
-
-              console.log(`🔒 Change token saved immediately after mint (crash-safe)`);
+              if (options?.skipSync) {
+                // BATCH MODE: Save directly to localStorage without triggering sync
+                // This avoids the ~1437ms LOCAL sync per token
+                const uiToken = await createUiTokenFromSdk(sdkToken, params.coinId);
+                saveTokenImmediately(identity.address, uiToken);
+                console.log(`🔒 Change token saved (sync deferred for batching)`);
+              } else {
+                // NORMAL MODE: Full sync (backwards compatible)
+                await saveChangeTokenToWallet(sdkToken, params.coinId, {
+                  address: identity.address,
+                  publicKey: identity.publicKey,
+                  ipnsName: identity.ipnsName,
+                });
+                dispatchWalletUpdated();
+                console.log(`🔒 Change token saved with sync dispatch`);
+              }
             }
           },
           onPreTransferSync: async () => {
@@ -1197,6 +1205,58 @@ export const useWallet = () => {
 
     // 15. IPFS sync is handled by removeTokenFromInventory() above
     // which calls inventorySync() to update localStorage and IPFS
+  };
+
+  /**
+   * Helper function to create a UI Token from SDK token without triggering sync.
+   * Used for batch mode where tokens are saved immediately to localStorage.
+   */
+  const createUiTokenFromSdk = async (sdkToken: SdkToken<any>, coinId: string): Promise<Token> => {
+    // Amount extraction (same logic as saveChangeTokenToWallet)
+    let amount = "0";
+    const coinsOpt = sdkToken.coins;
+    if (coinsOpt) {
+      const rawCoins = coinsOpt.coins;
+      const firstItem = rawCoins[0];
+      if (Array.isArray(firstItem) && firstItem.length === 2) {
+        const val = firstItem[1];
+        if (Array.isArray(val)) {
+          amount = val[1]?.toString() || "0";
+        } else if (val) {
+          amount = val.toString();
+        }
+      }
+    }
+
+    const def = registryService.getCoinDefinition(coinId);
+    const iconUrl = def ? registryService.getIconUrl(def) : undefined;
+
+    // Get SDK token JSON
+    const sdkJson = sdkToken.toJSON() as any;
+
+    // Ensure TXF compatibility fields exist
+    const txfJson = {
+      ...sdkJson,
+      version: sdkJson.version || "2.0",
+      transactions: sdkJson.transactions || [],
+      nametags: sdkJson.nametags || [],
+      _integrity: sdkJson._integrity || {
+        genesisDataJSONHash: "0000" + "0".repeat(60),
+      },
+    };
+
+    return new Token({
+      id: uuidv4(),
+      name: def?.symbol || "Change Token",
+      symbol: def?.symbol || "UNK",
+      type: "Fungible",
+      jsonData: JSON.stringify(txfJson),
+      status: TokenStatus.CONFIRMED,
+      amount: amount,
+      coinId: coinId,
+      iconUrl: iconUrl ? iconUrl : undefined,
+      timestamp: Date.now(),
+    });
   };
 
   const saveChangeTokenToWallet = async (sdkToken: SdkToken<any>, coinId: string, identity: { address: string; publicKey: string; ipnsName: string }) => {

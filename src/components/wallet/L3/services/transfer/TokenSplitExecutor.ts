@@ -54,8 +54,14 @@ export interface SplitPersistenceCallbacks {
    * The caller MUST save this token to localStorage before returning.
    * @param token The minted SDK token with proof
    * @param isChangeToken True if this is the sender's change token
+   * @param options Optional settings
+   * @param options.skipSync If true, save to localStorage only (no dispatchWalletUpdated)
    */
-  onTokenMinted: (token: SdkToken<any>, isChangeToken: boolean) => Promise<void>;
+  onTokenMinted: (
+    token: SdkToken<any>,
+    isChangeToken: boolean,
+    options?: { skipSync?: boolean }
+  ) => Promise<void>;
 
   /**
    * Called before transfer submission to give caller opportunity to sync to IPFS.
@@ -510,8 +516,9 @@ export class TokenSplitExecutor {
             isSenderToken ? "Sender (Change) - Early Persist" : "Recipient (Pre-transfer) - Early Persist"
           );
           const isChangeToken = !isForRecipient;
-          console.log(`💾 Persisting minted ${isChangeToken ? 'change' : 'recipient'} token immediately...`);
-          await persistenceCallbacks.onTokenMinted(mintedToken, isChangeToken);
+          // Skip sync for all intermediate mints - onPreTransferSync handles the final sync
+          console.log(`💾 Persisting minted ${isChangeToken ? 'change' : 'recipient'} token (sync deferred)...`);
+          await persistenceCallbacks.onTokenMinted(mintedToken, isChangeToken, { skipSync: true });
         } catch (persistError) {
           console.error(`⚠️ Failed to persist minted token immediately:`, persistError);
           // Don't fail the split - token is on blockchain and can be recovered
