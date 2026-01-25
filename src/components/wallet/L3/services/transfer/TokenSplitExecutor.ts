@@ -402,17 +402,27 @@ export class TokenSplitExecutor {
       );
     }
 
-    const mintedTokensInfo: MintedTokenInfo[] = [];
-    const mintEntryIds: string[] = [];
+    // === HYBRID APPROACH: Sequential Submissions + Parallel Proof Waiting ===
 
-    // Process each mint commitment with immediate persistence
+    // Phase 1: Prepare all mints (calculate metadata, create outbox entries)
+    interface PreparedMint {
+      commitment: any;
+      isForRecipient: boolean;
+      isSenderToken: boolean;
+      mintEntryId?: string;
+      commTokenIdHex: string;
+    }
+
+    const preparedMints: PreparedMint[] = [];
+    const recipientIdHex = Buffer.from(recipientTokenId.bytes).toString("hex");
+    const senderIdHex = Buffer.from(senderTokenId.bytes).toString("hex");
+
+    console.log("📋 Phase 1: Preparing mint commitments...");
     for (let i = 0; i < mintCommitments.length; i++) {
       const commitment = mintCommitments[i];
       const commTokenIdHex = Buffer.from(
         commitment.transactionData.tokenId.bytes
       ).toString("hex");
-      const recipientIdHex = Buffer.from(recipientTokenId.bytes).toString("hex");
-      const senderIdHex = Buffer.from(senderTokenId.bytes).toString("hex");
       const isForRecipient = commTokenIdHex === recipientIdHex;
       const isSenderToken = commTokenIdHex === senderIdHex;
 
@@ -438,11 +448,25 @@ export class TokenSplitExecutor {
         outboxRepo.addEntry(mintEntry);
         outboxRepo.addEntryToSplitGroup(splitGroupId, mintEntry.id);
         mintEntryId = mintEntry.id;
-        mintEntryIds.push(mintEntryId);
         console.log(`📤 Outbox: Added SPLIT_MINT entry ${mintEntry.id.slice(0, 8)}... (${isSenderToken ? 'change' : 'recipient'})`);
       }
 
-      // Submit mint to aggregator
+      preparedMints.push({
+        commitment,
+        isForRecipient,
+        isSenderToken,
+        mintEntryId,
+        commTokenIdHex,
+      });
+    }
+
+    // Phase 2: Submit commitments SEQUENTIALLY (preserves atomicity)
+    console.log("🚀 Phase 2: Submitting mint commitments sequentially...");
+    const submissionStartTime = performance.now();
+
+    for (const prepared of preparedMints) {
+      const { commitment, isSenderToken, mintEntryId, commTokenIdHex } = prepared;
+
       // Log the MINT RequestId (critical for spent detection debugging)
       console.log(`🔑 [SplitMint] RequestId committed for ${isSenderToken ? 'CHANGE' : 'recipient'}: ${commitment.requestId.toString()}`);
       console.log(`   - tokenId: ${commTokenIdHex.slice(0, 16)}...`);
@@ -484,9 +508,41 @@ export class TokenSplitExecutor {
       if (outboxRepo && mintEntryId) {
         outboxRepo.updateStatus(mintEntryId, "SUBMITTED");
       }
+    }
 
-      // Wait for inclusion proof (use dev bypass when trust base verification is skipped)
-      const proof = await waitInclusionProofWithDevBypass(commitment);
+    const submissionEndTime = performance.now();
+    console.log(`✅ All submissions complete in ${(submissionEndTime - submissionStartTime).toFixed(2)}ms`);
+
+    // Phase 3: Wait for proofs IN PARALLEL (safe - read-only operation)
+    console.log("⏳ Phase 3: Waiting for inclusion proofs in parallel...");
+    const proofStartTime = performance.now();
+
+    const proofResults = await Promise.allSettled(
+      preparedMints.map(async (prepared) => {
+        const proof = await waitInclusionProofWithDevBypass(prepared.commitment);
+        return { ...prepared, proof };
+      })
+    );
+
+    const proofEndTime = performance.now();
+    const proofDuration = proofEndTime - proofStartTime;
+    console.log(`✅ All proofs received in ${proofDuration.toFixed(2)}ms (parallel speedup)`);
+
+    // Check for any failed proofs
+    const failedProofs = proofResults.filter(r => r.status === 'rejected');
+    if (failedProofs.length > 0) {
+      console.error(`❌ ${failedProofs.length} proof(s) failed:`, failedProofs);
+      throw new Error(`Failed to retrieve ${failedProofs.length} inclusion proof(s). Tokens are on blockchain but proofs unavailable.`);
+    }
+
+    // Phase 4: Persist tokens SEQUENTIALLY (in original order)
+    console.log("💾 Phase 4: Persisting tokens with proofs...");
+    const mintedTokensInfo: MintedTokenInfo[] = [];
+
+    for (const result of proofResults) {
+      if (result.status === 'rejected') continue; // Already handled above
+
+      const { commitment, isForRecipient, isSenderToken, mintEntryId, proof } = result.value;
 
       // Update outbox: proof received
       if (outboxRepo && mintEntryId) {
@@ -525,6 +581,13 @@ export class TokenSplitExecutor {
         }
       }
     }
+
+    const totalTime = performance.now() - submissionStartTime;
+    console.log(`🎯 Mint processing complete in ${totalTime.toFixed(2)}ms total (${mintCommitments.length} tokens)`);
+    console.log(`   ⚡ Performance: Sequential submit + parallel proof saved ~${(mintCommitments.length - 1) * proofDuration / mintCommitments.length}ms`);
+
+    // Remove unused variable (was only used in old sequential loop)
+    // const mintEntryIds: string[] = []; // Removed - outbox entries tracked in preparedMints
 
     console.log("All split tokens minted on blockchain.");
 
