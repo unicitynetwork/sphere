@@ -864,6 +864,17 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
     return; // Continue with local-only data
   }
 
+  // FAST mode optimization: use cache-only resolution when cache is known-fresh
+  // This skips network round-trips (~2.5s) when we recently published locally
+  // Only enabled in FAST mode (post-transfer) when WebSocket is healthy as fallback
+  const httpResolver = getIpfsHttpResolver();
+  const wsConnected = httpResolver.isWebSocketConnected();
+  const useCacheOnly = ctx.mode === 'FAST' && wsConnected;
+
+  if (useCacheOnly) {
+    console.log(`  [FAST mode] Using cache-only IPNS resolution (WebSocket connected: ${wsConnected})`);
+  }
+
   // Try to use IpfsTransport if available (provides better sequence tracking)
   let transport: IpfsTransport | null = null;
   try {
@@ -898,7 +909,7 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
     console.log(`  Using IpfsTransport for IPNS resolution...`);
     try {
       const resolveStartTime = performance.now();
-      const resolution = await transport.resolveIpns();
+      const resolution = await transport.resolveIpns({ useCacheOnly });
       console.log(`  [Timing] transport.resolveIpns() took ${(performance.now() - resolveStartTime).toFixed(0)}ms`);
 
       if (resolution.cid) {
@@ -922,11 +933,10 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
   if (!remoteData) {
     // Fallback to HTTP resolver (transport unavailable or not initialized yet)
     console.log(`  Using HTTP resolver for IPNS resolution...`);
-    const resolver = getIpfsHttpResolver();
 
     try {
       // 1. Resolve IPNS name to get CID and content
-      const resolution = await resolver.resolveIpnsName(ctx.ipnsName);
+      const resolution = await httpResolver.resolveIpnsName(ctx.ipnsName, useCacheOnly);
 
       if (!resolution.success) {
         console.warn(`  IPNS resolution failed: ${resolution.error || 'unknown error'}`);

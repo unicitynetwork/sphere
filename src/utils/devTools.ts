@@ -42,6 +42,7 @@ import { IpfsStorageService } from "../components/wallet/L3/services/IpfsStorage
 import { getIpfsHttpResolver } from "../components/wallet/L3/services/IpfsHttpResolver";
 import { isActiveTokenKey, tokenIdFromKey, type TxfStorageData, type InvalidTokenEntry } from "../components/wallet/L3/services/types/TxfTypes";
 import { unicityIdValidator, type UnicityIdValidationResult } from "./unicityIdValidator";
+import { runNetworkDiagnostics, type NetworkDiagnosticsSummary } from "../components/wallet/L3/services/NetworkDiagnostics";
 
 // Type declarations for window extension
 declare global {
@@ -67,6 +68,7 @@ declare global {
     devInspectIpfs: () => Promise<unknown>;
     devRecoverInventory: (depth?: number) => Promise<RecoverInventoryResult>;
     devFetchCid: (cid: string) => Promise<unknown>;
+    devNetworkDiag: () => Promise<NetworkDiagnosticsSummary>;
   }
 }
 
@@ -1739,6 +1741,12 @@ export function devHelp(): void {
   console.log("    Useful for debugging version chain or finding lost tokens");
   console.log("    Example: devFetchCid('bafkreiabc123...')");
   console.log("");
+  console.log("  devNetworkDiag()");
+  console.log("    Run network diagnostics on IPFS nodes");
+  console.log("    Measures RTT and estimates network latency breakdown");
+  console.log("    Shows: node response times, min/max/avg, TLS overhead estimate");
+  console.log("    Returns: { timestamp, nodes[], minLatencyMs, maxLatencyMs, avgLatencyMs }");
+  console.log("");
   console.log("═══════════════════════════════════════════════════════════════");
   console.log("");
 }
@@ -2495,5 +2503,6 @@ export function registerDevTools(): void {
   window.devInspectIpfs = devInspectIpfs;
   window.devRecoverInventory = devRecoverInventory;
   window.devFetchCid = devFetchCid;
+  window.devNetworkDiag = runNetworkDiagnostics;
   console.log("🛠️ Dev tools registered. Type devHelp() for available commands.");
 }

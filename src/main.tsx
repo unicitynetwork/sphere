@@ -55,6 +55,15 @@ if (import.meta.env.DEV) {
   });
 }
 
+// Start Helia initialization early (background, non-blocking)
+// This eliminates the ~3 second delay during inventory sync
+import('./components/wallet/L3/services/IpfsStorageService').then(({ initializeHeliaEarly }) => {
+  initializeHeliaEarly().catch(err => {
+    console.warn('📦 Early Helia init failed:', err);
+    console.warn('📦 Lazy initialization will be attempted when IPFS is first needed');
+  });
+});
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>

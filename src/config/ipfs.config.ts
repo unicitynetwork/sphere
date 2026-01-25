@@ -123,7 +123,7 @@ export const IPNS_RESOLUTION_CONFIG = {
   /** Maximum polling interval when tab is inactive/hidden (4.5 minutes with jitter) */
   inactivePollingIntervalMaxMs: 270000,
   /** Per-gateway request timeout (for routing API) */
-  perGatewayTimeoutMs: 5000, // Reduced from 25s - dead nodes timeout quickly
+  perGatewayTimeoutMs: 2000, // Reduced from 5s - single node active, fail fast
   /** Gateway path resolution timeout (fast path) */
   gatewayPathTimeoutMs: 3000, // Reduced from 5s - faster path timeout
 };

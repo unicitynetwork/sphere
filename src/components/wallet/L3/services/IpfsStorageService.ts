@@ -47,6 +47,27 @@ import { isNametagCorrupted } from "../../../../utils/tokenValidation";
 (ed.hashes as any).sha512 = (message: Uint8Array) => sha512(message);
 
 // ==========================================
+// Module-level Helia Singleton
+// ==========================================
+
+/**
+ * Shared Helia instance across all IpfsStorageService instances.
+ * This is created once on app start and reused to avoid the ~3 second init delay.
+ */
+let sharedHeliaInstance: Helia | null = null;
+
+/**
+ * Promise tracking ongoing Helia initialization (prevents duplicate init)
+ */
+let heliaInitPromise: Promise<Helia | null> | null = null;
+
+/**
+ * Track initialization failures to prevent retry storms.
+ */
+let heliaInitFailureCount = 0;
+const MAX_INIT_FAILURES = 3;
+
+// ==========================================
 // Types
 // ==========================================
 
@@ -155,6 +176,171 @@ const HKDF_INFO = "ipfs-storage-ed25519-v1";
 const SYNC_DEBOUNCE_MS = 5000;
 
 // ==========================================
+// Static Helper Functions
+// ==========================================
+
+/**
+ * Create a connection gater that only allows connections to bootstrap peers.
+ * This restricts libp2p from connecting to random DHT-discovered peers,
+ * reducing browser traffic significantly.
+ *
+ * Static function for use in early Helia initialization and instance init.
+ *
+ * @param bootstrapPeers - List of bootstrap multiaddrs containing allowed peer IDs
+ */
+function createConnectionGaterStatic(bootstrapPeers: string[]): ConnectionGater {
+  // Extract peer IDs from bootstrap multiaddrs
+  const allowedPeerIds = new Set(
+    bootstrapPeers.map((addr) => {
+      const match = addr.match(/\/p2p\/([^/]+)$/);
+      return match ? match[1] : null;
+    }).filter((id): id is string => id !== null)
+  );
+
+  console.log(`📦 Connection gater: allowing ${allowedPeerIds.size} peer(s)`);
+
+  return {
+    // Allow dialing any multiaddr (peer filtering happens at connection level)
+    denyDialMultiaddr: async () => false,
+
+    // Block outbound connections to non-allowed peers
+    denyDialPeer: async (peerId: PeerId) => {
+      const peerIdStr = peerId.toString();
+      const denied = !allowedPeerIds.has(peerIdStr);
+      if (denied) {
+        console.debug(`📦 Blocked dial to non-bootstrap peer: ${peerIdStr.slice(0, 16)}...`);
+      }
+      return denied;
+    },
+
+    // Allow inbound connections (rare in browser, but don't block)
+    denyInboundConnection: async () => false,
+
+    // Block outbound connections to non-allowed peers
+    denyOutboundConnection: async (peerId: PeerId) => {
+      const peerIdStr = peerId.toString();
+      return !allowedPeerIds.has(peerIdStr);
+    },
+
+    // Allow encrypted connections (peer already passed connection check)
+    denyInboundEncryptedConnection: async () => false,
+    denyOutboundEncryptedConnection: async () => false,
+
+    // Allow upgraded connections
+    denyInboundUpgradedConnection: async () => false,
+    denyOutboundUpgradedConnection: async () => false,
+
+    // Allow all multiaddrs for allowed peers
+    filterMultiaddrForPeer: async () => true,
+  };
+}
+
+/**
+ * Initialize Helia early (on app start) without waiting for identity.
+ * This creates the libp2p node which takes ~3 seconds.
+ * Identity-specific keys are derived later in ensureInitialized().
+ *
+ * Returns the shared Helia instance or null if initialization failed/disabled.
+ */
+export async function initializeHeliaEarly(): Promise<Helia | null> {
+  // Return cached instance
+  if (sharedHeliaInstance) {
+    console.log("📦 [Early Init] Using cached Helia instance");
+    return sharedHeliaInstance;
+  }
+
+  // Return in-progress promise
+  if (heliaInitPromise) {
+    console.log("📦 [Early Init] Waiting for ongoing Helia initialization...");
+    return heliaInitPromise;
+  }
+
+  // Check if IPFS is disabled
+  if (import.meta.env.VITE_ENABLE_IPFS === 'false') {
+    console.log("📦 [Early Init] IPFS disabled via VITE_ENABLE_IPFS=false");
+    return null;
+  }
+
+  // Check WebCrypto availability
+  if (typeof crypto === 'undefined' || !crypto.subtle) {
+    console.warn("📦 [Early Init] WebCrypto not available - IPFS disabled");
+    return null;
+  }
+
+  console.log("📦 [Early Init] Starting Helia initialization...");
+  const startTime = performance.now();
+
+  heliaInitPromise = (async () => {
+    try {
+      const bootstrapPeers = getBootstrapPeers();
+      const customPeerCount = getConfiguredCustomPeers().length;
+
+      console.log(`📦 [Early Init] Bootstrap peers: ${bootstrapPeers.length} total (${customPeerCount} custom, ${bootstrapPeers.length - customPeerCount} fallback)`);
+
+      // Create connection gater
+      const connectionGater = createConnectionGaterStatic(bootstrapPeers);
+
+      const helia = await createHelia({
+        libp2p: {
+          connectionGater,
+          peerDiscovery: [
+            bootstrap({ list: bootstrapPeers }),
+          ],
+          connectionManager: {
+            maxConnections: IPFS_CONFIG.maxConnections,
+          },
+        },
+      });
+
+      sharedHeliaInstance = helia;
+      heliaInitFailureCount = 0;  // Reset on success
+      const elapsed = performance.now() - startTime;
+      const browserPeerId = helia.libp2p.peerId.toString();
+      console.log(`📦 [Early Init] Helia ready in ${elapsed.toFixed(0)}ms (Peer ID: ${browserPeerId.slice(0, 20)}...)`);
+
+      return helia;
+    } catch (error) {
+      heliaInitFailureCount++;
+      console.error(`📦 [Early Init] Helia initialization failed (attempt ${heliaInitFailureCount}/${MAX_INIT_FAILURES}):`, error);
+
+      if (heliaInitFailureCount >= MAX_INIT_FAILURES) {
+        console.error(`📦 [Early Init] Max failures reached, disabling early init auto-retry`);
+        console.error(`📦 [Early Init] Lazy initialization will still be attempted when needed`);
+        // Keep heliaInitPromise as null but don't allow more retries from early init
+        return null;
+      }
+
+      heliaInitPromise = null; // Allow retry
+      return null;
+    }
+  })();
+
+  return heliaInitPromise;
+}
+
+/**
+ * Shutdown the shared Helia instance.
+ * Only call this when the app is closing, not on component unmount.
+ */
+export async function shutdownSharedHelia(): Promise<void> {
+  if (!sharedHeliaInstance) return;
+
+  console.log("📦 Shutting down shared Helia instance");
+  try {
+    // Add timeout to prevent hanging
+    const stopPromise = sharedHeliaInstance.stop();
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Helia stop timeout')), 5000)
+    );
+    await Promise.race([stopPromise, timeoutPromise]);
+  } catch (err) {
+    console.warn("📦 Helia shutdown error:", err);
+  }
+  sharedHeliaInstance = null;
+  heliaInitPromise = null;
+}
+
+// ==========================================
 // IpfsStorageService
 // ==========================================
 
@@ -178,6 +364,8 @@ export class IpfsStorageService implements IpfsTransport {
   private eventCallbacks: StorageEventCallback[] = [];
 
   private isInitializing = false;
+  private initRetryCount = 0;
+  private static readonly MAX_INIT_RETRIES = 50; // 5 seconds max wait
   private isSyncing = false;
   private isInitialSyncing = false;  // Tracks initial IPNS-based sync on startup
   private isInsideSyncFromIpns = false;  // Tracks if we're inside syncFromIpns (to avoid deadlock)
@@ -289,9 +477,12 @@ export class IpfsStorageService implements IpfsTransport {
       clearInterval(this.connectionMaintenanceInterval);
       this.connectionMaintenanceInterval = null;
     }
+
+    // Detach from shared Helia but don't stop it
+    // (other service instances may still need it)
     if (this.helia) {
-      await this.helia.stop();
       this.helia = null;
+      console.log("📦 IPFS storage service detached from shared Helia");
     }
     console.log("📦 IPFS storage service stopped");
   }
@@ -424,9 +615,18 @@ export class IpfsStorageService implements IpfsTransport {
     }
 
     if (this.isInitializing) {
-      // Wait for ongoing initialization
+      if (this.initRetryCount >= IpfsStorageService.MAX_INIT_RETRIES) {
+        console.error("📦 ensureInitialized() timeout - exceeded max retries");
+        this.isInitializing = false;
+        this.initRetryCount = 0;
+        return false;
+      }
+
+      this.initRetryCount++;
       await new Promise((resolve) => setTimeout(resolve, 100));
-      return this.ensureInitialized();
+      const result = await this.ensureInitialized();
+      this.initRetryCount = 0;
+      return result;
     }
 
     this.isInitializing = true;
@@ -443,6 +643,7 @@ export class IpfsStorageService implements IpfsTransport {
       // Identity already fetched above, no need to fetch again
 
       // 2. Derive Ed25519 key from secp256k1 private key using HKDF
+      const keyDerivationStart = performance.now();
       const walletSecret = this.hexToBytes(identity.privateKey);
       const derivedKey = hkdf(
         sha256,
@@ -457,6 +658,7 @@ export class IpfsStorageService implements IpfsTransport {
       // 3. Generate libp2p key pair for IPNS from the derived key
       this.ipnsKeyPair = await generateKeyPairFromSeed("Ed25519", derivedKey);
       const ipnsPeerId = peerIdFromPrivateKey(this.ipnsKeyPair);
+      console.log(`📦 [Timing] Key derivation took ${(performance.now() - keyDerivationStart).toFixed(0)}ms`);
 
       // 4. Compute proper IPNS name from peer ID and migrate old storage keys
       const oldIpnsName = `ipns-${this.bytesToHex(this.ed25519PublicKey).slice(0, 32)}`;
@@ -468,70 +670,66 @@ export class IpfsStorageService implements IpfsTransport {
       // Load last IPNS sequence number from storage
       this.ipnsSequenceNumber = this.getIpnsSequenceNumber();
 
-      // 4. Initialize Helia (browser IPFS) with custom bootstrap peers
-      const bootstrapPeers = getBootstrapPeers();
-      const customPeerCount = getConfiguredCustomPeers().length;
+      // 4. Use shared Helia instance (or wait for early init to complete)
+      if (!this.helia) {
+        const ensureHeliaStart = performance.now();
+        console.log("📦 Waiting for shared Helia instance...");
+        this.helia = await initializeHeliaEarly();
+        console.log(`📦 [Timing] ensureInitialized() Helia wait took ${(performance.now() - ensureHeliaStart).toFixed(0)}ms`);
 
-      console.log("📦 Initializing Helia with restricted peer connections...");
-      console.log(`📦 Bootstrap peers: ${bootstrapPeers.length} total (${customPeerCount} custom, ${bootstrapPeers.length - customPeerCount} fallback)`);
+        if (!this.helia) {
+          console.error("📦 Failed to initialize shared Helia instance");
+          return false;
+        }
+      }
 
-      // Create connection gater to restrict connections to bootstrap peers only
-      const connectionGater = this.createConnectionGater(bootstrapPeers);
-
-      this.helia = await createHelia({
-        libp2p: {
-          connectionGater,
-          peerDiscovery: [
-            bootstrap({ list: bootstrapPeers }),
-            // No mDNS - don't discover local network peers
-          ],
-          connectionManager: {
-            maxConnections: IPFS_CONFIG.maxConnections,
-          },
-        },
-      });
-
-      // Log browser's peer ID for debugging
+      // Log identity info (Helia is now ready)
       const browserPeerId = this.helia.libp2p.peerId.toString();
       console.log("📦 IPFS storage service initialized");
       console.log("📦 Browser Peer ID:", browserPeerId);
       console.log("📦 IPNS name:", this.cachedIpnsName);
       console.log("📦 Identity address:", identity.address.slice(0, 30) + "...");
 
-      // Extract bootstrap peer IDs for filtering connection logs
-      const bootstrapPeerIds = new Set(
-        bootstrapPeers.map((addr) => {
-          const match = addr.match(/\/p2p\/([^/]+)$/);
-          return match ? match[1] : null;
-        }).filter(Boolean) as string[]
-      );
+      // Set up event handlers only if not already set up
+      // (avoid duplicate listeners if this is called multiple times)
+      if (!this.connectionMaintenanceInterval) {
+        const bootstrapPeers = getBootstrapPeers();
 
-      // Set up peer connection event handlers - only log bootstrap peers
-      this.helia.libp2p.addEventListener("peer:connect", (event) => {
-        const remotePeerId = event.detail.toString();
-        if (bootstrapPeerIds.has(remotePeerId)) {
-          console.log(`📦 Connected to bootstrap peer: ${remotePeerId.slice(0, 16)}...`);
-        }
-      });
+        // Extract bootstrap peer IDs for filtering connection logs
+        const bootstrapPeerIds = new Set(
+          bootstrapPeers.map((addr) => {
+            const match = addr.match(/\/p2p\/([^/]+)$/);
+            return match ? match[1] : null;
+          }).filter(Boolean) as string[]
+        );
 
-      this.helia.libp2p.addEventListener("peer:disconnect", (event) => {
-        const remotePeerId = event.detail.toString();
-        if (bootstrapPeerIds.has(remotePeerId)) {
-          console.log(`📦 Disconnected from bootstrap peer: ${remotePeerId.slice(0, 16)}...`);
-        }
-      });
-
-      // Log initial connections after a short delay
-      setTimeout(() => {
-        const connections = this.helia?.libp2p.getConnections() || [];
-        console.log(`📦 Active connections: ${connections.length}`);
-        connections.slice(0, 5).forEach((conn) => {
-          console.log(`📦   - ${conn.remotePeer.toString().slice(0, 16)}... via ${conn.remoteAddr.toString()}`);
+        // Set up peer connection event handlers - only log bootstrap peers
+        this.helia.libp2p.addEventListener("peer:connect", (event) => {
+          const remotePeerId = event.detail.toString();
+          if (bootstrapPeerIds.has(remotePeerId)) {
+            console.log(`📦 Connected to bootstrap peer: ${remotePeerId.slice(0, 16)}...`);
+          }
         });
-      }, 5000);
 
-      // Start connection maintenance for backend peer
-      this.startBackendConnectionMaintenance();
+        this.helia.libp2p.addEventListener("peer:disconnect", (event) => {
+          const remotePeerId = event.detail.toString();
+          if (bootstrapPeerIds.has(remotePeerId)) {
+            console.log(`📦 Disconnected from bootstrap peer: ${remotePeerId.slice(0, 16)}...`);
+          }
+        });
+
+        // Log initial connections after a short delay
+        setTimeout(() => {
+          const connections = this.helia?.libp2p.getConnections() || [];
+          console.log(`📦 Active connections: ${connections.length}`);
+          connections.slice(0, 5).forEach((conn) => {
+            console.log(`📦   - ${conn.remotePeer.toString().slice(0, 16)}... via ${conn.remoteAddr.toString()}`);
+          });
+        }, 5000);
+
+        // Start connection maintenance for backend peer
+        this.startBackendConnectionMaintenance();
+      }
 
       return true;
     } catch (error) {
@@ -596,59 +794,6 @@ export class IpfsStorageService implements IpfsTransport {
   // Connection Gater (Peer Filtering)
   // ==========================================
 
-  /**
-   * Create a connection gater that only allows connections to bootstrap peers.
-   * This restricts libp2p from connecting to random DHT-discovered peers,
-   * reducing browser traffic significantly.
-   *
-   * @param bootstrapPeers - List of bootstrap multiaddrs containing allowed peer IDs
-   */
-  private createConnectionGater(bootstrapPeers: string[]): ConnectionGater {
-    // Extract peer IDs from bootstrap multiaddrs
-    const allowedPeerIds = new Set(
-      bootstrapPeers.map((addr) => {
-        const match = addr.match(/\/p2p\/([^/]+)$/);
-        return match ? match[1] : null;
-      }).filter((id): id is string => id !== null)
-    );
-
-    console.log(`📦 Connection gater: allowing ${allowedPeerIds.size} peer(s)`);
-
-    return {
-      // Allow dialing any multiaddr (peer filtering happens at connection level)
-      denyDialMultiaddr: async () => false,
-
-      // Block outbound connections to non-allowed peers
-      denyDialPeer: async (peerId: PeerId) => {
-        const peerIdStr = peerId.toString();
-        const denied = !allowedPeerIds.has(peerIdStr);
-        if (denied) {
-          console.debug(`📦 Blocked dial to non-bootstrap peer: ${peerIdStr.slice(0, 16)}...`);
-        }
-        return denied;
-      },
-
-      // Allow inbound connections (rare in browser, but don't block)
-      denyInboundConnection: async () => false,
-
-      // Block outbound connections to non-allowed peers
-      denyOutboundConnection: async (peerId: PeerId) => {
-        const peerIdStr = peerId.toString();
-        return !allowedPeerIds.has(peerIdStr);
-      },
-
-      // Allow encrypted connections (peer already passed connection check)
-      denyInboundEncryptedConnection: async () => false,
-      denyOutboundEncryptedConnection: async () => false,
-
-      // Allow upgraded connections
-      denyInboundUpgradedConnection: async () => false,
-      denyOutboundUpgradedConnection: async () => false,
-
-      // Allow all multiaddrs for allowed peers
-      filterMultiaddrForPeer: async () => true,
-    };
-  }
 
   // ==========================================
   // IpfsTransport Interface - IPNS Name Management
@@ -770,9 +915,10 @@ export class IpfsStorageService implements IpfsTransport {
   /**
    * Resolve IPNS name to CID and fetch content
    * Part of IpfsTransport interface
+   * @param options Optional resolution options (e.g., useCacheOnly for FAST mode)
    */
-  public async resolveIpns(): Promise<IpnsResolutionResult> {
-    const result = await this.resolveIpnsProgressively();
+  public async resolveIpns(options?: { useCacheOnly?: boolean }): Promise<IpnsResolutionResult> {
+    const result = await this.resolveIpnsProgressively(undefined, options);
 
     if (!result.best) {
       return {
@@ -1205,9 +1351,15 @@ export class IpfsStorageService implements IpfsTransport {
             `✅ IPNS record published AND verified (seq: ${this.ipnsSequenceNumber})`
           );
 
-          // Clear IPNS cache to ensure next load fetches fresh content for the new CID
-          // Without this, the cache may return stale content from the old CID
-          getIpfsCache().clearIpnsRecords();
+          // Update cache with verified CID/sequence and mark as known-fresh
+          // This enables FAST mode to skip IPNS resolution on subsequent syncs
+          const ipfsCache = getIpfsCache();
+          ipfsCache.setIpnsRecord(this.cachedIpnsName!, {
+            cid: cidString,
+            sequence: this.ipnsSequenceNumber,
+          });
+          ipfsCache.markIpnsCacheFresh(this.cachedIpnsName!);
+          console.log(`[IpfsStorageService] Local publish complete - cache updated and marked fresh`);
 
           return this.cachedIpnsName;
         } else {
@@ -1520,7 +1672,8 @@ export class IpfsStorageService implements IpfsTransport {
    * Calls onLateHigherSequence if a late response has higher sequence.
    */
   private async resolveIpnsProgressively(
-    onLateHigherSequence?: (result: IpnsGatewayResult) => void
+    onLateHigherSequence?: (result: IpnsGatewayResult) => void,
+    options?: { useCacheOnly?: boolean }
   ): Promise<IpnsProgressiveResult> {
     const gatewayUrls = getAllBackendGatewayUrls();
     if (gatewayUrls.length === 0 || !this.cachedIpnsName) {
@@ -1531,8 +1684,9 @@ export class IpfsStorageService implements IpfsTransport {
     const metrics = getIpfsMetrics();
 
     // Fast path: Use HTTP resolver with caching (target: <100ms for cache hit)
+    // In FAST mode with useCacheOnly=true, skip network if cache is known-fresh
     const httpResolver = getIpfsHttpResolver();
-    const httpResult = await httpResolver.resolveIpnsName(this.cachedIpnsName);
+    const httpResult = await httpResolver.resolveIpnsName(this.cachedIpnsName, options?.useCacheOnly);
 
     if (httpResult.success && httpResult.cid) {
       const latencyMs = performance.now() - startTime;

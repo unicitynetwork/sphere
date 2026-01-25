@@ -70,6 +70,9 @@ async function tryRoutingApi(
   sequence: bigint;
   recordData: Uint8Array;
 } | null> {
+  const startTime = performance.now();
+  const hostname = new URL(gatewayUrl).hostname;
+
   try {
     const url = `${gatewayUrl}/api/v0/routing/get?arg=/ipns/${ipnsName}`;
 
@@ -77,9 +80,15 @@ async function tryRoutingApi(
       method: "POST",
     });
 
+    const latencyMs = performance.now() - startTime;
+    const cacheSource = response.headers.get('X-IPNS-Source') || 'unknown';
+
     if (!response.ok) {
+      console.log(`📦 [IPNS Routing] ${hostname}: source=${cacheSource}, latency=${latencyMs.toFixed(0)}ms, status=${response.status} (FAILED)`);
       return null;
     }
+
+    console.log(`📦 [IPNS Routing] ${hostname}: source=${cacheSource}, latency=${latencyMs.toFixed(0)}ms`);
 
     const json = (await response.json()) as { Extra?: string };
     if (!json.Extra) {
@@ -100,14 +109,20 @@ async function tryRoutingApi(
       return null;
     }
 
+    const cid = cidMatch[1];
+    console.log(`📦 [IPNS Routing] Resolved: CID=${cid.substring(0, 12)}..., seq=${record.sequence}`);
+
     return {
-      cid: cidMatch[1],
+      cid,
       sequence: record.sequence,
       recordData,
     };
   } catch (error) {
+    const latencyMs = performance.now() - startTime;
     if (error instanceof Error && error.name === "AbortError") {
-      console.debug(`Routing API timeout for ${ipnsName} on ${gatewayUrl}`);
+      console.log(`📦 [IPNS Routing] ${hostname}: TIMEOUT after ${latencyMs.toFixed(0)}ms`);
+    } else {
+      console.log(`📦 [IPNS Routing] ${hostname}: ERROR after ${latencyMs.toFixed(0)}ms - ${error instanceof Error ? error.message : 'unknown'}`);
     }
     return null;
   }
@@ -218,12 +233,14 @@ export class IpfsHttpResolver {
    * Resolve IPNS name across all configured nodes in parallel
    *
    * Execution flow:
-   * 1. Check cache for fresh record
-   * 2. Query all nodes with gateway path (fast)
-   * 3. If all fail, query all nodes with routing API (reliable)
-   * 4. Return first success or fail after timeout
+   * 1. Check cache for fresh record (or use known-fresh cache in FAST mode)
+   * 2. Query all nodes with routing API (reliable)
+   * 3. Return first success or fail after timeout
+   *
+   * @param ipnsName The IPNS name to resolve
+   * @param useCacheOnly If true, return cached value without network call when cache is known-fresh (for FAST mode)
    */
-  async resolveIpnsName(ipnsName: string): Promise<IpnsResolutionResult> {
+  async resolveIpnsName(ipnsName: string, useCacheOnly: boolean = false): Promise<IpnsResolutionResult> {
     // Step 0: Validate IPNS name is non-empty
     // New wallets or wallets not yet published to IPNS will have empty names
     if (!ipnsName || typeof ipnsName !== 'string' || ipnsName.trim().length === 0) {
@@ -235,7 +252,28 @@ export class IpfsHttpResolver {
       };
     }
 
-    // Step 1: Check cache first
+    // Step 0.5: FAST mode optimization - use known-fresh cache without network call
+    if (useCacheOnly) {
+      const isFresh = this.cache.isIpnsCacheKnownFresh(ipnsName);
+      const cachedRecord = this.cache.getIpnsRecordIgnoreTTL(ipnsName);
+
+      if (isFresh && cachedRecord) {
+        console.log(`[IpfsHttpResolver] FAST: Using known-fresh IPNS cache (skipping network resolution)`);
+        return {
+          success: true,
+          cid: cachedRecord.cid,
+          content: cachedRecord._cachedContent || null,
+          sequence: cachedRecord.sequence,
+          source: "cache",
+          latencyMs: 0,
+        };
+      }
+
+      // Not fresh enough for cache-only mode - fall through to normal resolution
+      console.log(`[IpfsHttpResolver] FAST: Cache not fresh enough, falling back to network resolution`);
+    }
+
+    // Step 1: Check cache first (standard TTL-based)
     const cached = this.cache.getIpnsRecord(ipnsName);
     if (cached) {
       return {
@@ -546,6 +584,14 @@ export class IpfsHttpResolver {
   }
 
   /**
+   * Get the underlying cache instance.
+   * Used by IpfsStorageService to mark cache fresh after local publish.
+   */
+  getCache() {
+    return this.cache;
+  }
+
+  /**
    * Ensure WebSocket subscription exists for an IPNS name.
    * Called automatically after successful resolution.
    */
@@ -630,8 +676,12 @@ export class IpfsHttpResolver {
           cid: update.cid,
           sequence: BigInt(update.sequence),
         });
+
+        // Mark cache as known-fresh since we received real-time WebSocket update
+        this.cache.markIpnsCacheFresh(update.name);
+
         console.log(
-          `[IPNS-WS] Cache updated: seq ${currentSeq} -> ${update.sequence}`
+          `[IPNS-WS] Cache updated and marked fresh: seq ${currentSeq} -> ${update.sequence}`
         );
 
         // Dispatch event for IpfsStorageService to trigger sync

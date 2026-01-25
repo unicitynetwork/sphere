@@ -62,6 +62,22 @@ export interface GatewayHealth {
 }
 
 // ==========================================
+// Resolution Options
+// ==========================================
+
+/**
+ * Options for IPNS resolution
+ */
+export interface IpnsResolveOptions {
+  /**
+   * If true, return cached value without network call when cache is known-fresh.
+   * Used in FAST mode to skip IPNS resolution when we recently published locally.
+   * Default: false
+   */
+  useCacheOnly?: boolean;
+}
+
+// ==========================================
 // Transport Interface
 // ==========================================
 
@@ -106,8 +122,9 @@ export interface IpfsTransport {
   /**
    * Resolve IPNS name to CID and fetch content
    * Returns resolution result with CID, sequence, and content
+   * @param options Optional resolution options (e.g., useCacheOnly for FAST mode)
    */
-  resolveIpns(): Promise<IpnsResolutionResult>;
+  resolveIpns(options?: IpnsResolveOptions): Promise<IpnsResolutionResult>;
 
   // ==========================================
   // IPFS Content Operations
