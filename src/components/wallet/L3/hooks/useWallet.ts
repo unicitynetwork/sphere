@@ -449,7 +449,6 @@ export const useWallet = () => {
     const tokenListUnchanged = currentTokenHash === lastTokenHashRef.current;
 
     if (tokenListUnchanged) {
-      console.log(`⏩ [backgroundValidation] Token list hash unchanged (${currentTokenHash}), skipping spent check`);
       return;
     }
 
