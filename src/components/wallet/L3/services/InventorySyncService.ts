@@ -1858,9 +1858,9 @@ async function step7_detectSpentTokens(ctx: SyncContext): Promise<void> {
       tokensToCheck,
       ctx.publicKey,
       {
-        batchSize: 3,
+        batchSize: 12,  // Increased for parallel aggregator calls
         onProgress: (completed, total) => {
-          if (completed % 5 === 0 || completed === total) {
+          if (completed % 15 === 0 || completed === total) {
             console.log(`  Checked ${completed}/${total} tokens for spent status`);
           }
         }
