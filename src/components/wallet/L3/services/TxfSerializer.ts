@@ -233,7 +233,7 @@ export function normalizeSdkTokenToStorage(sdkTokenJson: unknown): TxfToken {
     }
   }
 
-  // Normalize transaction authenticators
+  // Normalize transaction authenticators and state hash fields
   if (Array.isArray(txf.transactions)) {
     for (const tx of txf.transactions) {
       if (tx.inclusionProof?.authenticator) {
@@ -244,6 +244,23 @@ export function normalizeSdkTokenToStorage(sdkTokenJson: unknown): TxfToken {
         if (auth.signature !== undefined) {
           auth.signature = normalizeToHex(auth.signature);
         }
+      }
+
+      // SDK may store previousStateHash/newStateHash in nested data object
+      // Map them to top-level fields as expected by TxfTransaction
+      if (!tx.previousStateHash && tx.data?.previousStateHash) {
+        tx.previousStateHash = normalizeToHex(tx.data.previousStateHash);
+      }
+      if (!tx.newStateHash && tx.data?.newStateHash) {
+        tx.newStateHash = normalizeToHex(tx.data.newStateHash);
+      }
+
+      // Normalize state hash fields if they exist
+      if (tx.previousStateHash !== undefined) {
+        tx.previousStateHash = normalizeToHex(tx.previousStateHash);
+      }
+      if (tx.newStateHash !== undefined) {
+        tx.newStateHash = normalizeToHex(tx.newStateHash);
       }
     }
   }

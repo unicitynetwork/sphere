@@ -389,6 +389,7 @@ interface SyncResult {
 
 **Mode Detection (in order of precedence):**
 1. If LOCAL = true: always LOCAL mode (skip IPFS reads/writes)
+2. If recoveryDepth is set (>=0): RECOVERY mode (traverse version chain)
 2. If NAMETAG = true: minimal functionality mode to fetch the nametag token only for the given user
 3. If `incoming_token_list` OR `outbox_token_list` non-empty: FAST mode
 4. Otherwise (all empty, possible completed_list present): NORMAL mode
@@ -468,6 +469,103 @@ interface SyncResult {
 - Does not trigger background loops
 - Does not acquire sync lock (allows parallel reads)
 - Returns immediately after nametag fetch
+
+### 6.4 RECOVERY Mode Semantics
+
+**Purpose:** Traverse the IPFS version chain via `_meta.lastCid` links to recover tokens from previous versions. Used when a version regression bug caused good data to be overwritten with empty/stale state.
+
+**Version Chain Structure:**
+```
+IPNS → CID_v2 (current, possibly corrupted - 0 tokens)
+         ↓ _meta.lastCid
+       CID_v68 (previous version - 36 tokens) ← RECOVERY finds these
+         ↓ _meta.lastCid
+       CID_v67 (older version - 35 tokens)
+         ↓ ... back to v1
+```
+
+**Trigger:** Set `recoveryDepth` parameter in `inventorySync()`:
+- `recoveryDepth: 0` - Unlimited (traverse entire history)
+- `recoveryDepth: N` - Traverse at most N previous versions
+- Not set (undefined) - Normal sync (no recovery)
+
+**Step Flow (RECOVERY mode):**
+- Steps 0-2: Normal execution
+- Step 2.5: Version chain traversal (NEW - RECOVERY only):
+  1. Start from current CID's `_meta.lastCid`
+  2. Fetch historical version via HTTP gateway
+  3. Merge tokens (prefer token with more transactions)
+  4. Merge sent/invalid/tombstones (union merge)
+  5. Follow `_meta.lastCid` to next version
+  6. Repeat until depth limit or chain end
+- Steps 3-10: Normal execution (forces `uploadNeeded = true` to persist recovered state)
+
+**Merge Strategy:**
+| Data Type | Merge Key | Strategy |
+|-----------|-----------|----------|
+| Active tokens | tokenId | Keep token with more transactions |
+| Sent tokens | tokenId:stateHash | Union merge (first wins) |
+| Invalid tokens | tokenId:stateHash | Union merge (first wins) |
+| Tombstones | tokenId:stateHash | Union merge (first wins) |
+
+**Traversal Stop Conditions:**
+1. `recoveryDepth` limit reached (if >0)
+2. No more `_meta.lastCid` links (reached first version)
+3. CID cycle detected (safety check)
+4. Network error (sets `networkErrorOccurred` flag)
+5. 404 error (historical CID pruned/unavailable)
+
+**Critical: Network Error Handling:**
+If a network error occurs during traversal:
+- Set `networkErrorOccurred = true`
+- Skip Step 10 upload entirely (prevents overwriting good IPFS data with incomplete data)
+- Save to localStorage only
+
+**Return Type Extension:**
+```typescript
+interface SyncResult {
+  // ... existing fields ...
+  recoveryStats?: {
+    versionsTraversed: number;        // Number of historical versions processed
+    tokensRecoveredFromHistory: number; // Tokens found in historical versions
+    oldestCidReached?: string;        // CID of the oldest version reached
+  };
+}
+```
+
+**Dev Command:**
+```javascript
+// From browser console:
+await devRecoverInventory()     // Unlimited depth
+await devRecoverInventory(10)   // Last 10 versions only
+```
+
+**Use Cases:**
+- Version regression recovery: When v68→v2 bug overwrote good data
+- Fresh device sync: Auto-triggers with `recoveryDepth: 10` on fresh start (no localStorage)
+- Data archaeology: Manual investigation of historical token states
+
+**Auto-Recovery Detection:**
+
+After Step 2 completes, the system automatically detects if recovery is needed:
+
+```typescript
+const shouldAutoRecover =
+  ctx.tokens.size === 0 &&          // No tokens found from localStorage + IPFS
+  ctx.remoteCid !== null &&         // We successfully loaded from IPFS
+  ctx.remoteLastCid !== null;       // There's history to traverse
+```
+
+When detected:
+1. Logs: `🔄 [Auto-Recovery] Detected 0 tokens with IPFS history available`
+2. Sets `recoveryDepth = 10` (traverse last 10 versions)
+3. Calls `step2_5_traverseVersionChain()` automatically
+4. Sets `autoRecoveryTriggered = true` for tracking
+
+This handles scenarios where:
+- IPFS current version was corrupted/regressed to empty state
+- User imported wallet on new device with corrupted IPNS
+- Version regression bug published old state over good data
 
 #### Step 0: Input Processing (If NAMETAG mode, skip)
 

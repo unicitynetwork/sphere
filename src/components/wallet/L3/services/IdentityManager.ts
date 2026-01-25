@@ -120,7 +120,14 @@ export class IdentityManager {
     const publicKey = Buffer.from(signingService.publicKey).toString("hex");
 
     // Derive IPNS name for inventory sync (critical for IPFS initialization)
-    const ipnsName = await deriveIpnsNameFromPrivateKey(derived.privateKey);
+    let ipnsName: string | undefined;
+    try {
+      ipnsName = await deriveIpnsNameFromPrivateKey(derived.privateKey);
+      console.log(`📦 [IdentityManager] Derived IPNS name: ${ipnsName?.slice(0, 20)}...`);
+    } catch (err) {
+      console.error('❌ [IdentityManager] Failed to derive IPNS name:', err);
+      ipnsName = undefined;
+    }
 
     // Parse path to get index for addressIndex field
     const match = path.match(/\/(\d+)$/);

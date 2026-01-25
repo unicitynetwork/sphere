@@ -250,6 +250,17 @@ export const useWallet = () => {
   const identityIpnsName = identityQuery.data?.ipnsName;
 
   useEffect(() => {
+    // Debug: Log which values are present/missing
+    if (!_initialSyncTriggered) {
+      console.log('🔍 [useWallet] Checking sync preconditions:', {
+        hasAddress: !!identityAddress,
+        hasPublicKey: !!identityPublicKey,
+        hasIpnsName: !!identityIpnsName,
+        ipnsName: identityIpnsName?.slice(0, 20),
+        flagState: _initialSyncTriggered
+      });
+    }
+
     // Run inventory sync when user has identity - this will recover nametag and tokens from IPFS
     // Use module-level flag to ensure only ONE instance triggers the initial sync
     // (multiple useWallet hooks are mounted across the app)
@@ -1163,18 +1174,21 @@ export const useWallet = () => {
       if (!txf) {
         console.warn(`Cannot convert transferred token ${uiId.slice(0, 8)} to TXF`);
       } else {
+        // Get state hash if available (may be empty for tokens without newStateHash)
         const stateHash = getCurrentStateHash(txf) ?? '';
-        if (stateHash) {
-          await removeTokenFromInventory(
-            identity.address,
-            identity.publicKey,
-            identity.ipnsName,
-            uiId,
-            stateHash
-          ).catch(err => {
-            console.error(`Failed to remove transferred token ${uiId.slice(0, 8)}:`, err);
-          });
+        if (!stateHash) {
+          console.log(`📤 Token ${uiId.slice(0, 8)}... has no stateHash - will match by tokenId only`);
         }
+        // Always call removeTokenFromInventory - step 8.1 handles missing stateHash
+        await removeTokenFromInventory(
+          identity.address,
+          identity.publicKey,
+          identity.ipnsName,
+          uiId,
+          stateHash
+        ).catch(err => {
+          console.error(`Failed to remove transferred token ${uiId.slice(0, 8)}:`, err);
+        });
       }
     }
 
@@ -1182,17 +1196,8 @@ export const useWallet = () => {
     outboxRepo.updateEntry(outboxEntry.id, { status: "COMPLETED" });
     console.log(`📤 Direct transfer completed - outbox entry ${outboxEntry.id.slice(0, 8)}... marked complete`);
 
-    // 15. Final IPFS sync to update outbox status
-    try {
-      const ipfsService = IpfsStorageService.getInstance(identityManager);
-      await ipfsService.syncNow({
-        priority: SyncPriority.MEDIUM,
-        callerContext: 'post-transfer-sync',
-      });
-    } catch (err) {
-      console.warn(`📤 Final IPFS sync after transfer failed:`, err);
-      // Non-critical - token is transferred, outbox will be cleaned up later
-    }
+    // 15. IPFS sync is handled by removeTokenFromInventory() above
+    // which calls inventorySync() to update localStorage and IPFS
   };
 
   const saveChangeTokenToWallet = async (sdkToken: SdkToken<any>, coinId: string, identity: { address: string; publicKey: string; ipnsName: string }) => {

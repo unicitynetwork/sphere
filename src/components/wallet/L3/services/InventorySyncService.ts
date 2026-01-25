@@ -127,6 +127,15 @@ export interface SyncParams {
   /** Force NAMETAG mode */
   nametag?: boolean;
 
+  /**
+   * Recovery depth for RECOVERY mode.
+   * Set to enable RECOVERY mode which traverses the IPFS version chain via _meta.lastCid.
+   * - 0 = unlimited (traverse entire history)
+   * - >0 = maximum number of versions to traverse
+   * - undefined = no recovery (normal sync)
+   */
+  recoveryDepth?: number;
+
   /** Incoming tokens from Nostr/peer transfer */
   incomingTokens?: Token[] | null;
 
@@ -204,6 +213,20 @@ interface SyncContext {
 
   // Errors
   errors: string[];
+
+  // RECOVERY mode state
+  recoveryDepth: number;              // 0 = unlimited, >0 = max versions to traverse
+  processedCids: Set<string>;         // CIDs already processed (cycle detection)
+  networkErrorOccurred: boolean;      // Flag to prevent upload on network errors
+  recoveryStats: {                    // Statistics from recovery traversal
+    versionsTraversed: number;
+    tokensRecoveredFromHistory: number;
+    oldestCidReached?: string;
+  };
+
+  // Remote data state (for auto-recovery detection)
+  remoteLastCid: string | null;       // _meta.lastCid from remote (for version chain traversal)
+  autoRecoveryTriggered: boolean;     // True if auto-recovery was triggered
 }
 
 // ============================================
@@ -274,6 +297,7 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
   const mode = detectSyncMode({
     local: params.local || circuitBreakerActive,
     nametag: params.nametag,
+    recoveryDepth: params.recoveryDepth,
     incomingTokens: params.incomingTokens as Token[] | undefined,
     outboxTokens: params.outboxTokens
   });
@@ -406,6 +430,32 @@ async function executeFullSync(ctx: SyncContext, params: SyncParams): Promise<Sy
   // Step 2: Load from IPFS (skip in LOCAL mode)
   if (!shouldSkipIpfs(ctx.mode)) {
     await step2_loadIpfs(ctx);
+
+    // Step 2.5: Version chain traversal (RECOVERY mode only)
+    // Traverses _meta.lastCid chain to recover tokens from previous versions
+    if (ctx.mode === 'RECOVERY' && ctx.remoteCid) {
+      await step2_5_traverseVersionChain(ctx);
+    }
+
+    // AUTO-RECOVERY DETECTION: If we have 0 tokens but history exists, auto-trigger recovery
+    // This handles cases where IPFS current version was corrupted/regressed but history has good data
+    if (ctx.mode !== 'RECOVERY' && ctx.mode !== 'LOCAL' && ctx.mode !== 'NAMETAG') {
+      const shouldAutoRecover =
+        ctx.tokens.size === 0 &&          // No tokens found from localStorage + IPFS
+        ctx.remoteCid !== null &&         // We successfully loaded from IPFS
+        ctx.remoteLastCid !== null;       // There's history to traverse
+
+      if (shouldAutoRecover) {
+        console.log(`🔄 [Auto-Recovery] Detected 0 tokens with IPFS history available`);
+        console.log(`   Remote CID: ${ctx.remoteCid!.slice(0, 16)}...`);
+        console.log(`   History CID: ${ctx.remoteLastCid!.slice(0, 16)}...`);
+        console.log(`   Auto-triggering RECOVERY mode (depth=10)...`);
+
+        ctx.autoRecoveryTriggered = true;
+        ctx.recoveryDepth = 10;  // Reasonable default for auto-recovery
+        await step2_5_traverseVersionChain(ctx);
+      }
+    }
   }
 
   // Step 3: Proof Normalization
@@ -485,7 +535,18 @@ function initializeContext(params: SyncParams, mode: SyncMode, startTime: number
     preparedStorageData: null,
     stats: createDefaultSyncOperationStats(),
     circuitBreaker: createDefaultCircuitBreakerState(),
-    errors: []
+    errors: [],
+    // RECOVERY mode state
+    recoveryDepth: params.recoveryDepth ?? -1,  // -1 = not in recovery mode
+    processedCids: new Set(),
+    networkErrorOccurred: false,
+    recoveryStats: {
+      versionsTraversed: 0,
+      tokensRecoveredFromHistory: 0,
+    },
+    // Remote data state
+    remoteLastCid: null,
+    autoRecoveryTriggered: false,
   };
 }
 
@@ -808,10 +869,14 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
   // IPFS load succeeded - record success with circuit breaker
   circuitBreaker.recordIpfsSuccess();
 
-  // Extract remote version
+  // Extract remote version and lastCid (for auto-recovery detection)
   if (remoteData._meta) {
     ctx.remoteVersion = remoteData._meta.version || 0;
+    ctx.remoteLastCid = remoteData._meta.lastCid || null;
     console.log(`  Remote version: ${ctx.remoteVersion}, Local version: ${ctx.localVersion}`);
+    if (ctx.remoteLastCid) {
+      console.log(`  Remote lastCid: ${ctx.remoteLastCid.slice(0, 16)}... (history available)`);
+    }
     // Log warning if remote version seems stale (much lower than expected for active wallet)
     // This can indicate IPNS propagation issues
     if (ctx.localVersion > 0 && ctx.remoteVersion < ctx.localVersion) {
@@ -822,6 +887,15 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
   // 2. Merge remote tokens into context
   // Track which tokens were only in local (for upload detection)
   const localOnlyTokenIds = new Set(ctx.tokens.keys());
+
+  // Debug: Log all keys in remote data to diagnose missing tokens
+  const allRemoteKeys = Object.keys(remoteData);
+  const tokenKeys = allRemoteKeys.filter(k => isTokenKey(k));
+  const nonTokenKeys = allRemoteKeys.filter(k => !isTokenKey(k));
+  console.log(`  📦 Remote data keys: ${allRemoteKeys.length} total (${tokenKeys.length} tokens, ${nonTokenKeys.length} other)`);
+  if (tokenKeys.length === 0 && allRemoteKeys.length > 0) {
+    console.log(`  ⚠️ Non-token keys in remote: ${nonTokenKeys.slice(0, 10).join(', ')}`);
+  }
 
   let tokensImported = 0;
   for (const key of Object.keys(remoteData)) {
@@ -992,6 +1066,233 @@ function shouldPreferRemote(local: TxfToken, remote: TxfToken): boolean {
   }
 
   return false;
+}
+
+/**
+ * Step 2.5: RECOVERY mode - traverse IPFS version chain
+ *
+ * When RECOVERY mode is active, this step traverses the _meta.lastCid chain
+ * backwards through IPFS history to recover tokens from previous versions.
+ *
+ * This is used to recover from version regression bugs where an old/empty
+ * state was accidentally published, overwriting good data.
+ *
+ * The version chain looks like:
+ *   IPNS → CID_v2 (current, possibly corrupted)
+ *            ↓ _meta.lastCid
+ *          CID_v68 (previous, has good data)
+ *            ↓ _meta.lastCid
+ *          CID_v67
+ *            ↓ ... back to v1
+ *
+ * Traversal stops when:
+ * - recoveryDepth limit reached (if >0)
+ * - No more _meta.lastCid links
+ * - CID cycle detected (shouldn't happen but safety check)
+ * - Network error (marks networkErrorOccurred to prevent upload)
+ */
+async function step2_5_traverseVersionChain(ctx: SyncContext): Promise<void> {
+  // Start from the current CID's lastCid (don't re-process current version)
+  const resolver = getIpfsHttpResolver();
+
+  // First, get the current version's metadata to find lastCid
+  if (!ctx.remoteCid) {
+    console.log(`  ⏭️ No remote CID available for RECOVERY traversal`);
+    return;
+  }
+
+  // Mark current CID as processed
+  ctx.processedCids.add(ctx.remoteCid);
+
+  // Fetch current version to get its _meta.lastCid
+  let currentData: TxfStorageData | null = null;
+  try {
+    currentData = await resolver.fetchContentByCid(ctx.remoteCid);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (isNetworkError(errMsg)) {
+      console.warn(`  ⚠️ Network error fetching current CID, stopping RECOVERY: ${errMsg}`);
+      ctx.networkErrorOccurred = true;
+      return;
+    }
+    console.warn(`  ⚠️ Failed to fetch current CID for RECOVERY: ${errMsg}`);
+    return;
+  }
+
+  if (!currentData?._meta?.lastCid) {
+    console.log(`  📋 No previous version link found (first version or missing _meta.lastCid)`);
+    return;
+  }
+
+  let currentCid = currentData._meta.lastCid;
+  const depthLimit = ctx.recoveryDepth === 0 ? Infinity : ctx.recoveryDepth;
+
+  console.log(`🔄 [Step 2.5] RECOVERY: Traversing version chain (depth=${ctx.recoveryDepth === 0 ? 'unlimited' : ctx.recoveryDepth})...`);
+
+  while (ctx.recoveryStats.versionsTraversed < depthLimit) {
+    // Cycle detection
+    if (ctx.processedCids.has(currentCid)) {
+      console.log(`  ⚠️ CID cycle detected at ${currentCid.slice(0, 16)}..., stopping`);
+      break;
+    }
+    ctx.processedCids.add(currentCid);
+
+    // Fetch historical version
+    let historicalData: TxfStorageData | null = null;
+    try {
+      historicalData = await resolver.fetchContentByCid(currentCid);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (isNetworkError(errMsg)) {
+        console.warn(`  ⚠️ Network error during RECOVERY at ${currentCid.slice(0, 16)}...: ${errMsg}`);
+        ctx.networkErrorOccurred = true;
+        break;
+      }
+      if (is404Error(errMsg)) {
+        console.warn(`  ⚠️ CID ${currentCid.slice(0, 16)}... not found (data loss or pruned), stopping`);
+        ctx.recoveryStats.oldestCidReached = currentCid;
+        break;
+      }
+      console.warn(`  ⚠️ Failed to fetch ${currentCid.slice(0, 16)}...: ${errMsg}`);
+      break;
+    }
+
+    if (!historicalData) {
+      console.log(`  ⚠️ Empty content at ${currentCid.slice(0, 16)}..., stopping`);
+      break;
+    }
+
+    // Merge tokens from historical version
+    const tokensBefore = ctx.tokens.size;
+    for (const key of Object.keys(historicalData)) {
+      if (isTokenKey(key)) {
+        const remoteTxf = historicalData[key] as TxfToken;
+        if (!remoteTxf?.genesis?.data?.tokenId) continue;
+
+        const tokenId = tokenIdFromKey(key);
+        const localTxf = ctx.tokens.get(tokenId);
+
+        // Add token if not present, or prefer remote if it has more transactions
+        if (!localTxf || shouldPreferRemote(localTxf, remoteTxf)) {
+          ctx.tokens.set(tokenId, remoteTxf);
+        }
+      }
+    }
+
+    // Merge sent tokens from historical version (union merge)
+    if (historicalData._sent && Array.isArray(historicalData._sent)) {
+      const existingKeys = new Set(
+        ctx.sent.map(s => {
+          const tokenId = s.token.genesis?.data?.tokenId || '';
+          const stateHash = getCurrentStateHash(s.token) || '';
+          return `${tokenId}:${stateHash}`;
+        })
+      );
+      for (const sentEntry of historicalData._sent as SentTokenEntry[]) {
+        const tokenId = sentEntry.token?.genesis?.data?.tokenId;
+        if (!tokenId) continue;
+        const stateHash = getCurrentStateHash(sentEntry.token) || '';
+        const key = `${tokenId}:${stateHash}`;
+        if (!existingKeys.has(key)) {
+          ctx.sent.push(sentEntry);
+          existingKeys.add(key);
+        }
+      }
+    }
+
+    // Merge invalid tokens from historical version (union merge)
+    if (historicalData._invalid && Array.isArray(historicalData._invalid)) {
+      const existingKeys = new Set(
+        ctx.invalid.map(i => {
+          const tokenId = i.token.genesis?.data?.tokenId || '';
+          const stateHash = getCurrentStateHash(i.token) || '';
+          return `${tokenId}:${stateHash}`;
+        })
+      );
+      for (const invalidEntry of historicalData._invalid as InvalidTokenEntry[]) {
+        const tokenId = invalidEntry.token?.genesis?.data?.tokenId;
+        if (!tokenId) continue;
+        const stateHash = getCurrentStateHash(invalidEntry.token) || '';
+        const key = `${tokenId}:${stateHash}`;
+        if (!existingKeys.has(key)) {
+          ctx.invalid.push(invalidEntry);
+          existingKeys.add(key);
+        }
+      }
+    }
+
+    // Merge tombstones from historical version (union merge)
+    if (historicalData._tombstones && Array.isArray(historicalData._tombstones)) {
+      const existingKeys = new Set(
+        ctx.tombstones.map(t => `${t.tokenId}:${t.stateHash}`)
+      );
+      for (const tombstone of historicalData._tombstones as TombstoneEntry[]) {
+        const key = `${tombstone.tokenId}:${tombstone.stateHash}`;
+        if (!existingKeys.has(key)) {
+          ctx.tombstones.push(tombstone);
+        }
+      }
+    }
+
+    const tokensAdded = ctx.tokens.size - tokensBefore;
+    ctx.recoveryStats.versionsTraversed++;
+    ctx.recoveryStats.tokensRecoveredFromHistory += tokensAdded;
+
+    // Detailed logging for debugging version chain issues
+    const version = historicalData._meta?.version || '?';
+    const allKeys = Object.keys(historicalData);
+    const tokenKeyCount = allKeys.filter(k => isTokenKey(k)).length;
+    const hasNametag = !!historicalData._nametag;
+    const hasSent = Array.isArray(historicalData._sent) ? historicalData._sent.length : 0;
+    const hasLastCid = !!historicalData._meta?.lastCid;
+
+    console.log(`  📦 v${version} (${currentCid.slice(0, 12)}...): ${tokenKeyCount} token keys, nametag=${hasNametag}, sent=${hasSent}, lastCid=${hasLastCid}`);
+    if (tokensAdded > 0) {
+      console.log(`     ✓ Recovered ${tokensAdded} tokens (total: ${ctx.tokens.size})`);
+    }
+
+    // Get next CID in chain
+    const nextCid = historicalData._meta?.lastCid;
+    if (!nextCid) {
+      ctx.recoveryStats.oldestCidReached = currentCid;
+      console.log(`  📋 Reached end of version chain at v${version}`);
+      break;
+    }
+    currentCid = nextCid;
+  }
+
+  // RECOVERY mode always forces upload to persist recovered state
+  if (ctx.recoveryStats.tokensRecoveredFromHistory > 0 && !ctx.networkErrorOccurred) {
+    ctx.uploadNeeded = true;
+    console.log(`  ✓ RECOVERY complete: ${ctx.recoveryStats.versionsTraversed} versions traversed, ${ctx.recoveryStats.tokensRecoveredFromHistory} tokens recovered`);
+  } else if (ctx.networkErrorOccurred) {
+    console.log(`  ⚠️ RECOVERY stopped due to network error - will NOT upload to prevent data loss`);
+  } else {
+    console.log(`  ✓ RECOVERY complete: ${ctx.recoveryStats.versionsTraversed} versions traversed, no additional tokens found`);
+  }
+}
+
+/**
+ * Check if an error message indicates a network error (vs a 404 or other expected error)
+ */
+function isNetworkError(errMsg: string): boolean {
+  const msg = errMsg.toLowerCase();
+  return msg.includes('network') ||
+         msg.includes('timeout') ||
+         msg.includes('econnrefused') ||
+         msg.includes('fetch failed') ||
+         msg.includes('enotfound') ||
+         msg.includes('connection refused');
+}
+
+/**
+ * Check if an error message indicates a 404 (content not found)
+ */
+function is404Error(errMsg: string): boolean {
+  const msg = errMsg.toLowerCase();
+  return msg.includes('404') ||
+         msg.includes('not found') ||
+         msg.includes('no content');
 }
 
 function step3_normalizeProofs(ctx: SyncContext): void {
@@ -1288,15 +1589,20 @@ function validateTransactionCommitment(txf: TxfToken, txIndex: number): { valid:
     // If previousStateHash is missing on first transaction, that's OK - we know it should be genesis stateHash
     // Full SDK validation in Step 5 will verify the actual cryptographic proof
   } else {
-    // Subsequent transactions MUST have previousStateHash
-    if (!tx.previousStateHash || !isValidHexString(tx.previousStateHash, 64)) {
-      return { valid: false, reason: 'Invalid or missing previousStateHash' };
+    // Subsequent transactions - validate previousStateHash format if present
+    // Note: SDK may not populate previousStateHash/newStateHash for transfers
+    // Full cryptographic chain validation is done by SDK in Step 5
+    if (tx.previousStateHash) {
+      if (!isValidHexString(tx.previousStateHash, 64)) {
+        return { valid: false, reason: 'Invalid previousStateHash format' };
+      }
+      // If we have both hashes, verify chain integrity
+      const prevTx = txf.transactions[txIndex - 1];
+      if (prevTx?.newStateHash && tx.previousStateHash !== prevTx.newStateHash) {
+        return { valid: false, reason: `Chain break: previousStateHash doesn't match tx ${txIndex - 1}` };
+      }
     }
-    // Subsequent transactions should reference previous tx's new state
-    const prevTx = txf.transactions[txIndex - 1];
-    if (prevTx?.newStateHash && tx.previousStateHash !== prevTx.newStateHash) {
-      return { valid: false, reason: `Chain break: previousStateHash doesn't match tx ${txIndex - 1}` };
-    }
+    // If previousStateHash is missing, that's OK - SDK will validate the cryptographic proof
   }
 
   return { valid: true };
@@ -1604,9 +1910,15 @@ function step8_mergeInventory(ctx: SyncContext): void {
       const token = ctx.tokens.get(completed.tokenId);
 
       if (token) {
-        // Verify state hash matches
-        const currentStateHash = getCurrentStateHash(token);
-        if (currentStateHash === completed.stateHash) {
+        // Verify state hash matches (or proceed if stateHash not available)
+        const currentStateHash = getCurrentStateHash(token) ?? '';
+        const expectedHash = completed.stateHash ?? '';
+
+        // Match if: both empty (SDK didn't populate stateHash), or exact match
+        const hashMatches = (!expectedHash && !currentStateHash) ||
+                           (expectedHash && currentStateHash === expectedHash);
+
+        if (hashMatches) {
           // Move to Sent folder
           ctx.sent.push({
             token,
@@ -1615,17 +1927,18 @@ function step8_mergeInventory(ctx: SyncContext): void {
           });
           ctx.tokens.delete(completed.tokenId);
 
-          // Add tombstone
+          // Add tombstone (use tokenId as fallback if no stateHash)
+          const tombstoneHash = currentStateHash || completed.tokenId;
           ctx.tombstones.push({
             tokenId: completed.tokenId,
-            stateHash: completed.stateHash,
+            stateHash: tombstoneHash,
             timestamp: Date.now(),
           });
           ctx.stats.tombstonesAdded++;
 
           console.log(`  ✓ Marked ${completed.tokenId.slice(0, 8)}... as SPENT`);
         } else {
-          console.warn(`  State hash mismatch for ${completed.tokenId.slice(0, 8)}... (expected ${completed.stateHash.slice(0, 12)}..., got ${currentStateHash?.slice(0, 12)}...)`);
+          console.warn(`  State hash mismatch for ${completed.tokenId.slice(0, 8)}... (expected ${expectedHash.slice(0, 12) || '(empty)'}..., got ${currentStateHash.slice(0, 12) || '(empty)'}...)`);
         }
       }
     }
@@ -2423,6 +2736,13 @@ async function step10_uploadIpfs(ctx: SyncContext): Promise<void> {
 
   const circuitBreaker = getCircuitBreakerService();
 
+  // CRITICAL: Prevent upload if network errors occurred during RECOVERY
+  // This prevents overwriting good IPFS data with potentially incomplete data
+  if (ctx.networkErrorOccurred) {
+    console.log(`  ⏭️ Skipping IPFS upload: network errors during sync (preventing data loss)`);
+    return;
+  }
+
   if (!ctx.uploadNeeded) {
     console.log(`  ⏭️ Skipping IPFS upload: no changes to upload`);
     return;
@@ -2540,6 +2860,11 @@ function buildSuccessResult(ctx: SyncContext): SyncResult {
   // Get current circuit breaker state for result
   const circuitBreakerState = circuitBreaker.getState();
 
+  // Include recovery stats if RECOVERY mode OR auto-recovery was triggered
+  const recoveryStats = (ctx.mode === 'RECOVERY' || ctx.autoRecoveryTriggered) && ctx.recoveryStats.versionsTraversed > 0
+    ? ctx.recoveryStats
+    : undefined;
+
   return {
     status,
     syncMode: ctx.mode,
@@ -2553,7 +2878,8 @@ function buildSuccessResult(ctx: SyncContext): SyncResult {
     timestamp: Date.now(),
     version: ctx.localVersion,
     circuitBreaker: circuitBreakerState,
-    validationIssues: ctx.errors.length > 0 ? ctx.errors : undefined
+    validationIssues: ctx.errors.length > 0 ? ctx.errors : undefined,
+    recoveryStats,
   };
 }
 
