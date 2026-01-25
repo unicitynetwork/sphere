@@ -427,7 +427,7 @@ async function executeNametagSync(ctx: SyncContext, _params: SyncParams): Promis
   console.log(`⏱️ [Step 8.4] Extract Nametags completed in ${stepTimings['Step 8.4'].toFixed(1)}ms`);
 
   // Log timing summary for NAMETAG mode
-  const totalTime = performance.now() - (ctx.startTime || 0);
+  const totalTime = Date.now() - (ctx.startTime || 0);
   console.log(`📊 [Sync Timing Summary - NAMETAG Mode]`);
   console.log(`  Total: ${totalTime.toFixed(1)}ms`);
   Object.entries(stepTimings).sort().forEach(([step, duration]) => {
@@ -586,7 +586,7 @@ async function executeFullSync(ctx: SyncContext, params: SyncParams): Promise<Sy
   }
 
   // Log timing summary
-  const totalTime = performance.now() - (ctx.startTime || 0);
+  const totalTime = Date.now() - (ctx.startTime || 0);
   console.log(`📊 [Sync Timing Summary]`);
   console.log(`  Total: ${totalTime.toFixed(1)}ms`);
   Object.entries(stepTimings).sort().forEach(([step, duration]) => {
