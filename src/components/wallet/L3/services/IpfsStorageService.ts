@@ -805,6 +805,7 @@ export class IpfsStorageService implements IpfsTransport {
    * Part of IpfsTransport interface
    */
   public async uploadContent(data: TxfStorageData): Promise<IpfsUploadResult> {
+    const uploadStartTime = performance.now();
     try {
       // Ensure initialized
       const initialized = await this.ensureInitialized();
@@ -930,11 +931,16 @@ export class IpfsStorageService implements IpfsTransport {
         console.warn(`📦 Could not announce to DHT (non-fatal):`, provideError);
       }
 
+      const uploadDuration = performance.now() - uploadStartTime;
+      console.log(`⏱️ [IpfsStorage] uploadContent completed in ${uploadDuration.toFixed(1)}ms`);
+
       return {
         cid: canonicalCid,
         success: true,
       };
     } catch (error) {
+      const uploadDuration = performance.now() - uploadStartTime;
+      console.log(`⏱️ [IpfsStorage] uploadContent failed after ${uploadDuration.toFixed(1)}ms`);
       return {
         cid: "",
         success: false,
@@ -952,6 +958,7 @@ export class IpfsStorageService implements IpfsTransport {
    * Part of IpfsTransport interface
    */
   public async publishIpns(cid: string): Promise<IpnsPublishResult> {
+    const publishStartTime = performance.now();
     try {
       const { CID } = await import("multiformats/cid");
       const parsedCid = CID.parse(cid);
@@ -959,6 +966,8 @@ export class IpfsStorageService implements IpfsTransport {
       const ipnsName = await this.publishToIpns(parsedCid);
 
       if (ipnsName) {
+        const publishDuration = performance.now() - publishStartTime;
+        console.log(`⏱️ [IpfsStorage] publishIpns completed in ${publishDuration.toFixed(1)}ms`);
         return {
           ipnsName,
           success: true,
@@ -966,6 +975,8 @@ export class IpfsStorageService implements IpfsTransport {
           verified: true,
         };
       } else {
+        const publishDuration = performance.now() - publishStartTime;
+        console.log(`⏱️ [IpfsStorage] publishIpns failed after ${publishDuration.toFixed(1)}ms`);
         return {
           ipnsName: this.cachedIpnsName,
           success: false,
@@ -974,6 +985,8 @@ export class IpfsStorageService implements IpfsTransport {
         };
       }
     } catch (error) {
+      const publishDuration = performance.now() - publishStartTime;
+      console.log(`⏱️ [IpfsStorage] publishIpns error after ${publishDuration.toFixed(1)}ms`);
       return {
         ipnsName: this.cachedIpnsName,
         success: false,

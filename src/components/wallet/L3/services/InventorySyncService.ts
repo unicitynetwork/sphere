@@ -405,14 +405,34 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function executeNametagSync(ctx: SyncContext, _params: SyncParams): Promise<SyncResult> {
+  // Initialize timing object to track step durations
+  const stepTimings: Record<string, number> = {};
+
   // Step 1: Load nametags from localStorage only
+  let stepStart = performance.now();
   await step1_loadLocalStorage(ctx);
+  stepTimings['Step 1'] = performance.now() - stepStart;
+  console.log(`⏱️ [Step 1] Load from localStorage completed in ${stepTimings['Step 1'].toFixed(1)}ms`);
 
   // Step 2: Load nametags from IPFS
+  stepStart = performance.now();
   await step2_loadIpfs(ctx);
+  stepTimings['Step 2'] = performance.now() - stepStart;
+  console.log(`⏱️ [Step 2] Load from IPFS completed in ${stepTimings['Step 2'].toFixed(1)}ms`);
 
   // Step 8.4: Extract nametags for current user (filters for ownership)
+  stepStart = performance.now();
   const nametags = await step8_4_extractNametags(ctx);
+  stepTimings['Step 8.4'] = performance.now() - stepStart;
+  console.log(`⏱️ [Step 8.4] Extract Nametags completed in ${stepTimings['Step 8.4'].toFixed(1)}ms`);
+
+  // Log timing summary for NAMETAG mode
+  const totalTime = performance.now() - (ctx.startTime || 0);
+  console.log(`📊 [Sync Timing Summary - NAMETAG Mode]`);
+  console.log(`  Total: ${totalTime.toFixed(1)}ms`);
+  Object.entries(stepTimings).sort().forEach(([step, duration]) => {
+    console.log(`  ${step}: ${duration.toFixed(1)}ms`);
+  });
 
   return buildNametagResult(ctx, nametags);
 }
@@ -421,20 +441,35 @@ async function executeNametagSync(ctx: SyncContext, _params: SyncParams): Promis
  * Execute full sync (NORMAL/FAST/LOCAL modes)
  */
 async function executeFullSync(ctx: SyncContext, params: SyncParams): Promise<SyncResult> {
+  // Initialize timing object to track step durations
+  const stepTimings: Record<string, number> = {};
+
   // Step 0: Input Processing
+  let stepStart = performance.now();
   step0_inputProcessing(ctx, params);
+  stepTimings['Step 0'] = performance.now() - stepStart;
+  console.log(`⏱️ [Step 0] Input Processing completed in ${stepTimings['Step 0'].toFixed(1)}ms`);
 
   // Step 1: Load from localStorage
+  stepStart = performance.now();
   await step1_loadLocalStorage(ctx);
+  stepTimings['Step 1'] = performance.now() - stepStart;
+  console.log(`⏱️ [Step 1] Load from localStorage completed in ${stepTimings['Step 1'].toFixed(1)}ms`);
 
   // Step 2: Load from IPFS (skip in LOCAL mode)
   if (!shouldSkipIpfs(ctx.mode)) {
+    stepStart = performance.now();
     await step2_loadIpfs(ctx);
+    stepTimings['Step 2'] = performance.now() - stepStart;
+    console.log(`⏱️ [Step 2] Load from IPFS completed in ${stepTimings['Step 2'].toFixed(1)}ms`);
 
     // Step 2.5: Version chain traversal (RECOVERY mode only)
     // Traverses _meta.lastCid chain to recover tokens from previous versions
     if (ctx.mode === 'RECOVERY' && ctx.remoteCid) {
+      stepStart = performance.now();
       await step2_5_traverseVersionChain(ctx);
+      stepTimings['Step 2.5'] = performance.now() - stepStart;
+      console.log(`⏱️ [Step 2.5] Version chain traversal completed in ${stepTimings['Step 2.5'].toFixed(1)}ms`);
     }
 
     // AUTO-RECOVERY DETECTION: If we have 0 tokens but history exists, auto-trigger recovery
@@ -453,60 +488,110 @@ async function executeFullSync(ctx: SyncContext, params: SyncParams): Promise<Sy
 
         ctx.autoRecoveryTriggered = true;
         ctx.recoveryDepth = 10;  // Reasonable default for auto-recovery
+        stepStart = performance.now();
         await step2_5_traverseVersionChain(ctx);
+        stepTimings['Step 2.5 (Auto)'] = performance.now() - stepStart;
+        console.log(`⏱️ [Step 2.5 Auto-Recovery] Version chain traversal completed in ${stepTimings['Step 2.5 (Auto)'].toFixed(1)}ms`);
       }
     }
   }
 
   // Step 3: Proof Normalization
+  stepStart = performance.now();
   step3_normalizeProofs(ctx);
+  stepTimings['Step 3'] = performance.now() - stepStart;
+  console.log(`⏱️ [Step 3] Normalize Proofs completed in ${stepTimings['Step 3'].toFixed(1)}ms`);
 
   // Step 4: Commitment Validation
+  stepStart = performance.now();
   await step4_validateCommitments(ctx);
+  stepTimings['Step 4'] = performance.now() - stepStart;
+  console.log(`⏱️ [Step 4] Validate Commitments completed in ${stepTimings['Step 4'].toFixed(1)}ms`);
 
   // Step 5: Token Validation
+  stepStart = performance.now();
   await step5_validateTokens(ctx);
+  stepTimings['Step 5'] = performance.now() - stepStart;
+  console.log(`⏱️ [Step 5] Validate Tokens completed in ${stepTimings['Step 5'].toFixed(1)}ms`);
 
   // Step 6: Token Deduplication
+  stepStart = performance.now();
   step6_deduplicateTokens(ctx);
+  stepTimings['Step 6'] = performance.now() - stepStart;
+  console.log(`⏱️ [Step 6] Deduplicate Tokens completed in ${stepTimings['Step 6'].toFixed(1)}ms`);
 
   // Step 7: Spent Token Detection (skip in FAST/LOCAL mode)
   if (!shouldSkipSpentDetection(ctx.mode)) {
+    stepStart = performance.now();
     await step7_detectSpentTokens(ctx);
+    stepTimings['Step 7'] = performance.now() - stepStart;
+    console.log(`⏱️ [Step 7] Detect Spent Tokens completed in ${stepTimings['Step 7'].toFixed(1)}ms`);
   }
 
   // Step 7.5: Verify Tombstones (skip in FAST/LOCAL mode)
   if (!shouldSkipSpentDetection(ctx.mode)) {
+    stepStart = performance.now();
     await step7_5_verifyTombstones(ctx);
+    stepTimings['Step 7.5'] = performance.now() - stepStart;
+    console.log(`⏱️ [Step 7.5] Verify Tombstones completed in ${stepTimings['Step 7.5'].toFixed(1)}ms`);
   }
 
   // Step 8: Folder Assignment / Merge Inventory
+  stepStart = performance.now();
   step8_mergeInventory(ctx);
+  stepTimings['Step 8'] = performance.now() - stepStart;
+  console.log(`⏱️ [Step 8] Merge Inventory completed in ${stepTimings['Step 8'].toFixed(1)}ms`);
 
   // Step 8.4: Filter nametags for current user ownership
+  stepStart = performance.now();
   ctx.nametags = await step8_4_extractNametags(ctx);
+  stepTimings['Step 8.4'] = performance.now() - stepStart;
+  console.log(`⏱️ [Step 8.4] Extract Nametags completed in ${stepTimings['Step 8.4'].toFixed(1)}ms`);
 
   // Step 8.5: Ensure nametag bindings are registered with Nostr
   // Best-effort, non-blocking - failures don't stop sync
+  stepStart = performance.now();
   await step8_5_ensureNametagNostrBinding(ctx);
+  stepTimings['Step 8.5'] = performance.now() - stepStart;
+  console.log(`⏱️ [Step 8.5] Ensure Nametag-Nostr Consistency completed in ${stepTimings['Step 8.5'].toFixed(1)}ms`);
 
   // Step 8.5a: Ensure nametag genesis commitments are on aggregator
   // Per TOKEN_INVENTORY_SPEC.md Section 8.5a: If exclusion proof, trigger recovery
   // Best-effort, non-blocking - failures don't stop sync
+  stepStart = performance.now();
   await step8_5a_ensureNametagAggregatorRegistration(ctx);
+  stepTimings['Step 8.5a'] = performance.now() - stepStart;
+  console.log(`⏱️ [Step 8.5a] Ensure Nametag-Aggregator Registration completed in ${stepTimings['Step 8.5a'].toFixed(1)}ms`);
 
   // Step 8.6: Attempt recovery of nametag-invalidated tokens
   // Per TOKEN_INVENTORY_SPEC.md Section 13.26: After nametag proof is valid,
   // attempt to recover tokens that were invalidated due to stale embedded nametag proofs
+  stepStart = performance.now();
   await step8_6_recoverNametagInvalidatedTokens(ctx);
+  stepTimings['Step 8.6'] = performance.now() - stepStart;
+  console.log(`⏱️ [Step 8.6] Recover Nametag-Invalidated Tokens completed in ${stepTimings['Step 8.6'].toFixed(1)}ms`);
 
   // Step 9: Prepare for Storage
+  stepStart = performance.now();
   step9_prepareStorage(ctx);
+  stepTimings['Step 9'] = performance.now() - stepStart;
+  console.log(`⏱️ [Step 9] Prepare for Storage completed in ${stepTimings['Step 9'].toFixed(1)}ms`);
 
   // Step 10: Upload to IPFS (skip in LOCAL mode)
   if (ctx.uploadNeeded && !shouldSkipIpfs(ctx.mode)) {
+    stepStart = performance.now();
     await step10_uploadIpfs(ctx);
+    stepTimings['Step 10'] = performance.now() - stepStart;
+    console.log(`⏱️ [Step 10] Upload to IPFS completed in ${stepTimings['Step 10'].toFixed(1)}ms`);
   }
+
+  // Log timing summary
+  const totalTime = performance.now() - (ctx.startTime || 0);
+  console.log(`📊 [Sync Timing Summary]`);
+  console.log(`  Total: ${totalTime.toFixed(1)}ms`);
+  Object.entries(stepTimings).sort().forEach(([step, duration]) => {
+    console.log(`  ${step}: ${duration.toFixed(1)}ms`);
+  });
 
   return buildSuccessResult(ctx);
 }
