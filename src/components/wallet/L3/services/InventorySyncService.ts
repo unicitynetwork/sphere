@@ -299,7 +299,8 @@ export async function inventorySync(params: SyncParams): Promise<SyncResult> {
     nametag: params.nametag,
     recoveryDepth: params.recoveryDepth,
     incomingTokens: params.incomingTokens as Token[] | undefined,
-    outboxTokens: params.outboxTokens
+    outboxTokens: params.outboxTokens,
+    completedList: params.completedList
   });
 
   if (circuitBreakerActive) {

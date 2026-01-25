@@ -8,6 +8,7 @@
 import type { SyncMode, CircuitBreakerState } from '../../types/SyncTypes';
 import type { OutboxEntry } from '../types/OutboxTypes';
 import type { Token } from '../../data/model';
+import type { CompletedTransfer } from '../types/QueueTypes';
 
 /**
  * Parameters for sync mode detection
@@ -28,6 +29,9 @@ export interface SyncModeParams {
   /** Outbox tokens pending send (triggers FAST mode) */
   outboxTokens?: OutboxEntry[] | null;
 
+  /** Completed transfers with proof (triggers FAST mode) */
+  completedList?: CompletedTransfer[] | null;
+
   /** Circuit breaker state (may auto-activate LOCAL mode) */
   circuitBreaker?: CircuitBreakerState;
 }
@@ -39,7 +43,7 @@ export interface SyncModeParams {
  * 1. LOCAL = true or circuit breaker active → LOCAL mode
  * 2. recoveryDepth set (>=0) → RECOVERY mode
  * 3. NAMETAG = true → NAMETAG mode
- * 4. incomingTokens OR outboxTokens non-empty → FAST mode
+ * 4. incomingTokens OR outboxTokens OR completedList non-empty → FAST mode
  * 5. Default → NORMAL mode
  *
  * @example
@@ -65,6 +69,7 @@ export function detectSyncMode(params: SyncModeParams): SyncMode {
     recoveryDepth,
     incomingTokens,
     outboxTokens,
+    completedList,
     circuitBreaker
   } = params;
 
@@ -89,11 +94,12 @@ export function detectSyncMode(params: SyncModeParams): SyncMode {
     return 'NAMETAG';
   }
 
-  // Precedence 4: FAST mode (either incoming OR outbox non-empty)
+  // Precedence 4: FAST mode (incoming OR outbox OR completed non-empty)
   const hasIncoming = Array.isArray(incomingTokens) && incomingTokens.length > 0;
   const hasOutbox = Array.isArray(outboxTokens) && outboxTokens.length > 0;
+  const hasCompleted = Array.isArray(completedList) && completedList.length > 0;
 
-  if (hasIncoming || hasOutbox) {
+  if (hasIncoming || hasOutbox || hasCompleted) {
     return 'FAST';
   }
 
