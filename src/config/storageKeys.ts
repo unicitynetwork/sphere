@@ -151,6 +151,9 @@ export const STORAGE_KEYS = {
   // Spent token state cache (persisted SPENT results)
   SPENT_TOKEN_CACHE: 'sphere_spent_token_cache',
 
+  // Validation result cache (persisted VALID results)
+  VALIDATION_CACHE: 'sphere_validation_cache',
+
   // Last successful IPFS sync timestamp
   LAST_IPFS_SYNC_SUCCESS: 'sphere_last_ipfs_sync_success',
 

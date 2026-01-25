@@ -878,7 +878,9 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
     // Initialize transport with identity so cachedIpnsName gets set
     // This ensures IPFS is ready even if we don't need to upload later
     try {
+      const initStartTime = performance.now();
       const initialized = await transport.ensureInitialized();
+      console.log(`  [Timing] transport.ensureInitialized() took ${(performance.now() - initStartTime).toFixed(0)}ms`);
       if (!initialized) {
         console.log(`  ⚠️ Transport initialization failed, falling back to HTTP resolver`);
         transport = null;
@@ -894,7 +896,9 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
     // Use full transport API (better sequence tracking, dual DHT+HTTP)
     console.log(`  Using IpfsTransport for IPNS resolution...`);
     try {
+      const resolveStartTime = performance.now();
       const resolution = await transport.resolveIpns();
+      console.log(`  [Timing] transport.resolveIpns() took ${(performance.now() - resolveStartTime).toFixed(0)}ms`);
 
       if (resolution.cid) {
         ctx.remoteCid = resolution.cid;
@@ -958,6 +962,8 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
 
   // IPFS load succeeded - record success with circuit breaker
   circuitBreaker.recordIpfsSuccess();
+
+  const processingStartTime = performance.now();
 
   // Extract remote version and lastCid (for auto-recovery detection)
   if (remoteData._meta) {
@@ -1133,6 +1139,7 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
 
   ctx.stats.tokensImported = tokensImported;
   console.log(`  ✓ Loaded from IPFS: ${tokensImported} new tokens, ${ctx.tombstones.length} tombstones`);
+  console.log(`  [Timing] Remote data processing took ${(performance.now() - processingStartTime).toFixed(0)}ms`);
 }
 
 /**
@@ -1728,7 +1735,7 @@ async function step5_validateTokens(ctx: SyncContext): Promise<void> {
   // Validate all tokens with progress callback
   try {
     const result = await validationService.validateAllTokens(tokensToValidate, {
-      batchSize: 5,
+      batchSize: 10,  // Increased for CPU-bound validation with caching
       onProgress: (completed, total) => {
         if (completed % 10 === 0 || completed === total) {
           console.log(`  Validated ${completed}/${total} tokens`);

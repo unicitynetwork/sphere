@@ -12,7 +12,7 @@ import type {
   TxfInclusionProof,
   TxfToken,
 } from "./types/TxfTypes";
-import { getCurrentStateHash, tokenToTxf } from "./TxfSerializer";
+import { getCurrentStateHash, getCurrentStateHashFromToken, tokenToTxf } from "./TxfSerializer";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 // ==========================================
@@ -77,6 +77,20 @@ export class TokenValidationService {
 
   // localStorage key for persisting SPENT cache entries
   private static readonly SPENT_CACHE_STORAGE_KEY = STORAGE_KEYS.SPENT_TOKEN_CACHE;
+
+  // Validation result cache - ONLY caches VALID results
+  // Once a token passes SDK verification at a specific stateHash, it will always be valid
+  // (deterministic cryptographic verification). Invalid results are NOT cached because
+  // tokens may become valid after proof recovery.
+  private validationCache = new Map<string, {
+    validatedAt: number;
+  }>();
+  private readonly VALIDATION_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+  private validationCacheLoadedFromStorage = false;
+  private static readonly VALIDATION_CACHE_STORAGE_KEY = STORAGE_KEYS.VALIDATION_CACHE;
+
+  // Cached SDK Token class to avoid repeated dynamic imports
+  private sdkTokenClass: (typeof import("@unicitylabs/state-transition-sdk/lib/token/Token"))["Token"] | null = null;
 
   constructor(aggregatorUrl: string = DEFAULT_AGGREGATOR_URL) {
     this.aggregatorUrl = aggregatorUrl;
@@ -206,7 +220,7 @@ export class TokenValidationService {
 
   /**
    * Clear spent state cache (call on logout/address change or when refreshing Unicity proofs)
-   * Also clears localStorage persistence.
+   * Also clears localStorage persistence and validation cache.
    */
   clearSpentStateCache(): void {
     const size = this.spentStateCache.size;
@@ -221,6 +235,9 @@ export class TokenValidationService {
     if (size > 0) {
       console.log(`📦 Cleared spent state cache (${size} entries) and localStorage`);
     }
+
+    // Also clear validation cache on address change/logout
+    this.clearValidationCache();
   }
 
   /**
@@ -252,6 +269,175 @@ export class TokenValidationService {
       else unspentCount++;
     }
     return { size: this.spentStateCache.size, spentCount, unspentCount };
+  }
+
+  // ==========================================
+  // Validation Cache Methods
+  // ==========================================
+
+  /**
+   * Generate cache key for validation result
+   * Format: tokenId:stateHash
+   */
+  private getValidationCacheKey(tokenId: string, stateHash: string): string {
+    return `${tokenId}:${stateHash}`;
+  }
+
+  /**
+   * Load validation cache entries from localStorage (lazy load on first access)
+   */
+  private loadValidationCacheFromStorage(): void {
+    if (this.validationCacheLoadedFromStorage) return;
+    this.validationCacheLoadedFromStorage = true;
+
+    try {
+      const stored = localStorage.getItem(TokenValidationService.VALIDATION_CACHE_STORAGE_KEY);
+      if (!stored) return;
+
+      const entries = JSON.parse(stored) as Array<{ key: string; validatedAt: number }>;
+      let loadedCount = 0;
+      let expiredCount = 0;
+      const now = Date.now();
+
+      for (const entry of entries) {
+        // Skip expired entries
+        if (now - entry.validatedAt > this.VALIDATION_CACHE_TTL_MS) {
+          expiredCount++;
+          continue;
+        }
+
+        this.validationCache.set(entry.key, {
+          validatedAt: entry.validatedAt,
+        });
+        loadedCount++;
+      }
+
+      if (loadedCount > 0 || expiredCount > 0) {
+        console.log(`📦 Loaded ${loadedCount} validation cache entries from localStorage (${expiredCount} expired)`);
+      }
+    } catch (err) {
+      console.warn("📦 Failed to load validation cache from localStorage:", err);
+      try {
+        localStorage.removeItem(TokenValidationService.VALIDATION_CACHE_STORAGE_KEY);
+      } catch { /* ignore */ }
+    }
+  }
+
+  /**
+   * Persist validation cache entries to localStorage
+   */
+  private persistValidationCacheToStorage(): void {
+    try {
+      const entries: Array<{ key: string; validatedAt: number }> = [];
+      const now = Date.now();
+
+      for (const [key, entry] of this.validationCache.entries()) {
+        // Only persist non-expired entries
+        if (now - entry.validatedAt <= this.VALIDATION_CACHE_TTL_MS) {
+          entries.push({ key, validatedAt: entry.validatedAt });
+        }
+      }
+
+      if (entries.length === 0) {
+        localStorage.removeItem(TokenValidationService.VALIDATION_CACHE_STORAGE_KEY);
+      } else {
+        localStorage.setItem(
+          TokenValidationService.VALIDATION_CACHE_STORAGE_KEY,
+          JSON.stringify(entries)
+        );
+      }
+    } catch (err) {
+      console.warn("📦 Failed to persist validation cache to localStorage:", err);
+    }
+  }
+
+  /**
+   * Check if token validation is cached (VALID results only)
+   * Returns true if token was previously validated at this stateHash
+   */
+  private isValidationCached(tokenId: string, stateHash: string | null): boolean {
+    // Skip cache for tokens without stateHash
+    if (!stateHash) return false;
+
+    // Lazy load from localStorage on first access
+    this.loadValidationCacheFromStorage();
+
+    const key = this.getValidationCacheKey(tokenId, stateHash);
+    const cached = this.validationCache.get(key);
+
+    if (!cached) return false;
+
+    // Check TTL
+    if (Date.now() - cached.validatedAt > this.VALIDATION_CACHE_TTL_MS) {
+      this.validationCache.delete(key);
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Store valid result in cache
+   * Only caches VALID results - invalid results may become valid after proof recovery
+   */
+  private cacheValidResult(tokenId: string, stateHash: string | null): void {
+    if (!stateHash) return; // Don't cache without stateHash
+
+    const key = this.getValidationCacheKey(tokenId, stateHash);
+    this.validationCache.set(key, { validatedAt: Date.now() });
+
+    // Persist to localStorage
+    this.persistValidationCacheToStorage();
+  }
+
+  /**
+   * Clear validation cache (call on logout/address change)
+   * Also clears localStorage persistence.
+   */
+  clearValidationCache(): void {
+    const size = this.validationCache.size;
+    this.validationCache.clear();
+    this.validationCacheLoadedFromStorage = false;
+
+    try {
+      localStorage.removeItem(TokenValidationService.VALIDATION_CACHE_STORAGE_KEY);
+    } catch { /* ignore */ }
+
+    if (size > 0) {
+      console.log(`📦 Cleared validation cache (${size} entries)`);
+    }
+  }
+
+  /**
+   * Get validation cache statistics for debugging
+   */
+  getValidationCacheStats(): { size: number; oldestAge: number | null } {
+    this.loadValidationCacheFromStorage();
+
+    let oldestAge: number | null = null;
+    const now = Date.now();
+
+    for (const entry of this.validationCache.values()) {
+      const age = now - entry.validatedAt;
+      if (oldestAge === null || age > oldestAge) {
+        oldestAge = age;
+      }
+    }
+
+    return { size: this.validationCache.size, oldestAge };
+  }
+
+  /**
+   * Get cached SDK Token class (avoids repeated dynamic imports)
+   */
+  private async getSdkTokenClass(): Promise<(typeof import("@unicitylabs/state-transition-sdk/lib/token/Token"))["Token"]> {
+    if (!this.sdkTokenClass) {
+      const { Token } = await import(
+        "@unicitylabs/state-transition-sdk/lib/token/Token"
+      );
+      this.sdkTokenClass = Token;
+    }
+    return this.sdkTokenClass;
   }
 
   // ==========================================
@@ -363,11 +549,26 @@ export class TokenValidationService {
       };
     }
 
+    // Get stateHash for cache lookup - try stored value first
+    let stateHash = getCurrentStateHashFromToken(token);
+
+    // Check validation cache (VALID results only)
+    // A token that passed SDK verification at a specific stateHash will always be valid
+    // (deterministic cryptographic verification)
+    if (stateHash && this.isValidationCached(token.id, stateHash)) {
+      // Cache hit - token was previously validated at this state
+      return { isValid: true, token };
+    }
+
     // Check for uncommitted transactions
+    // NOTE: Do NOT cache tokens with uncommitted transactions - they may be recoverable
     const uncommitted = this.getUncommittedTransactions(txfToken);
     if (uncommitted.length > 0) {
       const recovered = await this.fetchMissingProofs(token);
       if (recovered) {
+        // Successfully recovered proofs - cache the result with the new stateHash
+        const recoveredStateHash = getCurrentStateHashFromToken(recovered);
+        this.cacheValidResult(recovered.id, recoveredStateHash);
         return { isValid: true, token: recovered };
       }
 
@@ -378,10 +579,29 @@ export class TokenValidationService {
       };
     }
 
+    // If stateHash is missing (genesis-only tokens), compute it using SDK
+    // This allows caching even for tokens without stored stateHash
+    if (!stateHash) {
+      try {
+        const TokenClass = await this.getSdkTokenClass();
+        const sdkToken = await TokenClass.fromJSON(txfToken);
+        const computedHash = await sdkToken.state.calculateHash();
+        stateHash = computedHash.toJSON();
+      } catch {
+        // Failed to compute - will skip caching but continue validation
+      }
+    }
+
+    // Check cache again with computed stateHash (may have been a cache miss on first check)
+    if (stateHash && this.isValidationCached(token.id, stateHash)) {
+      return { isValid: true, token };
+    }
+
     // Verify token using SDK (if trust base available)
     try {
       const verificationResult = await this.verifyWithSdk(txfToken);
       if (!verificationResult.success) {
+        // NOTE: Do NOT cache invalid results - token may become valid after proof recovery
         console.warn(`📦 Validation FAIL [${tokenIdPrefix}]: SDK verification failed - ${verificationResult.error}`);
         return {
           isValid: false,
@@ -395,6 +615,9 @@ export class TokenValidationService {
         err instanceof Error ? err.message : err
       );
     }
+
+    // Cache successful validation
+    this.cacheValidResult(token.id, stateHash);
 
     return { isValid: true, token };
   }
@@ -1345,13 +1568,11 @@ export class TokenValidationService {
         return { success: true };
       }
 
-      // Dynamic import to avoid bundling issues
-      const { Token } = await import(
-        "@unicitylabs/state-transition-sdk/lib/token/Token"
-      );
+      // Use cached SDK Token class to avoid repeated dynamic imports
+      const TokenClass = await this.getSdkTokenClass();
 
       // Parse token from JSON
-      const sdkToken = await Token.fromJSON(txfToken);
+      const sdkToken = await TokenClass.fromJSON(txfToken);
 
       // Get trust base
       const trustBase = await this.getTrustBase();
