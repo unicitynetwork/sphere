@@ -42,6 +42,7 @@ import type { InvalidReasonCode } from '../types/SyncTypes';
 import { NostrService } from './NostrService';
 import { IdentityManager } from './IdentityManager';
 import { invalidateWalletQueries } from '../../../../lib/queryClient';
+import { getInventoryStorage } from './storage/InventoryStorageAdapter';
 import {
   reconstructMintCommitment,
   fetchProofByRequestId,
@@ -685,7 +686,8 @@ async function step1_loadLocalStorage(ctx: SyncContext): Promise<void> {
   // This ensures backward compatibility while maintaining spec compliance.
 
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(ctx.address);
-  const json = localStorage.getItem(storageKey);
+  const storage = getInventoryStorage();
+  const json = storage.getItem(storageKey);
 
   if (!json) {
     console.log(`  No wallet data found for address ${ctx.address.slice(0, 20)}...`);
@@ -2896,7 +2898,8 @@ function step9_prepareStorage(ctx: SyncContext): void {
 
   // Read current localStorage to compare content
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(ctx.address);
-  const existingJson = localStorage.getItem(storageKey);
+  const storage = getInventoryStorage();
+  const existingJson = storage.getItem(storageKey);
   let existingData: TxfStorageData | null = null;
   if (existingJson) {
     try {
@@ -2923,7 +2926,7 @@ function step9_prepareStorage(ctx: SyncContext): void {
       if (ctx.remoteVersion > existingData._meta.version) {
         console.log(`  📥 Updating local version to match remote: ${existingData._meta.version} → ${ctx.remoteVersion}`);
         existingData._meta.version = ctx.remoteVersion;
-        localStorage.setItem(storageKey, JSON.stringify(existingData));
+        storage.setItem(storageKey, JSON.stringify(existingData));
         ctx.localVersion = ctx.remoteVersion;
       } else {
         console.log(`  ⏭️ Skipping localStorage write (version ${existingData._meta.version} is current)`);
@@ -2935,7 +2938,7 @@ function step9_prepareStorage(ctx: SyncContext): void {
 
   // Content changed - update version and write
   ctx.localVersion = storageData._meta.version;
-  localStorage.setItem(storageKey, JSON.stringify(storageData));
+  storage.setItem(storageKey, JSON.stringify(storageData));
   ctx.uploadNeeded = true;
 
   // CRITICAL: Store the prepared data for step 10 to avoid double-increment bug
@@ -3156,7 +3159,8 @@ function buildInventoryStats(ctx: SyncContext): TokenInventoryStats {
  */
 export function getTokensForAddress(address: string): Token[] {
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
-  const json = localStorage.getItem(storageKey);
+  const storage = getInventoryStorage();
+  const json = storage.getItem(storageKey);
   if (!json) return [];
 
   try {
@@ -3205,7 +3209,8 @@ export function getTokensForAddress(address: string): Token[] {
  */
 export function getNametagForAddress(address: string): NametagData | null {
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
-  const json = localStorage.getItem(storageKey);
+  const storage = getInventoryStorage();
+  const json = storage.getItem(storageKey);
   if (!json) return null;
 
   try {
@@ -3231,7 +3236,8 @@ export function getNametagForAddress(address: string): NametagData | null {
  */
 export function getTombstonesForAddress(address: string): TombstoneEntry[] {
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
-  const json = localStorage.getItem(storageKey);
+  const storage = getInventoryStorage();
+  const json = storage.getItem(storageKey);
   if (!json) return [];
 
   try {
@@ -3258,7 +3264,8 @@ export function getTombstonesForAddress(address: string): TombstoneEntry[] {
  */
 export function getInvalidatedNametagsForAddress(address: string): InvalidatedNametagEntry[] {
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
-  const json = localStorage.getItem(storageKey);
+  const storage = getInventoryStorage();
+  const json = storage.getItem(storageKey);
   if (!json) return [];
 
   try {
@@ -3299,7 +3306,8 @@ export function checkNametagForAddress(address: string): NametagData | null {
  */
 export function getVersionForAddress(address: string): number {
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
-  const json = localStorage.getItem(storageKey);
+  const storage = getInventoryStorage();
+  const json = storage.getItem(storageKey);
   if (!json) return 0;
 
   try {
@@ -3318,7 +3326,8 @@ export function getVersionForAddress(address: string): number {
  */
 export function getArchivedTokensForAddress(address: string): Map<string, TxfToken> {
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
-  const json = localStorage.getItem(storageKey);
+  const storage = getInventoryStorage();
+  const json = storage.getItem(storageKey);
   const result = new Map<string, TxfToken>();
 
   if (!json) return result;
@@ -3358,7 +3367,8 @@ export function getArchivedTokensForAddress(address: string): Map<string, TxfTok
  */
 export function getForkedTokensForAddress(address: string): Map<string, TxfToken> {
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
-  const json = localStorage.getItem(storageKey);
+  const storage = getInventoryStorage();
+  const json = storage.getItem(storageKey);
   const result = new Map<string, TxfToken>();
 
   if (!json) return result;
@@ -3462,7 +3472,8 @@ export async function removeToken(
  */
 export function setNametagForAddress(address: string, nametag: NametagData): void {
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
-  const json = localStorage.getItem(storageKey);
+  const storage = getInventoryStorage();
+  const json = storage.getItem(storageKey);
 
   let data: TxfStorageData;
   if (json) {
@@ -3493,7 +3504,7 @@ export function setNametagForAddress(address: string, nametag: NametagData): voi
   }
 
   data._nametag = nametag;
-  localStorage.setItem(storageKey, JSON.stringify(data));
+  storage.setItem(storageKey, JSON.stringify(data));
 
   // Dispatch wallet-updated event so UI refreshes
   window.dispatchEvent(new Event('wallet-updated'));
@@ -3504,13 +3515,14 @@ export function setNametagForAddress(address: string, nametag: NametagData): voi
  */
 export function clearNametagForAddress(address: string): void {
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
-  const json = localStorage.getItem(storageKey);
+  const storage = getInventoryStorage();
+  const json = storage.getItem(storageKey);
   if (!json) return;
 
   try {
     const data = JSON.parse(json) as TxfStorageData;
     delete data._nametag;
-    localStorage.setItem(storageKey, JSON.stringify(data));
+    storage.setItem(storageKey, JSON.stringify(data));
     window.dispatchEvent(new Event('wallet-updated'));
   } catch {
     // Ignore parse errors
@@ -3527,7 +3539,8 @@ export function saveTokenImmediately(address: string, token: Token): void {
   console.log(`💾 [IMMEDIATE] Token has jsonData: ${!!token.jsonData}, length: ${token.jsonData?.length || 0}`);
 
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
-  const json = localStorage.getItem(storageKey);
+  const storage = getInventoryStorage();
+  const json = storage.getItem(storageKey);
 
   let data: TxfStorageData;
   if (json) {
@@ -3581,7 +3594,7 @@ export function saveTokenImmediately(address: string, token: Token): void {
     data[tokenKey] = txf;
     data._meta = data._meta || { version: 0, address, ipnsName: '', formatVersion: '2.0' };
     data._meta.version = (data._meta.version || 0) + 1;
-    localStorage.setItem(storageKey, JSON.stringify(data));
+    storage.setItem(storageKey, JSON.stringify(data));
     console.log(`💾 [IMMEDIATE] Token ${sdkTokenId.slice(0, 8)}... saved directly to localStorage`);
   }
 }

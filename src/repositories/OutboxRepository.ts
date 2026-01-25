@@ -29,6 +29,7 @@ import {
   isMintRecoverable,
 } from "../components/wallet/L3/services/types/OutboxTypes";
 import { STORAGE_KEYS } from "../config/storageKeys";
+import { getInventoryStorage } from "../components/wallet/L3/services/storage/InventoryStorageAdapter";
 
 export class OutboxRepository {
   private static instance: OutboxRepository;
@@ -597,8 +598,10 @@ export class OutboxRepository {
 
   private loadFromStorage(): void {
     try {
+      const storage = getInventoryStorage();
+
       // Load transfer entries
-      const json = localStorage.getItem(this.getStorageKey());
+      const json = storage.getItem(this.getStorageKey());
       if (json) {
         const entries = JSON.parse(json) as OutboxEntry[];
         this._entries.clear();
@@ -611,7 +614,7 @@ export class OutboxRepository {
       }
 
       // Load mint entries
-      const mintJson = localStorage.getItem(this.getMintEntriesStorageKey());
+      const mintJson = storage.getItem(this.getMintEntriesStorageKey());
       if (mintJson) {
         const mintEntries = JSON.parse(mintJson) as MintOutboxEntry[];
         this._mintEntries.clear();
@@ -626,7 +629,7 @@ export class OutboxRepository {
       }
 
       // Load split groups
-      const groupsJson = localStorage.getItem(this.getSplitGroupsStorageKey());
+      const groupsJson = storage.getItem(this.getSplitGroupsStorageKey());
       if (groupsJson) {
         const groups = JSON.parse(groupsJson) as OutboxSplitGroup[];
         this._splitGroups.clear();
@@ -647,7 +650,8 @@ export class OutboxRepository {
   private saveToStorage(): void {
     try {
       const entries = Array.from(this._entries.values());
-      localStorage.setItem(this.getStorageKey(), JSON.stringify(entries));
+      const storage = getInventoryStorage();
+      storage.setItem(this.getStorageKey(), JSON.stringify(entries));
     } catch (error) {
       console.error("📤 Outbox: Failed to save to storage:", error);
     }
@@ -656,7 +660,8 @@ export class OutboxRepository {
   private saveMintEntriesToStorage(): void {
     try {
       const entries = Array.from(this._mintEntries.values());
-      localStorage.setItem(this.getMintEntriesStorageKey(), JSON.stringify(entries));
+      const storage = getInventoryStorage();
+      storage.setItem(this.getMintEntriesStorageKey(), JSON.stringify(entries));
     } catch (error) {
       console.error("📤 Outbox: Failed to save mint entries to storage:", error);
     }
@@ -665,7 +670,8 @@ export class OutboxRepository {
   private saveSplitGroupsToStorage(): void {
     try {
       const groups = Array.from(this._splitGroups.values());
-      localStorage.setItem(this.getSplitGroupsStorageKey(), JSON.stringify(groups));
+      const storage = getInventoryStorage();
+      storage.setItem(this.getSplitGroupsStorageKey(), JSON.stringify(groups));
     } catch (error) {
       console.error("📤 Outbox: Failed to save split groups to storage:", error);
     }

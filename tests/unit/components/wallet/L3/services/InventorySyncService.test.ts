@@ -40,6 +40,7 @@ vi.mock("../../../../../../src/components/wallet/L3/services/IpfsHttpResolver", 
         content: mockRemoteData,
       };
     }),
+    isWebSocketConnected: vi.fn().mockReturnValue(false),
   })),
   computeCidFromContent: vi.fn().mockResolvedValue("QmTestCid123"),
 }));
@@ -294,6 +295,7 @@ vi.mock("@unicitylabs/state-transition-sdk/lib/address/ProxyAddress", () => ({
 // Now import the module under test
 import { inventorySync, type SyncParams, type CompletedTransfer } from "../../../../../../src/components/wallet/L3/services/InventorySyncService";
 import { STORAGE_KEY_GENERATORS } from "../../../../../../src/config/storageKeys";
+import { resetInventoryStorage } from "../../../../../../src/components/wallet/L3/services/storage/InventoryStorageAdapter";
 
 // ==========================================
 // Test Fixtures
@@ -483,6 +485,7 @@ const resetMocks = () => {
 describe("inventorySync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetInventoryStorage();  // Reset storage adapter singleton before each test
     clearLocalStorage();
     resetMocks();
   });
