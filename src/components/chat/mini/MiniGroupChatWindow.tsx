@@ -1,10 +1,10 @@
 import { useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { X, Minus, Maximize2, Loader2 } from 'lucide-react';
+import { X, Minus, Maximize2, Loader2, Hash } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { ChatRepository } from '../data/ChatRepository';
-import type { ChatConversation, ChatMessage } from '../data/models';
+import { GroupChatRepository } from '../data/GroupChatRepository';
+import type { Group, GroupMessage } from '../data/groupModels';
 import { useServices } from '../../../contexts/useServices';
 import { useMiniChatStore, createWindowId } from './miniChatStore';
 import { MiniChatInput } from './MiniChatInput';
@@ -16,63 +16,62 @@ const WINDOW_HEIGHT = 455;
 const WINDOW_GAP = 12;
 const BUBBLES_WIDTH = 88;
 
-const chatRepository = ChatRepository.getInstance();
+const groupChatRepository = GroupChatRepository.getInstance();
 
-interface MiniChatWindowProps {
-  conversation: ChatConversation;
+interface MiniGroupChatWindowProps {
+  group: Group;
   index: number;
 }
 
-export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
+export function MiniGroupChatWindow({ group, index }: MiniGroupChatWindowProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { nostrService } = useServices();
+  const { groupChatService, nostrService } = useServices();
   const { closeWindow, minimizeWindow } = useMiniChatStore();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const windowId = createWindowId('dm', conversation.id);
+  const windowId = createWindowId('group', group.id);
+  // Try groupChatService first, fall back to nostrService (which initializes earlier)
+  const myPubkey = groupChatService?.getMyPublicKey() || nostrService?.getMyPublicKey() || '';
 
   const { data: messages = [], isLoading } = useQuery({
-    queryKey: ['chat', 'messages', conversation.id],
-    queryFn: () => chatRepository.getMessagesForConversation(conversation.id),
+    queryKey: ['groupChat', 'messages', group.id],
+    queryFn: () => groupChatRepository.getMessagesForGroup(group.id),
     staleTime: 5000,
   });
 
   // Listen for real-time messages and mark as read
   useEffect(() => {
-    // Mark conversation as read when window is open
-    chatRepository.markConversationAsRead(conversation.id);
-    queryClient.invalidateQueries({ queryKey: ['chat', 'unreadCount'] });
+    // Mark group as read when window is open
+    groupChatRepository.markGroupAsRead(group.id);
+    queryClient.invalidateQueries({ queryKey: ['groupChat', 'unreadCount'] });
 
-    const handleDMReceived = (event: CustomEvent<ChatMessage>) => {
+    const handleGroupMessageReceived = (event: CustomEvent<GroupMessage>) => {
       const message = event.detail;
-      if (message.conversationId === conversation.id) {
-        // Refetch messages for this conversation
-        queryClient.invalidateQueries({ queryKey: ['chat', 'messages', conversation.id] });
+      if (message.groupId === group.id) {
+        // Refetch messages for this group
+        queryClient.invalidateQueries({ queryKey: ['groupChat', 'messages', group.id] });
         // Auto-mark as read since window is open
-        chatRepository.markConversationAsRead(conversation.id);
-        queryClient.invalidateQueries({ queryKey: ['chat', 'unreadCount'] });
+        groupChatRepository.markGroupAsRead(group.id);
+        queryClient.invalidateQueries({ queryKey: ['groupChat', 'unreadCount'] });
       }
     };
 
-    window.addEventListener('dm-received', handleDMReceived as EventListener);
+    window.addEventListener('group-message-received', handleGroupMessageReceived as EventListener);
     return () => {
-      window.removeEventListener('dm-received', handleDMReceived as EventListener);
+      window.removeEventListener('group-message-received', handleGroupMessageReceived as EventListener);
     };
-  }, [conversation.id, queryClient]);
+  }, [group.id, queryClient]);
 
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {
-      const message = await nostrService.sendDirectMessage(
-        conversation.participantPubkey,
-        content,
-        conversation.participantNametag
-      );
+      if (!groupChatService) throw new Error('Group chat service not available');
+      const message = await groupChatService.sendMessage(group.id, content);
       return !!message;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chat', 'messages', conversation.id] });
-      queryClient.invalidateQueries({ queryKey: ['chat', 'conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['groupChat', 'messages', group.id] });
+      queryClient.invalidateQueries({ queryKey: ['groupChat', 'groups'] });
     },
   });
 
@@ -82,8 +81,7 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
 
   const handleExpand = () => {
     closeWindow(windowId);
-    const nametag = conversation.participantNametag || conversation.participantPubkey;
-    navigate(`/agents/chat?nametag=${encodeURIComponent(nametag)}`);
+    navigate(`/agents/chat?mode=global&group=${group.id}`);
   };
 
   const handleSend = async (content: string) => {
@@ -106,12 +104,12 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
       className="fixed bottom-4 z-100000 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-2xl flex flex-col overflow-hidden"
     >
       <div className="p-3 border-b border-neutral-200 dark:border-neutral-700 flex items-center gap-3 bg-linear-to-r from-white to-neutral-50 dark:from-neutral-900 dark:to-neutral-800 shrink-0">
-        <div className={`w-9 h-9 rounded-lg bg-linear-to-br ${getColorFromPubkey(conversation.participantPubkey).gradient} flex items-center justify-center text-white font-medium text-sm shadow-md shrink-0`}>
-          {conversation.getAvatar()}
+        <div className="w-9 h-9 rounded-lg bg-linear-to-br from-purple-500 to-purple-600 flex items-center justify-center text-white font-medium text-sm shadow-md shrink-0">
+          <Hash className="w-4 h-4" />
         </div>
         <div className="flex-1 min-w-0">
           <h4 className="font-medium text-neutral-900 dark:text-white text-sm truncate">
-            {conversation.getDisplayName()}
+            {group.getDisplayName()}
           </h4>
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -157,26 +155,40 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
         ) : (
           <>
             {messages.map((message) => {
-              const isOwn = message.isFromMe;
+              const isOwn = message.senderPubkey === myPubkey;
               return (
                 <div
                   key={message.id}
                   className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}
                 >
-                  <div
-                    className={`max-w-[80%] rounded-2xl px-3 py-2 ${
-                      isOwn
-                        ? 'bg-linear-to-br from-orange-500 to-orange-600 text-white'
-                        : 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white border border-neutral-200 dark:border-neutral-700'
-                    }`}
-                  >
-                    <div className="text-sm leading-relaxed wrap-break-word whitespace-pre-wrap">
-                      <MarkdownContent text={message.content} />
-                    </div>
-                    <div
-                      className={`text-[10px] mt-1 ${isOwn ? 'text-white/60' : 'text-neutral-400'}`}
-                    >
-                      {message.getFormattedTime()}
+                  <div className={`max-w-[80%] ${isOwn ? '' : 'flex gap-2'}`}>
+                    {!isOwn && (
+                      <div className={`w-6 h-6 rounded-full bg-linear-to-br ${getColorFromPubkey(message.senderPubkey).gradient} flex items-center justify-center text-white font-medium text-[10px] shrink-0`}>
+                        {message.getSenderAvatar()}
+                      </div>
+                    )}
+                    <div>
+                      {!isOwn && (
+                        <div className="text-[10px] text-neutral-500 dark:text-neutral-400 mb-0.5 ml-1">
+                          {message.getSenderDisplayName()}
+                        </div>
+                      )}
+                      <div
+                        className={`rounded-2xl px-3 py-2 ${
+                          isOwn
+                            ? 'bg-linear-to-br from-orange-500 to-orange-600 text-white'
+                            : 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white border border-neutral-200 dark:border-neutral-700'
+                        }`}
+                      >
+                        <div className="text-sm leading-relaxed wrap-break-word whitespace-pre-wrap">
+                          <MarkdownContent text={message.content} />
+                        </div>
+                        <div
+                          className={`text-[10px] mt-1 ${isOwn ? 'text-white/60' : 'text-neutral-400'}`}
+                        >
+                          {message.getFormattedTime()}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -190,7 +202,7 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
       <MiniChatInput
         onSend={handleSend}
         isSending={sendMutation.isPending}
-        placeholder={`Message ${conversation.getDisplayName()}...`}
+        placeholder={`Message ${group.getDisplayName()}...`}
       />
     </motion.div>
   );

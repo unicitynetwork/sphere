@@ -4,14 +4,19 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'framer-motion';
 import { MessageCircle } from 'lucide-react';
 import { ChatRepository } from '../data/ChatRepository';
+import { GroupChatRepository } from '../data/GroupChatRepository';
 import type { ChatMessage } from '../data/models';
-import { useMiniChatStore } from './miniChatStore';
+import type { GroupMessage } from '../data/groupModels';
+import { useMiniChatStore, parseWindowId, createWindowId } from './miniChatStore';
 import { MiniChatBubble } from './MiniChatBubble';
+import { MiniGroupChatBubble } from './MiniGroupChatBubble';
 import { MiniChatList } from './MiniChatList';
 import { MiniChatWindow } from './MiniChatWindow';
+import { MiniGroupChatWindow } from './MiniGroupChatWindow';
 
 const MAX_VISIBLE_BUBBLES = 5;
 const chatRepository = ChatRepository.getInstance();
+const groupChatRepository = GroupChatRepository.getInstance();
 
 export function MiniChatBubbles() {
   const queryClient = useQueryClient();
@@ -23,6 +28,7 @@ export function MiniChatBubbles() {
     toggleList,
     closeList,
     openWindow,
+    openGroupWindow,
   } = useMiniChatStore();
 
   const { data: conversations = [] } = useQuery({
@@ -31,11 +37,25 @@ export function MiniChatBubbles() {
     staleTime: 5000,
   });
 
-  const { data: totalUnreadCount = 0 } = useQuery({
+  const { data: groups = [] } = useQuery({
+    queryKey: ['groupChat', 'groups'],
+    queryFn: () => groupChatRepository.getGroups(),
+    staleTime: 5000,
+  });
+
+  const { data: dmUnreadCount = 0 } = useQuery({
     queryKey: ['chat', 'unreadCount'],
     queryFn: () => chatRepository.getTotalUnreadCount(),
     staleTime: 5000,
   });
+
+  const { data: groupUnreadCount = 0 } = useQuery({
+    queryKey: ['groupChat', 'unreadCount'],
+    queryFn: () => groupChatRepository.getTotalUnreadCount(),
+    staleTime: 5000,
+  });
+
+  const totalUnreadCount = dmUnreadCount + groupUnreadCount;
 
   // Listen for real-time message updates
   useEffect(() => {
@@ -53,21 +73,55 @@ export function MiniChatBubbles() {
       queryClient.invalidateQueries({ queryKey: ['chat', 'messages', message.conversationId] });
     };
 
+    const handleGroupChatUpdate = () => {
+      queryClient.invalidateQueries({ queryKey: ['groupChat', 'groups'] });
+      queryClient.invalidateQueries({ queryKey: ['groupChat', 'unreadCount'] });
+    };
+
+    const handleGroupMessageReceived = (event: CustomEvent<GroupMessage>) => {
+      const message = event.detail;
+      queryClient.invalidateQueries({ queryKey: ['groupChat', 'groups'] });
+      queryClient.invalidateQueries({ queryKey: ['groupChat', 'unreadCount'] });
+      queryClient.invalidateQueries({ queryKey: ['groupChat', 'messages', message.groupId] });
+    };
+
     window.addEventListener('chat-updated', handleChatUpdate);
     window.addEventListener('dm-received', handleDMReceived as EventListener);
+    window.addEventListener('group-chat-updated', handleGroupChatUpdate);
+    window.addEventListener('group-message-received', handleGroupMessageReceived as EventListener);
 
     return () => {
       window.removeEventListener('chat-updated', handleChatUpdate);
       window.removeEventListener('dm-received', handleDMReceived as EventListener);
+      window.removeEventListener('group-chat-updated', handleGroupChatUpdate);
+      window.removeEventListener('group-message-received', handleGroupMessageReceived as EventListener);
     };
   }, [queryClient]);
 
-  // Preserve window order based on when they were opened (openWindowIds order)
-  const openWindows = useMemo(() => {
-    return openWindowIds
-      .map((id) => conversations.find((c) => c.id === id))
-      .filter((c): c is NonNullable<typeof c> => c !== undefined);
-  }, [conversations, openWindowIds]);
+  // Parse open windows into DM and group windows
+  const { dmWindows, groupWindows } = useMemo(() => {
+    const dmWindows: { windowId: string; conversation: NonNullable<typeof conversations[0]> }[] = [];
+    const groupWindows: { windowId: string; group: NonNullable<typeof groups[0]> }[] = [];
+
+    for (const windowId of openWindowIds) {
+      const parsed = parseWindowId(windowId);
+      if (!parsed) continue;
+
+      if (parsed.type === 'dm') {
+        const conversation = conversations.find((c) => c.id === parsed.id);
+        if (conversation) {
+          dmWindows.push({ windowId, conversation });
+        }
+      } else if (parsed.type === 'group') {
+        const group = groups.find((g) => g.id === parsed.id);
+        if (group) {
+          groupWindows.push({ windowId, group });
+        }
+      }
+    }
+
+    return { dmWindows, groupWindows };
+  }, [conversations, groups, openWindowIds]);
 
   const sortedConversations = useMemo(() => {
     return [...conversations].sort((a, b) => {
@@ -78,7 +132,8 @@ export function MiniChatBubbles() {
   }, [conversations]);
 
   // Windows that are open and NOT minimized should show as chat windows
-  const windowsToRender = openWindows.filter((w) => !minimizedWindowIds.includes(w.id));
+  const dmWindowsToRender = dmWindows.filter((w) => !minimizedWindowIds.includes(w.windowId));
+  const groupWindowsToRender = groupWindows.filter((w) => !minimizedWindowIds.includes(w.windowId));
 
   // Single list of bubbles: conversations that should show as bubbles (not as windows)
   const visibleBubbles = useMemo(() => {
@@ -92,11 +147,23 @@ export function MiniChatBubbles() {
     // - dismissed ones (closed with ×)
     // - ones that have visible windows (open and not minimized)
     return sortedConversations
-      .filter((c) => !dismissedIds.has(c.id) && !visibleWindowIds.has(c.id))
+      .filter((c) => {
+        const windowId = createWindowId('dm', c.id);
+        return !dismissedIds.has(windowId) && !visibleWindowIds.has(windowId);
+      })
       .slice(0, MAX_VISIBLE_BUBBLES);
   }, [sortedConversations, openWindowIds, minimizedWindowIds, dismissedWindowIds]);
 
-  if (conversations.length === 0) {
+  // Group bubbles: groups that have minimized windows
+  const visibleGroupBubbles = useMemo(() => {
+    return groups.filter((g) => {
+      const windowId = createWindowId('group', g.id);
+      // Show as bubble if: window is open AND minimized
+      return openWindowIds.includes(windowId) && minimizedWindowIds.includes(windowId);
+    });
+  }, [groups, openWindowIds, minimizedWindowIds]);
+
+  if (conversations.length === 0 && groups.length === 0) {
     return null;
   }
 
@@ -120,12 +187,21 @@ export function MiniChatBubbles() {
 
         <AnimatePresence mode="popLayout">
           {!isListExpanded &&
+            visibleGroupBubbles.map((group, index) => (
+              <MiniGroupChatBubble
+                key={`group-${group.id}`}
+                group={group}
+                onClick={() => openGroupWindow(group)}
+                index={index}
+              />
+            ))}
+          {!isListExpanded &&
             visibleBubbles.map((conversation, index) => (
               <MiniChatBubble
                 key={conversation.id}
                 conversation={conversation}
                 onClick={() => openWindow(conversation)}
-                index={index}
+                index={visibleGroupBubbles.length + index}
               />
             ))}
         </AnimatePresence>
@@ -139,11 +215,18 @@ export function MiniChatBubbles() {
         </AnimatePresence>
 
         <AnimatePresence>
-          {windowsToRender.map((conversation, index) => (
+          {dmWindowsToRender.map(({ windowId, conversation }, index) => (
             <MiniChatWindow
-              key={conversation.id}
+              key={windowId}
               conversation={conversation}
               index={index}
+            />
+          ))}
+          {groupWindowsToRender.map(({ windowId, group }, index) => (
+            <MiniGroupChatWindow
+              key={windowId}
+              group={group}
+              index={dmWindowsToRender.length + index}
             />
           ))}
         </AnimatePresence>

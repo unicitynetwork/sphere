@@ -1,8 +1,30 @@
 import { useSyncExternalStore, useCallback } from 'react';
 import type { ChatConversation } from '../data/models';
+import type { Group } from '../data/groupModels';
 
 const STORAGE_KEY = 'sphere_mini_chat';
 const MAX_OPEN_WINDOWS = 3;
+
+// Window ID format: "dm:{conversationId}" or "group:{groupId}"
+export type WindowType = 'dm' | 'group';
+
+export function createWindowId(type: WindowType, id: string): string {
+  return `${type}:${id}`;
+}
+
+export function parseWindowId(windowId: string): { type: WindowType; id: string } | null {
+  const colonIndex = windowId.indexOf(':');
+  if (colonIndex === -1) {
+    // Legacy format - assume DM
+    return { type: 'dm', id: windowId };
+  }
+  const type = windowId.slice(0, colonIndex) as WindowType;
+  const id = windowId.slice(colonIndex + 1);
+  if (type !== 'dm' && type !== 'group') {
+    return null;
+  }
+  return { type, id };
+}
 
 interface MiniChatState {
   openWindowIds: string[];
@@ -73,26 +95,38 @@ export const miniChatStore = {
     return () => listeners.delete(listener);
   },
 
-  // Open a chat window (or restore if minimized)
+  // Open a DM chat window (or restore if minimized)
   openWindow: (conversation: ChatConversation) => {
-    const isAlreadyOpen = state.openWindowIds.includes(conversation.id);
-    const isMinimized = state.minimizedWindowIds.includes(conversation.id);
+    const windowId = createWindowId('dm', conversation.id);
+    miniChatStore.openWindowById(windowId);
+  },
+
+  // Open a group chat window (or restore if minimized)
+  openGroupWindow: (group: Group) => {
+    const windowId = createWindowId('group', group.id);
+    miniChatStore.openWindowById(windowId);
+  },
+
+  // Internal: open window by full ID
+  openWindowById: (windowId: string) => {
+    const isAlreadyOpen = state.openWindowIds.includes(windowId);
+    const isMinimized = state.minimizedWindowIds.includes(windowId);
 
     if (isAlreadyOpen && !isMinimized) {
       return; // Already open and visible
     }
 
     const nextOpenIds = [...state.openWindowIds];
-    const nextMinimizedIds = state.minimizedWindowIds.filter((id) => id !== conversation.id);
+    const nextMinimizedIds = state.minimizedWindowIds.filter((id) => id !== windowId);
     // Remove from dismissed when opening
-    const nextDismissedIds = state.dismissedWindowIds.filter((id) => id !== conversation.id);
+    const nextDismissedIds = state.dismissedWindowIds.filter((id) => id !== windowId);
 
     if (!isAlreadyOpen) {
       // Add to open windows
       if (nextOpenIds.length >= MAX_OPEN_WINDOWS) {
         nextOpenIds.shift();
       }
-      nextOpenIds.push(conversation.id);
+      nextOpenIds.push(windowId);
     }
 
     state = {
@@ -176,12 +210,16 @@ export function useMiniChatStore() {
     miniChatStore.openWindow(conversation);
   }, []);
 
-  const closeWindow = useCallback((conversationId: string) => {
-    miniChatStore.closeWindow(conversationId);
+  const openGroupWindow = useCallback((group: Group) => {
+    miniChatStore.openGroupWindow(group);
   }, []);
 
-  const minimizeWindow = useCallback((conversationId: string) => {
-    miniChatStore.minimizeWindow(conversationId);
+  const closeWindow = useCallback((windowId: string) => {
+    miniChatStore.closeWindow(windowId);
+  }, []);
+
+  const minimizeWindow = useCallback((windowId: string) => {
+    miniChatStore.minimizeWindow(windowId);
   }, []);
 
   const toggleList = useCallback(() => {
@@ -194,13 +232,14 @@ export function useMiniChatStore() {
 
   // Check if a window is minimized
   const isMinimized = useCallback(
-    (conversationId: string) => storeState.minimizedWindowIds.includes(conversationId),
+    (windowId: string) => storeState.minimizedWindowIds.includes(windowId),
     [storeState.minimizedWindowIds]
   );
 
   return {
     ...storeState,
     openWindow,
+    openGroupWindow,
     closeWindow,
     minimizeWindow,
     toggleList,

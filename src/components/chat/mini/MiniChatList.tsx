@@ -1,29 +1,43 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { X, Search, MessageCirclePlus } from 'lucide-react';
+import { X, Search, MessageCirclePlus, Hash, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { ChatRepository } from '../data/ChatRepository';
+import { GroupChatRepository } from '../data/GroupChatRepository';
 import { useMiniChatStore } from './miniChatStore';
 import type { ChatConversation } from '../data/models';
+import type { Group } from '../data/groupModels';
 import { getColorFromPubkey } from '../utils/avatarColors';
+
+type ChatMode = 'dm' | 'global';
 
 interface MiniChatListProps {
   onClose: () => void;
 }
 
 const chatRepository = ChatRepository.getInstance();
+const groupChatRepository = GroupChatRepository.getInstance();
 
 export function MiniChatList({ onClose }: MiniChatListProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { openWindow } = useMiniChatStore();
+  const { openWindow, openGroupWindow } = useMiniChatStore();
   const [searchQuery, setSearchQuery] = useState('');
+  const [chatMode, setChatMode] = useState<ChatMode>('dm');
   const listRef = useRef<HTMLDivElement>(null);
 
+  // DM conversations query
   const { data: conversations = [] } = useQuery({
     queryKey: ['chat', 'conversations'],
     queryFn: () => chatRepository.getConversations(),
+    staleTime: 30000,
+  });
+
+  // Group chats query
+  const { data: groups = [] } = useQuery({
+    queryKey: ['groupChat', 'groups'],
+    queryFn: () => groupChatRepository.getGroups(),
     staleTime: 30000,
   });
 
@@ -36,6 +50,16 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
         c.lastMessageText.toLowerCase().includes(query)
     );
   }, [conversations, searchQuery]);
+
+  const filteredGroups = useMemo(() => {
+    if (!searchQuery.trim()) return groups;
+    const query = searchQuery.toLowerCase();
+    return groups.filter(
+      (g) =>
+        g.name.toLowerCase().includes(query) ||
+        g.lastMessageText.toLowerCase().includes(query)
+    );
+  }, [groups, searchQuery]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -64,6 +88,13 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
     openWindow(conversation);
   };
 
+  const handleGroupClick = (group: Group) => {
+    groupChatRepository.markGroupAsRead(group.id);
+    queryClient.invalidateQueries({ queryKey: ['groupChat', 'unreadCount'] });
+    queryClient.invalidateQueries({ queryKey: ['groupChat', 'groups'] });
+    openGroupWindow(group);
+  };
+
   const handleNewConversation = () => {
     onClose();
     navigate('/agents/chat?mode=dm&new=true');
@@ -81,15 +112,17 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
       <div className="p-4 border-b border-neutral-200 dark:border-neutral-700 flex items-center justify-between shrink-0">
         <h3 className="text-lg font-semibold text-neutral-900 dark:text-white">Messages</h3>
         <div className="flex items-center gap-2">
-          <motion.button
-            onClick={handleNewConversation}
-            className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 dark:text-neutral-400 transition-colors"
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            title="New conversation"
-          >
-            <MessageCirclePlus className="w-5 h-5" />
-          </motion.button>
+          {chatMode === 'dm' && (
+            <motion.button
+              onClick={handleNewConversation}
+              className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 dark:text-neutral-400 transition-colors"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              title="New conversation"
+            >
+              <MessageCirclePlus className="w-5 h-5" />
+            </motion.button>
+          )}
           <motion.button
             onClick={onClose}
             className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 dark:text-neutral-400 transition-colors"
@@ -101,27 +134,60 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
         </div>
       </div>
 
+      {/* Mode Toggle Tabs */}
       <div className="p-3 border-b border-neutral-200 dark:border-neutral-700 shrink-0">
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <motion.button
+            onClick={() => setChatMode('global')}
+            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+              chatMode === 'global'
+                ? 'bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30'
+                : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700'
+            }`}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <Hash className="w-4 h-4" />
+            <span>Global</span>
+          </motion.button>
+          <motion.button
+            onClick={() => setChatMode('dm')}
+            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+              chatMode === 'dm'
+                ? 'bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30'
+                : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700'
+            }`}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <User className="w-4 h-4" />
+            <span>DM</span>
+          </motion.button>
+        </div>
+
+        {/* Search */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search conversations..."
+            placeholder={chatMode === 'dm' ? 'Search conversations...' : 'Search groups...'}
             className="w-full pl-10 pr-4 py-2 bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white placeholder-neutral-400 rounded-xl outline-none text-sm border border-transparent focus:border-orange-500 transition-colors"
           />
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto min-h-0">
-        {filteredConversations.length === 0 ? (
-          <div className="p-8 text-center text-neutral-500 dark:text-neutral-400">
-            <p className="text-sm">No conversations found</p>
-          </div>
-        ) : (
-          <div className="p-2">
-            {filteredConversations.map((conversation) => (
+        {chatMode === 'dm' ? (
+          // DM Conversations
+          filteredConversations.length === 0 ? (
+            <div className="p-8 text-center text-neutral-500 dark:text-neutral-400">
+              <p className="text-sm">No conversations found</p>
+            </div>
+          ) : (
+            <div className="p-2">
+              {filteredConversations.map((conversation) => (
                 <motion.button
                   key={conversation.id}
                   onClick={() => handleConversationClick(conversation)}
@@ -154,7 +220,51 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
                   </div>
                 </motion.button>
               ))}
-          </div>
+            </div>
+          )
+        ) : (
+          // Global Groups
+          filteredGroups.length === 0 ? (
+            <div className="p-8 text-center text-neutral-500 dark:text-neutral-400">
+              <p className="text-sm">No groups found</p>
+            </div>
+          ) : (
+            <div className="p-2">
+              {filteredGroups.map((group) => (
+                <motion.button
+                  key={group.id}
+                  onClick={() => handleGroupClick(group)}
+                  className="w-full p-3 rounded-xl flex items-center gap-3 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.99 }}
+                >
+                  <div className="w-10 h-10 rounded-xl bg-linear-to-br from-purple-500 to-purple-600 flex items-center justify-center text-white font-medium text-sm shrink-0 shadow-md">
+                    <Hash className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1 min-w-0 text-left">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-neutral-900 dark:text-white truncate text-sm">
+                        {group.name}
+                      </span>
+                      <span className="text-xs text-neutral-500 dark:text-neutral-400 shrink-0">
+                        {group.getFormattedLastMessageTime()}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">
+                        {group.lastMessageText || 'No messages yet'}
+                      </p>
+                      {group.unreadCount > 0 && (
+                        <span className="text-xs px-1.5 py-0.5 rounded-full bg-orange-500 text-white shrink-0">
+                          {group.unreadCount > 99 ? '99+' : group.unreadCount}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </motion.button>
+              ))}
+            </div>
+          )
         )}
       </div>
 
@@ -162,7 +272,7 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
         <motion.button
           onClick={() => {
             onClose();
-            navigate('/agents/chat');
+            navigate(`/agents/chat${chatMode === 'global' ? '?mode=global' : ''}`);
           }}
           className="w-full py-2 text-sm text-orange-500 hover:text-orange-600 font-medium transition-colors"
           whileHover={{ scale: 1.02 }}

@@ -370,6 +370,10 @@ export class GroupChatService {
 
     if (event.kind === NIP29_KINDS.GROUP_METADATA) {
       // Update group metadata
+      if (!event.content || event.content.trim() === '') {
+        // Empty metadata content - skip parsing
+        return;
+      }
       try {
         const metadata = JSON.parse(event.content);
         group.name = metadata.name || group.name;
@@ -377,8 +381,9 @@ export class GroupChatService {
         group.picture = metadata.picture || group.picture;
         group.updatedAt = event.created_at * 1000;
         this.repository.saveGroup(group);
-      } catch (e) {
-        console.error('Failed to parse group metadata', e);
+      } catch {
+        // Silently ignore invalid JSON - this is common for relay events
+        console.debug('Skipping invalid group metadata JSON');
       }
     } else if (event.kind === NIP29_KINDS.GROUP_MEMBERS) {
       // Update member list
@@ -1013,20 +1018,44 @@ export class GroupChatService {
       const wrappedContent = this.wrapMessageContent(content, senderNametag);
 
       console.log(`📡 Publishing message event kind=${kind} to group ${groupId}`);
-      const eventId = await this.client.createAndPublishEvent({
-        kind,
-        tags,
-        content: wrappedContent,
-      });
+
+      // Retry logic for auth-required errors (race condition with NIP-42 auth)
+      let eventId: string | null = null;
+      let lastError: Error | null = null;
+      const maxRetries = 3;
+      const retryDelayMs = 500;
+
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          eventId = await this.client.createAndPublishEvent({
+            kind,
+            tags,
+            content: wrappedContent,
+          });
+          break; // Success, exit retry loop
+        } catch (err) {
+          lastError = err as Error;
+          const isAuthError = lastError.message?.includes('auth-required');
+
+          if (isAuthError && attempt < maxRetries) {
+            console.log(`⏳ Auth required, retrying in ${retryDelayMs}ms (attempt ${attempt}/${maxRetries})...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+          } else {
+            throw lastError;
+          }
+        }
+      }
 
       if (eventId) {
         console.log(`✅ Message published with event ID: ${eventId}`);
+        // Use the Nostr client's pubkey (not L3 identity) to match incoming messages
+        const myPubkey = this.getMyPublicKey();
         const message = new GroupMessage({
           id: eventId,
           groupId,
           content,
           timestamp: Date.now(),
-          senderPubkey: identity.publicKey,
+          senderPubkey: myPubkey || identity.publicKey,
           senderNametag: senderNametag || undefined,
           replyToId,
           previousIds,
