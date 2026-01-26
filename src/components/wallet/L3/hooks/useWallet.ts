@@ -848,21 +848,27 @@ export const useWallet = () => {
           onPreTransferSync: async () => {
             // Sync to IPFS before submitting transfer to aggregator
             // This ensures we have a backup before the final commitment
-            // Uses HIGH priority so it jumps ahead of auto-syncs in the queue
+            // Uses inventorySync directly (not legacy ipfsService.syncNow)
+            // with skipExtendedVerification for fast mode
             try {
-              const result = await ipfsService.syncNow({
-                priority: SyncPriority.HIGH,
-                timeout: 60000,
-                callerContext: 'pre-transfer-sync',
+              if (!identity.ipnsName) {
+                console.error(`❌ Pre-transfer sync: No IPNS name available`);
+                return false;
+              }
+
+              const result = await inventorySync({
+                address: identity.address,
+                publicKey: identity.publicKey,
+                ipnsName: identity.ipnsName,
                 skipExtendedVerification: true, // Fast mode: safety guaranteed by HTTP 200
               });
 
-              if (result.success) {
+              if (result.status === 'SUCCESS' || result.status === 'PARTIAL_SUCCESS') {
                 console.log(`☁️ Pre-transfer IPFS sync completed (tokens backed up)`);
                 return true;
               }
 
-              console.error(`❌ Pre-transfer IPFS sync failed: ${result.error}`);
+              console.error(`❌ Pre-transfer IPFS sync failed: ${result.errorMessage}`);
               return false;
             } catch (err) {
               console.error(`❌ Pre-transfer IPFS sync error:`, err);
@@ -1078,23 +1084,28 @@ export const useWallet = () => {
     // 5. Sync to IPFS if enabled (skip if IPFS is disabled)
     const isIpfsEnabled = import.meta.env.VITE_ENABLE_IPFS !== 'false';
     if (isIpfsEnabled) {
-      // Uses HIGH priority so it jumps ahead of auto-syncs in the queue
+      // Uses inventorySync directly (not legacy ipfsService.syncNow)
+      // with skipExtendedVerification for fast mode
       try {
-        const ipfsService = IpfsStorageService.getInstance(identityManager);
-        const syncResult = await ipfsService.syncNow({
-          priority: SyncPriority.HIGH,
-          timeout: 60000,
-          callerContext: 'outbox-pre-transfer',
+        if (!identity.ipnsName) {
+          outboxRepo.removeEntry(outboxEntry.id);
+          throw new Error(`Failed to sync outbox to IPFS - no IPNS name available`);
+        }
+
+        const syncResult = await inventorySync({
+          address: identity.address,
+          publicKey: identity.publicKey,
+          ipnsName: identity.ipnsName,
           skipExtendedVerification: true, // Fast mode: safety guaranteed by HTTP 200
         });
 
-        if (!syncResult.success) {
+        if (syncResult.status !== 'SUCCESS' && syncResult.status !== 'PARTIAL_SUCCESS') {
           // Remove outbox entry since we didn't start the transfer
           outboxRepo.removeEntry(outboxEntry.id);
-          throw new Error(`Failed to sync outbox to IPFS - aborting transfer: ${syncResult.error}`);
+          throw new Error(`Failed to sync outbox to IPFS - aborting transfer: ${syncResult.errorMessage}`);
         }
 
-        console.log(`📤 Outbox entry synced to IPFS: ${syncResult.cid?.slice(0, 12)}...`);
+        console.log(`📤 Outbox entry synced to IPFS: ${syncResult.lastCid?.slice(0, 12)}...`);
       } catch (err) {
         // Remove outbox entry if IPFS sync failed
         outboxRepo.removeEntry(outboxEntry.id);
