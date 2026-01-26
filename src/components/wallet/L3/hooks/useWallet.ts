@@ -743,6 +743,17 @@ export const useWallet = () => {
           nostrService,
           recipientNametag
         );
+
+        // Record direct transfer to transaction history
+        const def = registryService.getCoinDefinition(params.coinId);
+        const iconUrl = def ? registryService.getIconUrl(def) || undefined : undefined;
+        addSentTransaction(
+          item.amount.toString(),
+          params.coinId,
+          def?.symbol || 'UNK',
+          iconUrl,
+          recipientNametag
+        );
       }
 
       // 4. EXECUTE SPLIT
