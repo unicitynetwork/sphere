@@ -307,6 +307,30 @@ export function L3WalletView({
               console.warn(`⚠️ Auto-repair error for "${nametag}":`, repairErr);
               // Don't show warning for transient errors - will retry on next load
             }
+          } else if (result.nametag?.isOnAggregator === false) {
+            // Nametag not on aggregator - attempt recovery
+            console.log(`🔧 Nametag "${nametag}" not on aggregator, attempting recovery...`);
+            try {
+              // Import services for recovery
+              const { NametagService } = await import('../services/NametagService');
+              const { IdentityManager: IdMgr } = await import('../services/IdentityManager');
+              const identityManager = IdMgr.getInstance();
+              const nametagService = NametagService.getInstance(identityManager);
+              const recovered = await nametagService.recoverNametagProofs();
+              if (recovered) {
+                console.log(`✅ Nametag "${nametag}" recovered on aggregator`);
+                setUnicityIdWarning(null);
+                // Trigger inventory sync to recover affected tokens
+                const { IpfsStorageService, SyncPriority } = await import('../services/IpfsStorageService');
+                await IpfsStorageService.getInstance(identityManager).syncNow({ priority: SyncPriority.HIGH });
+              } else {
+                setUnicityIdWarning(`Nametag "${nametag}" recovery failed. Please re-register.`);
+              }
+            } catch (recoveryErr) {
+              const errMsg = recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr);
+              console.warn(`⚠️ Nametag recovery failed for "${nametag}":`, recoveryErr);
+              setUnicityIdWarning(`Nametag recovery failed: ${errMsg}`);
+            }
           } else if (result.errors.length > 0) {
             // Other non-critical errors
             setUnicityIdWarning(result.errors[0]);

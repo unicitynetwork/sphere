@@ -815,101 +815,58 @@ export class TokenValidationService {
     }
 
     try {
-      const { ServiceProvider } = await import("./ServiceProvider");
-      const skipVerification = ServiceProvider.isTrustBaseVerificationSkipped();
+      // Query aggregator using RequestId derived from publicKey + stateHash
+      // This approach works for tombstone verification where we only have tokenId + stateHash
+      const { RequestId } = await import(
+        "@unicitylabs/state-transition-sdk/lib/api/RequestId"
+      );
+      const { DataHash } = await import(
+        "@unicitylabs/state-transition-sdk/lib/hash/DataHash"
+      );
+
+      const pubKeyBytes = Buffer.from(publicKey, "hex");
+
+      // Parse stateHash using SDK's DataHash
+      const stateHashObj = DataHash.fromJSON(stateHash);
+
+      // Create RequestId exactly as SDK does
+      const requestId = await RequestId.create(pubKeyBytes, stateHashObj);
+
+      // Query aggregator for inclusion/exclusion proof
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const response = await (client as any).getInclusionProof(requestId);
 
       let isSpent: boolean;
 
-      if (skipVerification) {
-        // DEV MODE: Query aggregator using RequestId derived from publicKey + stateHash
-        const { RequestId } = await import(
-          "@unicitylabs/state-transition-sdk/lib/api/RequestId"
-        );
-        const { DataHash } = await import(
-          "@unicitylabs/state-transition-sdk/lib/hash/DataHash"
-        );
-
-        const pubKeyBytes = Buffer.from(publicKey, "hex");
-
-        // Parse stateHash using SDK's DataHash
-        const stateHashObj = DataHash.fromJSON(stateHash);
-
-        // Create RequestId exactly as SDK does
-        const requestId = await RequestId.create(pubKeyBytes, stateHashObj);
-
-        // Query aggregator for inclusion/exclusion proof
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const response = await (client as any).getInclusionProof(requestId);
-
-        if (!response.inclusionProof) {
-          isSpent = false;
-        } else {
-          const proof = response.inclusionProof;
-
-          // Verify the hashpath cryptographically corresponds to our RequestId
-          const pathResult = await proof.merkleTreePath.verify(
-            requestId.toBitString().toBigInt()
-          );
-
-          if (!pathResult.isPathValid) {
-            // Invalid proof - assume unspent for safety
-            console.warn(`⚠️ [isTokenStateSpent] Invalid hashpath for ${tokenId.slice(0, 16)}... - assuming unspent`);
-            isSpent = false;
-          } else if (pathResult.isPathIncluded && proof.authenticator !== null) {
-            // Valid INCLUSION proof: state was spent
-            isSpent = true;
-          } else if (!pathResult.isPathIncluded && proof.authenticator === null) {
-            // Valid EXCLUSION proof: state is unspent
-            isSpent = false;
-          } else if (pathResult.isPathIncluded && proof.authenticator === null) {
-            // SECURITY VIOLATION: path included but no authenticator
-            console.error(`❌ SECURITY VIOLATION: pathIncluded=true but authenticator=null for token ${tokenId.slice(0, 16)}...`);
-            // Assume unspent for safety (don't trust invalid proof)
-            isSpent = false;
-          } else {
-            // Contradictory: authenticator present but path doesn't lead to RequestId
-            console.warn(`⚠️ [isTokenStateSpent] Invalid proof state for ${tokenId.slice(0, 16)}... - assuming unspent`);
-            isSpent = false;
-          }
-        }
+      if (!response.inclusionProof) {
+        isSpent = false;
       } else {
-        // PRODUCTION MODE: We need a full token to use SDK's isTokenStateSpent
-        // This is a limitation - for now, fall back to dev mode logic
-        // Future enhancement: Store full token in tombstones for verification
-        console.warn(`⚠️ [isTokenStateSpent] Production mode requires full token - falling back to dev mode logic`);
+        const proof = response.inclusionProof;
 
-        // Use the same dev mode logic above
-        const { RequestId } = await import(
-          "@unicitylabs/state-transition-sdk/lib/api/RequestId"
-        );
-        const { DataHash } = await import(
-          "@unicitylabs/state-transition-sdk/lib/hash/DataHash"
+        // Verify the hashpath cryptographically corresponds to our RequestId
+        const pathResult = await proof.merkleTreePath.verify(
+          requestId.toBitString().toBigInt()
         );
 
-        const pubKeyBytes = Buffer.from(publicKey, "hex");
-        const stateHashObj = DataHash.fromJSON(stateHash);
-        const requestId = await RequestId.create(pubKeyBytes, stateHashObj);
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const response = await (client as any).getInclusionProof(requestId);
-
-        if (!response.inclusionProof) {
+        if (!pathResult.isPathValid) {
+          // Invalid proof - assume unspent for safety
+          console.warn(`⚠️ [isTokenStateSpent] Invalid hashpath for ${tokenId.slice(0, 16)}... - assuming unspent`);
+          isSpent = false;
+        } else if (pathResult.isPathIncluded && proof.authenticator !== null) {
+          // Valid INCLUSION proof: state was spent
+          isSpent = true;
+        } else if (!pathResult.isPathIncluded && proof.authenticator === null) {
+          // Valid EXCLUSION proof: state is unspent
+          isSpent = false;
+        } else if (pathResult.isPathIncluded && proof.authenticator === null) {
+          // SECURITY VIOLATION: path included but no authenticator
+          console.error(`❌ SECURITY VIOLATION: pathIncluded=true but authenticator=null for token ${tokenId.slice(0, 16)}...`);
+          // Assume unspent for safety (don't trust invalid proof)
           isSpent = false;
         } else {
-          const proof = response.inclusionProof;
-          const pathResult = await proof.merkleTreePath.verify(
-            requestId.toBitString().toBigInt()
-          );
-
-          if (!pathResult.isPathValid) {
-            isSpent = false;
-          } else if (pathResult.isPathIncluded && proof.authenticator !== null) {
-            isSpent = true;
-          } else if (!pathResult.isPathIncluded && proof.authenticator === null) {
-            isSpent = false;
-          } else {
-            isSpent = false;
-          }
+          // Contradictory: authenticator present but path doesn't lead to RequestId
+          console.warn(`⚠️ [isTokenStateSpent] Invalid proof state for ${tokenId.slice(0, 16)}... - assuming unspent`);
+          isSpent = false;
         }
       }
 

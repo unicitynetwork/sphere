@@ -19,6 +19,9 @@ export interface SyncModeParams {
   /** Force NAMETAG mode (fetch nametag token only) */
   nametag?: boolean;
 
+  /** Recovery depth for RECOVERY mode (0 = unlimited, >0 = max versions to traverse) */
+  recoveryDepth?: number;
+
   /** Incoming tokens from Nostr/peer transfer (triggers FAST mode) */
   incomingTokens?: Token[] | null;
 
@@ -34,13 +37,18 @@ export interface SyncModeParams {
  *
  * Precedence Order (Section 6.1):
  * 1. LOCAL = true or circuit breaker active → LOCAL mode
- * 2. NAMETAG = true → NAMETAG mode
- * 3. incomingTokens OR outboxTokens non-empty → FAST mode
- * 4. Default → NORMAL mode
+ * 2. recoveryDepth set (>=0) → RECOVERY mode
+ * 3. NAMETAG = true → NAMETAG mode
+ * 4. incomingTokens OR outboxTokens non-empty → FAST mode
+ * 5. Default → NORMAL mode
  *
  * @example
  * // Force LOCAL mode
  * detectSyncMode({ local: true }); // Returns 'LOCAL'
+ *
+ * @example
+ * // RECOVERY mode with depth limit
+ * detectSyncMode({ recoveryDepth: 10 }); // Returns 'RECOVERY'
  *
  * @example
  * // FAST mode from incoming tokens
@@ -54,6 +62,7 @@ export function detectSyncMode(params: SyncModeParams): SyncMode {
   const {
     local = false,
     nametag = false,
+    recoveryDepth,
     incomingTokens,
     outboxTokens,
     circuitBreaker
@@ -69,12 +78,18 @@ export function detectSyncMode(params: SyncModeParams): SyncMode {
     return 'LOCAL';
   }
 
-  // Precedence 2: NAMETAG mode
+  // Precedence 2: RECOVERY mode (explicit recovery depth set)
+  // Note: recoveryDepth=0 means unlimited recovery, so we check !== undefined
+  if (recoveryDepth !== undefined && recoveryDepth >= 0) {
+    return 'RECOVERY';
+  }
+
+  // Precedence 3: NAMETAG mode
   if (nametag === true) {
     return 'NAMETAG';
   }
 
-  // Precedence 3: FAST mode (either incoming OR outbox non-empty)
+  // Precedence 4: FAST mode (either incoming OR outbox non-empty)
   const hasIncoming = Array.isArray(incomingTokens) && incomingTokens.length > 0;
   const hasOutbox = Array.isArray(outboxTokens) && outboxTokens.length > 0;
 
@@ -82,7 +97,7 @@ export function detectSyncMode(params: SyncModeParams): SyncMode {
     return 'FAST';
   }
 
-  // Precedence 4: Default to NORMAL
+  // Precedence 5: Default to NORMAL
   return 'NORMAL';
 }
 

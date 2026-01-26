@@ -24,6 +24,9 @@ import { getNametagForAddress } from "../components/wallet/L3/services/Inventory
 import { STORAGE_KEY_GENERATORS } from "../config/storageKeys";
 import type { NametagData } from "../components/wallet/L3/services/types/TxfTypes";
 import type { InvalidatedNametagEntry } from "../components/wallet/L3/services/types/TxfTypes";
+import { ServiceProvider } from "../components/wallet/L3/services/ServiceProvider";
+import { MintCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/MintCommitment";
+import { MintTransactionData } from "@unicitylabs/state-transition-sdk/lib/transaction/MintTransactionData";
 
 export interface UnicityIdValidationResult {
   isValid: boolean;
@@ -36,6 +39,7 @@ export interface UnicityIdValidationResult {
     name: string;
     hasToken: boolean;
     tokenRecipient: string | null;
+    isOnAggregator: boolean | null; // null if check not performed
   } | null;
   nostrBinding: {
     resolvedPubkey: string | null;
@@ -147,7 +151,7 @@ export async function validateUnicityId(): Promise<UnicityIdValidationResult> {
 
     if (!nametagData) {
       errors.push("No nametag registered locally");
-      result.nametag = { name: "", hasToken: false, tokenRecipient: null };
+      result.nametag = { name: "", hasToken: false, tokenRecipient: null, isOnAggregator: null };
     } else {
       nametagName = nametagData.name;
       const hasToken = !!nametagData.token;
@@ -155,10 +159,55 @@ export async function validateUnicityId(): Promise<UnicityIdValidationResult> {
       const token = nametagData.token as any;
       const tokenRecipient = token?.genesis?.data?.recipient || null;
 
+      // Check if nametag is on aggregator (critical for receiving tokens)
+      let isOnAggregator: boolean | null = null;
+      if (hasToken && token?.genesis?.data?.salt) {
+        try {
+          // Reconstruct the MintCommitment to get the correct requestId
+          const genesisData = token.genesis.data;
+          const mintDataJson = {
+            tokenId: genesisData.tokenId,
+            tokenType: genesisData.tokenType,
+            tokenData: genesisData.tokenData || null,
+            coinData: genesisData.coinData && genesisData.coinData.length > 0 ? genesisData.coinData : null,
+            recipient: genesisData.recipient,
+            salt: genesisData.salt,
+            recipientDataHash: genesisData.recipientDataHash,
+            reason: genesisData.reason ? JSON.parse(genesisData.reason) : null,
+          };
+
+          const mintTransactionData = await MintTransactionData.fromJSON(mintDataJson);
+          const commitment = await MintCommitment.create(mintTransactionData);
+          const requestId = commitment.requestId;
+
+          console.log(`🔍 Checking aggregator for nametag requestId: ${requestId.toJSON().slice(0, 16)}...`);
+
+          const client = ServiceProvider.stateTransitionClient;
+          const response = await client.getInclusionProof(requestId);
+
+          // Check if it's an inclusion proof (has authenticator) vs exclusion proof (authenticator === null)
+          if (response.inclusionProof && response.inclusionProof.authenticator !== null) {
+            isOnAggregator = true;
+            console.log(`✅ Nametag verified on aggregator`);
+          } else {
+            isOnAggregator = false;
+            console.log(`❌ Nametag NOT found on aggregator (exclusion proof)`);
+            errors.push(
+              `Nametag "${nametagName}" is NOT registered on the aggregator. ` +
+              `You cannot receive tokens until you re-register your nametag.`
+            );
+          }
+        } catch (err) {
+          console.log(`⚠️ Could not verify nametag on aggregator: ${err instanceof Error ? err.message : String(err)}`);
+          warnings.push(`Could not verify nametag on aggregator: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
       result.nametag = {
         name: nametagName,
         hasToken,
         tokenRecipient,
+        isOnAggregator,
       };
 
       console.log(`✅ Local nametag: "${nametagName}"`);

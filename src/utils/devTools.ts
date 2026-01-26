@@ -65,6 +65,8 @@ declare global {
     devRestoreNametag: (nametagName: string) => Promise<boolean>;
     devDumpNametagToken: () => Promise<unknown>;
     devInspectIpfs: () => Promise<unknown>;
+    devRecoverInventory: (depth?: number) => Promise<RecoverInventoryResult>;
+    devFetchCid: (cid: string) => Promise<unknown>;
   }
 }
 
@@ -76,6 +78,18 @@ export interface RecoverCorruptedTokensResult {
   recovered: number;
   failed: number;
   details: Array<{ tokenId: string; status: string; error?: string }>;
+}
+
+/**
+ * Result of the devRecoverInventory operation (RECOVERY mode)
+ */
+export interface RecoverInventoryResult {
+  success: boolean;
+  versionsTraversed: number;
+  tokensRecovered: number;
+  oldestCidReached?: string;
+  error?: string;
+  duration: number;
 }
 
 /**
@@ -142,7 +156,7 @@ interface ProofRequest {
  * Submit a commitment to the aggregator
  * Returns: "SUCCESS" | "REQUEST_ID_EXISTS" | error message
  */
-async function submitCommitmentToAggregator(
+export async function submitTransferCommitmentToAggregator(
   commitment: TransferCommitment
 ): Promise<{ success: boolean; status: string }> {
   try {
@@ -163,7 +177,7 @@ async function submitCommitmentToAggregator(
  * Submit a mint commitment to the aggregator
  * Returns: "SUCCESS" | "REQUEST_ID_EXISTS" | error message
  */
-async function submitMintCommitmentToAggregator(
+export async function submitMintCommitmentToAggregator(
   commitment: MintCommitment<IMintTransactionReason>
 ): Promise<{ success: boolean; status: string }> {
   try {
@@ -187,7 +201,7 @@ async function submitMintCommitmentToAggregator(
  * Uses MintTransactionData.fromJSON() to parse the genesis data and
  * then creates a MintCommitment from it.
  */
-async function reconstructMintCommitment(
+export async function reconstructMintCommitment(
   genesis: TxfGenesis
 ): Promise<{ commitment: MintCommitment<IMintTransactionReason> | null; error?: string }> {
   try {
@@ -243,7 +257,7 @@ async function reconstructMintCommitment(
  * - If authenticator is present: inclusion proof (commitment exists in tree)
  * - If authenticator is null: exclusion proof (commitment NOT in tree, e.g., after tree reset)
  */
-function isInclusionProofNotExclusion(proofJson: TxfInclusionProof | null): boolean {
+export function isInclusionProofNotExclusion(proofJson: TxfInclusionProof | null): boolean {
   if (!proofJson) return false;
 
   try {
@@ -261,7 +275,7 @@ function isInclusionProofNotExclusion(proofJson: TxfInclusionProof | null): bool
 /**
  * Wait for mint inclusion proof using the SDK
  */
-async function waitForMintProofWithSDK(
+export async function waitForMintProofWithSDK(
   commitment: MintCommitment<IMintTransactionReason>,
   timeoutMs: number = 30000
 ): Promise<TxfInclusionProof | null> {
@@ -287,7 +301,7 @@ async function waitForMintProofWithSDK(
 /**
  * Wait for inclusion proof using the SDK (handles longer waits for block inclusion)
  */
-async function waitForProofWithSDK(
+export async function waitForTransferProofWithSDK(
   commitment: TransferCommitment,
   timeoutMs: number = 30000
 ): Promise<TxfInclusionProof | null> {
@@ -405,7 +419,7 @@ export async function waitInclusionProofWithDevBypass(
  * Fetch a proof from the aggregator using requestId with retry logic
  * Uses the SDK's StateTransitionClient.getInclusionProof() method
  */
-async function fetchProofByRequestId(
+export async function fetchProofByRequestId(
   requestIdStr: string,
   maxRetries: number = 3
 ): Promise<TxfInclusionProof | null> {
@@ -451,7 +465,7 @@ async function fetchProofByRequestId(
  * @param forceResubmit - If true, accept any entry with commitmentJson (for tree reset scenario)
  *                        If false, only accept uncommitted entries (READY_TO_SUBMIT, SUBMITTED)
  */
-async function tryRecoverFromOutbox(
+export async function tryRecoverFromOutbox(
   tokenId: string,
   forceResubmit: boolean = false
 ): Promise<{ recovered: boolean; proof?: TxfInclusionProof; message: string }> {
@@ -485,7 +499,7 @@ async function tryRecoverFromOutbox(
     const commitment = await TransferCommitment.fromJSON(commitmentData);
 
     // Submit commitment (idempotent - REQUEST_ID_EXISTS is OK)
-    const submitResult = await submitCommitmentToAggregator(commitment);
+    const submitResult = await submitTransferCommitmentToAggregator(commitment);
     console.log(`   Submission result: ${submitResult.status}`);
 
     if (!submitResult.success) {
@@ -494,7 +508,7 @@ async function tryRecoverFromOutbox(
 
     // Wait for inclusion proof
     console.log(`   Waiting for inclusion proof...`);
-    const proof = await waitForProofWithSDK(commitment, 60000); // 60 second timeout
+    const proof = await waitForTransferProofWithSDK(commitment, 60000); // 60 second timeout
 
     if (!proof) {
       return { recovered: false, message: "Timeout waiting for inclusion proof" };
@@ -1708,6 +1722,23 @@ export function devHelp(): void {
   console.log("    Returns: pubkey if owned, null if available");
   console.log("    Example: devCheckNametag('eric')");
   console.log("");
+  console.log("  devRecoverInventory(depth?)");
+  console.log("    RECOVERY mode: Traverse IPFS version chain to recover lost tokens");
+  console.log("    Traverses _meta.lastCid links to find tokens from previous versions");
+  console.log("    Useful when version regression bug overwrote good data");
+  console.log("    Example: devRecoverInventory()     // Unlimited (all history)");
+  console.log("    Example: devRecoverInventory(10)   // Last 10 versions");
+  console.log("    Returns: { success, versionsTraversed, tokensRecovered, duration }");
+  console.log("");
+  console.log("  devInspectIpfs()");
+  console.log("    Inspect current IPFS inventory for debugging");
+  console.log("    Shows tokens, tombstones, sent tokens, metadata");
+  console.log("");
+  console.log("  devFetchCid(cid)");
+  console.log("    Manually fetch and inspect any IPFS CID");
+  console.log("    Useful for debugging version chain or finding lost tokens");
+  console.log("    Example: devFetchCid('bafkreiabc123...')");
+  console.log("");
   console.log("═══════════════════════════════════════════════════════════════");
   console.log("");
 }
@@ -2201,6 +2232,172 @@ export async function devInspectIpfs(): Promise<unknown> {
 }
 
 /**
+ * RECOVERY mode: Traverse IPFS version chain to recover lost tokens
+ *
+ * This function triggers RECOVERY mode in inventorySync, which traverses the
+ * IPFS version chain via _meta.lastCid links to recover tokens from previous
+ * versions. This is useful when a version regression bug caused good data to
+ * be overwritten.
+ *
+ * Usage from browser console:
+ *   await devRecoverInventory()     // Unlimited depth (traverse all history)
+ *   await devRecoverInventory(10)   // Last 10 versions only
+ *
+ * @param depth - Maximum versions to traverse (0 = unlimited, default: 0)
+ * @returns RecoverInventoryResult with traversal statistics
+ */
+export async function devRecoverInventory(depth: number = 0): Promise<RecoverInventoryResult> {
+  console.group("🔄 RECOVERY MODE: Traversing IPFS version chain...");
+  const startTime = Date.now();
+
+  try {
+    const identityManager = IdentityManager.getInstance();
+    const identity = await identityManager.getCurrentIdentity();
+
+    if (!identity) {
+      console.error("❌ No wallet identity available");
+      console.groupEnd();
+      return {
+        success: false,
+        error: "No wallet identity",
+        versionsTraversed: 0,
+        tokensRecovered: 0,
+        duration: 0,
+      };
+    }
+
+    console.log(`📋 Recovery depth: ${depth === 0 ? "unlimited" : depth}`);
+    console.log(`📋 Address: ${identity.address.slice(0, 20)}...`);
+    console.log(`📋 IPNS: ${identity.ipnsName?.slice(0, 20) || "(none)"}...`);
+
+    // Import inventorySync dynamically to avoid circular dependencies
+    const { inventorySync } = await import("../components/wallet/L3/services/InventorySyncService");
+
+    const result = await inventorySync({
+      address: identity.address,
+      publicKey: identity.publicKey,
+      ipnsName: identity.ipnsName ?? '',
+      recoveryDepth: depth,
+    });
+
+    const duration = Date.now() - startTime;
+
+    if (result.status === 'SUCCESS' || result.status === 'PARTIAL_SUCCESS') {
+      console.log(`✅ Recovery complete in ${duration}ms`);
+      console.log(`   Versions traversed: ${result.recoveryStats?.versionsTraversed || 0}`);
+      console.log(`   Tokens recovered: ${result.recoveryStats?.tokensRecoveredFromHistory || 0}`);
+      console.log(`   Oldest CID: ${result.recoveryStats?.oldestCidReached?.slice(0, 16) || "N/A"}...`);
+      console.log(`   Final token count: ${result.inventoryStats?.activeTokens || 0}`);
+      console.groupEnd();
+
+      // Refresh UI
+      window.dispatchEvent(new Event("wallet-updated"));
+
+      return {
+        success: true,
+        versionsTraversed: result.recoveryStats?.versionsTraversed || 0,
+        tokensRecovered: result.recoveryStats?.tokensRecoveredFromHistory || 0,
+        oldestCidReached: result.recoveryStats?.oldestCidReached,
+        duration,
+      };
+    } else {
+      console.error(`❌ Recovery failed: ${result.errorMessage || result.status}`);
+      console.groupEnd();
+      return {
+        success: false,
+        error: result.errorMessage || result.status,
+        versionsTraversed: result.recoveryStats?.versionsTraversed || 0,
+        tokensRecovered: result.recoveryStats?.tokensRecoveredFromHistory || 0,
+        duration,
+      };
+    }
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`❌ ${msg}`);
+    console.groupEnd();
+    return {
+      success: false,
+      error: msg,
+      versionsTraversed: 0,
+      tokensRecovered: 0,
+      duration,
+    };
+  }
+}
+
+/**
+ * Manually fetch and inspect any IPFS CID
+ *
+ * Useful for debugging version chain issues - fetch any historical CID
+ * to see its contents (tokens, metadata, lastCid link).
+ *
+ * Usage from browser console:
+ *   await devFetchCid("bafkreiabc123...")
+ *
+ * @param cid - The CID to fetch
+ * @returns The content of the CID
+ */
+export async function devFetchCid(cid: string): Promise<unknown> {
+  console.group(`📦 Fetching CID: ${cid.slice(0, 20)}...`);
+
+  try {
+    const resolver = getIpfsHttpResolver();
+    const content = await resolver.fetchContentByCid(cid);
+
+    if (!content) {
+      console.error("❌ No content found at CID");
+      console.groupEnd();
+      return { error: "No content found" };
+    }
+
+    // Analyze content
+    const allKeys = Object.keys(content);
+    const tokenKeys = allKeys.filter(k => isActiveTokenKey(k));
+    const meta = content._meta as { version?: number; lastCid?: string } | undefined;
+
+    console.log(`\n📋 Metadata:`);
+    console.log(`   Version: ${meta?.version || 'N/A'}`);
+    console.log(`   lastCid: ${meta?.lastCid ? meta.lastCid.slice(0, 20) + '...' : 'NONE (end of chain)'}`);
+
+    console.log(`\n📦 Content Summary:`);
+    console.log(`   Token keys: ${tokenKeys.length}`);
+    console.log(`   Nametag: ${content._nametag ? (content._nametag as { name?: string }).name || 'yes' : 'none'}`);
+    console.log(`   Sent: ${Array.isArray(content._sent) ? content._sent.length : 0}`);
+    console.log(`   Invalid: ${Array.isArray(content._invalid) ? content._invalid.length : 0}`);
+    console.log(`   Tombstones: ${Array.isArray(content._tombstones) ? content._tombstones.length : 0}`);
+    console.log(`   Outbox: ${Array.isArray(content._outbox) ? content._outbox.length : 0}`);
+
+    if (tokenKeys.length > 0) {
+      console.log(`\n📦 Token IDs:`);
+      for (const key of tokenKeys.slice(0, 10)) {
+        const tokenId = tokenIdFromKey(key);
+        console.log(`   ${tokenId.slice(0, 16)}...`);
+      }
+      if (tokenKeys.length > 10) {
+        console.log(`   ... and ${tokenKeys.length - 10} more`);
+      }
+    }
+
+    console.log(`\n📋 All keys: ${allKeys.join(', ')}`);
+
+    console.groupEnd();
+    return {
+      cid,
+      version: meta?.version,
+      lastCid: meta?.lastCid,
+      tokenCount: tokenKeys.length,
+      hasSent: Array.isArray(content._sent) ? content._sent.length : 0,
+      rawContent: content,
+    };
+  } catch (error) {
+    console.error("❌ Error fetching CID:", error);
+    console.groupEnd();
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
  * Register developer tools on the window object
  * Call this during app initialization in development mode
  */
@@ -2296,5 +2493,7 @@ export function registerDevTools(): void {
     }
   };
   window.devInspectIpfs = devInspectIpfs;
+  window.devRecoverInventory = devRecoverInventory;
+  window.devFetchCid = devFetchCid;
   console.log("🛠️ Dev tools registered. Type devHelp() for available commands.");
 }

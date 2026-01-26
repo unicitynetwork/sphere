@@ -54,6 +54,10 @@ export class SyncCoordinator {
   private readonly LEADER_TIMEOUT = 10000; // 10s - leader considered dead if no heartbeat
   private readonly HEARTBEAT_INTERVAL = 3000; // 3s heartbeat
   private readonly LOCK_TIMEOUT = 30000; // 30s max wait for lock
+  private readonly YIELD_COOLDOWN = 15000; // 15s cooldown after yielding to prevent flapping
+
+  // Yield tracking to prevent leadership flapping
+  private lastYieldTime: number = 0;
 
   constructor() {
     this.instanceId = crypto.randomUUID();
@@ -164,13 +168,17 @@ export class SyncCoordinator {
     this.leaderId = this.instanceId;
     this.leaderLastSeen = Date.now();
 
-    // Start heartbeat
+    // Start heartbeat interval
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
     }
     this.heartbeatInterval = setInterval(() => {
       this.broadcast({ type: "heartbeat" });
     }, this.HEARTBEAT_INTERVAL);
+
+    // Send immediate heartbeat to prevent silent leader period
+    // This allows followers to immediately update leaderLastSeen
+    this.broadcast({ type: "heartbeat" });
 
     // Announce leadership
     this.broadcast({ type: "leader-announce" });
@@ -195,6 +203,12 @@ export class SyncCoordinator {
    */
   private checkLeaderLiveness(): void {
     if (this.isLeader) return;
+
+    // Don't attempt takeover if we recently yielded leadership
+    // This prevents rapid leadership cycling (flapping) when messages are delayed
+    if (Date.now() - this.lastYieldTime < this.YIELD_COOLDOWN) {
+      return;
+    }
 
     if (this.isLeaderDead()) {
       console.log(`📋 Leader ${this.leaderId?.slice(0, 8)}... appears dead, taking over`);
@@ -238,6 +252,10 @@ export class SyncCoordinator {
             console.log(`📋 Yielding leadership to ${msg.from.slice(0, 8)}...`);
             this.isLeader = false;
             this.leaderId = msg.from;
+            // Set yield cooldown to prevent rapid re-election attempts
+            this.lastYieldTime = Date.now();
+            // Give the new leader grace period to send heartbeats
+            // Without this, we'd immediately consider them dead after cooldown expires
             this.leaderLastSeen = Date.now();
             if (this.heartbeatInterval) {
               clearInterval(this.heartbeatInterval);
@@ -249,6 +267,8 @@ export class SyncCoordinator {
           }
         } else {
           this.leaderId = msg.from;
+          // Give the new leader grace period to send heartbeats
+          // We update leaderLastSeen here so the leader has LEADER_TIMEOUT to prove liveness
           this.leaderLastSeen = Date.now();
           console.log(`📋 Acknowledged leader: ${msg.from.slice(0, 8)}...`);
         }

@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Cloud, CloudOff, RefreshCw, Clock, AlertTriangle, Zap } from 'lucide-react';
+import { Cloud, CloudOff, RefreshCw, Clock, AlertTriangle, Zap, History } from 'lucide-react';
 import type { SyncMode, CircuitBreakerState, SyncResult } from '../types/SyncTypes';
 
 interface SyncModeSelectorProps {
@@ -48,6 +48,13 @@ const MODE_CONFIG: Record<SyncMode, {
     color: 'text-yellow-400',
     bgColor: 'bg-yellow-500/10',
     description: 'Fast sync (skipping spent detection)'
+  },
+  RECOVERY: {
+    label: 'Recovering',
+    icon: History,
+    color: 'text-purple-400',
+    bgColor: 'bg-purple-500/10',
+    description: 'Recovering tokens from IPFS history'
   },
   NAMETAG: {
     label: 'Nametag Only',

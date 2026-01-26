@@ -72,6 +72,36 @@ All routes except intro are wrapped in `WalletGate` and use `DashboardLayout` wh
 - IPFS/IPNS for decentralized token storage and sync
 - ServiceProvider singleton manages SDK clients
 
+### Agent Configuration
+
+Agents are defined in `src/config/activities.ts`:
+```typescript
+interface AgentConfig {
+  id: string;
+  name: string;
+  type: AgentType;  // 'chat' | 'simple-ai' | 'ai-with-sidebar' | 'trivia' | 'unified'
+  backendActivityId?: string;  // Maps to agentic-chatbot backend API
+  contentType?: ContentType;   // 'none' | 'game' | 'match' | 'product' | 'merch'
+  hasSidebar?: boolean;
+  quickActions?: QuickAction[];
+}
+```
+
+### NIP-29 Group Chat
+
+The app implements [NIP-29](https://github.com/nostr-protocol/nips/blob/master/29.md) for relay-based group messaging:
+- Dedicated Zooid relay at `wss://sphere-relay.unicity.network`
+- `GroupChatService` (`src/components/chat/services/`) - manages relay connection, subscriptions, message sending
+- `GroupChatRepository` (`src/components/chat/data/`) - local storage for groups, messages, members
+- `useGroupChat` hook - React Query integration
+
+**Event Kinds (NIP-29):**
+- Kind 9: Group chat message
+- Kind 9021: Join request
+- Kind 9022: Leave request
+- Kind 39000: Group metadata (relay-signed)
+- Kind 39002: Group members (relay-signed)
+
 ### Key Patterns
 
 **State Management:**
@@ -169,9 +199,18 @@ Copy `.env.example` to `.env` and configure:
 
 ```env
 VITE_AGENT_API_URL=http://localhost:3000  # Agentic chatbot backend
+VITE_AGENT_API_KEY=...                     # Required for SSE streaming
 VITE_USE_MOCK_AGENTS=true                  # Use mock agents (for local dev without backend)
 VITE_AGGREGATOR_URL=/rpc                   # Unicity aggregator (proxied in dev)
-VITE_ENABLE_IPFS=true                      # Enable IPFS storage for wallet backup (default: false)
+VITE_ENABLE_IPFS=true                      # Enable IPFS storage for wallet backup (default: true)
+
+# Nostr configuration
+VITE_NOSTR_RELAYS=wss://nostr-relay.testnet.unicity.network  # DMs and token transfers
+VITE_GROUP_CHAT_RELAYS=wss://sphere-relay.unicity.network    # NIP-29 group chat (Zooid)
+
+# Activity service (for recent activity panel)
+VITE_ACTIVITY_API_URL=http://localhost:3001/activities
+VITE_ACTIVITY_API_KEY=...
 
 # Optional: HTTPS for dev server (e.g., for WebCrypto APIs)
 SSL_CERT_PATH=/path/to/certs              # Path to SSL certificate directory

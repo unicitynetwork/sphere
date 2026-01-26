@@ -389,6 +389,7 @@ interface SyncResult {
 
 **Mode Detection (in order of precedence):**
 1. If LOCAL = true: always LOCAL mode (skip IPFS reads/writes)
+2. If recoveryDepth is set (>=0): RECOVERY mode (traverse version chain)
 2. If NAMETAG = true: minimal functionality mode to fetch the nametag token only for the given user
 3. If `incoming_token_list` OR `outbox_token_list` non-empty: FAST mode
 4. Otherwise (all empty, possible completed_list present): NORMAL mode
@@ -468,6 +469,103 @@ interface SyncResult {
 - Does not trigger background loops
 - Does not acquire sync lock (allows parallel reads)
 - Returns immediately after nametag fetch
+
+### 6.4 RECOVERY Mode Semantics
+
+**Purpose:** Traverse the IPFS version chain via `_meta.lastCid` links to recover tokens from previous versions. Used when a version regression bug caused good data to be overwritten with empty/stale state.
+
+**Version Chain Structure:**
+```
+IPNS → CID_v2 (current, possibly corrupted - 0 tokens)
+         ↓ _meta.lastCid
+       CID_v68 (previous version - 36 tokens) ← RECOVERY finds these
+         ↓ _meta.lastCid
+       CID_v67 (older version - 35 tokens)
+         ↓ ... back to v1
+```
+
+**Trigger:** Set `recoveryDepth` parameter in `inventorySync()`:
+- `recoveryDepth: 0` - Unlimited (traverse entire history)
+- `recoveryDepth: N` - Traverse at most N previous versions
+- Not set (undefined) - Normal sync (no recovery)
+
+**Step Flow (RECOVERY mode):**
+- Steps 0-2: Normal execution
+- Step 2.5: Version chain traversal (NEW - RECOVERY only):
+  1. Start from current CID's `_meta.lastCid`
+  2. Fetch historical version via HTTP gateway
+  3. Merge tokens (prefer token with more transactions)
+  4. Merge sent/invalid/tombstones (union merge)
+  5. Follow `_meta.lastCid` to next version
+  6. Repeat until depth limit or chain end
+- Steps 3-10: Normal execution (forces `uploadNeeded = true` to persist recovered state)
+
+**Merge Strategy:**
+| Data Type | Merge Key | Strategy |
+|-----------|-----------|----------|
+| Active tokens | tokenId | Keep token with more transactions |
+| Sent tokens | tokenId:stateHash | Union merge (first wins) |
+| Invalid tokens | tokenId:stateHash | Union merge (first wins) |
+| Tombstones | tokenId:stateHash | Union merge (first wins) |
+
+**Traversal Stop Conditions:**
+1. `recoveryDepth` limit reached (if >0)
+2. No more `_meta.lastCid` links (reached first version)
+3. CID cycle detected (safety check)
+4. Network error (sets `networkErrorOccurred` flag)
+5. 404 error (historical CID pruned/unavailable)
+
+**Critical: Network Error Handling:**
+If a network error occurs during traversal:
+- Set `networkErrorOccurred = true`
+- Skip Step 10 upload entirely (prevents overwriting good IPFS data with incomplete data)
+- Save to localStorage only
+
+**Return Type Extension:**
+```typescript
+interface SyncResult {
+  // ... existing fields ...
+  recoveryStats?: {
+    versionsTraversed: number;        // Number of historical versions processed
+    tokensRecoveredFromHistory: number; // Tokens found in historical versions
+    oldestCidReached?: string;        // CID of the oldest version reached
+  };
+}
+```
+
+**Dev Command:**
+```javascript
+// From browser console:
+await devRecoverInventory()     // Unlimited depth
+await devRecoverInventory(10)   // Last 10 versions only
+```
+
+**Use Cases:**
+- Version regression recovery: When v68→v2 bug overwrote good data
+- Fresh device sync: Auto-triggers with `recoveryDepth: 10` on fresh start (no localStorage)
+- Data archaeology: Manual investigation of historical token states
+
+**Auto-Recovery Detection:**
+
+After Step 2 completes, the system automatically detects if recovery is needed:
+
+```typescript
+const shouldAutoRecover =
+  ctx.tokens.size === 0 &&          // No tokens found from localStorage + IPFS
+  ctx.remoteCid !== null &&         // We successfully loaded from IPFS
+  ctx.remoteLastCid !== null;       // There's history to traverse
+```
+
+When detected:
+1. Logs: `🔄 [Auto-Recovery] Detected 0 tokens with IPFS history available`
+2. Sets `recoveryDepth = 10` (traverse last 10 versions)
+3. Calls `step2_5_traverseVersionChain()` automatically
+4. Sets `autoRecoveryTriggered = true` for tracking
+
+This handles scenarios where:
+- IPFS current version was corrupted/regressed to empty state
+- User imported wallet on new device with corrupted IPNS
+- Version regression bug published old state over good data
 
 #### Step 0: Input Processing (If NAMETAG mode, skip)
 
@@ -651,6 +749,21 @@ Keep one copy, merge any additional data (proofs, metadata).
 - **Security note:** On-chain (aggregator) predicate ownership is the source of truth. Nostr bindings are a routing optimization only - they tell relays where to deliver token transfer events
 - **Rationale:** Nametags can exist locally/IPFS but lack Nostr registration (e.g., imported from another device, recovered from backup, or initial publish failed)
 - Track result in `SyncResult.stats.nametagsPublished` counter
+
+**8.5a) Nametag-Aggregator Registration:** (skip if NAMETAG mode is TRUE)
+- For each nametag token extracted in 8.4:
+  - Reconstruct MintCommitment from `genesis.data` (preserving exact salt)
+  - Query aggregator for inclusion proof: `getInclusionProof(requestId)`
+  - If `authenticator !== null`: nametag is registered, no action needed
+  - If `authenticator === null` (exclusion proof): trigger recovery via `recoverNametagProofs()`
+- **Recovery Flow:**
+  1. Re-submit genesis MintCommitment to aggregator (idempotent)
+  2. Wait for inclusion proof (30s timeout in sync context)
+  3. Update stored nametag token with fresh proof
+  4. Trigger `step8_6_recoverNametagInvalidatedTokens()` to recover affected tokens
+- **Best-effort, non-blocking:** Recovery failures logged but do NOT block sync completion
+- **CRITICAL:** Salt must exist in `genesis.data.salt` for recovery to succeed
+- Track result in `SyncResult.stats.nametagsRecovered` counter
 
 #### Step 9: Prepare IPFS Sync
 
@@ -1268,6 +1381,87 @@ interface RecoveryMintEntry extends OutboxEntry {
 - "Token split partially failed. X tokens recovered to your wallet. Y tokens could not be delivered to [recipients]."
 
 **Rationale:** This ensures no value is permanently lost due to transient failures. The original owner can manually retry transfers after recovery.
+
+### 13.26 Automatic Nametag Proof Recovery
+
+**Scenario:** During nametag proof refresh, the aggregator returns an exclusion proof for the genesis commitment.
+
+**Problem:** When a nametag token's genesis commitment returns an exclusion proof from the aggregator (meaning the aggregator's Merkle tree doesn't contain the commitment), the user cannot receive tokens because SDK verification fails. The commitment was previously accepted but is no longer in the tree (e.g., after aggregator reset).
+
+**Trigger Points:**
+Recovery is triggered from three locations:
+1. **Token receipt finalization** (reactive): When `refreshNametagProof()` is called during token finalization and detects an exclusion proof
+2. **Inventory sync Step 8.5a** (proactive): During `inventorySync()`, checks aggregator registration and triggers recovery if missing
+3. **L3WalletView validation** (proactive): On wallet load, `validateUnicityId()` checks aggregator and triggers recovery if `isOnAggregator === false`
+
+**Detection:** In `refreshNametagProof()`:
+1. Reconstruct MintCommitment from stored genesis data
+2. Query aggregator with `getInclusionProof(requestId)`
+3. If `authenticator === null`: trigger automatic recovery
+
+**Resolution:**
+1. Re-submit genesis MintCommitment via `submitMintCommitment()`
+   - `SUCCESS`: New commitment accepted
+   - `REQUEST_ID_EXISTS`: Commitment already exists (idempotent)
+2. Wait for inclusion proof via `waitInclusionProof()` (60s timeout)
+3. Update `genesis.inclusionProof` with fresh proof
+4. Save updated token to storage
+5. **Recover previously invalidated tokens** (see below)
+6. Return updated token for immediate use
+
+**Token Recovery After Nametag Proof Fix:**
+
+Tokens that were invalidated due to nametag inclusion proof failures can now be recovered.
+
+**CRITICAL INSIGHT - Embedded Nametags:**
+Each received token has an **embedded copy** of the nametag in its `nametags` array. The SDK's `Token.verify()` validates this embedded nametag, NOT the main stored nametag. Simply updating the main nametag does NOT fix already-finalized tokens - we must update the EMBEDDED nametag within each invalid token.
+
+**Recovery Flow:**
+1. Load `_invalid` array from localStorage
+2. Get current nametag with fresh inclusion proof from storage
+3. Filter for tokens with:
+   - `reason === "SDK_VALIDATION"`
+   - `details` contains "Inclusion proof verification failed" or "Nametag verification"
+4. **For each invalid token, update the EMBEDDED nametag's proof:**
+   - Parse token's `nametags` array
+   - Find embedded nametag matching our nametag's `tokenId`
+   - Replace embedded nametag's `genesis.inclusionProof` with fresh proof
+5. Re-validate each token using `TokenValidationService.validateToken()`
+   - Validation now passes because the embedded nametag has valid proof
+6. For tokens that pass validation:
+   - Add back to active inventory via `addToken()`
+   - Remove from `_invalid` array
+7. Trigger `wallet-updated` event for UI refresh
+
+**Implementation:**
+- `TokenRecoveryService.recoverNametagInvalidatedTokens()` - called after successful nametag proof recovery
+- `TokenRecoveryService.updateEmbeddedNametagProof()` - helper to fix embedded nametag
+
+**Idempotency:**
+- Salt is preserved from original genesis data (NEVER regenerated)
+- requestId is deterministically derived from tokenId
+- Re-submission is safe (idempotent) - same commitment can be resubmitted
+
+**Technical Note - Salt's Role in Commitment:**
+| Component | Affected by Salt? | Explanation |
+|-----------|------------------|-------------|
+| tokenId | ❌ NO | `tokenId = SHA256(nametag)` |
+| requestId | ❌ NO | `requestId = f(tokenId)` only |
+| transactionHash | ✅ YES | `transactionHash = SHA256(CBOR(...salt...))` |
+| authenticator | ✅ YES | Signature over transactionHash |
+
+**Implication:** We can fetch the proof using just tokenId → requestId, but the reconstructed Token must use the exact same salt for SDK verification to pass (transactionHash must match authenticator signature).
+
+**Error Handling:**
+- If re-submission fails: throw error with clear message
+- If proof timeout (60s): throw error, user may retry later
+- If SDK validation fails after recovery: propagate original error
+- Token recovery failures are non-fatal: logged but don't prevent nametag recovery from completing
+
+**Implementation Locations:**
+- `NametagService.recoverNametagProofs()` - called from `refreshNametagProof()` when exclusion proof detected
+- `TokenRecoveryService.recoverNametagInvalidatedTokens()` - called after successful nametag proof recovery
+- `TokenRecoveryService.updateEmbeddedNametagProof()` - updates embedded nametag's proof within a token
 
 ---
 

@@ -32,8 +32,6 @@ import { TransferTransaction } from "@unicitylabs/state-transition-sdk/lib/trans
 import { AddressScheme } from "@unicitylabs/state-transition-sdk/lib/address/AddressScheme";
 import { NametagService } from "./NametagService";
 import { ProxyAddress } from "@unicitylabs/state-transition-sdk/lib/address/ProxyAddress";
-import { addToken as addTokenToInventory } from "./InventorySyncService";
-import { deriveIpnsNameFromPrivateKey } from "./IpnsUtils";
 import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
 import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
 import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
@@ -48,7 +46,6 @@ import {
 } from "../data/model";
 import { v4 as uuidv4 } from "uuid";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
-import { normalizeSdkTokenToStorage } from "./TxfSerializer";
 import { NOSTR_CONFIG } from "../../../../config/nostr.config";
 import { recordActivity } from "../../../../services/ActivityService";
 import { addReceivedTransaction } from "../../../../services/TransactionHistoryService";
@@ -567,13 +564,18 @@ export class NostrService {
           const sourceTxf = sourceToken.toJSON();
           const existingTransactions = sourceTxf.transactions || [];
 
+          // Calculate the previous state hash (sender's current state before transfer)
+          const previousStateHash = await sourceToken.state.calculateHash();
+          const previousStateHashStr = previousStateHash.toJSON();
+
           // Calculate the new state hash (required for token chain validity)
           const newStateHash = await recipientState.calculateHash();
           const newStateHashStr = newStateHash.toJSON();
 
-          // Create the new transaction with the calculated state hash
+          // Create the new transaction with proper state hash chain
           const newTxJson = {
             ...transferTx.toJSON(),
+            previousStateHash: previousStateHashStr,
             newStateHash: newStateHashStr,
           };
 
@@ -602,22 +604,50 @@ export class NostrService {
             if (errorMessage.includes("Nametag tokens verification failed")) {
               console.log("📦 Nametag proof appears stale, refreshing and retrying...");
 
-              const refreshedNametag = await nametagService.refreshNametagProof();
-              if (!refreshedNametag) {
-                console.error("Failed to refresh nametag proof");
+              try {
+                const refreshedNametag = await nametagService.refreshNametagProof();
+                if (!refreshedNametag) {
+                  console.error("Failed to refresh nametag proof");
+                  throw finalizeError;
+                }
+
+                // Retry with refreshed nametag
+                myNametagToken = refreshedNametag;
+                finalizedToken = await client.finalizeTransaction(
+                  rootTrustBase,
+                  sourceToken,
+                  recipientState,
+                  transferTx,
+                  [myNametagToken]
+                );
+                console.log("✅ Finalization succeeded after proof refresh");
+              } catch (refreshError: unknown) {
+                const refreshErrorMsg = refreshError instanceof Error ? refreshError.message : String(refreshError);
+
+                // Check if this is a recovery failure or exclusion proof error
+                // With automatic recovery (TOKEN_INVENTORY_SPEC.md Section 13.26), we now
+                // attempt to re-submit the commitment before giving up
+                if (refreshErrorMsg.includes("recovery failed") || refreshErrorMsg.includes("exclusion proof")) {
+                  console.error("❌ Nametag recovery failed after all attempts.");
+
+                  // Dispatch custom event for UI notification
+                  window.dispatchEvent(new CustomEvent("nametag-recovery-failed", {
+                    detail: {
+                      message: "Your nametag proof could not be recovered automatically. Please re-register your nametag.",
+                      error: refreshErrorMsg
+                    }
+                  }));
+
+                  // Re-throw with user-friendly message
+                  throw new Error(
+                    "Cannot receive token: Automatic nametag proof recovery failed. " +
+                    "Please go to Settings and re-register your nametag."
+                  );
+                }
+
+                // Other refresh errors - re-throw original
                 throw finalizeError;
               }
-
-              // Retry with refreshed nametag
-              myNametagToken = refreshedNametag;
-              finalizedToken = await client.finalizeTransaction(
-                rootTrustBase,
-                sourceToken,
-                recipientState,
-                transferTx,
-                [myNametagToken]
-              );
-              console.log("✅ Finalization succeeded after proof refresh");
             } else {
               // Different error, re-throw
               throw finalizeError;
@@ -671,13 +701,18 @@ export class NostrService {
           const sourceTxf = sourceToken.toJSON();
           const existingTransactions = sourceTxf.transactions || [];
 
+          // Calculate the previous state hash (sender's current state before transfer)
+          const previousStateHash = await sourceToken.state.calculateHash();
+          const previousStateHashStr = previousStateHash.toJSON();
+
           // Calculate the new state hash (required for token chain validity)
           const newStateHash = await recipientState.calculateHash();
           const newStateHashStr = newStateHash.toJSON();
 
-          // Create the new transaction with the calculated state hash
+          // Create the new transaction with proper state hash chain
           const newTxJson = {
             ...transferTx.toJSON(),
+            previousStateHash: previousStateHashStr,
             newStateHash: newStateHashStr,
           };
 
@@ -708,7 +743,10 @@ export class NostrService {
     }
   }
 
-  private async saveReceivedToken(token: Token<any>, senderPubkey: string): Promise<UiToken | null> {
+  private async saveReceivedToken(
+    token: Token<any>,
+    senderPubkey: string
+  ): Promise<UiToken | null> {
     let amount = undefined;
     let coinId = undefined;
     let symbol = undefined;
@@ -768,12 +806,13 @@ export class NostrService {
       }
     }
 
+    // Use SDK's native token serialization - no custom normalization needed
     const uiToken = new UiToken({
       id: uuidv4(),
       name: symbol ? symbol : "Unicity Token",
       type: token.type.toString(),
       symbol: symbol,
-      jsonData: JSON.stringify(normalizeSdkTokenToStorage(token.toJSON())),
+      jsonData: JSON.stringify(token.toJSON()),
       status: TokenStatus.CONFIRMED,
       amount: amount,
       coinId: coinId,
@@ -782,47 +821,27 @@ export class NostrService {
       senderPubkey: senderPubkey,
     });
 
-// Save token via InventorySyncService (per TOKEN_INVENTORY_SPEC.md Section 6.1)
-    // Use local mode for fast storage - background sync will handle IPFS upload
-    const identity = await this.identityManager.getCurrentIdentity();
-    if (identity) {
-      try {
-        const ipnsName = await deriveIpnsNameFromPrivateKey(identity.privateKey);
-        await addTokenToInventory(
-          identity.address,
-          identity.publicKey,
-          ipnsName,
-          uiToken,
-          { local: true } // Quick local storage, IPFS sync handled by background loop
-        );
-        console.log(`💾 Token saved via InventorySyncService: ${uiToken.id}`);
+    // Token will be saved via InventorySync through the background loop mechanism
+    // No need to save here - queueIncomingToken() handles the sync
+    console.log(`📦 Token prepared for sync: ${uiToken.id}`);
 
-        // Record to transaction history (deduplication handled by TransactionHistoryService)
-        if (amount && coinId) {
-          addReceivedTransaction(
-            amount,
-            coinId,
-            symbol || "UNK",
-            iconUrl,
-            senderPubkey,
-            Date.now()
-          );
-        }
-
-        // Record token transfer activity (fire and forget)
-        recordActivity("token_transfer", {
-          isPublic: false,
-          data: { amount, symbol },
-        });
-      } catch (syncError) {
-        console.error(`❌ Failed to save token via InventorySyncService:`, syncError);
-        // Token creation succeeded but storage failed - this is a critical error
-        throw syncError;
-      }
-    } else {
-      console.error(`❌ No identity available to save token`);
-      throw new Error("No identity available to save received token");
+    // Record to transaction history
+    if (amount && coinId) {
+      addReceivedTransaction(
+        amount,
+        coinId,
+        symbol || "UNK",
+        iconUrl,
+        senderPubkey,
+        Date.now()
+      );
     }
+
+    // Record token transfer activity (fire and forget)
+    recordActivity("token_transfer", {
+      isPublic: false,
+      data: { amount, symbol },
+    });
 
     return uiToken;
   }

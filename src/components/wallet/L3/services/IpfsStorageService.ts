@@ -823,7 +823,7 @@ export class IpfsStorageService implements IpfsTransport {
 
       // Multi-node upload: directly upload content to all configured IPFS nodes
       // IMPORTANT: Use the CID returned by the backend, not Helia's CID!
-      // Helia uses dag-json codec, but /api/v0/add uses raw codec.
+      // Helia uses dag-json codec (0x0200), but /api/v0/add uses dag-pb codec (0x70, UnixFS wrapper).
       // We must use a consistent CID for IPNS publishing.
       let backendCid: string | null = null;
       const gatewayUrls = getAllBackendGatewayUrls();
@@ -905,9 +905,9 @@ export class IpfsStorageService implements IpfsTransport {
         }
       }
 
-      // Determine which CID to use: prefer backend CID (raw codec) over Helia CID (dag-json codec)
+      // Determine which CID to use: prefer backend CID (dag-pb codec) over Helia CID (dag-json codec)
       const canonicalCid = backendCid || cidString;
-      const canonicalCidSource = backendCid ? "backend (raw codec)" : "Helia (dag-json codec)";
+      const canonicalCidSource = backendCid ? "backend (dag-pb codec)" : "Helia (dag-json codec)";
       if (backendCid && backendCid !== cidString) {
         console.log(`📦 CID codec note: backend=${backendCid.slice(0, 12)}... vs helia=${cidString.slice(0, 12)}... (using ${canonicalCidSource})`);
       }

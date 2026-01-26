@@ -26,11 +26,12 @@ import type { NametagData } from '../services/types/TxfTypes';
  * Modes are mutually exclusive and listed in order of precedence (Section 6.1)
  *
  * - LOCAL: Skip IPFS entirely, localStorage only (Section 6.2)
+ * - RECOVERY: Traverse IPFS version chain to recover lost tokens (Section 6.4)
  * - NAMETAG: Fetch only nametag tokens, read-only (Section 6.3)
  * - FAST: Skip Step 7 spent detection, for speed (Section 6.1)
  * - NORMAL: Full sync with all validation (Section 6.1)
  */
-export type SyncMode = 'LOCAL' | 'NAMETAG' | 'FAST' | 'NORMAL';
+export type SyncMode = 'LOCAL' | 'RECOVERY' | 'NAMETAG' | 'FAST' | 'NORMAL';
 
 /**
  * Sync operation result status
@@ -138,6 +139,9 @@ export interface SyncOperationStats {
   /** Nametag bindings published to Nostr (Step 8.5) */
   nametagsPublished: number;
 
+  /** Nametags recovered by re-submitting to aggregator (Step 8.5a) */
+  nametagsRecovered?: number;
+
   /** Tokens recovered from false tombstones (Step 7.5) */
   tokensRecovered?: number;
 }
@@ -226,6 +230,23 @@ export interface SyncResult {
 
   /** Validation warnings that didn't prevent sync */
   validationIssues?: string[];
+
+  /** RECOVERY mode statistics (only populated when mode === 'RECOVERY') */
+  recoveryStats?: RecoveryStats;
+}
+
+/**
+ * Statistics from RECOVERY mode version chain traversal
+ */
+export interface RecoveryStats {
+  /** Number of IPFS versions traversed via _meta.lastCid chain */
+  versionsTraversed: number;
+
+  /** Number of tokens recovered from historical versions */
+  tokensRecoveredFromHistory: number;
+
+  /** CID of the oldest version reached in traversal (for debugging) */
+  oldestCidReached?: string;
 }
 
 /**
