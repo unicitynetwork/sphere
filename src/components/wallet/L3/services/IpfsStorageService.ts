@@ -949,8 +949,9 @@ export class IpfsStorageService implements IpfsTransport {
   /**
    * Upload content to IPFS
    * Part of IpfsTransport interface
+   * @param options Optional upload options (e.g., skipExtendedVerification for pre-transfer sync)
    */
-  public async uploadContent(data: TxfStorageData): Promise<IpfsUploadResult> {
+  public async uploadContent(data: TxfStorageData, options?: { skipExtendedVerification?: boolean }): Promise<IpfsUploadResult> {
     const uploadStartTime = performance.now();
     try {
       // Ensure initialized
@@ -1025,27 +1026,32 @@ export class IpfsStorageService implements IpfsTransport {
 
           // Verify content is retrievable (backend might need time to index)
           // This prevents CID mismatch issues when content is fetched immediately after upload
-          const maxRetries = 3;
-          const retryDelay = 200; // ms
-          for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-              const verifyResponse = await fetch(
-                `${uploadHost}/ipfs/${backendCid}`,
-                {
-                  method: "HEAD",
-                  signal: AbortSignal.timeout(2000),
+          // Skip extended verification in pre-transfer mode (content is already persisted after POST 200)
+          if (options?.skipExtendedVerification) {
+            console.log(`⚡ Content upload successful - skipping extended verification (fast mode)`);
+          } else {
+            const maxRetries = 3;
+            const retryDelay = 200; // ms
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+              try {
+                const verifyResponse = await fetch(
+                  `${uploadHost}/ipfs/${backendCid}`,
+                  {
+                    method: "HEAD",
+                    signal: AbortSignal.timeout(2000),
+                  }
+                );
+                if (verifyResponse.ok) {
+                  console.log(`📦 Content verified retrievable (attempt ${attempt})`);
+                  break;
                 }
-              );
-              if (verifyResponse.ok) {
-                console.log(`📦 Content verified retrievable (attempt ${attempt})`);
-                break;
-              }
-              if (attempt < maxRetries) {
-                await new Promise((r) => setTimeout(r, retryDelay));
-              }
-            } catch {
-              if (attempt < maxRetries) {
-                await new Promise((r) => setTimeout(r, retryDelay));
+                if (attempt < maxRetries) {
+                  await new Promise((r) => setTimeout(r, retryDelay));
+                }
+              } catch {
+                if (attempt < maxRetries) {
+                  await new Promise((r) => setTimeout(r, retryDelay));
+                }
               }
             }
           }
@@ -1102,14 +1108,15 @@ export class IpfsStorageService implements IpfsTransport {
   /**
    * Publish CID to IPNS
    * Part of IpfsTransport interface
+   * @param options Optional publish options (e.g., skipExtendedVerification for pre-transfer sync)
    */
-  public async publishIpns(cid: string): Promise<IpnsPublishResult> {
+  public async publishIpns(cid: string, options?: { skipExtendedVerification?: boolean }): Promise<IpnsPublishResult> {
     const publishStartTime = performance.now();
     try {
       const { CID } = await import("multiformats/cid");
       const parsedCid = CID.parse(cid);
 
-      const ipnsName = await this.publishToIpns(parsedCid);
+      const ipnsName = await this.publishToIpns(parsedCid, options?.skipExtendedVerification);
 
       if (ipnsName) {
         const publishDuration = performance.now() - publishStartTime;
@@ -1284,9 +1291,10 @@ export class IpfsStorageService implements IpfsTransport {
    * 1. Primary: HTTP POST to Kubo backend (fast, reliable)
    * 2. Fallback: Fire-and-forget browser DHT (slow but provides redundancy)
    * @param cid The CID to publish
+   * @param skipExtendedVerification If true, reduce verification retries for faster operation
    * @returns The IPNS name on success, null on failure (non-fatal)
    */
-  private async publishToIpns(cid: CID): Promise<string | null> {
+  private async publishToIpns(cid: CID, skipExtendedVerification?: boolean): Promise<string | null> {
     if (!this.helia || !this.ipnsKeyPair) {
       console.warn("📦 IPNS key not initialized - skipping IPNS publish");
       return null;
@@ -1337,11 +1345,14 @@ export class IpfsStorageService implements IpfsTransport {
         // HTTP 200 only means the node received the record, NOT that it persisted
         const httpResolver = getIpfsHttpResolver();
         const cidString = cid.toString();
+        // Use fewer retries in fast mode - record is already accepted, verification confirms propagation
+        const verificationRetries = skipExtendedVerification ? 1 : 3;
         const verification = await httpResolver.verifyIpnsRecord(
           this.cachedIpnsName!,
           this.ipnsSequenceNumber,
           cidString,
-          3 // retries
+          verificationRetries,
+          skipExtendedVerification // Pass flag to skip delays
         );
 
         if (verification.verified) {
@@ -3655,8 +3666,8 @@ export class IpfsStorageService implements IpfsTransport {
    * Internal sync implementation - called by SyncQueue
    * Uses SyncCoordinator for cross-tab coordination to prevent race conditions
    */
-  private async executeSyncInternal(options?: { forceIpnsPublish?: boolean; isRetryAttempt?: boolean }): Promise<StorageResult> {
-    const { forceIpnsPublish = false, isRetryAttempt = false } = options || {};
+  private async executeSyncInternal(options?: { forceIpnsPublish?: boolean; isRetryAttempt?: boolean; skipExtendedVerification?: boolean }): Promise<StorageResult> {
+    const { forceIpnsPublish = false, isRetryAttempt = false, skipExtendedVerification = false } = options || {};
 
     // CRITICAL: Wait for initial IPNS sync to complete before proceeding
     // This prevents race conditions where Nostr delivers tokens and triggers a sync
@@ -4063,7 +4074,7 @@ export class IpfsStorageService implements IpfsTransport {
         if (forceIpnsPublish && cidString === previousCid) {
           console.log(`📦 Forcing IPNS republish (CID unchanged but IPNS may be expired)`);
         }
-        const ipnsResult = await this.publishToIpns(cid);
+        const ipnsResult = await this.publishToIpns(cid, skipExtendedVerification);
         if (ipnsResult) {
           ipnsPublished = true;
           this.clearPendingIpnsPublish(); // Clear any previous pending

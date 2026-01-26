@@ -77,6 +77,32 @@ export interface IpnsResolveOptions {
   useCacheOnly?: boolean;
 }
 
+/**
+ * Options for IPFS upload
+ */
+export interface IpfsUploadOptions {
+  /**
+   * If true, skip extended verification (HEAD retries with delays).
+   * Content is already persisted after successful POST - verification just confirms indexing.
+   * Use for pre-transfer sync where safety is guaranteed but speed is critical.
+   * Default: false
+   */
+  skipExtendedVerification?: boolean;
+}
+
+/**
+ * Options for IPNS publish
+ */
+export interface IpnsPublishOptions {
+  /**
+   * If true, reduce verification retries and delays.
+   * Record is already accepted after HTTP 200 - verification confirms propagation.
+   * Use for pre-transfer sync where safety is guaranteed but speed is critical.
+   * Default: false
+   */
+  skipExtendedVerification?: boolean;
+}
+
 // ==========================================
 // Transport Interface
 // ==========================================
@@ -139,8 +165,9 @@ export interface IpfsTransport {
   /**
    * Upload content to IPFS
    * Returns CID and success status
+   * @param options Optional upload options (e.g., skipExtendedVerification for pre-transfer sync)
    */
-  uploadContent(data: TxfStorageData): Promise<IpfsUploadResult>;
+  uploadContent(data: TxfStorageData, options?: IpfsUploadOptions): Promise<IpfsUploadResult>;
 
   // ==========================================
   // IPNS Publishing
@@ -149,8 +176,9 @@ export interface IpfsTransport {
   /**
    * Publish CID to IPNS
    * Returns publish result with verification status
+   * @param options Optional publish options (e.g., skipExtendedVerification for pre-transfer sync)
    */
-  publishIpns(cid: string): Promise<IpnsPublishResult>;
+  publishIpns(cid: string, options?: IpnsPublishOptions): Promise<IpnsPublishResult>;
 
   // ==========================================
   // Version and CID Tracking

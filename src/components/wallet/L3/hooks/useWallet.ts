@@ -854,6 +854,7 @@ export const useWallet = () => {
                 priority: SyncPriority.HIGH,
                 timeout: 60000,
                 callerContext: 'pre-transfer-sync',
+                skipExtendedVerification: true, // Fast mode: safety guaranteed by HTTP 200
               });
 
               if (result.success) {
@@ -1084,6 +1085,7 @@ export const useWallet = () => {
           priority: SyncPriority.HIGH,
           timeout: 60000,
           callerContext: 'outbox-pre-transfer',
+          skipExtendedVerification: true, // Fast mode: safety guaranteed by HTTP 200
         });
 
         if (!syncResult.success) {

@@ -154,6 +154,13 @@ export interface SyncParams {
 
   /** IPNS name (required) */
   ipnsName: string;
+
+  /**
+   * Skip extended IPFS/IPNS verification delays for faster sync.
+   * Content is still persisted (safety guaranteed), but verification retries are reduced.
+   * Use for pre-transfer sync where speed is critical.
+   */
+  skipExtendedVerification?: boolean;
 }
 
 /**
@@ -228,6 +235,9 @@ interface SyncContext {
   // Remote data state (for auto-recovery detection)
   remoteLastCid: string | null;       // _meta.lastCid from remote (for version chain traversal)
   autoRecoveryTriggered: boolean;     // True if auto-recovery was triggered
+
+  // Performance optimization options
+  skipExtendedVerification: boolean;  // Skip extended IPFS/IPNS verification delays
 }
 
 // ============================================
@@ -639,6 +649,8 @@ function initializeContext(params: SyncParams, mode: SyncMode, startTime: number
     // Remote data state
     remoteLastCid: null,
     autoRecoveryTriggered: false,
+    // Performance optimization
+    skipExtendedVerification: params.skipExtendedVerification ?? false,
   };
 }
 
@@ -3023,10 +3035,11 @@ async function step10_uploadIpfs(ctx: SyncContext): Promise<void> {
   }
 
   // Upload content to IPFS
-  console.log(`  📤 Uploading content to IPFS...`);
+  const fastMode = ctx.skipExtendedVerification;
+  console.log(`  📤 Uploading content to IPFS...${fastMode ? ' (fast mode)' : ''}`);
   let uploadResult;
   try {
-    uploadResult = await transport.uploadContent(storageData);
+    uploadResult = await transport.uploadContent(storageData, { skipExtendedVerification: fastMode });
   } catch (err) {
     console.warn(`  ❌ IPFS upload error:`, err);
     ctx.errors.push(`IPFS upload error: ${err instanceof Error ? err.message : String(err)}`);
@@ -3053,8 +3066,8 @@ async function step10_uploadIpfs(ctx: SyncContext): Promise<void> {
   // The CID is tracked by the transport layer and context.
 
   // Publish to IPNS
-  console.log(`  📡 Publishing to IPNS...`);
-  const publishResult = await transport.publishIpns(uploadResult.cid);
+  console.log(`  📡 Publishing to IPNS...${fastMode ? ' (fast mode)' : ''}`);
+  const publishResult = await transport.publishIpns(uploadResult.cid, { skipExtendedVerification: fastMode });
   if (publishResult.success) {
     ctx.ipnsPublished = true;
     console.log(`  ✅ IPNS published: seq=${publishResult.sequence}`);

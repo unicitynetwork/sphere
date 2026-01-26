@@ -55,6 +55,12 @@ export interface SyncOptions {
   coalesce?: boolean;
   /** Internal: true when called from IPNS retry loop (prevents recursive retry) */
   isRetryAttempt?: boolean;
+  /**
+   * Skip extended IPFS/IPNS verification delays for faster sync.
+   * Content is still persisted (safety guaranteed), but verification retries are reduced.
+   * Use for pre-transfer sync where speed is critical.
+   */
+  skipExtendedVerification?: boolean;
 }
 
 /**
@@ -63,7 +69,7 @@ export interface SyncOptions {
 interface SyncQueueEntry {
   id: string;
   priority: SyncPriority;
-  options: { forceIpnsPublish?: boolean; isRetryAttempt?: boolean };
+  options: { forceIpnsPublish?: boolean; isRetryAttempt?: boolean; skipExtendedVerification?: boolean };
   resolve: (result: StorageResult) => void;
   reject: (error: Error) => void;
   timeoutHandle: ReturnType<typeof setTimeout> | null;
@@ -84,7 +90,7 @@ export interface QueueStatus {
 /**
  * Executor function type - the actual sync implementation
  */
-type SyncExecutor = (options?: { forceIpnsPublish?: boolean; isRetryAttempt?: boolean }) => Promise<StorageResult>;
+type SyncExecutor = (options?: { forceIpnsPublish?: boolean; isRetryAttempt?: boolean; skipExtendedVerification?: boolean }) => Promise<StorageResult>;
 
 // ==========================================
 // SyncQueue
@@ -127,6 +133,7 @@ export class SyncQueue {
       callerContext,
       coalesce = true,
       isRetryAttempt = false,
+      skipExtendedVerification = false,
     } = options;
 
     // Check queue size limit
@@ -143,7 +150,7 @@ export class SyncQueue {
       const entry: SyncQueueEntry = {
         id: `sync-${++this.idCounter}`,
         priority,
-        options: { forceIpnsPublish, isRetryAttempt },
+        options: { forceIpnsPublish, isRetryAttempt, skipExtendedVerification },
         resolve,
         reject,
         timeoutHandle: null,

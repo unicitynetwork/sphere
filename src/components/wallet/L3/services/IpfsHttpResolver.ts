@@ -479,13 +479,15 @@ export class IpfsHttpResolver {
    * @param expectedSeq The sequence number we expect to see
    * @param expectedCid The CID we expect the record to point to
    * @param retries Number of retries (with delay between)
+   * @param skipDelays If true, minimize delays for faster verification (pre-transfer mode)
    * @returns Verification result with actual values from node
    */
   async verifyIpnsRecord(
     ipnsName: string,
     expectedSeq: bigint,
     expectedCid: string,
-    retries: number = 3
+    retries: number = 3,
+    skipDelays: boolean = false
   ): Promise<{
     verified: boolean;
     actualSeq?: bigint;
@@ -502,11 +504,21 @@ export class IpfsHttpResolver {
 
     for (let attempt = 1; attempt <= retries; attempt++) {
       // Small delay before verification to allow node to persist
-      // Increase delay on retries
-      const delayMs = attempt === 1 ? 300 : 500 * attempt;
-      await new Promise(resolve => setTimeout(resolve, delayMs));
+      // In fast mode (skipDelays), use minimal delay only on first attempt
+      // Normal mode: Increase delay on retries for propagation
+      let delayMs: number;
+      if (skipDelays) {
+        // Fast mode: 50ms on first attempt only (give node a moment), 0ms on retries
+        delayMs = attempt === 1 ? 50 : 0;
+      } else {
+        // Normal mode: 300ms first attempt, escalating on retries
+        delayMs = attempt === 1 ? 300 : 500 * attempt;
+      }
+      if (delayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
 
-      console.log(`📦 [Verify] Attempt ${attempt}/${retries}: Verifying IPNS seq=${expectedSeq}...`);
+      console.log(`📦 [Verify] Attempt ${attempt}/${retries}: Verifying IPNS seq=${expectedSeq}...${skipDelays ? ' (fast mode)' : ''}`);
 
       // Use routing API for authoritative sequence number (bypass gateway path cache)
       const routingResult = await this.resolveViaRoutingApi(ipnsName, gateways);
