@@ -3,6 +3,7 @@ import type { TombstoneEntry, TxfToken, TxfTransaction, InvalidatedNametagEntry,
 import { v4 as uuidv4 } from "uuid";
 import { STORAGE_KEYS, STORAGE_KEY_GENERATORS, STORAGE_KEY_PREFIXES } from "../config/storageKeys";
 import { assertValidNametagData, sanitizeNametagForLogging, validateTokenJson } from "../utils/tokenValidation";
+import { RegistryService } from "../components/wallet/L3/services/RegistryService";
 
 // Re-export NametagData for backwards compatibility
 export type { NametagData } from "../components/wallet/L3/services/types/TxfTypes";
@@ -1862,16 +1863,29 @@ export class WalletRepository {
       const tokenType = txfToken.genesis?.data?.tokenType || "";
       const isNft = tokenType === "455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89";
 
+      // Lookup registry for symbol and icon
+      let symbol = isNft ? "NFT" : "UCT";
+      let iconUrl: string | undefined = undefined;
+      if (coinId && !isNft) {
+        const registryService = RegistryService.getInstance();
+        const def = registryService.getCoinDefinition(coinId);
+        if (def) {
+          symbol = def.symbol || symbol;
+          iconUrl = registryService.getIconUrl(def) || undefined;
+        }
+      }
+
       const token = new Token({
         id: tokenId,
-        name: isNft ? "NFT" : "Token",
-        type: isNft ? "NFT" : "UCT",
+        name: isNft ? "NFT" : symbol,
+        type: isNft ? "NFT" : symbol,
         timestamp: Date.now(),
         jsonData: JSON.stringify(txfToken),
         status: TokenStatus.CONFIRMED,
         amount: totalAmount.toString(),
         coinId,
-        symbol: isNft ? "NFT" : "UCT",
+        symbol,
+        iconUrl,
         sizeBytes: JSON.stringify(txfToken).length,
       });
 

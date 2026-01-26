@@ -20,6 +20,7 @@ import {
   removeToken
 } from "./InventorySyncService";
 import { IdentityManager } from "./IdentityManager";
+import { RegistryService } from "./RegistryService";
 // import { ServiceProvider } from "./ServiceProvider"; // TODO: Uncomment when aggregator token lookup is implemented
 import type { TxfToken, TxfTransaction } from "./types/TxfTypes";
 import { getCurrentStateHash, tokenToTxf } from "./TxfSerializer";
@@ -888,15 +889,28 @@ export class TokenRecoveryService {
       // For now, create a placeholder token that marks this as recovered
       // The actual reconstruction would need SDK integration
 
+      // Lookup registry for symbol and icon
+      let symbol = isNft ? "NFT" : "UCT";
+      let iconUrl: string | undefined = undefined;
+      if (coinId && !isNft) {
+        const registryService = RegistryService.getInstance();
+        const def = registryService.getCoinDefinition(coinId);
+        if (def) {
+          symbol = def.symbol || symbol;
+          iconUrl = registryService.getIconUrl(def) || undefined;
+        }
+      }
+
       const token = new Token({
         id: tokenId,
-        name: isNft ? "NFT (Recovered)" : "Token (Recovered)",
-        type: isNft ? "NFT" : "UCT",
+        name: isNft ? "NFT (Recovered)" : `${symbol} (Recovered)`,
+        type: isNft ? "NFT" : symbol,
         timestamp: Date.now(),
         status: TokenStatus.CONFIRMED,
         amount: amount,
         coinId: coinId,
-        symbol: isNft ? "NFT" : "UCT",
+        symbol,
+        iconUrl,
         // Note: jsonData would need proper TxfToken reconstruction with proofs
       });
 
