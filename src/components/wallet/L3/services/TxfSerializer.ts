@@ -4,6 +4,7 @@
  */
 
 import { Token, TokenStatus } from "../data/model";
+import { RegistryService } from "./RegistryService";
 import type { NametagData } from "./types/TxfTypes";
 import {
   type TxfStorageData,
@@ -148,16 +149,29 @@ export function txfToToken(tokenId: string, txf: TxfToken): Token {
   const tokenType = txf.genesis.data.tokenType;
   const isNft = tokenType === "455ad8720656b08e8dbd5bac1f3c73eeea5431565f6c1c3af742b1aa12d41d89";
 
+  // Lookup registry for symbol and icon
+  let symbol = isNft ? "NFT" : "UCT";
+  let iconUrl: string | undefined = undefined;
+  if (coinId && !isNft) {
+    const registryService = RegistryService.getInstance();
+    const def = registryService.getCoinDefinition(coinId);
+    if (def) {
+      symbol = def.symbol || symbol;
+      iconUrl = registryService.getIconUrl(def) || undefined;
+    }
+  }
+
   return new Token({
     id: tokenId,
-    name: isNft ? "NFT" : "Token",
-    type: isNft ? "NFT" : "UCT",
+    name: isNft ? "NFT" : symbol,
+    type: isNft ? "NFT" : symbol,
     timestamp: Date.now(),
     jsonData: JSON.stringify(txf),
     status,
     amount: totalAmount.toString(),
     coinId,
-    symbol: isNft ? "NFT" : "UCT",
+    symbol,
+    iconUrl,
     sizeBytes: JSON.stringify(txf).length,
   });
 }
