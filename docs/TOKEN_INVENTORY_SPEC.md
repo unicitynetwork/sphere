@@ -1,7 +1,14 @@
 # Token Inventory Management Specification
 
-**Version:** 3.3
-**Last Updated:** 2026-01-27
+**Version:** 3.4
+**Last Updated:** 2026-01-28
+
+> **v3.4 Changes:** Version chain integrity and server validation contract:
+> - Section 10.8: Version High Water Mark (HWM) tracking to prevent data regression
+> - Section 10.9: Server Chain Validation Contract (version increment, lastCid chain, rate limits)
+> - Section 10.10: Version Calculation for IPFS Uploads (`remoteVersion + 1` logic)
+> - Section 10.11: Fast Sync Mode (`skipExtendedVerification` option)
+> - Updated Step 2 and Step 10 with HWM tracking behavior
 
 > **v3.3 Changes:** Lazy recovery for cache corruption resilience:
 > - Section 7.4: LazyRecoveryLoop (automatic background recovery from IPFS version history)
@@ -599,6 +606,8 @@ This handles scenarios where:
 - **Circuit Breaker:** Max 10 consecutive failures. After 10 failures: switch to LOCAL mode, continue with localStorage data only
 - Add to common processing set either all tokens if NAMETAG is FALSE, otherwise add just the nametag tokens and skip directly to Step 8.4
 - Mark outbox tokens for sending (except completed_list entries)
+- **HWM Tracking:** If `remoteVersion > versionHwm`, update HWM to remoteVersion
+- **Stale Cache Detection:** If `remoteVersion < versionHwm`, set `networkErrorOccurred = true` to block upload (see Section 10.8)
 
 **Note:** Same token may exist in multiple versions (different state hashes). Track by (tokenId, stateHash) tuple.
 
@@ -807,6 +816,7 @@ Keep one copy, merge any additional data (proofs, metadata).
 
 **10.5) Success:**
 - Clear UPLOAD_NEEDED flag
+- **Update HWM:** Set `versionHwm = newVersion` (see Section 10.8)
 - Return SUCCESS
 
 **10.6) Circuit Breaker:**
@@ -1102,6 +1112,165 @@ if (isLocalMode && localModeActivatedAt < Date.now() - 3600000) {
 - Manual "Retry IPFS" button always available in LOCAL mode
 - Shows countdown: "Auto-retry in X minutes"
 - Success clears LOCAL flag immediately
+
+### 10.8 Version High Water Mark (HWM) Tracking
+
+**Purpose:** Prevent accepting downgraded or corrupted data from stale IPNS cache. The HWM tracks the highest version ever successfully synced with IPFS for a given wallet address.
+
+**Storage Key:** `sphere_version_hwm_${address}` (localStorage)
+
+**Lifecycle:**
+1. **Initialization:** HWM starts at 0 for new wallets
+2. **Update on IPFS Load (Step 2):** When remote version > current HWM, update HWM
+3. **Update on IPNS Publish (Step 10):** After successful publish, update HWM to new version
+
+**Version Scenario Handling:**
+
+| Scenario | Condition | Action |
+|----------|-----------|--------|
+| Remote regression | `remoteVersion < HWM` | Block upload, wait for IPNS cache refresh |
+| Local ahead | `localVersion > remoteVersion` AND `remoteVersion >= HWM` | Allow upload (normal pending changes) |
+| Remote ahead | `remoteVersion > localVersion` | Merge remote changes (another device synced) |
+| Equal versions | `remoteVersion == localVersion` | Check content diff for merge |
+
+**Stale Cache Detection:**
+When `remoteVersion < HWM`:
+- Log: `REMOTE VERSION REGRESSED: Remote vX < HWM vY`
+- Set `networkErrorOccurred = true` to block upload
+- Skip IPFS upload (we don't have correct `lastCid` for chain validation)
+- Retry after IPNS cache refreshes (~30 seconds)
+
+**Implementation:**
+```typescript
+// Storage key generator
+STORAGE_KEY_GENERATORS.versionHighWaterMark(address) → `sphere_version_hwm_${address}`
+
+// Update after successful IPFS load
+if (remoteVersion > versionHwm) {
+  localStorage.setItem(hwmKey, remoteVersion.toString());
+}
+
+// Update after successful IPNS publish
+localStorage.setItem(hwmKey, newVersion.toString());
+```
+
+### 10.9 Server Chain Validation Contract
+
+The IPFS sidecar server performs cryptographic chain validation on all IPNS updates. Clients MUST follow these rules for successful uploads.
+
+**Version Increment Rule (CRITICAL):**
+```
+version = current_server_version + 1  (EXACTLY)
+```
+- Server rejects version skips (e.g., v7 → v9)
+- Server rejects version regression (e.g., v7 → v5)
+- Server rejects same version (e.g., v7 → v7)
+
+**Chain Continuity Rule (CRITICAL):**
+```
+lastCid = current_server_cid  (EXACTLY)
+```
+- Each upload MUST reference the previous CID via `_meta.lastCid`
+- Bootstrap (first upload): `lastCid` should be null or absent
+- Updates: `lastCid` MUST match server's current CID
+
+**`_meta` Field Requirements:**
+
+| Field | Required | Type | Constraints |
+|-------|----------|------|-------------|
+| `version` | YES | integer | Must be ≥ 1, must increment by exactly 1 |
+| `lastCid` | YES (updates) | string | Must match server's current CID |
+| `address` | YES | string | Wallet address |
+| `ipnsName` | YES | string | IPNS name (peer ID) |
+| `formatVersion` | YES | string | "2.0" |
+
+**Rate Limiting:**
+
+| Scope | Limit | Purpose |
+|-------|-------|---------|
+| Global | 100 req/sec | Prevent DDoS |
+| Per IP | 30 req/min | Prevent abuse from single source |
+| Per IPNS Name | 1 req/sec | Prevent rapid-fire updates |
+
+**Error Responses:**
+
+| Error | Cause | Client Action |
+|-------|-------|---------------|
+| `version_mismatch` | Version != current + 1 | Refetch IPNS, recalculate version |
+| `chain_break` | lastCid != current CID | Refetch IPNS, use correct lastCid |
+| `missing_meta_field` | _meta field absent | Add _meta to payload |
+| `fetch_failed` | Server couldn't fetch CID content | Ensure content is pinned/accessible |
+| `rate_limited` | Too many requests | Back off and retry |
+
+### 10.10 Version Calculation for IPFS Uploads
+
+**CRITICAL: Use `remoteVersion + 1`, NOT `max(local, remote) + 1`**
+
+**Rationale:**
+The server's chain validation requires exactly `current_version + 1`. When local version is ahead of remote (due to failed previous uploads), using `max()` sends a version the server doesn't expect.
+
+**Example Failure Scenario (OLD behavior):**
+```
+1. Remote has v7, local has v8 (previous upload failed)
+2. Client calculates: max(8, 7) + 1 = 9
+3. Client sends v9
+4. Server expects v8 (current=7, expects 7+1=8)
+5. Server rejects: "VERSION MISMATCH: Expected 8, got 9"
+```
+
+**Correct Behavior (NEW):**
+```
+1. Remote has v7, local has v8 (previous upload failed)
+2. Client calculates: 7 + 1 = 8
+3. Client sends v8
+4. Server accepts (current=7, expects 8, got 8) ✓
+```
+
+**Implementation:**
+```typescript
+// In buildStorageDataFromContext()
+const newVersion = ctx.remoteVersion > 0
+  ? ctx.remoteVersion + 1    // Server expects exactly this
+  : ctx.localVersion + 1;     // First upload (no remote data)
+```
+
+**Content Merging:**
+- Content is merged from BOTH local and remote sources
+- Version number is purely for chain ordering
+- Local-ahead scenario triggers upload to sync local changes to IPFS
+
+### 10.11 Fast Sync Mode (skipExtendedVerification)
+
+**Purpose:** Reduce IPFS upload + IPNS publish latency from ~4-5 seconds to <1 second for UX-critical paths.
+
+**When to Use:**
+- Pre-transfer IPFS sync (in critical path before sending tokens)
+- LazyRecoveryLoop (background operation)
+
+**What Gets Skipped:**
+| Check | Normal Mode | Fast Mode |
+|-------|-------------|-----------|
+| Content upload HEAD verification | 3 retries, 600ms delays | Skip (HTTP 200 = persisted) |
+| IPNS verification retries | 3 retries, ~2.8s total | 1 quick check, 50ms |
+
+**Safety Guarantee:**
+- HTTP 200 response from backend guarantees content persistence
+- Verification retries only confirm indexing/propagation, not persistence
+- Fast mode is safe because persistence is the critical requirement
+
+**Usage:**
+```typescript
+await inventorySync({
+  skipExtendedVerification: true  // Enable fast mode
+});
+```
+
+**Performance Impact:**
+| Operation | Normal Mode | Fast Mode |
+|-----------|-------------|-----------|
+| Content upload | ~2.5s | ~2.1s |
+| IPNS publish | ~1.5s | ~0.35s |
+| Total | ~4-5s | ~2.5s |
 
 ---
 
@@ -1571,3 +1740,35 @@ interface TombstoneEntry {
 ```
 
 **Note:** Same tokenId can have multiple tombstones (for forked states). Token can return with a NEW stateHash even if previous state is tombstoned.
+
+### A.4 Validation Cache (localStorage)
+
+Caches SDK validation results to avoid repeated expensive validation calls.
+
+```typescript
+interface ValidationCacheEntry {
+  valid: boolean;
+  timestamp: number;
+  stateHash: string;
+}
+
+// Key format: "tokenId:stateHash"
+// Storage key: "sphere_validation_cache"
+// TTL: 24 hours
+```
+
+**Cache Behavior:**
+- Only VALID results are cached (invalid tokens may become valid after proof recovery)
+- Cache is cleared when IPFS inventory changes significantly
+- Reduces validation time by ~96% on hot cache (2.5-3.9s → ~100ms)
+
+### A.5 Version High Water Mark (localStorage)
+
+Tracks highest version ever successfully synced with IPFS.
+
+```typescript
+// Key format: "sphere_version_hwm_${address}"
+// Value: version number as string (e.g., "42")
+```
+
+**Purpose:** Prevents accepting downgraded data from stale IPNS cache. See Section 10.8.
