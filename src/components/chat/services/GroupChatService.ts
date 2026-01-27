@@ -233,9 +233,7 @@ export class GroupChatService {
 
     this.client.subscribe(messageFilter, {
       onEvent: (event) => this.handleGroupEvent(event),
-      onEndOfStoredEvents: () => {
-        console.log('End of stored group messages');
-      },
+      onEndOfStoredEvents: () => {},
     });
 
     // Subscribe to group metadata changes
@@ -246,9 +244,7 @@ export class GroupChatService {
 
     this.client.subscribe(metadataFilter, {
       onEvent: (event) => this.handleMetadataEvent(event),
-      onEndOfStoredEvents: () => {
-        console.log('End of stored group metadata');
-      },
+      onEndOfStoredEvents: () => {},
     });
 
     // Subscribe to moderation events (message deletions, user removals, group deletions)
@@ -259,9 +255,7 @@ export class GroupChatService {
 
     this.client.subscribe(moderationFilter, {
       onEvent: (event) => this.handleModerationEvent(event),
-      onEndOfStoredEvents: () => {
-        console.log('End of stored moderation events');
-      },
+      onEndOfStoredEvents: () => {},
     });
   }
 
@@ -291,9 +285,7 @@ export class GroupChatService {
 
     this.client.subscribe(moderationFilter, {
       onEvent: (event) => this.handleModerationEvent(event),
-      onEndOfStoredEvents: () => {
-        console.log(`End of stored moderation events for group ${groupId}`);
-      },
+      onEndOfStoredEvents: () => {},
     });
   }
 
@@ -657,7 +649,6 @@ export class GroupChatService {
             }
           }
           const groups = Array.from(groupsMap.values());
-          console.log(`Found ${groups.length} available groups`);
           resolve(groups);
         }
       };
@@ -1638,15 +1629,10 @@ export class GroupChatService {
    */
   isCurrentUserAdmin(groupId: string): boolean {
     const myPubkey = this.getMyPublicKey();
-    if (!myPubkey) {
-      console.log(`🔍 isCurrentUserAdmin(${groupId}): no pubkey`);
-      return false;
-    }
+    if (!myPubkey) return false;
 
     const member = this.repository.getMember(groupId, myPubkey);
-    const isAdmin = member?.isAdmin() || false;
-    console.log(`🔍 isCurrentUserAdmin(${groupId}): pubkey=${myPubkey?.slice(0, 8)}, member=${!!member}, role=${member?.role}, isAdmin=${isAdmin}`);
-    return isAdmin;
+    return member?.isAdmin() || false;
   }
 
   // Cache for relay admin status
