@@ -80,10 +80,11 @@ export function useGlobalSyncStatus(): GlobalSyncStatus {
     window.addEventListener('ipfs-storage-event', handleSyncEvent as EventListener);
 
     // Poll for token sync status as backup (events may be missed during initialization)
+    // Reduced from 500ms to 5000ms (10x) to lower CPU overhead - events are primary source
     const pollInterval = setInterval(() => {
       const currentSyncing = tokenService.isCurrentlySyncing();
       setTokenSyncing(currentSyncing);
-    }, 500);
+    }, 5000);
 
     return () => {
       window.removeEventListener('ipfs-storage-event', handleSyncEvent as EventListener);

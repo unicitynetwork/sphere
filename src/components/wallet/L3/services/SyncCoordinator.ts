@@ -51,9 +51,9 @@ export class SyncCoordinator {
   private leaderCheckInterval: ReturnType<typeof setInterval> | null = null;
 
   // Constants
-  private readonly LEADER_TIMEOUT = 10000; // 10s - leader considered dead if no heartbeat
-  private readonly HEARTBEAT_INTERVAL = 5000; // 5s heartbeat (was 3s) - reduce CPU overhead
-  private readonly LEADER_CHECK_INTERVAL = 7500; // 7.5s leader check (was 5s) - reduce CPU overhead
+  private readonly LEADER_TIMEOUT = 30000; // 30s - leader considered dead if no heartbeat
+  private readonly HEARTBEAT_INTERVAL = 15000; // 15s heartbeat (was 5s) - reduce CPU overhead
+  private readonly LEADER_CHECK_INTERVAL = 20000; // 20s leader check (was 7.5s) - reduce CPU overhead
   private readonly LOCK_TIMEOUT = 30000; // 30s max wait for lock
   private readonly YIELD_COOLDOWN = 15000; // 15s cooldown after yielding to prevent flapping
 

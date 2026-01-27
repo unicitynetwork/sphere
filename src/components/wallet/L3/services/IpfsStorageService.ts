@@ -204,13 +204,11 @@ function createConnectionGaterStatic(bootstrapPeers: string[]): ConnectionGater 
     denyDialMultiaddr: async () => false,
 
     // Block outbound connections to non-allowed peers
+    // Note: Removed verbose logging from this hot path to reduce CPU overhead
+    // The gater runs 100+ times/minute; logging each call was expensive
     denyDialPeer: async (peerId: PeerId) => {
       const peerIdStr = peerId.toString();
-      const denied = !allowedPeerIds.has(peerIdStr);
-      if (denied) {
-        console.debug(`📦 Blocked dial to non-bootstrap peer: ${peerIdStr.slice(0, 16)}...`);
-      }
-      return denied;
+      return !allowedPeerIds.has(peerIdStr);
     },
 
     // Allow inbound connections (rare in browser, but don't block)
@@ -2340,15 +2338,9 @@ export class IpfsStorageService implements IpfsTransport {
               console.warn(`📦 Failed to reconnect to backend:`, dialError);
             }
           }
-        } else {
-          // Connection exists, log status
-          const backendConn = connections.find(
-            (conn) => conn.remotePeer.toString() === backendPeerId
-          );
-          if (backendConn) {
-            console.log(`📦 Backend connection alive: ${backendConn.remoteAddr.toString()}`);
-          }
         }
+        // Removed verbose "Backend connection alive" logging to reduce CPU overhead
+        // Connection health is already verified by the isConnected check above
       } catch (error) {
         console.warn(`📦 Connection maintenance error:`, error);
       }
