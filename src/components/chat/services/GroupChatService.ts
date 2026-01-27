@@ -460,6 +460,16 @@ export class GroupChatService {
       if (this.repository.isEventProcessed(event.id)) {
         return;
       }
+
+      // Check if the delete event is older than the group's creation
+      // This handles the case where a group was deleted and recreated with the same ID
+      const deleteTimestampMs = event.created_at * 1000;
+      if (deleteTimestampMs < group.createdAt) {
+        console.log(`⏭️ Ignoring stale DELETE_GROUP for ${groupId} (delete: ${deleteTimestampMs}, group created: ${group.createdAt})`);
+        this.repository.addProcessedEventId(event.id);
+        return;
+      }
+
       this.repository.addProcessedEventId(event.id);
 
       console.log(`🗑️ Group ${groupId} was deleted`);
