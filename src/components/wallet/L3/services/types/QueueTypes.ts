@@ -108,8 +108,18 @@ export interface LoopConfig {
   deliveryBackoffMs: number[];
   /** 3000ms - Wait for empty before NORMAL sync */
   deliveryEmptyQueueWaitMs: number;
-  /** 500ms - How often to check queue */
+  /** 2000ms - How often to check queue (reduced from 500ms to lower CPU overhead) */
   deliveryCheckIntervalMs: number;
+
+  // LazyRecoveryLoop (Section 7.4)
+  /** 10000ms - Delay before running lazy recovery (default: 10 seconds) */
+  lazyRecoveryDelayMs: number;
+  /** 20 - Max versions to traverse during lazy recovery */
+  lazyRecoveryDepth: number;
+  /** 120000ms - Timeout for lazy recovery operation (default: 2 minutes) */
+  lazyRecoveryTimeoutMs: number;
+  /** 0.5 - Jitter ratio for recovery delay (±50%) */
+  lazyRecoveryJitter: number;
 }
 
 /**
@@ -123,7 +133,11 @@ export const DEFAULT_LOOP_CONFIG: LoopConfig = {
   deliveryMaxRetries: 10,
   deliveryBackoffMs: [1000, 3000, 10000, 30000, 60000],
   deliveryEmptyQueueWaitMs: 3000,
-  deliveryCheckIntervalMs: 500,
+  deliveryCheckIntervalMs: 2000,  // 2000ms (was 500ms) - reduce CPU overhead
+  lazyRecoveryDelayMs: 10000,      // 10 seconds after startup
+  lazyRecoveryDepth: 20,           // Traverse up to 20 versions
+  lazyRecoveryTimeoutMs: 120000,   // 2 minutes timeout
+  lazyRecoveryJitter: 0.5,         // ±50% jitter for DHT load distribution
 };
 
 /**

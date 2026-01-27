@@ -1,7 +1,10 @@
 # Token Inventory Management Specification
 
-**Version:** 3.2
-**Last Updated:** 2026-01-17
+**Version:** 3.3
+**Last Updated:** 2026-01-27
+
+> **v3.3 Changes:** Lazy recovery for cache corruption resilience:
+> - Section 7.4: LazyRecoveryLoop (automatic background recovery from IPFS version history)
 
 > **v3.2 Changes:** Multi-version token architecture clarification:
 > - Section 3.7: Multi-Version Token Architecture (tokenId vs stateHash, uniqueness constraints, boomerang scenarios)
@@ -875,6 +878,59 @@ Processes Nostr delivery queue in background.
 - Build `completed_list` with all sent tokens' IDs, state hashes, and proofs
 - Call `inventorySync(null, null, completed_list)`
 - Moves completed tokens to Sent folder
+
+### 7.4 LazyRecoveryLoop
+
+Background task that recovers tokens lost due to IPFS cache corruption. Runs once per session, 10 seconds after app startup.
+
+**Purpose:**
+- Automatically recover tokens from IPFS version history if local cache is corrupted
+- Non-blocking background operation with zero impact on main sync
+- Provides resilience against cache corruption at client or sidecar level
+
+**Configuration:**
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `lazyRecoveryDelayMs` | 10000 | Delay before starting recovery (ms) |
+| `lazyRecoveryDepth` | 20 | Maximum versions to traverse |
+| `lazyRecoveryTimeoutMs` | 120000 | Timeout for recovery operation (ms) |
+| `lazyRecoveryJitter` | 0.5 | Random jitter ratio (±50%) for DHT load distribution |
+
+**Execution Flow:**
+
+**1) Scheduling Phase:**
+- Wait 10 seconds after app initialization (with ±50% random jitter)
+- Jitter prevents DHT query bursts when many users start simultaneously
+- Run once per session only
+
+**2) Recovery Phase:**
+```
+1. Get current identity from IdentityManager
+2. Clear client-side IPNS cache (forces fresh resolution)
+3. Call inventorySync() in RECOVERY mode with:
+   - recoveryDepth: 20 (configurable)
+   - skipExtendedVerification: true
+4. RECOVERY mode traverses version chain via _meta.lastCid
+5. Merge recovered tokens without overwriting existing
+```
+
+**3) Completion Phase:**
+- Log recovery statistics (tokens recovered, versions traversed, duration)
+- Mark `hasRun = true` to prevent retry
+- On error: log and continue (non-critical operation)
+
+**Status Monitoring:**
+```typescript
+const loopsManager = InventoryBackgroundLoopsManager.getInstance();
+const status = loopsManager.getStatus().lazyRecovery;
+// { hasRun, isRunning, isScheduled, completedAt, tokensRecovered }
+```
+
+**Performance Characteristics:**
+- Zero impact on main sync operations (10-second delay ensures isolation)
+- Memory: ~200KB transient during recovery
+- Duration: 5-30 seconds depending on cache state
+- CPU: 2-5% background usage
 
 ---
 

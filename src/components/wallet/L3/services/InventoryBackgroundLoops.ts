@@ -21,6 +21,8 @@ import type {
 } from './types/QueueTypes';
 import { DEFAULT_LOOP_CONFIG } from './types/QueueTypes';
 import { inventorySync, type SyncParams } from './InventorySyncService';
+import { getIpfsHttpResolver } from './IpfsHttpResolver';
+import type { RecoveryStats } from '../types/SyncTypes';
 
 /**
  * Batches incoming Nostr tokens with 3-second idle detection
@@ -592,12 +594,227 @@ export class NostrDeliveryQueue {
 }
 
 /**
+ * Lazy Recovery Loop
+ *
+ * Runs a single background recovery task 10 seconds after app startup
+ * to recover tokens lost due to IPFS cache corruption.
+ *
+ * Key Features:
+ * - One-time execution per session
+ * - Bypasses client-side cache for fresh IPFS resolution
+ * - Traverses version chain up to configurable depth (default: 20)
+ * - Non-blocking background operation
+ * - Random jitter (±50%) for DHT load distribution
+ * - Timeout protection (default: 2 minutes)
+ */
+export class LazyRecoveryLoop {
+  private identityManager: IdentityManager;
+  private config: LoopConfig;
+  private hasRun: boolean = false;
+  private isRunning: boolean = false;
+  private scheduledTimeout: ReturnType<typeof setTimeout> | null = null;
+  private completedAt: number | null = null;
+  private lastRecoveryStats: RecoveryStats | null = null;
+  private lastError: string | null = null;
+
+  constructor(
+    identityManager: IdentityManager,
+    config: LoopConfig = DEFAULT_LOOP_CONFIG
+  ) {
+    this.identityManager = identityManager;
+    this.config = config;
+
+    // Validate configuration
+    const minDelay = 5000; // 5 seconds minimum
+    if (this.config.lazyRecoveryDelayMs < minDelay) {
+      console.warn(`🔄 [LazyRecovery] Delay ${this.config.lazyRecoveryDelayMs}ms too short, using minimum ${minDelay}ms`);
+      this.config.lazyRecoveryDelayMs = minDelay;
+    }
+  }
+
+  /**
+   * Schedule lazy recovery to run after a delay with random jitter
+   * Called automatically by InventoryBackgroundLoopsManager.initialize()
+   *
+   * Jitter (±50%) prevents DHT query bursts when many users start simultaneously
+   */
+  scheduleRecovery(delayMs: number = this.config.lazyRecoveryDelayMs): void {
+    // Prevent duplicate scheduling
+    if (this.scheduledTimeout || this.hasRun) {
+      console.log('🔄 [LazyRecovery] Already scheduled or completed, skipping');
+      return;
+    }
+
+    // Add random jitter: ±50% of base delay (e.g., 5-15 seconds for 10s base)
+    const jitterRatio = (Math.random() - 0.5); // -0.5 to +0.5
+    const jitterMs = delayMs * jitterRatio * this.config.lazyRecoveryJitter;
+    const totalDelayMs = Math.max(1000, delayMs + jitterMs); // Clamp to minimum 1s
+
+    console.log(
+      `🔄 [LazyRecovery] Scheduled to run in ${totalDelayMs.toFixed(0)}ms ` +
+      `(base=${delayMs}ms, jitter=${jitterMs.toFixed(0)}ms)`
+    );
+
+    this.scheduledTimeout = setTimeout(() => {
+      this.scheduledTimeout = null;
+      this.runLazyRecovery().catch(err => {
+        console.error('🔄 [LazyRecovery] Unexpected error:', err);
+      });
+    }, totalDelayMs);
+  }
+
+  /**
+   * Execute lazy recovery operation
+   * INTERNAL: Called automatically by scheduleRecovery(), not directly by user code
+   */
+  private async runLazyRecovery(): Promise<void> {
+    // Guard against concurrent execution
+    if (this.isRunning || this.hasRun) {
+      console.log('🔄 [LazyRecovery] Already running or completed');
+      return;
+    }
+
+    this.isRunning = true;
+    const startTime = performance.now();
+
+    console.log('🔄 [LazyRecovery] Starting background recovery...');
+
+    try {
+      // Step 1: Get current identity with exception handling
+      let identity;
+      try {
+        identity = await this.identityManager.getCurrentIdentity();
+      } catch (identityError) {
+        console.warn('🔄 [LazyRecovery] Failed to get identity:', identityError);
+        return;
+      }
+
+      if (!identity || !identity.ipnsName) {
+        console.log('🔄 [LazyRecovery] No identity or IPNS name available, skipping');
+        return;
+      }
+
+      console.log(`🔄 [LazyRecovery] Identity: ${identity.address.slice(0, 16)}...`);
+      console.log(`🔄 [LazyRecovery] IPNS: ${identity.ipnsName.slice(0, 24)}...`);
+
+      // Step 2: Clear client-side IPNS cache to force fresh resolution
+      // NOTE: This clears ALL IPNS records (not targeted), as the current
+      // implementation uses ipnsName as a boolean flag. This is acceptable
+      // for single-wallet scenarios but may need refinement for multi-wallet.
+      const httpResolver = getIpfsHttpResolver();
+      console.log('🔄 [LazyRecovery] Clearing all IPNS records from client cache');
+      httpResolver.invalidateIpnsCache(identity.ipnsName);
+
+      // Step 3: Run inventorySync in RECOVERY mode with timeout
+      const syncParams: SyncParams = {
+        address: identity.address,
+        publicKey: identity.publicKey,
+        ipnsName: identity.ipnsName,
+        recoveryDepth: this.config.lazyRecoveryDepth,
+        skipExtendedVerification: true, // Speed optimization
+      };
+
+      const timeoutMs = this.config.lazyRecoveryTimeoutMs;
+      console.log(
+        `🔄 [LazyRecovery] Calling inventorySync(RECOVERY, depth=${syncParams.recoveryDepth}, timeout=${timeoutMs}ms)`
+      );
+
+      // Add timeout wrapper to prevent hanging operations
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Recovery timeout exceeded')), timeoutMs);
+      });
+
+      const result = await Promise.race([
+        inventorySync(syncParams),
+        timeoutPromise
+      ]);
+
+      // Step 4: Analyze results
+      this.completedAt = Date.now();
+      this.lastRecoveryStats = result.recoveryStats || null;
+
+      const durationMs = performance.now() - startTime;
+
+      if (result.status === 'SUCCESS' || result.status === 'PARTIAL_SUCCESS') {
+        const tokensRecovered = result.recoveryStats?.tokensRecoveredFromHistory || 0;
+        const versionsTraversed = result.recoveryStats?.versionsTraversed || 0;
+
+        if (tokensRecovered > 0) {
+          console.log(
+            `✅ [LazyRecovery] RECOVERED ${tokensRecovered} tokens from ${versionsTraversed} versions ` +
+            `(${durationMs.toFixed(0)}ms)`
+          );
+        } else {
+          console.log(
+            `✅ [LazyRecovery] Completed - no additional tokens found ` +
+            `(${versionsTraversed} versions checked, ${durationMs.toFixed(0)}ms)`
+          );
+        }
+      } else {
+        this.lastError = result.errorMessage || 'Unknown error';
+        console.warn(`⚠️ [LazyRecovery] Completed with errors: ${this.lastError} (${durationMs.toFixed(0)}ms)`);
+      }
+
+    } catch (error) {
+      const durationMs = performance.now() - startTime;
+      this.lastError = error instanceof Error ? error.message : String(error);
+      console.error(`❌ [LazyRecovery] Failed after ${durationMs.toFixed(0)}ms:`, error);
+    } finally {
+      this.isRunning = false;
+      this.hasRun = true;
+    }
+  }
+
+  /**
+   * Get recovery status for debugging/UI
+   */
+  getStatus(): {
+    hasRun: boolean;
+    isRunning: boolean;
+    isScheduled: boolean;
+    completedAt: number | null;
+    lastRecoveryStats: RecoveryStats | null;
+    lastError: string | null;
+  } {
+    return {
+      hasRun: this.hasRun,
+      isRunning: this.isRunning,
+      isScheduled: this.scheduledTimeout !== null,
+      completedAt: this.completedAt,
+      // Return copy to prevent external modifications
+      lastRecoveryStats: this.lastRecoveryStats ? { ...this.lastRecoveryStats } : null,
+      lastError: this.lastError,
+    };
+  }
+
+  /**
+   * Cancel scheduled recovery (e.g., on app shutdown before it runs)
+   */
+  cancel(): void {
+    if (this.scheduledTimeout) {
+      clearTimeout(this.scheduledTimeout);
+      this.scheduledTimeout = null;
+      console.log('🔄 [LazyRecovery] Scheduled recovery cancelled');
+    }
+  }
+
+  /**
+   * Cleanup on app shutdown
+   */
+  destroy(): void {
+    this.cancel();
+    console.log('🛑 [LazyRecovery] Destroyed');
+  }
+}
+
+/**
  * Singleton manager for background loop lifecycle
  */
 export class InventoryBackgroundLoopsManager {
   private static instance: InventoryBackgroundLoopsManager | null = null;
   private receiveLoop: ReceiveTokensToInventoryLoop | null = null;
   private deliveryQueue: NostrDeliveryQueue | null = null;
+  private lazyRecoveryLoop: LazyRecoveryLoop | null = null;
   private identityManager: IdentityManager;
   private config: LoopConfig;
   private isInitialized = false;
@@ -663,8 +880,13 @@ export class InventoryBackgroundLoopsManager {
     try {
       this.receiveLoop = new ReceiveTokensToInventoryLoop(this.identityManager, this.config);
       this.deliveryQueue = new NostrDeliveryQueue(this.identityManager, this.config);
+      this.lazyRecoveryLoop = new LazyRecoveryLoop(this.identityManager, this.config);
       this.isInitialized = true;
       console.log('✅ [LoopsManager] Background loops initialized');
+
+      // Schedule lazy recovery after initialization
+      const delayMs = this.config.lazyRecoveryDelayMs;
+      this.lazyRecoveryLoop.scheduleRecovery(delayMs);
     } finally {
       // Clear promise after completion (success or failure)
       this.initializationPromise = null;
@@ -683,6 +905,10 @@ export class InventoryBackgroundLoopsManager {
     if (this.deliveryQueue) {
       this.deliveryQueue.destroy();
       this.deliveryQueue = null;
+    }
+    if (this.lazyRecoveryLoop) {
+      this.lazyRecoveryLoop.destroy();
+      this.lazyRecoveryLoop = null;
     }
     this.isInitialized = false;
     console.log('🛑 [LoopsManager] Background loops shutdown');
@@ -709,13 +935,33 @@ export class InventoryBackgroundLoopsManager {
   }
 
   /**
+   * Get lazy recovery loop (throws if not initialized)
+   */
+  getLazyRecoveryLoop(): LazyRecoveryLoop {
+    if (!this.lazyRecoveryLoop) {
+      throw new Error('LazyRecoveryLoop not initialized - call initialize() first');
+    }
+    return this.lazyRecoveryLoop;
+  }
+
+  /**
    * Get combined status of all loops
    */
   getStatus(): {
     receive: { pending: number; batchId: string | null; isProcessing: boolean };
     delivery: DeliveryQueueStatus;
+    lazyRecovery: {
+      hasRun: boolean;
+      isRunning: boolean;
+      isScheduled: boolean;
+      completedAt: number | null;
+      tokensRecovered: number | null;
+    };
     isInitialized: boolean;
   } {
+    const lazyRecoveryStatus = this.lazyRecoveryLoop?.getStatus();
+    const tokensRecovered = lazyRecoveryStatus?.lastRecoveryStats?.tokensRecoveredFromHistory ?? null;
+
     return {
       receive: this.receiveLoop?.getBatchStatus() || { pending: 0, batchId: null, isProcessing: false },
       delivery: this.deliveryQueue?.getQueueStatus() || {
@@ -725,6 +971,13 @@ export class InventoryBackgroundLoopsManager {
         byRetryCount: {},
         oldestEntryAge: 0,
         activeDeliveries: 0,
+      },
+      lazyRecovery: {
+        hasRun: lazyRecoveryStatus?.hasRun || false,
+        isRunning: lazyRecoveryStatus?.isRunning || false,
+        isScheduled: lazyRecoveryStatus?.isScheduled || false,
+        completedAt: lazyRecoveryStatus?.completedAt || null,
+        tokensRecovered,
       },
       isInitialized: this.isInitialized,
     };

@@ -77,8 +77,8 @@ describe("DEFAULT_LOOP_CONFIG", () => {
     expect(DEFAULT_LOOP_CONFIG.deliveryEmptyQueueWaitMs).toBe(3000);
   });
 
-  it("should have correct check interval (500ms)", () => {
-    expect(DEFAULT_LOOP_CONFIG.deliveryCheckIntervalMs).toBe(500);
+  it("should have correct check interval (2000ms)", () => {
+    expect(DEFAULT_LOOP_CONFIG.deliveryCheckIntervalMs).toBe(2000);
   });
 });
 
