@@ -302,9 +302,21 @@ export const useGroupChat = (): UseGroupChatReturn => {
   // Join group
   const joinGroup = useCallback(
     async (groupId: string, inviteCode?: string): Promise<boolean> => {
-      return joinGroupMutation.mutateAsync({ groupId, inviteCode });
+      const success = await joinGroupMutation.mutateAsync({ groupId, inviteCode });
+      if (success) {
+        // Auto-select the joined group (it's now in the repository)
+        const joinedGroup = groupRepository.getGroup(groupId);
+        if (joinedGroup) {
+          // Use setSelectedGroup directly to avoid async selectGroup overhead
+          setSelectedGroup(joinedGroup);
+          localStorage.setItem(STORAGE_KEYS.CHAT_SELECTED_GROUP, joinedGroup.id);
+          groupRepository.markGroupAsRead(joinedGroup.id);
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
+        }
+      }
+      return success;
     },
-    [joinGroupMutation]
+    [joinGroupMutation, queryClient]
   );
 
   // Leave group
