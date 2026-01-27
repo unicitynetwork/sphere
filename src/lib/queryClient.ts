@@ -11,11 +11,22 @@ export { QUERY_KEYS };
  *   import { queryClient, QUERY_KEYS } from '@/lib/queryClient';
  *   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.TOKENS });
  */
+/**
+ * QueryClient with CPU-optimized defaults
+ *
+ * CPU OPTIMIZATION (Phase 3a):
+ * - staleTime: 60000 (1 min) - Reduce redundant refetches
+ * - gcTime: 300000 (5 min) - Keep data in cache longer
+ * - refetchOnMount: false - Prevent mount refetch storms
+ */
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
       retry: 1,
+      staleTime: 60000,           // 1 minute default stale time
+      gcTime: 5 * 60 * 1000,      // Keep data in cache for 5 minutes
+      refetchOnMount: false,      // Prevent mount refetch storms
     },
   },
 });

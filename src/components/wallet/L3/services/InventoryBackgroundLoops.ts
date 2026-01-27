@@ -338,6 +338,9 @@ export class NostrDeliveryQueue {
 
   /**
    * Process queue: send ready entries in parallel
+   *
+   * CPU OPTIMIZATION (Phase 2): Stops the processing timer when queue is empty
+   * to eliminate 2000ms polling overhead. Timer restarts when items are queued.
    */
   private async processQueue(): Promise<void> {
     if (this.isProcessing) return;
@@ -358,6 +361,9 @@ export class NostrDeliveryQueue {
       if (readyEntries.length === 0) {
         // Check if queue is empty (including active deliveries)
         if (this.queue.size === 0 && this.activeDeliveries.size === 0) {
+          // CPU OPTIMIZATION: Stop the timer immediately when queue is empty
+          // This eliminates 2000ms polling overhead when idle
+          this.stopProcessing();
           this.checkEmptyQueueWindow();
         }
         return;
@@ -547,8 +553,11 @@ export class NostrDeliveryQueue {
 
   /**
    * Get queue status for UI/debugging
+   *
+   * CPU OPTIMIZATION: Added isProcessingActive and isEmptyQueueWaiting
+   * for monitoring the event-driven queue behavior.
    */
-  getQueueStatus(): DeliveryQueueStatus {
+  getQueueStatus(): DeliveryQueueStatus & { isProcessingActive: boolean; isEmptyQueueWaiting: boolean } {
     const byRetryCount: Record<number, number> = {};
     let oldestAge = 0;
     const now = Date.now();
@@ -566,7 +575,25 @@ export class NostrDeliveryQueue {
       byRetryCount,
       oldestEntryAge: oldestAge,
       activeDeliveries: this.activeDeliveries.size,
+      isProcessingActive: this.processTimer !== null,
+      isEmptyQueueWaiting: this.emptyQueueTimer !== null,
     };
+  }
+
+  /**
+   * Check if the processing timer is currently active
+   * CPU OPTIMIZATION: Used to verify event-driven behavior
+   */
+  isProcessingActive(): boolean {
+    return this.processTimer !== null;
+  }
+
+  /**
+   * Check if we're in the empty queue waiting window
+   * CPU OPTIMIZATION: Used to verify event-driven behavior
+   */
+  isEmptyQueueWaiting(): boolean {
+    return this.emptyQueueTimer !== null;
   }
 
   /**

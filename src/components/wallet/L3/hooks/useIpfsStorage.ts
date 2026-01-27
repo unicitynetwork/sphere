@@ -90,10 +90,13 @@ export function useIpfsStorage() {
   }, [storageService]);
 
   // Query: Storage status
+  // CPU OPTIMIZATION (Phase 3c): Removed polling - status is already
+  // invalidated via storage:completed and storage:failed events
   const statusQuery = useQuery({
     queryKey: IPFS_STORAGE_KEYS.STATUS,
     queryFn: (): StorageStatus => storageService!.getStatus(),
-    refetchInterval: 30000, // Refresh every 30 seconds
+    refetchInterval: false,  // No polling - events handle updates
+    staleTime: Infinity,     // Only refetch on explicit invalidation
     enabled: isServiceReady && !!storageService,
   });
 

@@ -7,6 +7,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './lib/queryClient'
 import { ThemeInitializer } from './components/theme'
 import { ServicesProvider } from './contexts/ServicesProvider'
+import { WalletProvider } from './contexts/WalletContext'
 import { ToastContainer } from './components/ui/Toast'
 import mixpanel from 'mixpanel-browser'
 
@@ -68,12 +69,14 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <ServicesProvider>
-        <ThemeInitializer>
-          <HashRouter>
-            <App />
-          </HashRouter>
-          <ToastContainer />
-        </ThemeInitializer>
+        <WalletProvider>
+          <ThemeInitializer>
+            <HashRouter>
+              <App />
+            </HashRouter>
+            <ToastContainer />
+          </ThemeInitializer>
+        </WalletProvider>
       </ServicesProvider>
     </QueryClientProvider>
   </StrictMode>,

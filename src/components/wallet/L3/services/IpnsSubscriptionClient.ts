@@ -171,6 +171,29 @@ export class IpnsSubscriptionClient {
     }
   }
 
+  /**
+   * Check backend health before reconnecting
+   * CPU OPTIMIZATION (Phase 5): Prevents reconnect storms when backend is down
+   */
+  private async checkBackendHealth(): Promise<boolean> {
+    try {
+      const httpUrl = this.wsUrl.replace('wss://', 'https://').replace('ws://', 'http://').replace('/ws/ipns', '/health');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const response = await fetch(httpUrl, { method: 'HEAD', signal: controller.signal });
+      clearTimeout(timeoutId);
+      return response.ok;
+    } catch {
+      // Allow reconnect if health check is unavailable (fail open)
+      return true;
+    }
+  }
+
+  /**
+   * Schedule reconnection with exponential backoff
+   * CPU OPTIMIZATION (Phase 5): Increased backoff factor from 1.5 to 2
+   * Sequence: 5s, 10s, 20s, 40s, 60s (capped)
+   */
   private scheduleReconnect(): void {
     if (this.reconnectTimeout) {
       return;
@@ -182,8 +205,9 @@ export class IpnsSubscriptionClient {
     }
 
     this.reconnectAttempts++;
+    // CPU OPTIMIZATION: Changed from 1.5 to 2 for slower backoff
     const delay = Math.min(
-      this.reconnectDelayMs * Math.pow(1.5, this.reconnectAttempts - 1),
+      this.reconnectDelayMs * Math.pow(2, this.reconnectAttempts - 1),
       this.maxReconnectDelayMs
     );
 
@@ -191,8 +215,19 @@ export class IpnsSubscriptionClient {
       `[IPNS-WS] Reconnecting in ${(delay / 1000).toFixed(1)}s (attempt ${this.reconnectAttempts})...`
     );
 
-    this.reconnectTimeout = setTimeout(() => {
+    this.reconnectTimeout = setTimeout(async () => {
       this.reconnectTimeout = null;
+
+      // CPU OPTIMIZATION: Health check for first 3 attempts to avoid reconnect storms
+      if (this.reconnectAttempts <= 3) {
+        const isHealthy = await this.checkBackendHealth();
+        if (!isHealthy) {
+          console.log(`[IPNS-WS] Backend health check failed, delaying reconnect`);
+          this.scheduleReconnect(); // Schedule another attempt with increased delay
+          return;
+        }
+      }
+
       this.connect();
     }, delay);
   }
