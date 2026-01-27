@@ -501,8 +501,6 @@ export class GroupChatService {
     // NIP-29 GROUP_ADMINS event has p tags with admin pubkeys
     const pTags = event.tags.filter((t) => t[0] === 'p');
 
-    console.log(`👑 Updating admins for group ${groupId}: ${pTags.length} admins`);
-
     for (const tag of pTags) {
       const pubkey = tag[1];
 
@@ -1284,6 +1282,7 @@ export class GroupChatService {
                 group.description = options.description;
               }
               group.visibility = options.visibility || GroupVisibility.PUBLIC;
+              group.memberCount = 1; // Creator is automatically added as member
 
               // Save the group
               this.repository.saveGroup(group);
@@ -1683,7 +1682,6 @@ export class GroupChatService {
           }
         },
         onEndOfStoredEvents: () => {
-          console.log(`👑 Fetched ${adminPubkeys.size} relay admins`);
           this.relayAdminPubkeys = adminPubkeys;
           resolve(adminPubkeys);
         },
@@ -1705,12 +1703,12 @@ export class GroupChatService {
    */
   async isCurrentUserRelayAdmin(): Promise<boolean> {
     const myPubkey = this.getMyPublicKey();
-    if (!myPubkey) return false;
+    if (!myPubkey) {
+      return false;
+    }
 
     const admins = await this.fetchRelayAdmins();
-    const isAdmin = admins.has(myPubkey);
-    console.log(`👑 isCurrentUserRelayAdmin: ${isAdmin} (${admins.size} relay admins)`);
-    return isAdmin;
+    return admins.has(myPubkey);
   }
 
   /**
