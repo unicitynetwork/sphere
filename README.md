@@ -10,13 +10,26 @@ A multifunctional Web3 platform with integrated crypto wallet, specialized AI ag
 
 ### 🤖 Agent System
 
-- **Chat Agent** — direct and group messaging via Nostr protocol
-- **AI Assistant (Viktor)** — uncensored LLM with internet access
-- **Trivia Agent** — quiz games with score tracking
+**Core Agents:**
+- **Chat** — direct and group messaging via Nostr protocol
+- **Uncensored AI (Viktor)** — uncensored LLM with internet access
+- **Unicity Trivia** — quiz games with score tracking
 - **P2P Gaming** — gaming platform (Quake arena, crypto poker)
-- **Sports Betting** — sports event betting with history tracking
-- **OTC Trading** — P2P cryptocurrency trading
-- **Merch Store** — merchandise store with order management
+- **P2P Prediction** — sports prediction markets with history tracking
+- **OTC** — peer-to-peer cryptocurrency trading
+- **Unicity Merch** — merchandise store with order management
+
+**Additional Agents:**
+- **Agent Casino** — verifiably fair casino games
+- **P2P Sports** — private betting pools
+- **P2P Derivatives** — leveraged trading
+- **P2P Payday Loans** — instant approval loans
+- **P2P Crypto Offramp** — convert crypto to cash
+- **P2P Fiat Onramp** — convert cash to crypto
+- **Friendly Miners** — buy hash rate
+- **Buy Anything** — product purchasing
+- **Sell Anything** — get quotes for items
+- **Get UCT** — acquire Unicity tokens
 
 ### 💰 Multi-Layer Wallet
 
@@ -39,6 +52,51 @@ A multifunctional Web3 platform with integrated crypto wallet, specialized AI ag
 - QR codes for receiving payments
 - Seed phrase management
 - Real-time market data
+
+### 💬 NIP-29 Group Chat
+
+Sphere implements [NIP-29](https://github.com/nostr-protocol/nips/blob/master/29.md) for relay-based group chat functionality, providing Discord-like group messaging.
+
+**Features:**
+- Public and private groups with invite codes
+- Real-time messaging via WebSocket
+- Group discovery and browsing
+- Member count display
+- Unread message tracking
+- Join/leave group functionality
+- Message history persistence
+
+**Architecture:**
+- Dedicated Zooid relay (NIP-29 compliant) at `wss://sphere-relay.unicity.network`
+- `GroupChatService` — manages relay connection, subscriptions, and message sending
+- `GroupChatRepository` — local storage for groups, messages, and members
+- `useGroupChat` hook — React Query integration for state management
+
+**Event Kinds (NIP-29):**
+- Kind 9: Group chat message
+- Kind 9021: Join request
+- Kind 9022: Leave request
+- Kind 39000: Group metadata (relay-signed)
+- Kind 39002: Group members (relay-signed)
+
+**Files:**
+```
+src/components/chat/
+├── data/
+│   ├── groupModels.ts        # Group, GroupMessage, GroupMember classes
+│   └── GroupChatRepository.ts # Local storage operations
+├── services/
+│   └── GroupChatService.ts   # NIP-29 relay communication
+├── hooks/
+│   └── useGroupChat.ts       # React Query hook
+└── group/
+    ├── GroupChatSection.tsx  # Main container
+    ├── GroupList.tsx         # Sidebar with joined groups
+    ├── GroupItem.tsx         # Single group row
+    ├── GroupMessageList.tsx  # Message display
+    ├── GroupMessageBubble.tsx # Individual message
+    └── JoinGroupModal.tsx    # Browse/join groups
+```
 
 ### 🔐 Security
 
@@ -122,6 +180,9 @@ VITE_AGENT_API_URL=https://api.example.com
 
 # Base path for deployment
 BASE_PATH=/
+
+# NIP-29 Group Chat Relays (Zooid, comma-separated)
+VITE_GROUP_CHAT_RELAYS=wss://sphere-relay.unicity.network
 ```
 
 ## Project Structure
@@ -167,15 +228,34 @@ src/
 
 ### Agent Architecture
 
-Each agent is a specialized interface:
+Each agent is configured in `src/config/activities.ts`:
 
 ```typescript
+// For rendering agent cards (src/types/index.ts)
 interface IAgent {
   id: string;
   name: string;
-  icon: string;
+  Icon: LucideIcon;  // Lucide React icon component
+  category: string;
+  color: string;
+  isSelected?: boolean;
+}
+
+// Full agent configuration (src/config/activities.ts)
+interface AgentConfig {
+  id: string;
+  name: string;
   description: string;
-  activityId?: string; // For backend integration
+  Icon: LucideIcon;
+  category: string;
+  color: string;
+  type: AgentType;  // 'chat' | 'simple-ai' | 'ai-with-sidebar' | 'trivia' | 'unified'
+  greetingMessage?: string;
+  placeholder?: string;
+  backendActivityId?: string;  // For real mode API calls
+  quickActions?: QuickAction[];
+  contentType?: ContentType;  // 'none' | 'game' | 'match' | 'product' | 'merch'
+  hasSidebar?: boolean;
 }
 ```
 

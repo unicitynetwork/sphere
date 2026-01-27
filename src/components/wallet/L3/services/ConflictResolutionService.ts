@@ -10,13 +10,22 @@ import type {
   TokenConflict,
   MergeResult,
   TxfTransaction,
+  TombstoneEntry,
+  NametagData,
 } from "./types/TxfTypes";
 import {
   isTokenKey,
+  isArchivedKey,
+  isForkedKey,
   tokenIdFromKey,
+  tokenIdFromArchivedKey,
+  parseForkedKey,
   keyFromTokenId,
+  archivedKeyFromTokenId,
+  forkedKeyFromTokenIdAndState,
 } from "./types/TxfTypes";
-import type { NametagData } from "../../../../repositories/WalletRepository";
+import { getCurrentStateHash } from "./TxfSerializer";
+import { isNametagCorrupted, sanitizeNametagForLogging } from "../../../../utils/tokenValidation";
 
 // ==========================================
 // ConflictResolutionService
@@ -53,7 +62,6 @@ export class ConflictResolutionService {
       baseMeta = {
         ...remote._meta,
         version: remoteVersion + 1, // Increment for merged version
-        timestamp: Date.now(),
       };
       baseTokens = this.extractTokens(remote);
       otherTokens = this.extractTokens(local);
@@ -64,39 +72,21 @@ export class ConflictResolutionService {
       baseMeta = {
         ...local._meta,
         version: localVersion + 1,
-        timestamp: Date.now(),
       };
       baseTokens = this.extractTokens(local);
       otherTokens = this.extractTokens(remote);
       baseIsLocal = true;
       console.log(`📦 Local is newer, using local as base`);
     } else {
-      // Same version - merge based on timestamp
-      const localTs = local._meta.timestamp;
-      const remoteTs = remote._meta.timestamp;
-
-      if (remoteTs > localTs) {
-        baseMeta = {
-          ...remote._meta,
-          version: remoteVersion + 1,
-          timestamp: Date.now(),
-        };
-        baseTokens = this.extractTokens(remote);
-        otherTokens = this.extractTokens(local);
-        baseIsLocal = false;
-      } else {
-        baseMeta = {
-          ...local._meta,
-          version: localVersion + 1,
-          timestamp: Date.now(),
-        };
-        baseTokens = this.extractTokens(local);
-        otherTokens = this.extractTokens(remote);
-        baseIsLocal = true;
-      }
-      console.log(
-        `📦 Same version, using ${baseIsLocal ? "local" : "remote"} as base (newer timestamp)`
-      );
+      // Same version - use local as base (local wins on tie)
+      baseMeta = {
+        ...local._meta,
+        version: localVersion + 1,
+      };
+      baseTokens = this.extractTokens(local);
+      otherTokens = this.extractTokens(remote);
+      baseIsLocal = true;
+      console.log(`📦 Same version, using local as base (local wins on tie)`);
     }
 
     // Merge tokens
@@ -149,13 +139,79 @@ export class ConflictResolutionService {
       merged._nametag = this.mergeNametags(localNametag, remoteNametag);
     }
 
-    // Add all tokens
+    // Merge tombstones (union of local and remote by tokenId+stateHash)
+    // This ensures deleted token states stay deleted across devices
+    const localTombstones: TombstoneEntry[] = local._tombstones || [];
+    const remoteTombstones: TombstoneEntry[] = remote._tombstones || [];
+
+    // Use Map for deduplication by tokenId+stateHash key
+    const tombstoneMap = new Map<string, TombstoneEntry>();
+    for (const t of [...localTombstones, ...remoteTombstones]) {
+      const key = `${t.tokenId}:${t.stateHash}`;
+      if (!tombstoneMap.has(key)) {
+        tombstoneMap.set(key, t);
+      }
+    }
+    const mergedTombstones = [...tombstoneMap.values()];
+
+    if (mergedTombstones.length > 0) {
+      merged._tombstones = mergedTombstones;
+      console.log(`📦 Merged ${mergedTombstones.length} tombstone(s) (${localTombstones.length} local + ${remoteTombstones.length} remote)`);
+    }
+
+    // Build tombstone lookup set (tokenId:stateHash)
+    const tombstoneKeySet = new Set(tombstoneMap.keys());
+
+    // Add all tokens (excluding tombstoned states)
     for (const [tokenId, token] of mergedTokens) {
+      // Get the token's current state hash
+      const stateHash = getCurrentStateHash(token);
+      if (!stateHash) {
+        console.warn(`📦 Token ${tokenId.slice(0, 8)}... has undefined stateHash, skipping tombstone check`);
+        merged[keyFromTokenId(tokenId)] = token;
+        continue;
+      }
+      const tombstoneKey = `${tokenId}:${stateHash}`;
+
+      // Don't include tokens whose current state is tombstoned
+      if (tombstoneKeySet.has(tombstoneKey)) {
+        console.log(`📦 Excluding tombstoned token ${tokenId.slice(0, 8)}... (state ${stateHash.slice(0, 12)}...) from merge`);
+        removedTokens.push(tokenId);
+        continue;
+      }
       merged[keyFromTokenId(tokenId)] = token;
     }
 
+    // Merge archived tokens (union of local and remote, prefer more transactions)
+    const localArchived = this.extractArchivedTokens(local);
+    const remoteArchived = this.extractArchivedTokens(remote);
+    const mergedArchived = this.mergeArchivedTokenMaps(localArchived, remoteArchived);
+    for (const [tokenId, token] of mergedArchived) {
+      merged[archivedKeyFromTokenId(tokenId)] = token;
+    }
+    if (mergedArchived.size > 0) {
+      console.log(`📦 Merged ${mergedArchived.size} archived token(s)`);
+    }
+
+    // Merge forked tokens (union of local and remote)
+    const localForked = this.extractForkedTokens(local);
+    const remoteForked = this.extractForkedTokens(remote);
+    const mergedForked = this.mergeForkedTokenMaps(localForked, remoteForked);
+    for (const [key, token] of mergedForked) {
+      // Parse key to get tokenId and stateHash
+      const parts = key.split("_");
+      if (parts.length >= 2) {
+        const tokenId = parts[0];
+        const stateHash = parts.slice(1).join("_");  // stateHash may contain underscores
+        merged[forkedKeyFromTokenIdAndState(tokenId, stateHash)] = token;
+      }
+    }
+    if (mergedForked.size > 0) {
+      console.log(`📦 Merged ${mergedForked.size} forked token(s)`);
+    }
+
     console.log(
-      `📦 Merge complete: ${mergedTokens.size} tokens, ${conflicts.length} conflicts resolved, ${newTokens.length} new tokens`
+      `📦 Merge complete: ${mergedTokens.size - removedTokens.length} active, ${mergedArchived.size} archived, ${mergedForked.size} forked, ${conflicts.length} conflicts resolved, ${newTokens.length} new, ${removedTokens.length} tombstoned`
     );
 
     return {
@@ -292,17 +348,56 @@ export class ConflictResolutionService {
   }
 
   /**
-   * Merge nametag data, preferring local if both exist
+   * Merge nametag data, preferring valid data over corrupted data
+   *
+   * CRITICAL: Detects corrupted nametags (with empty token: {}) and
+   * prefers valid data over corrupted data. This fixes the bug where
+   * local corrupted data would overwrite valid remote data.
    */
   private mergeNametags(
     local: NametagData | undefined,
     remote: NametagData | undefined
   ): NametagData {
+    const localCorrupted = isNametagCorrupted(local);
+    const remoteCorrupted = isNametagCorrupted(remote);
+
     if (local && remote) {
-      // Both exist - use local (user's current choice)
+      // Both exist - check for corruption
+      if (localCorrupted && !remoteCorrupted) {
+        // Local is corrupted, remote is valid - use remote
+        console.warn("📦 Local nametag is corrupted, using remote:", {
+          local: sanitizeNametagForLogging(local),
+          remote: sanitizeNametagForLogging(remote),
+        });
+        return remote;
+      }
+      if (!localCorrupted && remoteCorrupted) {
+        // Local is valid, remote is corrupted - use local
+        console.warn("📦 Remote nametag is corrupted, using local:", {
+          local: sanitizeNametagForLogging(local),
+          remote: sanitizeNametagForLogging(remote),
+        });
+        return local;
+      }
+      if (localCorrupted && remoteCorrupted) {
+        // Both corrupted - prefer local but warn
+        console.error("📦 CRITICAL: Both local and remote nametags are corrupted!", {
+          local: sanitizeNametagForLogging(local),
+          remote: sanitizeNametagForLogging(remote),
+        });
+        return local;
+      }
+      // Both valid - use local (user's current choice)
       return local;
     }
-    return (local || remote)!;
+
+    // Only one exists
+    const result = (local || remote)!;
+    const resultCorrupted = isNametagCorrupted(result);
+    if (resultCorrupted) {
+      console.warn("📦 Warning: Only available nametag is corrupted:", sanitizeNametagForLogging(result));
+    }
+    return result;
   }
 
   // ==========================================
@@ -364,6 +459,103 @@ export class ConflictResolutionService {
     }
 
     return true;
+  }
+
+  // ==========================================
+  // Archived Token Methods
+  // ==========================================
+
+  /**
+   * Extract archived tokens from storage data into a Map
+   */
+  private extractArchivedTokens(data: TxfStorageData): Map<string, TxfToken> {
+    const archived = new Map<string, TxfToken>();
+
+    for (const key of Object.keys(data)) {
+      if (isArchivedKey(key)) {
+        const tokenId = tokenIdFromArchivedKey(key);
+        const token = data[key] as TxfToken;
+        if (token && token.genesis) {
+          archived.set(tokenId, token);
+        }
+      }
+    }
+
+    return archived;
+  }
+
+  /**
+   * Extract forked tokens from storage data into a Map
+   * Map key format: tokenId_stateHash
+   */
+  private extractForkedTokens(data: TxfStorageData): Map<string, TxfToken> {
+    const forked = new Map<string, TxfToken>();
+
+    for (const key of Object.keys(data)) {
+      if (isForkedKey(key)) {
+        const parsed = parseForkedKey(key);
+        if (parsed) {
+          const token = data[key] as TxfToken;
+          if (token && token.genesis) {
+            // Use tokenId_stateHash as map key
+            const mapKey = `${parsed.tokenId}_${parsed.stateHash}`;
+            forked.set(mapKey, token);
+          }
+        }
+      }
+    }
+
+    return forked;
+  }
+
+  /**
+   * Merge archived token maps
+   * Prefers token with more transactions (more complete history)
+   */
+  private mergeArchivedTokenMaps(
+    local: Map<string, TxfToken>,
+    remote: Map<string, TxfToken>
+  ): Map<string, TxfToken> {
+    const merged = new Map<string, TxfToken>(local);
+
+    for (const [tokenId, remoteToken] of remote) {
+      const localToken = merged.get(tokenId);
+
+      if (!localToken) {
+        // Only in remote - add it
+        merged.set(tokenId, remoteToken);
+      } else {
+        // Both have it - prefer one with more transactions (more complete history)
+        const localTxnCount = localToken.transactions?.length || 0;
+        const remoteTxnCount = remoteToken.transactions?.length || 0;
+
+        if (remoteTxnCount > localTxnCount) {
+          merged.set(tokenId, remoteToken);
+        }
+        // else keep local (ties go to local)
+      }
+    }
+
+    return merged;
+  }
+
+  /**
+   * Merge forked token maps (union merge)
+   * Each fork is unique by tokenId_stateHash
+   */
+  private mergeForkedTokenMaps(
+    local: Map<string, TxfToken>,
+    remote: Map<string, TxfToken>
+  ): Map<string, TxfToken> {
+    const merged = new Map<string, TxfToken>(local);
+
+    for (const [key, token] of remote) {
+      if (!merged.has(key)) {
+        merged.set(key, token);
+      }
+    }
+
+    return merged;
   }
 }
 

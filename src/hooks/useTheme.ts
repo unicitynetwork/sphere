@@ -1,15 +1,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect } from 'react';
+import { STORAGE_KEYS } from '../config/storageKeys';
 
 export type Theme = 'light' | 'dark';
-
-const THEME_STORAGE_KEY = 'sphere-theme';
 const THEME_QUERY_KEY = ['theme'] as const;
 
 function getStoredTheme(): Theme {
   if (typeof window === 'undefined') return 'dark';
 
-  const stored = localStorage.getItem(THEME_STORAGE_KEY);
+  const stored = localStorage.getItem(STORAGE_KEYS.THEME);
   if (stored === 'light' || stored === 'dark') {
     return stored;
   }
@@ -60,7 +59,7 @@ export function useTheme() {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
     const handleChange = (e: MediaQueryListEvent) => {
-      const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+      const storedTheme = localStorage.getItem(STORAGE_KEYS.THEME);
       // Only update if user hasn't manually set a preference
       if (!storedTheme) {
         const newTheme: Theme = e.matches ? 'dark' : 'light';
@@ -73,7 +72,7 @@ export function useTheme() {
   }, [queryClient]);
 
   const setTheme = useCallback((newTheme: Theme) => {
-    localStorage.setItem(THEME_STORAGE_KEY, newTheme);
+    localStorage.setItem(STORAGE_KEYS.THEME, newTheme);
     queryClient.setQueryData(THEME_QUERY_KEY, newTheme);
     applyTheme(newTheme);
   }, [queryClient]);

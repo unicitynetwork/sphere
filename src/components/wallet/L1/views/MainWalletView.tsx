@@ -4,16 +4,15 @@ import {
   Send,
   Trash2,
   Copy,
-  ChevronDown,
   Download,
   History,
   ExternalLink,
   Check,
-  Plus,
   ArrowRightLeft,
+  Plus,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { TransactionPlan, VestingMode, VestingBalances } from "../sdk";
+import type { TransactionPlan, VestingBalances } from "../sdk";
 import {
   QRModal,
   SaveWalletModal,
@@ -22,7 +21,9 @@ import {
   BridgeModal,
   SendModal,
 } from "../components/modals";
-import { VestingSelector } from "../components/VestingSelector";
+import { VestingDisplay } from "../components/VestingDisplay";
+import { AddressSelector } from "../../shared/components/AddressSelector";
+import { CreateAddressModal } from "../../shared/modals/CreateAddressModal";
 
 // Animated balance display component
 function AnimatedBalance({ value, show }: { value: number; show: boolean }) {
@@ -77,17 +78,15 @@ interface MainWalletViewProps {
   balance: number;
   totalBalance: number;
   showBalances: boolean;
-  onNewAddress: () => void;
-  onSelectAddress: (address: string) => void;
   onShowHistory: () => void;
   onSaveWallet: (filename: string, password?: string) => void;
+  /** Whether mnemonic is available for export */
+  hasMnemonic?: boolean;
   onDeleteWallet: () => void;
   onSendTransaction: (destination: string, amount: string) => Promise<void>;
   txPlan: TransactionPlan | null;
   isSending: boolean;
   onConfirmSend: () => Promise<void>;
-  vestingProgress?: { current: number; total: number } | null;
-  onVestingModeChange?: (mode: VestingMode) => void;
   vestingBalances?: VestingBalances;
 }
 
@@ -98,27 +97,24 @@ export function MainWalletView({
   balance,
   totalBalance,
   showBalances,
-  onNewAddress,
-  onSelectAddress,
   onShowHistory,
   onSaveWallet,
+  hasMnemonic,
   onDeleteWallet,
   onSendTransaction,
   txPlan,
   isSending,
   onConfirmSend,
-  vestingProgress,
-  onVestingModeChange,
   vestingBalances,
 }: MainWalletViewProps) {
   const [showQR, setShowQR] = useState(false);
-  const [showDropdown, setShowDropdown] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showSendModal, setShowSendModal] = useState(false);
   const [showBridgeModal, setShowBridgeModal] = useState(false);
+  const [showCreateAddressModal, setShowCreateAddressModal] = useState(false);
   const [pendingDestination, setPendingDestination] = useState("");
   const [pendingAmount, setPendingAmount] = useState("");
 
@@ -162,104 +158,46 @@ export function MainWalletView({
         onClose={() => setShowQR(false)}
       />
 
-      {/* Address Selector */}
+      {/* Address Selector - uses shared component with nametag modal */}
       <div className="px-3 sm:px-4 lg:px-6 mb-2 sm:mb-3">
-        <div className="relative">
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <button
-              onClick={() => setShowDropdown((prev) => !prev)}
-              className="flex-1 bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 flex items-center justify-between hover:bg-neutral-200/50 dark:hover:bg-neutral-700/50 transition-colors"
-            >
-              <span className="font-mono text-xs sm:text-sm">
-                {selectedAddress.slice(0, 12) + "..." + selectedAddress.slice(-8)}
-              </span>
-              <ChevronDown className={`w-3 h-3 sm:w-4 sm:h-4 text-neutral-500 dark:text-neutral-400 transition-transform ${showDropdown ? "rotate-180" : ""}`} />
-            </button>
-
-            <motion.button
-              onClick={onNewAddress}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="p-1.5 sm:p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors"
-              title="Generate new address"
-            >
-              <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </motion.button>
-
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(selectedAddress);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              }}
-              className={`p-1.5 sm:p-2 rounded-lg border transition-colors ${
-                copied
-                  ? "bg-green-600 border-green-500 text-white"
-                  : "bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
-              }`}
-              title={copied ? "Copied!" : "Copy address"}
-            >
-              {copied ? <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Copy className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
-            </button>
-
-            <a
-              href={`https://www.unicity.network/address/${selectedAddress}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-1.5 sm:p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors"
-              title="View in explorer"
-            >
-              <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </a>
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="flex-1 bg-neutral-100 dark:bg-neutral-800 px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border border-neutral-200 dark:border-neutral-700">
+            <AddressSelector compact={false} />
           </div>
 
-          <AnimatePresence>
-            {showDropdown && (
-              <>
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="fixed inset-0 z-10"
-                  onClick={() => setShowDropdown(false)}
-                />
-                <motion.div
-                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                  transition={{ duration: 0.2 }}
-                  className="absolute z-20 mt-2 w-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl max-h-52 overflow-y-auto custom-scrollbar"
-                >
-                  {addresses.map((a) => (
-                    <div
-                      key={a}
-                      className={`flex items-center gap-2 px-3 py-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer ${
-                        a === selectedAddress ? "bg-neutral-100 dark:bg-neutral-800/50" : ""
-                      }`}
-                      onClick={() => {
-                        onSelectAddress(a);
-                        setShowDropdown(false);
-                      }}
-                    >
-                      <span className="flex-1 text-left text-xs text-neutral-700 dark:text-neutral-200 font-mono truncate">
-                        {a}
-                      </span>
-                      <a
-                        href={`https://www.unicity.network/address/${a}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-1 text-blue-500 dark:text-blue-400 hover:text-blue-400 dark:hover:text-blue-300 transition-colors"
-                        title="View in explorer"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                  ))}
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
+          <button
+            onClick={() => setShowCreateAddressModal(true)}
+            className="p-1.5 sm:p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors"
+            title="Generate new address"
+          >
+            <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </button>
+
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(selectedAddress);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            }}
+            className={`p-1.5 sm:p-2 rounded-lg border transition-colors ${
+              copied
+                ? "bg-green-600 border-green-500 text-white"
+                : "bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300"
+            }`}
+            title={copied ? "Copied!" : "Copy address"}
+          >
+            {copied ? <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Copy className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
+          </button>
+
+          <a
+            href={`https://www.unicity.network/address/${selectedAddress}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-1.5 sm:p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors"
+            title="View in explorer"
+          >
+            <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </a>
         </div>
       </div>
 
@@ -297,12 +235,9 @@ export function MainWalletView({
         )}
       </div>
 
-      {/* Vesting Selector */}
+      {/* Vesting Display */}
       <div className="px-3 sm:px-4 lg:px-6 mb-2 sm:mb-3">
-        <VestingSelector
-          address={selectedAddress}
-          onModeChange={onVestingModeChange}
-          classificationProgress={vestingProgress}
+        <VestingDisplay
           showBalances={showBalances}
           balances={vestingBalances}
         />
@@ -407,6 +342,7 @@ export function MainWalletView({
         show={showSaveModal}
         onConfirm={handleSave}
         onCancel={() => setShowSaveModal(false)}
+        hasMnemonic={hasMnemonic}
       />
 
       <DeleteConfirmationModal
@@ -431,6 +367,11 @@ export function MainWalletView({
         selectedAddress={selectedAddress}
         onClose={() => setShowSendModal(false)}
         onSend={handleSendFromModal}
+      />
+
+      <CreateAddressModal
+        isOpen={showCreateAddressModal}
+        onClose={() => setShowCreateAddressModal(false)}
       />
     </div>
   );

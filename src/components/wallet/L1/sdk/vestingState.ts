@@ -106,6 +106,15 @@ class VestingStateManager {
   }
 
   /**
+   * Get all UTXOs regardless of vesting mode (for transactions)
+   */
+  getAllUtxos(address: string): ClassifiedUTXO[] {
+    const cache = this.addressCache.get(address);
+    if (!cache) return [];
+    return cache.classifiedUtxos.all;
+  }
+
+  /**
    * Get balance for current vesting mode (in satoshis)
    */
   getBalance(address: string): bigint {

@@ -8,8 +8,10 @@ import {
   type StorageStatus,
 } from "../services/IpfsStorageService";
 import { IdentityManager } from "../services/IdentityManager";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { addToken, getTokensForAddress, removeToken, setNametagForAddress } from "../services/InventorySyncService";
+import { getTokenValidationService } from "../services/TokenValidationService";
 import type { Token } from "../data/model";
+import { tokenToTxf, getCurrentStateHash } from "../services/TxfSerializer";
 
 // Query keys
 export const IPFS_STORAGE_KEYS = {
@@ -29,16 +31,25 @@ export function useIpfsStorage() {
   const queryClient = useQueryClient();
   const [lastEvent, setLastEvent] = useState<StorageEvent | null>(null);
   const [isServiceReady, setIsServiceReady] = useState(false);
+  const [isSyncingRealtime, setIsSyncingRealtime] = useState(false);
 
-  const isEnabled = import.meta.env.VITE_ENABLE_IPFS === 'true';
+  // Check if IPFS is disabled via environment variable
+  const isEnabled = import.meta.env.VITE_ENABLE_IPFS !== 'false';
 
-  // Get storage service instance (only if enabled)
-  const storageService = isEnabled ? IpfsStorageService.getInstance(identityManager) : null;
+  // Get storage service instance - useWallet will have started this
+  const storageService = IpfsStorageService.getInstance(identityManager);
 
   // Listen for storage events
   useEffect(() => {
+    console.log(`🔄 useIpfsStorage: setting up event listener`);
     const handleEvent = (e: CustomEvent<StorageEvent>) => {
       setLastEvent(e.detail);
+
+      // Handle real-time sync state changes for immediate UI updates
+      if (e.detail.type === "sync:state-changed" && e.detail.data?.isSyncing !== undefined) {
+        console.log(`🔄 useIpfsStorage: received sync:state-changed, isSyncing=${e.detail.data.isSyncing}`);
+        setIsSyncingRealtime(e.detail.data.isSyncing);
+      }
 
       // Invalidate status query on storage completion
       if (
@@ -61,11 +72,17 @@ export function useIpfsStorage() {
     };
   }, [queryClient]);
 
-  // Start auto-sync on mount (only if enabled)
+  // Mark service as ready on mount
+  // NOTE: Auto-sync is now handled by useWallet.ts via InventorySyncService.inventorySync()
+  // This hook only provides UI state and manual sync operations
   useEffect(() => {
     if (!storageService) return;
-    storageService.startAutoSync();
     setIsServiceReady(true);
+
+    // Initialize sync state from service (in case sync already started before hook mounted)
+    const currentSyncState = storageService.isCurrentlySyncing();
+    console.log(`🔄 useIpfsStorage: initializing sync state to ${currentSyncState}`);
+    setIsSyncingRealtime(currentSyncState);
 
     return () => {
       // Note: Don't shutdown on unmount as service is singleton
@@ -103,13 +120,49 @@ export function useIpfsStorage() {
 
       // If successful, add tokens to wallet and restore nametag
       if (result.success && result.tokens) {
-        const walletRepo = WalletRepository.getInstance();
-        for (const token of result.tokens) {
-          walletRepo.addToken(token);
+        // Get identity context for InventorySyncService
+        const identity = await identityManager.getCurrentIdentity();
+        if (!identity?.address || !identity?.publicKey || !identity?.ipnsName) {
+          console.error(`📦 Cannot restore: missing identity context`);
+          return result;
         }
+
+        // Add tokens using InventorySyncService
+        for (const token of result.tokens) {
+          await addToken(identity.address, identity.publicKey, identity.ipnsName, token, { local: true });
+        }
+
         // Restore nametag if present
         if (result.nametag) {
-          walletRepo.setNametag(result.nametag);
+          setNametagForAddress(identity.address, result.nametag);
+        }
+
+        // CRITICAL: Validate restored tokens against aggregator to detect spent tokens
+        // that bypassed tombstone checks (e.g., tokens with different state hashes)
+        console.log(`📦 Running post-restore spent token validation...`);
+        const validationService = getTokenValidationService();
+        const allTokens = await getTokensForAddress(identity.address);
+        const validationResult = await validationService.checkSpentTokens(allTokens, identity.publicKey);
+
+        if (validationResult.spentTokens.length > 0) {
+          console.log(`📦 Found ${validationResult.spentTokens.length} spent token(s) during restore validation:`);
+          for (const spent of validationResult.spentTokens) {
+            console.log(`📦   - Removing spent token ${spent.tokenId.slice(0, 8)}...`);
+            // Find the actual token from localStorage using localId
+            const token = allTokens.find(t => t.id === spent.localId);
+            if (token) {
+              const txf = tokenToTxf(token);
+              if (txf) {
+                const stateHash = getCurrentStateHash(txf);
+                if (stateHash) {
+                  await removeToken(identity.address, identity.publicKey, identity.ipnsName, spent.localId, stateHash);
+                }
+              }
+            }
+          }
+          window.dispatchEvent(new Event("wallet-updated"));
+        } else {
+          console.log(`📦 Post-restore validation: all ${allTokens.length} token(s) are valid`);
         }
       }
 
@@ -130,12 +183,49 @@ export function useIpfsStorage() {
 
       // If successful, add tokens to wallet
       if (result.success && result.tokens) {
-        const walletRepo = WalletRepository.getInstance();
-        for (const token of result.tokens) {
-          walletRepo.addToken(token);
+        // Get identity context for InventorySyncService
+        const identity = await identityManager.getCurrentIdentity();
+        if (!identity?.address || !identity?.publicKey || !identity?.ipnsName) {
+          console.error(`📦 Cannot restore: missing identity context`);
+          return result;
         }
+
+        // Add tokens using InventorySyncService
+        for (const token of result.tokens) {
+          await addToken(identity.address, identity.publicKey, identity.ipnsName, token, { local: true });
+        }
+
+        // Restore nametag if present
         if (result.nametag) {
-          walletRepo.setNametag(result.nametag);
+          setNametagForAddress(identity.address, result.nametag);
+        }
+
+        // CRITICAL: Validate restored tokens against aggregator to detect spent tokens
+        // that bypassed tombstone checks (e.g., tokens with different state hashes)
+        console.log(`📦 Running post-restore spent token validation...`);
+        const validationService = getTokenValidationService();
+        const allTokens = await getTokensForAddress(identity.address);
+        const validationResult = await validationService.checkSpentTokens(allTokens, identity.publicKey);
+
+        if (validationResult.spentTokens.length > 0) {
+          console.log(`📦 Found ${validationResult.spentTokens.length} spent token(s) during restore validation:`);
+          for (const spent of validationResult.spentTokens) {
+            console.log(`📦   - Removing spent token ${spent.tokenId.slice(0, 8)}...`);
+            // Find the actual token from localStorage using localId
+            const token = allTokens.find(t => t.id === spent.localId);
+            if (token) {
+              const txf = tokenToTxf(token);
+              if (txf) {
+                const stateHash = getCurrentStateHash(txf);
+                if (stateHash) {
+                  await removeToken(identity.address, identity.publicKey, identity.ipnsName, spent.localId, stateHash);
+                }
+              }
+            }
+          }
+          window.dispatchEvent(new Event("wallet-updated"));
+        } else {
+          console.log(`📦 Post-restore validation: all ${allTokens.length} token(s) are valid`);
         }
       }
 
@@ -183,9 +273,16 @@ export function useIpfsStorage() {
 
       // If successful, add tokens to wallet
       if (result.success && result.tokens) {
-        const walletRepo = WalletRepository.getInstance();
+        // Get identity context for InventorySyncService
+        const identity = await identityManager.getCurrentIdentity();
+        if (!identity?.address || !identity?.publicKey || !identity?.ipnsName) {
+          console.error(`📦 Cannot import: missing identity context`);
+          return result;
+        }
+
+        // Add tokens using InventorySyncService
         for (const token of result.tokens) {
-          walletRepo.addToken(token);
+          await addToken(identity.address, identity.publicKey, identity.ipnsName, token, { local: true });
         }
       }
 
@@ -224,7 +321,7 @@ export function useIpfsStorage() {
 
     // Sync operations
     sync: syncMutation.mutateAsync,
-    isSyncing: syncMutation.isPending || (storageService?.isCurrentlySyncing() ?? false),
+    isSyncing: isEnabled && (syncMutation.isPending || isSyncingRealtime || (storageService?.isCurrentlySyncing() ?? false)),
     syncError: syncMutation.error,
 
     // Restore operations

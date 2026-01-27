@@ -8,7 +8,12 @@ export const useIncomingPaymentRequests = () => {
 
     useEffect(() => {
         const update = () => {
-            setRequests([...nostrService.getPaymentRequests()]);
+            const newRequests = [...nostrService.getPaymentRequests()];
+            console.log('🔔 useIncomingPaymentRequests update:', {
+                count: newRequests.length,
+                pendingCount: newRequests.filter(r => r.status === 'PENDING').length
+            });
+            setRequests(newRequests);
         };
 
         update();

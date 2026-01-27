@@ -30,6 +30,7 @@ export const globalMessages: IMessage[] = [
   { id: '2', sender: 'Sarah Williams', avatar: 'SW', content: 'That\'s awesome! How was the experience?', timestamp: '10:25 AM', isOwn: false },
   { id: '3', sender: 'You', avatar: 'ME', content: 'Welcome to the platform! The agents are really powerful.', timestamp: '10:26 AM', isOwn: true },
   { id: '4', sender: 'Mike Johnson', avatar: 'MJ', content: 'Anyone tried the Mining agent yet? Looking for recommendations.', timestamp: '10:28 AM', isOwn: false },
+  { id: '5', sender: 'Alex Chen', avatar: 'AC', content: 'Hey @sarah-williams check out this trade! Also cc @mike_johnson', timestamp: '10:30 AM', isOwn: false },
 ];
 
 export const dmMessages: IMessage[] = [

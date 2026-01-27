@@ -7,6 +7,7 @@ import CryptoJS from "crypto-js";
 import elliptic from "elliptic";
 import type { Wallet, TransactionPlan, Transaction, UTXO } from "./types";
 import { vestingState } from "./vestingState";
+import { WalletAddressHelper } from "./addressHelpers";
 
 const ec = new elliptic.ec("secp256k1");
 
@@ -307,6 +308,9 @@ export function createAndSignTransaction(
 /**
  * Collect UTXOs for required amount
  * Based on index.html collectUtxosForAmount()
+ *
+ * Strategy: First try to find a single UTXO that can cover amount + fee.
+ * If not found, fall back to combining multiple UTXOs.
  */
 export function collectUtxosForAmount(
   utxoList: UTXO[],
@@ -314,23 +318,55 @@ export function collectUtxosForAmount(
   recipientAddress: string,
   senderAddress: string
 ): TransactionPlan {
-  // Sort UTXOs by value (ascending)
-  const sortedUtxos = [...utxoList].sort((a, b) => a.value - b.value);
+  const totalAvailable = utxoList.reduce((sum, u) => sum + u.value, 0);
 
-  const totalAvailable = sortedUtxos.reduce((sum, u) => sum + u.value, 0);
-
-  if (totalAvailable < amountSats) {
+  if (totalAvailable < amountSats + FEE) {
     return {
       success: false,
       transactions: [],
-      error: `Insufficient funds. Available: ${totalAvailable / SAT} ALPHA, Required: ${amountSats / SAT} ALPHA`,
+      error: `Insufficient funds. Available: ${totalAvailable / SAT} ALPHA, Required: ${(amountSats + FEE) / SAT} ALPHA (including fee)`,
     };
   }
+
+  // Strategy 1: Find a single UTXO that covers amount + fee
+  // Sort by value ascending to find the smallest sufficient UTXO
+  const sortedByValue = [...utxoList].sort((a, b) => a.value - b.value);
+  const sufficientUtxo = sortedByValue.find(u => u.value >= amountSats + FEE);
+
+  if (sufficientUtxo) {
+    const changeAmount = sufficientUtxo.value - amountSats - FEE;
+    const tx: Transaction = {
+      input: {
+        txid: sufficientUtxo.txid ?? sufficientUtxo.tx_hash ?? "",
+        vout: sufficientUtxo.vout ?? sufficientUtxo.tx_pos ?? 0,
+        value: sufficientUtxo.value,
+        address: sufficientUtxo.address ?? senderAddress,
+      },
+      outputs: [{ address: recipientAddress, value: amountSats }],
+      fee: FEE,
+      changeAmount: changeAmount,
+      changeAddress: senderAddress,
+    };
+
+    // Add change output if above dust
+    if (changeAmount > DUST) {
+      tx.outputs.push({ value: changeAmount, address: senderAddress });
+    }
+
+    return {
+      success: true,
+      transactions: [tx],
+    };
+  }
+
+  // Strategy 2: No single UTXO is sufficient, combine multiple UTXOs
+  // Sort descending to use larger UTXOs first (fewer transactions)
+  const sortedDescending = [...utxoList].sort((a, b) => b.value - a.value);
 
   const transactions: Transaction[] = [];
   let remainingAmount = amountSats;
 
-  for (const utxo of sortedUtxos) {
+  for (const utxo of sortedDescending) {
     if (remainingAmount <= 0) break;
 
     const utxoValue = utxo.value;
@@ -338,16 +374,15 @@ export function collectUtxosForAmount(
     let changeAmount = 0;
 
     if (utxoValue >= remainingAmount + FEE) {
-      // Covers remaining + fee
+      // This UTXO covers the remaining amount plus fee
       txAmount = remainingAmount;
       changeAmount = utxoValue - remainingAmount - FEE;
       remainingAmount = 0;
     } else {
       // Use entire UTXO minus fee
       txAmount = utxoValue - FEE;
+      if (txAmount <= 0) continue; // Skip UTXOs too small to cover fee
       remainingAmount -= txAmount;
-
-      if (txAmount <= 0) continue;
     }
 
     const tx: Transaction = {
@@ -402,18 +437,19 @@ export async function createTransactionPlan(
     throw new Error("Invalid recipient address");
   }
 
-  // Use specified fromAddress or default to first address
-  const senderAddress = fromAddress || wallet.addresses[0].address;
+  // Use specified fromAddress or default to first external address
+  const defaultAddr = WalletAddressHelper.getDefault(wallet);
+  const senderAddress = fromAddress || defaultAddr.address;
   const amountSats = Math.floor(amountAlpha * SAT);
 
-  // Check if we have classified UTXOs for vesting mode filtering
+  // Get UTXOs filtered by current vesting mode (set in SendModal)
   let utxos: UTXO[];
   const currentMode = vestingState.getMode();
 
   if (vestingState.hasClassifiedData(senderAddress)) {
-    // Use vesting-filtered UTXOs based on current mode
+    // Use vesting-filtered UTXOs based on selected mode
     utxos = vestingState.getFilteredUtxos(senderAddress);
-    console.log(`Using ${utxos.length} vesting-filtered UTXOs (mode: ${currentMode})`);
+    console.log(`Using ${utxos.length} ${currentMode} UTXOs`);
   } else {
     // Fall back to all UTXOs if not yet classified
     utxos = await getUtxo(senderAddress);
@@ -421,8 +457,8 @@ export async function createTransactionPlan(
   }
 
   if (!Array.isArray(utxos) || utxos.length === 0) {
-    const modeText = currentMode !== 'all' ? ` (${currentMode} mode)` : '';
-    throw new Error(`No UTXOs available for address${modeText}: ` + senderAddress);
+    const modeText = currentMode !== 'all' ? ` (${currentMode} coins)` : '';
+    throw new Error(`No UTXOs available${modeText} for address: ` + senderAddress);
   }
 
   return collectUtxosForAmount(utxos, amountSats, toAddress, senderAddress);

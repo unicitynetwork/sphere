@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import {
   importWallet,
   exportWallet,
@@ -24,7 +24,9 @@ import {
 import { subscribeBlocks } from "../sdk/network";
 import { loadWalletFromUnifiedKeyManager, getUnifiedKeyManager } from "../sdk/unifiedWalletBridge";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
-import { WalletRepository } from "../../../../repositories/WalletRepository";
+import { dispatchWalletUpdated } from "../../L3/services/InventorySyncService";
+import { KEYS as L3_KEYS } from "../../L3/hooks/useWallet";
+import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 // Query keys for L1 wallet
 export const L1_KEYS = {
@@ -37,8 +39,36 @@ export const L1_KEYS = {
 };
 
 
-export function useL1Wallet(selectedAddress?: string) {
+export function useL1Wallet(selectedAddressProp?: string) {
   const queryClient = useQueryClient();
+
+  // Query: Wallet from UnifiedKeyManager
+  const walletQuery = useQuery({
+    queryKey: L1_KEYS.WALLET,
+    queryFn: async () => {
+      const wallet = await loadWalletFromUnifiedKeyManager();
+      return wallet;
+    },
+    staleTime: Infinity, // Wallet doesn't change unless we mutate it
+  });
+
+  // Compute selected address: use prop if provided, else derive from localStorage path
+  const selectedAddress = useMemo(() => {
+    if (selectedAddressProp) return selectedAddressProp;
+
+    const wallet = walletQuery.data;
+    if (!wallet || wallet.addresses.length === 0) return "";
+
+    const storedPath = localStorage.getItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
+    if (storedPath) {
+      const addrFromPath = wallet.addresses.find(a => a.path === storedPath);
+      if (addrFromPath) return addrFromPath.address;
+    }
+
+    // Default to first address
+    return wallet.addresses[0]?.address || "";
+  }, [selectedAddressProp, walletQuery.data]);
+
   const selectedAddressRef = useRef<string>(selectedAddress || "");
 
   // Update ref when address changes
@@ -91,16 +121,6 @@ export function useL1Wallet(selectedAddress?: string) {
       }
     };
   }, [queryClient]);
-
-  // Query: Wallet from UnifiedKeyManager
-  const walletQuery = useQuery({
-    queryKey: L1_KEYS.WALLET,
-    queryFn: async () => {
-      const wallet = await loadWalletFromUnifiedKeyManager();
-      return wallet;
-    },
-    staleTime: Infinity, // Wallet doesn't change unless we mutate it
-  });
 
   // Query: Balance for selected address
   const balanceQuery = useQuery({
@@ -200,6 +220,10 @@ export function useL1Wallet(selectedAddress?: string) {
   // Mutation: Create new wallet via UnifiedKeyManager
   const createWalletMutation = useMutation({
     mutationFn: async () => {
+      // Clear all wallet data first (ensures clean slate)
+      UnifiedKeyManager.clearAll();
+
+      // Generate new wallet
       const keyManager = getUnifiedKeyManager();
       await keyManager.generateNew(12);
       // Load the wallet from UnifiedKeyManager
@@ -227,6 +251,9 @@ export function useL1Wallet(selectedAddress?: string) {
       file: File;
       password?: string;
     }) => {
+      // Clear all wallet data first (ensures clean slate)
+      UnifiedKeyManager.clearAll();
+
       const keyManager = getUnifiedKeyManager();
 
       // Read file content
@@ -272,26 +299,20 @@ export function useL1Wallet(selectedAddress?: string) {
   // Mutation: Delete wallet via UnifiedKeyManager
   const deleteWalletMutation = useMutation({
     mutationFn: async () => {
-      // 1. Clear UnifiedKeyManager localStorage and reset singleton
-      const keyManager = getUnifiedKeyManager();
-      keyManager.clear();
-      UnifiedKeyManager.resetInstance();
+      // Clear all wallet data from localStorage and reset singletons
+      UnifiedKeyManager.clearAll();
 
-      // 2. Clear IdentityManager selected index
-      localStorage.removeItem("l3_selected_address_index");
-
-      // 3. Reset WalletRepository in-memory state (keeps localStorage intact for tokens/nametags)
-      WalletRepository.getInstance().resetInMemoryState();
+      // Notify UI components of wallet change
+      dispatchWalletUpdated();
     },
     onSuccess: () => {
-      // Clear ALL L1 queries
+      // Set identity to null immediately - this triggers WalletGate to show onboarding
+      queryClient.setQueryData(L3_KEYS.IDENTITY, null);
+      queryClient.setQueryData(L3_KEYS.NAMETAG, null);
+
+      // Clear all other queries
+      queryClient.removeQueries({ queryKey: ["wallet"] });
       queryClient.removeQueries({ queryKey: ["l1"] });
-
-      // Clear ALL L3 queries
-      queryClient.removeQueries({ queryKey: ["l3"] });
-
-      // Force page reload for clean state
-      window.location.reload();
     },
   });
 
@@ -345,13 +366,19 @@ export function useL1Wallet(selectedAddress?: string) {
       return results;
     },
     onSuccess: () => {
-      // Invalidate balance and transactions after sending
+      // Invalidate balance, transactions and vesting after sending
       if (selectedAddress) {
+        // Clear vestingState cache first (UTXOs changed)
+        vestingState.clearAddressCache(selectedAddress);
+
         queryClient.invalidateQueries({
           queryKey: L1_KEYS.BALANCE(selectedAddress),
         });
         queryClient.invalidateQueries({
           queryKey: L1_KEYS.TRANSACTIONS(selectedAddress),
+        });
+        queryClient.invalidateQueries({
+          queryKey: L1_KEYS.VESTING(selectedAddress),
         });
       }
     },

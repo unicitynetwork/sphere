@@ -25,6 +25,7 @@ interface HistoryViewProps {
     toAddresses: string[];
   };
   onBackToMain: () => void;
+  hideBackButton?: boolean;
 }
 
 function formatTimestamp(time: number | undefined) {
@@ -48,20 +49,23 @@ export function HistoryView({
   transactionDetails,
   analyzeTransaction,
   onBackToMain,
+  hideBackButton,
 }: HistoryViewProps) {
   return (
     <div className="flex flex-col h-full relative">
       <div className="px-6 mb-4">
-        <div className="flex items-center gap-3 mb-4">
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            onClick={onBackToMain}
-            className="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </motion.button>
-          <h2 className="text-xl text-neutral-900 dark:text-white font-bold">Transaction History</h2>
-        </div>
+        {!hideBackButton && (
+          <div className="flex items-center gap-3 mb-4">
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={onBackToMain}
+              className="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </motion.button>
+            <h2 className="text-xl text-neutral-900 dark:text-white font-bold">Transaction History</h2>
+          </div>
+        )}
 
         <p className="text-xs text-neutral-500 dark:text-neutral-400">
           {selectedAddress.slice(0, 10)}...{selectedAddress.slice(-6)}

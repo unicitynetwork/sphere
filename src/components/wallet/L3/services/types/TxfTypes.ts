@@ -3,33 +3,99 @@
  * Based on TXF Format Specification v2.0
  */
 
-import type { NametagData } from "../../../../../repositories/WalletRepository";
+import type { OutboxEntry, MintOutboxEntry } from "./OutboxTypes";
+import type { InvalidReasonCode } from "../../types/SyncTypes";
 
 // ==========================================
 // Storage Format (for IPFS)
 // ==========================================
 
 /**
+ * Nametag data (one per identity)
+ * Represents a Unicity ID (human-readable address)
+ */
+export interface NametagData {
+  name: string;           // e.g., "cryptohog"
+  token: object;          // SDK Token JSON
+  timestamp: number;
+  format: string;
+  version: string;
+}
+
+/**
+ * Tombstone entry for tracking spent token states
+ * Tracks both tokenId AND stateHash to allow same token to return with new state
+ */
+export interface TombstoneEntry {
+  tokenId: string;    // 64-char hex token ID
+  stateHash: string;  // State hash that was spent (with "0000" prefix)
+  timestamp: number;  // When tombstoned (epoch ms)
+}
+
+/**
+ * Entry for invalidated nametags (Unicity IDs)
+ * Stored when a nametag is found to be owned by a different Nostr pubkey
+ */
+export interface InvalidatedNametagEntry {
+  name: string;              // The invalidated nametag name
+  token: object;             // Original token data
+  timestamp: number;         // Original creation timestamp
+  format: string;
+  version: string;
+  invalidatedAt: number;     // When invalidated (epoch ms)
+  invalidationReason: string;
+}
+
+/**
+ * Entry for tokens moved to Sent folder (Section 3.2)
+ * Stored when a token's latest state is SPENT with inclusion proof
+ */
+export interface SentTokenEntry {
+  token: TxfToken;           // Complete token data
+  timestamp: number;         // When moved to Sent (epoch ms)
+  spentAt: number;           // When token was spent (epoch ms, from inclusion proof)
+}
+
+/**
+ * Entry for tokens moved to Invalid folder (Section 3.3)
+ * Stored when a token fails validation but is kept for investigation
+ */
+export interface InvalidTokenEntry {
+  token: TxfToken;           // Complete token data (may be partial)
+  timestamp: number;         // When moved to Invalid (epoch ms)
+  invalidatedAt: number;     // When invalidated (epoch ms)
+  reason: InvalidReasonCode; // Structured reason code
+  details?: string;          // Optional human-readable details
+}
+
+/**
  * Complete storage data structure for IPFS
- * Contains metadata, nametag, and all tokens keyed by their IDs
+ * Contains metadata, nametag, tombstones, outbox, invalidated nametags, and all tokens keyed by their IDs
  */
 export interface TxfStorageData {
   _meta: TxfMeta;
   _nametag?: NametagData;
+  _tombstones?: TombstoneEntry[];              // State-hash-aware tombstones (spent token states)
+  _invalidatedNametags?: InvalidatedNametagEntry[]; // Nametags that failed Nostr validation
+  _outbox?: OutboxEntry[];                     // Pending transfers (CRITICAL for recovery)
+  _mintOutbox?: MintOutboxEntry[];             // Pending mints (CRITICAL for recovery)
+  _sent?: SentTokenEntry[];                    // Sent tokens (SPENT with inclusion proof)
+  _invalid?: InvalidTokenEntry[];              // Invalid tokens (failed validation, kept for investigation)
   // Dynamic keys for tokens: _<tokenId>
-  [key: string]: TxfToken | TxfMeta | NametagData | undefined;
+  [key: string]: TxfToken | TxfMeta | NametagData | TombstoneEntry[] | InvalidatedNametagEntry[] | OutboxEntry[] | MintOutboxEntry[] | SentTokenEntry[] | InvalidTokenEntry[] | undefined;
 }
 
 /**
  * Storage metadata
+ * Note: timestamp is excluded to ensure CID stability (same content = same CID)
  */
 export interface TxfMeta {
   version: number;           // Monotonic counter (increments each sync)
-  timestamp: number;         // Unix timestamp of last sync
   address: string;           // Wallet L3 address
   ipnsName: string;          // IPNS name for this wallet
   formatVersion: "2.0";      // TXF format version
   lastCid?: string;          // Last successfully stored CID
+  deviceId?: string;         // Unique device identifier for conflict resolution
 }
 
 // ==========================================
@@ -44,8 +110,8 @@ export interface TxfToken {
   genesis: TxfGenesis;
   state: TxfState;
   transactions: TxfTransaction[];
-  nametags: string[];
-  _integrity: TxfIntegrity;
+  nametags?: string[];           // Optional for backwards compatibility
+  _integrity?: TxfIntegrity;     // Optional for backwards compatibility
 }
 
 /**
@@ -83,7 +149,7 @@ export interface TxfState {
  */
 export interface TxfTransaction {
   previousStateHash: string;
-  newStateHash: string;
+  newStateHash?: string;     // Optional for backwards compatibility with older tokens
   predicate: string;         // New owner's predicate
   inclusionProof: TxfInclusionProof | null; // null = uncommitted
   data?: Record<string, unknown>; // Optional transfer metadata
@@ -130,6 +196,7 @@ export interface TxfMerkleStep {
  */
 export interface TxfIntegrity {
   genesisDataJSONHash: string; // SHA-256 hash with "0000" prefix
+  currentStateHash?: string;   // Current state hash (computed for genesis-only tokens)
 }
 
 // ==========================================
@@ -176,14 +243,48 @@ export interface MergeResult {
 // Utility Types
 // ==========================================
 
+// Key prefixes for special storage types
+const ARCHIVED_PREFIX = "_archived_";
+const FORKED_PREFIX = "_forked_";
+
 /**
- * Check if a key is a token key (starts with _ but not reserved)
+ * Check if a key is an archived token key
  */
-export function isTokenKey(key: string): boolean {
+export function isArchivedKey(key: string): boolean {
+  return key.startsWith(ARCHIVED_PREFIX);
+}
+
+/**
+ * Check if a key is a forked token key
+ */
+export function isForkedKey(key: string): boolean {
+  return key.startsWith(FORKED_PREFIX);
+}
+
+/**
+ * Check if a key is an active token key (not archived, forked, or reserved)
+ */
+export function isActiveTokenKey(key: string): boolean {
   return key.startsWith("_") &&
+         !key.startsWith(ARCHIVED_PREFIX) &&
+         !key.startsWith(FORKED_PREFIX) &&
          key !== "_meta" &&
          key !== "_nametag" &&
+         key !== "_tombstones" &&
+         key !== "_invalidatedNametags" &&
+         key !== "_outbox" &&
+         key !== "_mintOutbox" &&
+         key !== "_sent" &&
+         key !== "_invalid" &&
          key !== "_integrity";
+}
+
+/**
+ * Check if a key is a token key (starts with _ but not reserved)
+ * NOTE: This now only returns true for ACTIVE tokens (excludes archived/forked)
+ */
+export function isTokenKey(key: string): boolean {
+  return isActiveTokenKey(key);
 }
 
 /**
@@ -198,6 +299,45 @@ export function tokenIdFromKey(key: string): string {
  */
 export function keyFromTokenId(tokenId: string): string {
   return `_${tokenId}`;
+}
+
+/**
+ * Create archived token key from token ID
+ */
+export function archivedKeyFromTokenId(tokenId: string): string {
+  return `${ARCHIVED_PREFIX}${tokenId}`;
+}
+
+/**
+ * Extract token ID from archived key
+ */
+export function tokenIdFromArchivedKey(key: string): string {
+  return key.startsWith(ARCHIVED_PREFIX) ? key.substring(ARCHIVED_PREFIX.length) : key;
+}
+
+/**
+ * Create forked token key from token ID and state hash
+ */
+export function forkedKeyFromTokenIdAndState(tokenId: string, stateHash: string): string {
+  return `${FORKED_PREFIX}${tokenId}_${stateHash}`;
+}
+
+/**
+ * Parse forked key into tokenId and stateHash
+ * Returns null if key is not a valid forked key
+ */
+export function parseForkedKey(key: string): { tokenId: string; stateHash: string } | null {
+  if (!key.startsWith(FORKED_PREFIX)) return null;
+  const remainder = key.substring(FORKED_PREFIX.length);
+  // Format: tokenId_stateHash
+  // tokenId is 64 chars, stateHash starts with "0000" (68+ chars)
+  // Find underscore after 64-char tokenId
+  const underscoreIndex = remainder.indexOf("_");
+  if (underscoreIndex === -1 || underscoreIndex < 64) return null;
+  return {
+    tokenId: remainder.substring(0, underscoreIndex),
+    stateHash: remainder.substring(underscoreIndex + 1),
+  };
 }
 
 /**

@@ -76,6 +76,7 @@ jobs:
           BASE_PATH: /sphere/${{ steps.branch.outputs.name }}/
           VITE_AGENT_API_URL: https://sphere.unicity.network/api
           VITE_AGGREGATOR_URL: https://goggregator-test.unicity.network
+          VITE_ACTIVITY_API_URL: https://sphere.unicity.network/activities
 
       - name: Deploy branch to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
