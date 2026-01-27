@@ -394,6 +394,11 @@ export class IpfsStorageService implements IpfsTransport {
   // Gateway health tracking (for IpfsTransport interface)
   private gatewayHealth: Map<string, GatewayHealth> = new Map();
 
+  // Event listener cleanup - store bound handlers for proper removal
+  private boundPeerConnectHandler: ((event: CustomEvent) => void) | null = null;
+  private boundPeerDisconnectHandler: ((event: CustomEvent) => void) | null = null;
+  private initialConnectionLogTimeout: ReturnType<typeof setTimeout> | null = null;
+
   private constructor(identityManager: IdentityManager) {
     this.identityManager = identityManager;
   }
@@ -476,6 +481,24 @@ export class IpfsStorageService implements IpfsTransport {
     if (this.connectionMaintenanceInterval) {
       clearInterval(this.connectionMaintenanceInterval);
       this.connectionMaintenanceInterval = null;
+    }
+
+    // Clear initial connection log timeout
+    if (this.initialConnectionLogTimeout) {
+      clearTimeout(this.initialConnectionLogTimeout);
+      this.initialConnectionLogTimeout = null;
+    }
+
+    // Remove libp2p event listeners (prevent memory leaks)
+    if (this.helia?.libp2p) {
+      if (this.boundPeerConnectHandler) {
+        this.helia.libp2p.removeEventListener("peer:connect", this.boundPeerConnectHandler);
+        this.boundPeerConnectHandler = null;
+      }
+      if (this.boundPeerDisconnectHandler) {
+        this.helia.libp2p.removeEventListener("peer:disconnect", this.boundPeerDisconnectHandler);
+        this.boundPeerDisconnectHandler = null;
+      }
     }
 
     // Detach from shared Helia but don't stop it
@@ -704,22 +727,26 @@ export class IpfsStorageService implements IpfsTransport {
         );
 
         // Set up peer connection event handlers - only log bootstrap peers
-        this.helia.libp2p.addEventListener("peer:connect", (event) => {
+        // Store bound handlers for proper cleanup in shutdown()
+        this.boundPeerConnectHandler = ((event: CustomEvent) => {
           const remotePeerId = event.detail.toString();
           if (bootstrapPeerIds.has(remotePeerId)) {
             console.log(`📦 Connected to bootstrap peer: ${remotePeerId.slice(0, 16)}...`);
           }
-        });
+        }) as (event: CustomEvent) => void;
 
-        this.helia.libp2p.addEventListener("peer:disconnect", (event) => {
+        this.boundPeerDisconnectHandler = ((event: CustomEvent) => {
           const remotePeerId = event.detail.toString();
           if (bootstrapPeerIds.has(remotePeerId)) {
             console.log(`📦 Disconnected from bootstrap peer: ${remotePeerId.slice(0, 16)}...`);
           }
-        });
+        }) as (event: CustomEvent) => void;
 
-        // Log initial connections after a short delay
-        setTimeout(() => {
+        this.helia.libp2p.addEventListener("peer:connect", this.boundPeerConnectHandler);
+        this.helia.libp2p.addEventListener("peer:disconnect", this.boundPeerDisconnectHandler);
+
+        // Log initial connections after a short delay (store timeout for cleanup)
+        this.initialConnectionLogTimeout = setTimeout(() => {
           const connections = this.helia?.libp2p.getConnections() || [];
           console.log(`📦 Active connections: ${connections.length}`);
           connections.slice(0, 5).forEach((conn) => {
@@ -1065,22 +1092,26 @@ export class IpfsStorageService implements IpfsTransport {
         console.log(`📦 CID codec note: backend=${backendCid.slice(0, 12)}... vs helia=${cidString.slice(0, 12)}... (using ${canonicalCidSource})`);
       }
 
-      // Announce content to DHT (non-blocking)
-      const PROVIDE_TIMEOUT = 10000;
-      try {
-        console.log(`📦 Announcing CID to network: ${canonicalCid.slice(0, 16)}...`);
-        // Announce the canonical CID (which may be different from Helia's)
-        const { CID: CIDClass } = await import("multiformats/cid");
-        const cidToAnnounce = CIDClass.parse(canonicalCid);
-        await Promise.race([
-          this.helia.routing.provide(cidToAnnounce),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("DHT provide timeout")), PROVIDE_TIMEOUT)
-          ),
-        ]);
-        console.log(`📦 CID announced to network`);
-      } catch (provideError) {
-        console.warn(`📦 Could not announce to DHT (non-fatal):`, provideError);
+      // Announce content to DHT (non-blocking) - ONLY if DHT enabled
+      if (IPFS_CONFIG.enableDht) {
+        const PROVIDE_TIMEOUT = 10000;
+        try {
+          console.log(`📦 Announcing CID to network: ${canonicalCid.slice(0, 16)}...`);
+          // Announce the canonical CID (which may be different from Helia's)
+          const { CID: CIDClass } = await import("multiformats/cid");
+          const cidToAnnounce = CIDClass.parse(canonicalCid);
+          await Promise.race([
+            this.helia.routing.provide(cidToAnnounce),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("DHT provide timeout")), PROVIDE_TIMEOUT)
+            ),
+          ]);
+          console.log(`📦 CID announced to network`);
+        } catch (provideError) {
+          console.warn(`📦 Could not announce to DHT (non-fatal):`, provideError);
+        }
+      } else {
+        console.debug(`📦 DHT provide skipped (disabled via config)`);
       }
 
       const uploadDuration = performance.now() - uploadStartTime;
@@ -1224,7 +1255,21 @@ export class IpfsStorageService implements IpfsTransport {
 
           if (!response.ok) {
             const errorText = await response.text().catch(() => "");
-            throw new Error(`HTTP ${response.status}: ${errorText.slice(0, 100)}`);
+
+            // Detect sequence rejection errors from the sidecar
+            // The sidecar rejects records with sequence <= existing sequence
+            const isSequenceError =
+              response.status === 400 &&
+              (errorText.toLowerCase().includes('sequence') ||
+               errorText.toLowerCase().includes('rejecting ipns record'));
+
+            const error = new Error(`HTTP ${response.status}: ${errorText.slice(0, 100)}`) as Error & {
+              isSequenceRejection?: boolean;
+              httpStatus?: number;
+            };
+            error.isSequenceRejection = isSequenceError;
+            error.httpStatus = response.status;
+            throw error;
           }
 
           const hostname = new URL(gatewayUrl).hostname;
@@ -1261,6 +1306,10 @@ export class IpfsStorageService implements IpfsTransport {
     routingKey: Uint8Array,
     marshalledRecord: Uint8Array
   ): void {
+    if (!IPFS_CONFIG.enableDht) {
+      console.debug("📦 DHT IPNS publish skipped (disabled via config)");
+      return;
+    }
     if (!this.helia) return;
 
     const helia = this.helia;
@@ -1334,11 +1383,66 @@ export class IpfsStorageService implements IpfsTransport {
 
       // 2. Publish via HTTP (primary, fast) - AWAIT this
       // HTTP path uses cachedIpnsName internally, doesn't need routingKey
-      const httpSuccess = await this.publishIpnsViaHttp(marshalledRecord);
+      let httpSuccess = false;
+      let currentMarshalledRecord = marshalledRecord;
+      let currentRoutingKey = routingKey;
+
+      try {
+        httpSuccess = await this.publishIpnsViaHttp(currentMarshalledRecord);
+      } catch (error: unknown) {
+        // Check if this is a sequence rejection error
+        const err = error as Error & { isSequenceRejection?: boolean };
+        if (err.isSequenceRejection) {
+          console.warn(`📦 Sequence rejection detected - fetching latest and retrying...`);
+
+          // Fetch latest IPNS record to get correct sequence
+          const httpResolver = getIpfsHttpResolver();
+          httpResolver.invalidateIpnsCache();
+          const resolution = await this.resolveIpnsProgressively();
+
+          if (resolution.best) {
+            // Update tracking with actual remote sequence
+            const remoteSeq = resolution.best.sequence;
+            console.log(`📦 Remote sequence is ${remoteSeq}, our attempt was ${this.ipnsSequenceNumber}`);
+            this.lastKnownRemoteSequence = remoteSeq;
+
+            // Recalculate sequence number (remote + 1)
+            this.ipnsSequenceNumber = remoteSeq + 1n;
+            console.log(`📦 Retrying with corrected sequence: ${this.ipnsSequenceNumber}`);
+
+            // Re-create record with corrected sequence
+            const newRecord = await createIPNSRecord(
+              ipnsKeyPair,
+              `/ipfs/${cid.toString()}`,
+              this.ipnsSequenceNumber,
+              IPNS_LIFETIME
+            );
+            currentMarshalledRecord = marshalIPNSRecord(newRecord);
+            currentRoutingKey = multihashToIPNSRoutingKey(
+              ipnsKeyPair.publicKey.toMultihash()
+            );
+
+            // Retry publish with corrected sequence
+            try {
+              httpSuccess = await this.publishIpnsViaHttp(currentMarshalledRecord);
+              console.log(`✅ Retry succeeded with sequence ${this.ipnsSequenceNumber}`);
+            } catch (retryError) {
+              console.warn(`📦 Retry also failed:`, retryError);
+              // Fall through to DHT path
+            }
+          } else {
+            console.warn(`📦 Could not fetch remote state for sequence correction`);
+            // Fall through to DHT path
+          }
+        } else {
+          // Not a sequence error - log and continue to DHT path
+          console.warn(`📦 HTTP IPNS publish failed (non-sequence error):`, error);
+        }
+      }
 
       // 3. Publish via browser DHT (fallback, fire-and-forget) - DON'T await
       // This runs in background regardless of HTTP result for redundancy
-      this.publishIpnsViaDhtAsync(routingKey, marshalledRecord);
+      this.publishIpnsViaDhtAsync(currentRoutingKey, currentMarshalledRecord);
 
       if (httpSuccess) {
         // CRITICAL: Verify the IPNS record was actually persisted
@@ -2211,8 +2315,8 @@ export class IpfsStorageService implements IpfsTransport {
     // Run immediately
     setTimeout(maintainConnection, 2000);
 
-    // Then periodically (every 30 seconds)
-    this.connectionMaintenanceInterval = setInterval(maintainConnection, 30000);
+    // Then periodically (every 60 seconds - reduced from 30s to lower CPU overhead)
+    this.connectionMaintenanceInterval = setInterval(maintainConnection, 60000);
     console.log(`📦 Backend connection maintenance started`);
   }
 
@@ -4050,19 +4154,24 @@ export class IpfsStorageService implements IpfsTransport {
       // 4.4. Announce content to connected peers (DHT provide)
       // This helps ensure our backend IPFS node can discover and fetch the content
       // Use timeout since DHT operations can be slow in browser
-      const PROVIDE_TIMEOUT = 10000; // 10 seconds
-      try {
-        console.log(`📦 Announcing CID to network: ${cidString.slice(0, 16)}...`);
-        await Promise.race([
-          this.helia.routing.provide(cid),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("DHT provide timeout")), PROVIDE_TIMEOUT)
-          ),
-        ]);
-        console.log(`📦 CID announced to network`);
-      } catch (provideError) {
-        // Non-fatal - content is still stored locally
-        console.warn(`📦 Could not announce to DHT (non-fatal):`, provideError);
+      // ONLY if DHT enabled (HTTP is primary path, DHT provides optional redundancy)
+      if (IPFS_CONFIG.enableDht) {
+        const PROVIDE_TIMEOUT = 10000; // 10 seconds
+        try {
+          console.log(`📦 Announcing CID to network: ${cidString.slice(0, 16)}...`);
+          await Promise.race([
+            this.helia.routing.provide(cid),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("DHT provide timeout")), PROVIDE_TIMEOUT)
+            ),
+          ]);
+          console.log(`📦 CID announced to network`);
+        } catch (provideError) {
+          // Non-fatal - content is still stored locally
+          console.warn(`📦 Could not announce to DHT (non-fatal):`, provideError);
+        }
+      } else {
+        console.debug(`📦 DHT provide skipped (disabled via config)`);
       }
 
       // 4.5. Publish to IPNS only if CID changed (or forced for IPNS recovery)
