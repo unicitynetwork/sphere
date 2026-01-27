@@ -236,6 +236,10 @@ interface SyncContext {
   remoteLastCid: string | null;       // _meta.lastCid from remote (for version chain traversal)
   autoRecoveryTriggered: boolean;     // True if auto-recovery was triggered
 
+  // Version tracking
+  versionHwm: number;                 // Highest version ever seen from IPFS (prevents accepting downgraded data)
+  remoteVersionRegressed: boolean;    // True if remote version < HWM (indicates corruption/stale cache)
+
   // Performance optimization options
   skipExtendedVerification: boolean;  // Skip extended IPFS/IPNS verification delays
 }
@@ -649,6 +653,9 @@ function initializeContext(params: SyncParams, mode: SyncMode, startTime: number
     // Remote data state
     remoteLastCid: null,
     autoRecoveryTriggered: false,
+    // Version tracking
+    versionHwm: 0,
+    remoteVersionRegressed: false,
     // Performance optimization
     skipExtendedVerification: params.skipExtendedVerification ?? false,
   };
@@ -699,6 +706,18 @@ async function step1_loadLocalStorage(ctx: SyncContext): Promise<void> {
 
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(ctx.address);
   const storage = getInventoryStorage();
+
+  // Load Version High Water Mark - tracks highest version ever seen from IPFS
+  // This prevents accepting downgraded/corrupted data across sessions
+  const hwmKey = STORAGE_KEY_GENERATORS.versionHighWaterMark(ctx.address);
+  const hwmStr = storage.getItem(hwmKey);
+  if (hwmStr) {
+    ctx.versionHwm = parseInt(hwmStr, 10) || 0;
+    if (ctx.versionHwm > 0) {
+      console.log(`  Version HWM: ${ctx.versionHwm} (highest known version for this wallet)`);
+    }
+  }
+
   const json = storage.getItem(storageKey);
 
   if (!json) {
@@ -998,10 +1017,57 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
     if (ctx.remoteLastCid) {
       console.log(`  Remote lastCid: ${ctx.remoteLastCid.slice(0, 16)}... (history available)`);
     }
-    // Log warning if remote version seems stale (much lower than expected for active wallet)
-    // This can indicate IPNS propagation issues
-    if (ctx.localVersion > 0 && ctx.remoteVersion < ctx.localVersion) {
-      console.warn(`  ⚠️ Remote version (${ctx.remoteVersion}) is LOWER than local (${ctx.localVersion}) - possible stale IPNS data`);
+
+    // ============================================
+    // VERSION TRACKING LOGIC
+    // ============================================
+    //
+    // Case 1: Remote version REGRESSED (remote < HWM)
+    //   - This means remote has OLDER data than we've previously seen
+    //   - Could be stale cache, network issue, or external corruption
+    //   - We should NOT merge this data (it's outdated)
+    //   - We SHOULD upload our local data to fix the remote
+    //
+    // Case 2: Local ahead of remote (local > remote, remote >= HWM)
+    //   - Normal case: local has pending changes not yet uploaded
+    //   - Skip merging remote data, keep local data
+    //   - Upload local data to sync to IPFS
+    //
+    // Case 3: Remote ahead of local (remote > local)
+    //   - Another device made changes
+    //   - Merge remote data into local
+    //   - Then upload merged result
+    //
+    // Case 4: Versions match (remote == local)
+    //   - Check for content differences
+    //   - Normal merge flow
+    // ============================================
+
+    // Case 1: Remote version regressed below HWM
+    if (ctx.versionHwm > 1 && ctx.remoteVersion > 0 && ctx.remoteVersion < ctx.versionHwm) {
+      console.error(`  🚨 REMOTE VERSION REGRESSED: Remote v${ctx.remoteVersion} < HWM v${ctx.versionHwm}`);
+      console.error(`  🚨 This indicates stale cache or external corruption`);
+      console.error(`  🚨 Skipping remote data - will use local and upload to fix remote`);
+      ctx.remoteVersionRegressed = true;
+      // DO NOT set networkErrorOccurred - we WANT to upload to fix the regression
+      // Skip processing remote data, return early
+      const processingEndTime = performance.now();
+      console.log(`  [Timing] Remote data SKIPPED (regressed) in ${(processingEndTime - processingStartTime).toFixed(0)}ms`);
+      return;
+    }
+
+    // Case 2: Local is ahead of remote (normal pending changes)
+    if (ctx.localVersion > ctx.remoteVersion) {
+      console.log(`  📤 Local v${ctx.localVersion} ahead of Remote v${ctx.remoteVersion} - local has pending changes`);
+      // This is NORMAL after local operations (split, receive, etc.)
+      // We should still process remote data in case it has tokens we don't have locally
+      // But we should NOT overwrite local tokens with older remote tokens
+      // The merge logic below will handle this correctly (prefer local or newer remote)
+    }
+
+    // Case 3: Remote is ahead of local
+    if (ctx.remoteVersion > ctx.localVersion) {
+      console.log(`  📥 Remote v${ctx.remoteVersion} ahead of Local v${ctx.localVersion} - will merge remote changes`);
     }
   }
 
@@ -1164,6 +1230,17 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
 
   ctx.stats.tokensImported = tokensImported;
   console.log(`  ✓ Loaded from IPFS: ${tokensImported} new tokens, ${ctx.tombstones.length} tombstones`);
+
+  // Update Version High Water Mark after successfully loading remote data
+  // This tracks the highest version we've seen from IPFS
+  if (ctx.remoteVersion > ctx.versionHwm) {
+    const storage = getInventoryStorage();
+    const hwmKey = STORAGE_KEY_GENERATORS.versionHighWaterMark(ctx.address);
+    storage.setItem(hwmKey, String(ctx.remoteVersion));
+    console.log(`  ✓ Updated version HWM: ${ctx.versionHwm} → ${ctx.remoteVersion}`);
+    ctx.versionHwm = ctx.remoteVersion;
+  }
+
   console.log(`  [Timing] Remote data processing took ${(performance.now() - processingStartTime).toFixed(0)}ms`);
 }
 
@@ -3071,6 +3148,17 @@ async function step10_uploadIpfs(ctx: SyncContext): Promise<void> {
   if (publishResult.success) {
     ctx.ipnsPublished = true;
     console.log(`  ✅ IPNS published: seq=${publishResult.sequence}`);
+
+    // Update Version High Water Mark after successful IPNS publish
+    // The uploaded version is in the prepared storage data
+    const uploadedVersion = ctx.preparedStorageData?._meta?.version;
+    if (uploadedVersion && uploadedVersion > ctx.versionHwm) {
+      const storage = getInventoryStorage();
+      const hwmKey = STORAGE_KEY_GENERATORS.versionHighWaterMark(ctx.address);
+      storage.setItem(hwmKey, String(uploadedVersion));
+      console.log(`  ✓ Updated version HWM: ${ctx.versionHwm} → ${uploadedVersion}`);
+      ctx.versionHwm = uploadedVersion;
+    }
   } else {
     console.warn(`  ⚠️ IPNS publish failed (will retry in background): ${publishResult.error}`);
   }
