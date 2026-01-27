@@ -1349,6 +1349,10 @@ export class GroupChatService {
 
       // Now send the create group request
       // Include 'h' tag with proposed group ID as some relays require it
+      // Group visibility settings:
+      // - Public: closed=true (anyone reads, members write)
+      // - Private: private=true, closed=true, hidden=true (secret - members only, not in listings)
+      const isPrivate = options.visibility === GroupVisibility.PRIVATE;
       const eventId = await this.client.createAndPublishEvent({
         kind: NIP29_KINDS.CREATE_GROUP,
         tags: [['h', proposedGroupId]],
@@ -1356,7 +1360,9 @@ export class GroupChatService {
           name: options.name,
           about: options.description,
           picture: options.picture,
-          private: options.visibility === GroupVisibility.PRIVATE,
+          closed: true, // All groups are members-only write
+          private: isPrivate,
+          hidden: isPrivate,
         }),
       });
 
