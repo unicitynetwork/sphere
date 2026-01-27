@@ -110,6 +110,7 @@ export function CreateGroupModal({
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Enter group name..."
                   disabled={isCreating}
+                  autoFocus
                   className="w-full px-4 py-2.5 bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white placeholder-neutral-400 rounded-xl border border-neutral-200 dark:border-neutral-700 focus:outline-none focus:border-blue-500 transition-colors disabled:opacity-50"
                 />
               </div>

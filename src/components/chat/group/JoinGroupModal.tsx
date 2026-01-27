@@ -188,6 +188,7 @@ export function JoinGroupModal({
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder="Search groups..."
+                        autoFocus
                         className="w-full pl-9 pr-3 py-2.5 bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white placeholder-neutral-400 rounded-xl text-sm border border-neutral-200 dark:border-neutral-700 focus:outline-none focus:border-blue-500 transition-colors"
                       />
                     </div>
