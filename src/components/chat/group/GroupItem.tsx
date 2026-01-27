@@ -48,7 +48,7 @@ export function GroupItem({
         isSelected
           ? 'bg-linear-to-br from-blue-500/10 to-purple-500/10 border border-blue-500/30'
           : 'hover:bg-neutral-100 dark:hover:bg-neutral-800/50 border border-transparent'
-      }`}
+      } ${showMenu ? 'z-50' : ''}`}
       whileHover={{ scale: 1.01 }}
       whileTap={{ scale: 0.99 }}
     >
