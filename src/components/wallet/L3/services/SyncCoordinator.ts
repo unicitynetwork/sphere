@@ -52,12 +52,16 @@ export class SyncCoordinator {
 
   // Constants
   private readonly LEADER_TIMEOUT = 10000; // 10s - leader considered dead if no heartbeat
-  private readonly HEARTBEAT_INTERVAL = 3000; // 3s heartbeat
+  private readonly HEARTBEAT_INTERVAL = 5000; // 5s heartbeat (was 3s) - reduce CPU overhead
+  private readonly LEADER_CHECK_INTERVAL = 7500; // 7.5s leader check (was 5s) - reduce CPU overhead
   private readonly LOCK_TIMEOUT = 30000; // 30s max wait for lock
   private readonly YIELD_COOLDOWN = 15000; // 15s cooldown after yielding to prevent flapping
 
   // Yield tracking to prevent leadership flapping
   private lastYieldTime: number = 0;
+
+  // Event listener cleanup - store bound handler for proper removal
+  private boundPagehideHandler: (() => void) | null = null;
 
   constructor() {
     this.instanceId = crypto.randomUUID();
@@ -69,7 +73,7 @@ export class SyncCoordinator {
     // Start leader check interval
     this.leaderCheckInterval = setInterval(
       () => this.checkLeaderLiveness(),
-      this.LEADER_TIMEOUT / 2
+      this.LEADER_CHECK_INTERVAL
     );
 
     // Request leadership on startup
@@ -78,7 +82,9 @@ export class SyncCoordinator {
     // Handle tab close - use pagehide instead of beforeunload
     // beforeunload fires BEFORE the confirmation dialog, so cleanup would run
     // even if user cancels the reload. pagehide only fires when page actually unloads.
-    window.addEventListener("pagehide", () => this.cleanup());
+    // Store bound handler for proper cleanup
+    this.boundPagehideHandler = () => this.cleanup();
+    window.addEventListener("pagehide", this.boundPagehideHandler);
 
     console.log(`📋 SyncCoordinator initialized: ${this.instanceId.slice(0, 8)}...`);
   }
@@ -332,11 +338,19 @@ export class SyncCoordinator {
    * Cleanup on tab close
    */
   private cleanup(): void {
+    // Remove pagehide listener (prevent memory leak / double cleanup)
+    if (this.boundPagehideHandler) {
+      window.removeEventListener("pagehide", this.boundPagehideHandler);
+      this.boundPagehideHandler = null;
+    }
+
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
     }
     if (this.leaderCheckInterval) {
       clearInterval(this.leaderCheckInterval);
+      this.leaderCheckInterval = null;
     }
 
     // If we're leader and syncing, let others know

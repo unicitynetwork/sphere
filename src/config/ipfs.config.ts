@@ -96,6 +96,8 @@ export const IPFS_CONFIG = {
   maxConnections: 10,  // Reduced from 50 - we only connect to Unicity peers + 1 fallback
   enableAutoSync: true,
   syncIntervalMs: 5 * 60 * 1000, // 5 minutes
+  /** Enable DHT operations (provide/put). Set false for HTTP-only mode to reduce CPU usage. */
+  enableDht: import.meta.env.VITE_ENABLE_IPFS_DHT !== 'false',
 };
 
 /**
@@ -115,9 +117,9 @@ export const IPNS_RESOLUTION_CONFIG = {
   /** Maximum wait for all gateway responses (late arrivals handled separately) */
   maxWaitMs: 15000, // Reduced from 30s - faster overall resolution
   /** Minimum polling interval for background IPNS re-fetch (active tab) */
-  pollingIntervalMinMs: 45000,
+  pollingIntervalMinMs: 60000,  // 60s (was 45s) - reduce CPU overhead
   /** Maximum polling interval (jitter applied between min and max, active tab) */
-  pollingIntervalMaxMs: 75000,
+  pollingIntervalMaxMs: 90000,  // 90s (was 75s) - reduce CPU overhead
   /** Minimum polling interval when tab is inactive/hidden (4 minutes) */
   inactivePollingIntervalMinMs: 240000,
   /** Maximum polling interval when tab is inactive/hidden (4.5 minutes with jitter) */

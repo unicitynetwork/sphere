@@ -720,7 +720,8 @@ export class LazyRecoveryLoop {
       );
 
       // Add timeout wrapper to prevent hanging operations
-      const timeoutPromise = new Promise((_, reject) => {
+      // Type as Promise<never> since it only rejects, never resolves
+      const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error('Recovery timeout exceeded')), timeoutMs);
       });
 
