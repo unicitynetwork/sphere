@@ -234,6 +234,9 @@ export const STORAGE_KEY_GENERATORS = {
 
   // Token list hash for spent check optimization: `sphere_token_hash_${address}`
   tokenListHash: (address: string) => `sphere_token_hash_${address}` as const,
+
+  // High water mark version (prevents accepting downgraded data): `sphere_version_hwm_${address}`
+  versionHighWaterMark: (address: string) => `sphere_version_hwm_${address}` as const,
 } as const;
 
 // ============================================================================

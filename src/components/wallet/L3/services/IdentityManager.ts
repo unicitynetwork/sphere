@@ -33,6 +33,9 @@ export interface UserIdentity {
 export class IdentityManager {
   private static instance: IdentityManager;
   private sessionKey: string;
+  // CPU OPTIMIZATION: Cache derived identity to avoid repeated crypto operations
+  private cachedIdentity: UserIdentity | null = null;
+  private cachedIdentityPath: string | null = null;
 
   private constructor(sessionKey: string) {
     this.sessionKey = sessionKey;
@@ -43,6 +46,14 @@ export class IdentityManager {
       IdentityManager.instance = new IdentityManager(sessionKey);
     }
     return IdentityManager.instance;
+  }
+
+  /**
+   * Clear the identity cache - call when wallet changes or address switches
+   */
+  clearIdentityCache(): void {
+    this.cachedIdentity = null;
+    this.cachedIdentityPath = null;
   }
 
   /**
@@ -71,6 +82,8 @@ export class IdentityManager {
     localStorage.setItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH, path);
     // Clean up legacy index key
     localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_INDEX_LEGACY);
+    // Clear cache since path changed
+    this.clearIdentityCache();
   }
 
   /**
@@ -79,6 +92,8 @@ export class IdentityManager {
   clearSelectedAddressPath(): void {
     localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
     localStorage.removeItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_INDEX_LEGACY);
+    // Clear cache since wallet is being reset
+    this.clearIdentityCache();
   }
 
   /**
@@ -86,6 +101,9 @@ export class IdentityManager {
    * This creates a unified wallet where L1 and L3 share the same keypairs
    */
   async generateNewIdentity(): Promise<UserIdentity> {
+    // Clear cache before generating new wallet
+    this.clearIdentityCache();
+
     const keyManager = this.getUnifiedKeyManager();
     const mnemonic = await keyManager.generateNew(12);
     // Use path-based derivation - PATH is the single identifier
@@ -96,6 +114,11 @@ export class IdentityManager {
     if (mnemonic) {
       this.saveSeed(mnemonic);
     }
+
+    // Cache the new identity
+    this.cachedIdentity = { ...identity, mnemonic };
+    this.cachedIdentityPath = defaultPath;
+
     return { ...identity, mnemonic };
   }
 
@@ -172,6 +195,9 @@ export class IdentityManager {
    * This always uses BIP32 derivation for consistency with L1
    */
   async deriveIdentityFromMnemonic(mnemonic: string): Promise<UserIdentity> {
+    // Clear cache before restoring wallet
+    this.clearIdentityCache();
+
     // Validate mnemonic phrase
     const isValid = bip39.validateMnemonic(mnemonic);
     if (!isValid) {
@@ -189,6 +215,10 @@ export class IdentityManager {
 
     // Save mnemonic for legacy compatibility
     this.saveSeed(mnemonic);
+
+    // Cache the restored identity
+    this.cachedIdentity = { ...identity, mnemonic };
+    this.cachedIdentityPath = defaultPath;
 
     return { ...identity, mnemonic };
   }
@@ -237,14 +267,19 @@ export class IdentityManager {
     if (initialized) {
       // Use path-based derivation (not index-based) - PATH is the ONLY reliable identifier
       const selectedPath = this.getSelectedAddressPath();
-      if (selectedPath) {
-        return this.deriveIdentityFromPath(selectedPath);
+      const basePath = keyManager.getBasePath();
+      const currentPath = selectedPath || `${basePath}/0/0`;
+
+      // CPU OPTIMIZATION: Return cached identity if path hasn't changed
+      if (this.cachedIdentity && this.cachedIdentityPath === currentPath) {
+        return this.cachedIdentity;
       }
 
-      // Fallback to first external address if no path stored
-      const basePath = keyManager.getBasePath();
-      const defaultPath = `${basePath}/0/0`;
-      return this.deriveIdentityFromPath(defaultPath);
+      // Derive and cache the identity
+      const identity = await this.deriveIdentityFromPath(currentPath);
+      this.cachedIdentity = identity;
+      this.cachedIdentityPath = currentPath;
+      return identity;
     }
 
     // No wallet initialized - user must create or import a wallet

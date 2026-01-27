@@ -41,13 +41,11 @@ export function useIpfsStorage() {
 
   // Listen for storage events
   useEffect(() => {
-    console.log(`🔄 useIpfsStorage: setting up event listener`);
     const handleEvent = (e: CustomEvent<StorageEvent>) => {
       setLastEvent(e.detail);
 
       // Handle real-time sync state changes for immediate UI updates
       if (e.detail.type === "sync:state-changed" && e.detail.data?.isSyncing !== undefined) {
-        console.log(`🔄 useIpfsStorage: received sync:state-changed, isSyncing=${e.detail.data.isSyncing}`);
         setIsSyncingRealtime(e.detail.data.isSyncing);
       }
 
@@ -80,9 +78,7 @@ export function useIpfsStorage() {
     setIsServiceReady(true);
 
     // Initialize sync state from service (in case sync already started before hook mounted)
-    const currentSyncState = storageService.isCurrentlySyncing();
-    console.log(`🔄 useIpfsStorage: initializing sync state to ${currentSyncState}`);
-    setIsSyncingRealtime(currentSyncState);
+    setIsSyncingRealtime(storageService.isCurrentlySyncing());
 
     return () => {
       // Note: Don't shutdown on unmount as service is singleton

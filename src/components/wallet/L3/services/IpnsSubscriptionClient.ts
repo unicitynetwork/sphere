@@ -41,6 +41,9 @@ export class IpnsSubscriptionClient {
   private readonly maxReconnectDelayMs = 60000;
   private reconnectAttempts = 0;
   private isConnecting = false;
+  private connectionOpenedAt: number = 0;
+  // Minimum stable connection time before resetting backoff (30 seconds)
+  private readonly minStableConnectionMs = 30000;
 
   constructor(gateway?: string) {
     const baseGateway = gateway || getBackendGatewayUrl();
@@ -73,8 +76,8 @@ export class IpnsSubscriptionClient {
       this.ws.onopen = () => {
         console.log("[IPNS-WS] WebSocket connected");
         this.isConnecting = false;
-        this.reconnectAttempts = 0;
-        this.reconnectDelayMs = 5000;
+        this.connectionOpenedAt = Date.now();
+        // Don't reset backoff yet - wait until connection proves stable
 
         // Resubscribe to all IPNS names
         const names = Array.from(this.subscriptions.keys());
@@ -91,11 +94,30 @@ export class IpnsSubscriptionClient {
       };
 
       this.ws.onclose = (event) => {
-        console.log(
-          `[IPNS-WS] WebSocket closed (code: ${event.code}, reason: ${event.reason || "none"})`
-        );
+        const connectionDuration = this.connectionOpenedAt > 0 ? Date.now() - this.connectionOpenedAt : 0;
+        const wasStable = connectionDuration >= this.minStableConnectionMs;
+
+        // Only log if connection was short-lived (to reduce log spam)
+        if (connectionDuration < 5000) {
+          console.log(
+            `[IPNS-WS] WebSocket closed quickly (code: ${event.code}, duration: ${connectionDuration}ms)`
+          );
+        } else {
+          console.log(
+            `[IPNS-WS] WebSocket closed (code: ${event.code}, duration: ${Math.round(connectionDuration / 1000)}s)`
+          );
+        }
+
         this.isConnecting = false;
+        this.connectionOpenedAt = 0;
         this.stopPingInterval();
+
+        // Only reset backoff if connection was stable (prevents rapid reconnect loops)
+        if (wasStable) {
+          this.reconnectAttempts = 0;
+          this.reconnectDelayMs = 5000;
+        }
+
         this.scheduleReconnect();
       };
 
@@ -173,20 +195,13 @@ export class IpnsSubscriptionClient {
 
   /**
    * Check backend health before reconnecting
-   * CPU OPTIMIZATION (Phase 5): Prevents reconnect storms when backend is down
+   * NOTE: Disabled HTTP health check - causes CORS errors from browser.
+   * WebSocket reconnection will handle connectivity checks naturally.
    */
   private async checkBackendHealth(): Promise<boolean> {
-    try {
-      const httpUrl = this.wsUrl.replace('wss://', 'https://').replace('ws://', 'http://').replace('/ws/ipns', '/health');
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
-      const response = await fetch(httpUrl, { method: 'HEAD', signal: controller.signal });
-      clearTimeout(timeoutId);
-      return response.ok;
-    } catch {
-      // Allow reconnect if health check is unavailable (fail open)
-      return true;
-    }
+    // Skip HTTP health check - it causes CORS errors from browser origins.
+    // The WebSocket connection itself is the best health indicator.
+    return true;
   }
 
   /**
