@@ -1043,16 +1043,19 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
     //   - Normal merge flow
     // ============================================
 
-    // Case 1: Remote version regressed below HWM
+    // Case 1: Remote version regressed below HWM (stale IPNS cache)
     if (ctx.versionHwm > 1 && ctx.remoteVersion > 0 && ctx.remoteVersion < ctx.versionHwm) {
       console.error(`  🚨 REMOTE VERSION REGRESSED: Remote v${ctx.remoteVersion} < HWM v${ctx.versionHwm}`);
-      console.error(`  🚨 This indicates stale cache or external corruption`);
-      console.error(`  🚨 Skipping remote data - will use local and upload to fix remote`);
+      console.error(`  🚨 This indicates stale IPNS cache - server likely has v${ctx.versionHwm}`);
+      console.error(`  🚨 Skipping IPFS upload - we don't have correct lastCid for chain validation`);
+      console.error(`  🚨 Try again after IPNS cache refreshes (usually within 30s)`);
       ctx.remoteVersionRegressed = true;
-      // DO NOT set networkErrorOccurred - we WANT to upload to fix the regression
-      // Skip processing remote data, return early
+      // MUST set networkErrorOccurred to prevent upload with wrong lastCid
+      // If we upload with stale lastCid, chain validation will fail on server
+      // Wait for IPNS cache to refresh and try again on next sync
+      ctx.networkErrorOccurred = true;
       const processingEndTime = performance.now();
-      console.log(`  [Timing] Remote data SKIPPED (regressed) in ${(processingEndTime - processingStartTime).toFixed(0)}ms`);
+      console.log(`  [Timing] Remote data SKIPPED (regressed, upload blocked) in ${(processingEndTime - processingStartTime).toFixed(0)}ms`);
       return;
     }
 
@@ -2864,13 +2867,17 @@ function buildStorageDataFromContext(ctx: SyncContext): TxfStorageData {
   // Build TxfStorageData structure
   // Note: timestamp is excluded from _meta for CID stability (same content = same CID)
 
-  // CRITICAL: Use max(localVersion, remoteVersion) + 1 for version calculation
-  // This ensures proper version progression when:
-  // 1. Recovering from IPFS after localStorage corruption (local=1, remote=5 -> new=6)
-  // 2. Normal sync progression (local=5, remote=5 -> new=6)
-  // 3. Local-only changes (local=5, remote=0 -> new=6)
-  const baseVersion = Math.max(ctx.localVersion, ctx.remoteVersion);
-  const newVersion = baseVersion + 1;
+  // CRITICAL: For IPFS uploads, use remoteVersion + 1 (server expects exactly current + 1)
+  // For first upload (no remote data), use localVersion + 1
+  // This ensures the server's chain validation passes:
+  // - Server has v7 → expects v8 → we send v8 ✓
+  // - Local may be ahead (v9) due to failed uploads, but server doesn't know about that
+  // - Content is merged from both local and remote, version is just for ordering
+  // Note: If remoteVersionRegressed is true, networkErrorOccurred should also be true
+  // which blocks upload, so the version calculation here won't matter for IPFS.
+  const newVersion = ctx.remoteVersion > 0
+    ? ctx.remoteVersion + 1
+    : ctx.localVersion + 1;
 
   const storageData: TxfStorageData = {
     _meta: {
@@ -3005,6 +3012,11 @@ function step9_prepareStorage(ctx: SyncContext): void {
     // Content same as localStorage, but check if we have local-only content that needs upload
     if (ctx.hasLocalOnlyContent) {
       console.log(`  📤 Local-only content detected - forcing upload to IPFS`);
+      // Fall through to write localStorage and mark upload needed
+    } else if (ctx.localVersion > ctx.remoteVersion && ctx.remoteVersion > 0) {
+      // Local is ahead of remote - previous upload may have failed
+      // Force upload to sync local changes to IPFS
+      console.log(`  📤 Local v${ctx.localVersion} ahead of remote v${ctx.remoteVersion} - forcing upload to sync`);
       // Fall through to write localStorage and mark upload needed
     } else {
       console.log(`  ⏭️ No content changes detected`);
