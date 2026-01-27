@@ -147,6 +147,10 @@ export class GroupChatService {
     this.connectPromise = null;
     this.reconnectAttempts = 0;
 
+    // Clear cached relay admin status
+    this.relayAdminPubkeys = null;
+    this.relayAdminFetchPromise = null;
+
     console.log('✅ GroupChatService reset complete');
   }
 
@@ -370,6 +374,10 @@ export class GroupChatService {
 
     if (event.kind === NIP29_KINDS.GROUP_METADATA) {
       // Update group metadata
+      if (!event.content || event.content.trim() === '') {
+        // Skip events with empty content (shouldn't happen but handle gracefully)
+        return;
+      }
       try {
         const metadata = JSON.parse(event.content);
         group.name = metadata.name || group.name;
@@ -378,7 +386,7 @@ export class GroupChatService {
         group.updatedAt = event.created_at * 1000;
         this.repository.saveGroup(group);
       } catch (e) {
-        console.error('Failed to parse group metadata', e);
+        console.error('Failed to parse group metadata', e, { content: event.content });
       }
     } else if (event.kind === NIP29_KINDS.GROUP_MEMBERS) {
       // Update member list
@@ -1669,6 +1677,8 @@ export class GroupChatService {
     if (!this.client) await this.start();
     if (!this.client) return new Set();
 
+    console.log('🔍 Fetching relay admins...');
+
     return new Promise((resolve) => {
       const adminPubkeys = new Set<string>();
 
@@ -1680,6 +1690,11 @@ export class GroupChatService {
 
       this.client!.subscribe(filter, {
         onEvent: (event) => {
+          console.log(`🔍 Received GROUP_ADMINS event:`, {
+            id: event.id?.slice(0, 8),
+            dTag: event.tags.find((t) => t[0] === 'd')?.[1],
+            pTags: event.tags.filter((t) => t[0] === 'p').map((t) => t[1]?.slice(0, 8)),
+          });
           const pTags = event.tags.filter((t) => t[0] === 'p');
           for (const tag of pTags) {
             if (tag[1]) {
@@ -1688,6 +1703,7 @@ export class GroupChatService {
           }
         },
         onEndOfStoredEvents: () => {
+          console.log(`🔍 End of relay admins, found ${adminPubkeys.size} admins:`, [...adminPubkeys].map(a => a.slice(0, 8)));
           this.relayAdminPubkeys = adminPubkeys;
           resolve(adminPubkeys);
         },
@@ -1710,11 +1726,14 @@ export class GroupChatService {
   async isCurrentUserRelayAdmin(): Promise<boolean> {
     const myPubkey = this.getMyPublicKey();
     if (!myPubkey) {
+      console.log('🔍 isCurrentUserRelayAdmin: no pubkey, returning false');
       return false;
     }
 
     const admins = await this.fetchRelayAdmins();
-    return admins.has(myPubkey);
+    const isAdmin = admins.has(myPubkey);
+    console.log(`🔍 isCurrentUserRelayAdmin: pubkey=${myPubkey.slice(0, 8)}, admins=[${[...admins].map(a => a.slice(0, 8)).join(', ')}], isAdmin=${isAdmin}`);
+    return isAdmin;
   }
 
   /**
