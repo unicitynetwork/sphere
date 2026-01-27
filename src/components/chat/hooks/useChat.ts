@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChatRepository } from '../data/ChatRepository';
 import { ChatConversation, ChatMessage } from '../data/models';
 import { useServices } from '../../../contexts/useServices';
+import { STORAGE_KEYS } from '../../../config/storageKeys';
 
 const QUERY_KEYS = {
   CONVERSATIONS: ['chat', 'conversations'],
@@ -91,6 +92,19 @@ export const useChat = (): UseChatReturn => {
     staleTime: 30000,
   });
 
+  // Restore selected conversation from localStorage when conversations are loaded
+  useEffect(() => {
+    if (conversationsQuery.data && conversationsQuery.data.length > 0 && !selectedConversation) {
+      const savedConversationId = localStorage.getItem(STORAGE_KEYS.CHAT_SELECTED_DM);
+      if (savedConversationId) {
+        const savedConversation = conversationsQuery.data.find((c) => c.id === savedConversationId);
+        if (savedConversation) {
+          setSelectedConversation(savedConversation);
+        }
+      }
+    }
+  }, [conversationsQuery.data, selectedConversation]);
+
   // Query messages for selected conversation
   const messagesQuery = useQuery({
     queryKey: QUERY_KEYS.MESSAGES(selectedConversation?.id || ''),
@@ -165,9 +179,13 @@ export const useChat = (): UseChatReturn => {
   const selectConversation = useCallback(
     (conversation: ChatConversation | null) => {
       setSelectedConversation(conversation);
+      // Persist selected conversation ID
       if (conversation) {
+        localStorage.setItem(STORAGE_KEYS.CHAT_SELECTED_DM, conversation.id);
         chatRepository.markConversationAsRead(conversation.id);
         queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.CHAT_SELECTED_DM);
       }
     },
     [queryClient]

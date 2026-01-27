@@ -93,6 +93,7 @@ export class GroupChatService {
   private connectPromise: Promise<void> | null = null;
   private messageListeners: ((message: GroupMessage) => void)[] = [];
   private reconnectAttempts: number = 0;
+  private pendingLeaves: Set<string> = new Set(); // Track voluntary leaves to suppress "kicked" toast
 
   private constructor(identityManager: IdentityManager, relayUrls?: string[]) {
     this.identityManager = identityManager;
@@ -441,14 +442,23 @@ export class GroupChatService {
         if (removedPubkey) {
           console.log(`👢 User ${removedPubkey.slice(0, 8)}... removed from group ${groupId}`);
 
-          // If it's me who got kicked, remove the group from local storage
+          // If it's me who got removed, handle it
           if (removedPubkey === myPubkey) {
-            console.log(`😢 I was kicked from group ${groupId}`);
-            const groupName = group.getDisplayName();
-            this.repository.removeGroup(groupId);
-            showToast(`You were removed from "${groupName}"`, 'warning', 0);
-            window.dispatchEvent(new CustomEvent('group-kicked', { detail: { groupId } }));
-            window.dispatchEvent(new CustomEvent('group-chat-updated'));
+            // Check if this was a voluntary leave (not a kick)
+            if (this.pendingLeaves.has(groupId)) {
+              console.log(`👋 Left group ${groupId} voluntarily`);
+              this.pendingLeaves.delete(groupId);
+              // Group already removed in leaveGroup(), just update UI
+              window.dispatchEvent(new CustomEvent('group-chat-updated'));
+            } else {
+              // Actually kicked by admin
+              console.log(`😢 I was kicked from group ${groupId}`);
+              const groupName = group.getDisplayName();
+              this.repository.removeGroup(groupId);
+              showToast(`You were removed from "${groupName}"`, 'warning', 0);
+              window.dispatchEvent(new CustomEvent('group-kicked', { detail: { groupId } }));
+              window.dispatchEvent(new CustomEvent('group-chat-updated'));
+            }
           } else {
             // Someone else was kicked, just remove them from member list
             this.repository.removeMember(groupId, removedPubkey);
@@ -869,9 +879,12 @@ export class GroupChatService {
     if (!this.client) return false;
 
     try {
-      // First, fetch group metadata
-      const group = await this.fetchGroupMetadata(groupId);
-      if (!group) {
+      // Try to fetch group metadata first (may fail for hidden groups)
+      let group = await this.fetchGroupMetadata(groupId);
+
+      // For hidden groups, metadata won't be visible until after joining
+      // If we have an invite code, proceed anyway
+      if (!group && !inviteCode) {
         console.error(`Group not found: ${groupId}`);
         return false;
       }
@@ -890,6 +903,15 @@ export class GroupChatService {
 
       if (eventId) {
         console.log(`✅ Join request sent for group ${groupId}`);
+
+        // For hidden groups, fetch metadata now that we're a member
+        if (!group) {
+          group = await this.fetchGroupMetadata(groupId);
+          if (!group) {
+            console.error(`Failed to fetch group metadata after join: ${groupId}`);
+            return false;
+          }
+        }
 
         // Save the group locally
         this.repository.saveGroup(group);
@@ -936,6 +958,9 @@ export class GroupChatService {
     if (!this.client) return false;
 
     try {
+      // Track this as a voluntary leave to suppress "kicked" toast
+      this.pendingLeaves.add(groupId);
+
       const eventId = await this.client.createAndPublishEvent({
         kind: NIP29_KINDS.LEAVE_REQUEST,
         tags: [['h', groupId]],
@@ -950,6 +975,9 @@ export class GroupChatService {
 
         return true;
       }
+
+      // If publish failed, remove from pending leaves
+      this.pendingLeaves.delete(groupId);
 
       return false;
     } catch (error) {

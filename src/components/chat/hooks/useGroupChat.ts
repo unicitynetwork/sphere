@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { GroupChatRepository } from '../data/GroupChatRepository';
 import { Group, GroupMessage, GroupMember } from '../data/groupModels';
 import { useServices } from '../../../contexts/useServices';
+import { STORAGE_KEYS } from '../../../config/storageKeys';
 
 const QUERY_KEYS = {
   GROUPS: ['groupChat', 'groups'],
@@ -164,6 +165,19 @@ export const useGroupChat = (): UseGroupChatReturn => {
     staleTime: 30000,
   });
 
+  // Restore selected group from localStorage when groups are loaded
+  useEffect(() => {
+    if (groupsQuery.data && groupsQuery.data.length > 0 && !selectedGroup) {
+      const savedGroupId = localStorage.getItem(STORAGE_KEYS.CHAT_SELECTED_GROUP);
+      if (savedGroupId) {
+        const savedGroup = groupsQuery.data.find((g) => g.id === savedGroupId);
+        if (savedGroup) {
+          setSelectedGroup(savedGroup);
+        }
+      }
+    }
+  }, [groupsQuery.data, selectedGroup]);
+
   // Query available groups (for discovery)
   const availableGroupsQuery = useQuery({
     queryKey: QUERY_KEYS.AVAILABLE_GROUPS,
@@ -266,7 +280,9 @@ export const useGroupChat = (): UseGroupChatReturn => {
   const selectGroup = useCallback(
     async (group: Group | null) => {
       setSelectedGroup(group);
+      // Persist selected group ID
       if (group) {
+        localStorage.setItem(STORAGE_KEYS.CHAT_SELECTED_GROUP, group.id);
         groupRepository.markGroupAsRead(group.id);
         queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
 
@@ -276,6 +292,8 @@ export const useGroupChat = (): UseGroupChatReturn => {
           await groupChatService.fetchMessages(group.id);
           queryClient.invalidateQueries({ queryKey: QUERY_KEYS.MESSAGES(group.id) });
         }
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.CHAT_SELECTED_GROUP);
       }
     },
     [queryClient, groupChatService]

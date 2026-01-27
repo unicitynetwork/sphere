@@ -132,6 +132,19 @@ export const STORAGE_KEYS = {
   GROUP_CHAT_PROCESSED_EVENTS: 'sphere_group_chat_processed_events',
 
   // ============================================================================
+  // CHAT UI STATE (Persistence across navigation)
+  // ============================================================================
+
+  // Chat mode (global/dm)
+  CHAT_MODE: 'sphere_chat_mode',
+
+  // Selected group ID (when in global mode)
+  CHAT_SELECTED_GROUP: 'sphere_chat_selected_group',
+
+  // Selected DM conversation pubkey (when in dm mode)
+  CHAT_SELECTED_DM: 'sphere_chat_selected_dm',
+
+  // ============================================================================
   // AGENT CHAT SESSIONS
   // ============================================================================
 

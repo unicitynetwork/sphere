@@ -2,6 +2,7 @@ import { motion } from 'framer-motion';
 import { Hash, Lock, MoreVertical, LogOut, Trash2, Link, Loader2 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { Group, GroupVisibility } from '../data/groupModels';
+import { showToast } from '../../ui/toast-utils';
 
 interface GroupItemProps {
   group: Group;
@@ -120,9 +121,10 @@ export function GroupItem({
                       e.stopPropagation();
                       const code = await onCreateInvite();
                       if (code) {
-                        // Copy to clipboard
-                        const inviteUrl = `${window.location.origin}${window.location.pathname}?join=${group.relayUrl}'${group.id}~${code}`;
+                        // Copy to clipboard - format: #/agents/chat?join=groupId/inviteCode
+                        const inviteUrl = `${window.location.origin}${window.location.pathname}#/agents/chat?join=${group.id}/${code}`;
                         navigator.clipboard.writeText(inviteUrl);
+                        showToast('Invite link copied to clipboard', 'success');
                       }
                       setShowMenu(false);
                     }}

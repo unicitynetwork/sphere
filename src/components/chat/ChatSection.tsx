@@ -2,12 +2,24 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { DMChatSection } from './dm/DMChatSection';
 import { GroupChatSection } from './group/GroupChatSection';
+import { STORAGE_KEYS } from '../../config/storageKeys';
 import type { ChatMode } from '../../types';
 
 export function ChatSection() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [chatMode, setChatMode] = useState<ChatMode>('dm');
+  // Priority: 1) join param -> global, 2) nametag param -> dm, 3) saved mode, 4) default dm
+  const [chatMode, setChatMode] = useState<ChatMode>(() => {
+    if (searchParams.get('join')) return 'global';
+    if (searchParams.get('nametag')) return 'dm';
+    const saved = localStorage.getItem(STORAGE_KEYS.CHAT_MODE);
+    return (saved === 'global' || saved === 'dm') ? saved : 'dm';
+  });
   const [pendingDmRecipient, setPendingDmRecipient] = useState<string | null>(null);
+
+  // Persist chat mode changes
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.CHAT_MODE, chatMode);
+  }, [chatMode]);
 
   // Handle URL params for DM navigation from other agents (P2P, SellAnything, etc.)
   useEffect(() => {
