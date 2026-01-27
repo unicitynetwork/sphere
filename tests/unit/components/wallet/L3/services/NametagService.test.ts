@@ -139,15 +139,8 @@ const mockInclusionProof = {
   unicityCertificate: "5".repeat(100),
 };
 
-const mockExclusionProof = {
-  authenticator: null,
-  merkleTreePath: {
-    root: "0000" + "3".repeat(60),
-    steps: [],
-  },
-  transactionHash: null,
-  unicityCertificate: null,
-};
+// Note: Exclusion proof fixture is defined inline in tests as needed
+// Exclusion proofs have authenticator: null, indicating token not found on aggregator
 
 // ==========================================
 // NametagService Tests
@@ -178,7 +171,7 @@ describe("NametagService", () => {
       );
       const service = NametagService.getInstance({
         getCurrentIdentity: mockGetCurrentIdentity,
-      } as any);
+      } as unknown);
 
       const result = await service.recoverNametagProofs();
 
@@ -193,7 +186,7 @@ describe("NametagService", () => {
       );
       const service = NametagService.getInstance({
         getCurrentIdentity: mockGetCurrentIdentity,
-      } as any);
+      } as unknown);
 
       const result = await service.recoverNametagProofs();
 
@@ -221,7 +214,7 @@ describe("NametagService", () => {
       );
       const service = NametagService.getInstance({
         getCurrentIdentity: mockGetCurrentIdentity,
-      } as any);
+      } as unknown);
 
       const result = await service.recoverNametagProofs();
 
@@ -245,7 +238,7 @@ describe("NametagService", () => {
       );
       const service = NametagService.getInstance({
         getCurrentIdentity: mockGetCurrentIdentity,
-      } as any);
+      } as unknown);
 
       const result = await service.recoverNametagProofs();
 
@@ -273,7 +266,7 @@ describe("NametagService", () => {
       );
       const service = NametagService.getInstance({
         getCurrentIdentity: mockGetCurrentIdentity,
-      } as any);
+      } as unknown);
 
       await service.recoverNametagProofs();
 
@@ -296,7 +289,7 @@ describe("NametagService", () => {
       );
       const service = NametagService.getInstance({
         getCurrentIdentity: mockGetCurrentIdentity,
-      } as any);
+      } as unknown);
 
       await expect(service.recoverNametagProofs()).rejects.toThrow("Submission failed");
     });
@@ -312,7 +305,7 @@ describe("NametagService", () => {
       );
       const service = NametagService.getInstance({
         getCurrentIdentity: mockGetCurrentIdentity,
-      } as any);
+      } as unknown);
 
       await expect(service.recoverNametagProofs()).rejects.toThrow("Cannot reconstruct commitment");
     });
@@ -331,7 +324,7 @@ describe("NametagService", () => {
       );
       const service = NametagService.getInstance({
         getCurrentIdentity: mockGetCurrentIdentity,
-      } as any);
+      } as unknown);
 
       const result = await service.refreshNametagProof();
 

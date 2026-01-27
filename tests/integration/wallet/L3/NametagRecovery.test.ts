@@ -17,14 +17,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Track which mocks were called for verification
 const mockCalls = {
-  getInclusionProof: [] as any[],
-  submitMintCommitment: [] as any[],
-  recoverNametagProofs: [] as any[],
-  recoverNametagInvalidatedTokens: [] as any[],
+  getInclusionProof: [] as unknown[],
+  submitMintCommitment: [] as unknown[],
+  recoverNametagProofs: [] as number[],
+  recoverNametagInvalidatedTokens: [] as number[],
 };
 
 // Configurable mock responses
-let mockAggregatorResponse: any = null;
+let mockAggregatorResponse: { inclusionProof: { authenticator: unknown } } | null = null;
 let mockRecoverySuccess = true;
 
 // Mock IdentityManager
@@ -46,7 +46,7 @@ vi.mock("../../../../src/components/wallet/L3/services/IdentityManager", () => (
 vi.mock("../../../../src/components/wallet/L3/services/ServiceProvider", () => ({
   ServiceProvider: {
     stateTransitionClient: {
-      getInclusionProof: vi.fn().mockImplementation(async (requestId: any) => {
+      getInclusionProof: vi.fn().mockImplementation(async (requestId: unknown) => {
         mockCalls.getInclusionProof.push(requestId);
         if (mockAggregatorResponse) {
           return mockAggregatorResponse;
@@ -63,7 +63,7 @@ vi.mock("../../../../src/components/wallet/L3/services/ServiceProvider", () => (
           },
         };
       }),
-      submitMintCommitment: vi.fn().mockImplementation(async (commitment: any) => {
+      submitMintCommitment: vi.fn().mockImplementation(async (commitment: unknown) => {
         mockCalls.submitMintCommitment.push(commitment);
         return { success: true, status: "SUCCESS" };
       }),
@@ -176,47 +176,7 @@ vi.mock("@unicitylabs/state-transition-sdk/lib/address/ProxyAddress", () => ({
 // Test Fixtures
 // ==========================================
 
-const mockNametagData = {
-  name: "alice",
-  timestamp: Date.now(),
-  format: "2.0",
-  version: "1.0",
-  token: {
-    version: "2.0",
-    genesis: {
-      data: {
-        tokenId: "d".repeat(64),
-        tokenType: "f8aa13834268d29355ff12183066f0cb902003629bbc5eb9ef0efbe397867509",
-        recipient: "DIRECT://" + "a".repeat(64),
-        salt: "e".repeat(64),
-        recipientDataHash: null,
-        reason: null,
-        coinData: null,
-        tokenData: "alice",
-      },
-      inclusionProof: {
-        authenticator: {
-          algorithm: "secp256k1",
-          publicKey: "f".repeat(64),
-          signature: "1".repeat(128),
-          stateHash: "0000" + "2".repeat(60),
-        },
-        merkleTreePath: {
-          root: "0000" + "3".repeat(60),
-          steps: [],
-        },
-        transactionHash: "4".repeat(64),
-        unicityCertificate: "5".repeat(100),
-      },
-    },
-    state: {
-      data: "",
-      predicate: "6".repeat(64),
-    },
-    transactions: [],
-    nametags: [],
-  },
-};
+// Note: Nametag data fixtures are defined inline in tests as needed
 
 // ==========================================
 // Integration Tests
@@ -305,7 +265,7 @@ describe("Nametag Recovery Integration", () => {
   describe("Token Recovery After Nametag Fix", () => {
     it("should trigger token recovery after successful nametag recovery", async () => {
       const { NametagService } = await import("../../../../src/components/wallet/L3/services/NametagService");
-      const service = NametagService.getInstance({} as any);
+      const service = NametagService.getInstance({} as unknown);
 
       await service.recoverNametagProofs();
 
@@ -317,7 +277,7 @@ describe("Nametag Recovery Integration", () => {
       mockRecoverySuccess = false;
 
       const { NametagService } = await import("../../../../src/components/wallet/L3/services/NametagService");
-      const service = NametagService.getInstance({} as any);
+      const service = NametagService.getInstance({} as unknown);
 
       const result = await service.recoverNametagProofs();
 
@@ -345,7 +305,7 @@ describe("Nametag Recovery Integration", () => {
 
       // Step 2: Trigger recovery
       const { NametagService } = await import("../../../../src/components/wallet/L3/services/NametagService");
-      const nametagService = NametagService.getInstance({} as any);
+      const nametagService = NametagService.getInstance({} as unknown);
 
       // Reset mock to return inclusion proof after recovery
       mockAggregatorResponse = {
@@ -367,7 +327,7 @@ describe("Nametag Recovery Integration", () => {
       mockRecoverySuccess = false;
 
       const { NametagService } = await import("../../../../src/components/wallet/L3/services/NametagService");
-      const service = NametagService.getInstance({} as any);
+      const service = NametagService.getInstance({} as unknown);
 
       // Recovery should return null, not throw
       const result = await service.recoverNametagProofs();
@@ -391,7 +351,7 @@ describe("Nametag Recovery Integration", () => {
       });
 
       const { NametagService } = await import("../../../../src/components/wallet/L3/services/NametagService");
-      const service = NametagService.getInstance({} as any);
+      const service = NametagService.getInstance({} as unknown);
 
       // Should not throw - REQUEST_ID_EXISTS is a valid success state
       const result = await service.recoverNametagProofs();

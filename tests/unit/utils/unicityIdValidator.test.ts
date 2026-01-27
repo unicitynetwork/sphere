@@ -239,7 +239,7 @@ describe("unicityIdValidator", () => {
     it("should derive Nostr pubkey from identity private key", async () => {
       const { deriveNostrPubkeyFromIdentity } = await import("../../../src/utils/unicityIdValidator");
 
-      const pubkey = deriveNostrPubkeyFromIdentity(mockIdentity as any);
+      const pubkey = deriveNostrPubkeyFromIdentity(mockIdentity as unknown as Parameters<typeof deriveNostrPubkeyFromIdentity>[0]);
 
       expect(pubkey).toBeDefined();
       expect(pubkey).toBe(expectedNostrPubkey);
