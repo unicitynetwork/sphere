@@ -1255,19 +1255,28 @@ export class IpfsStorageService implements IpfsTransport {
 
           if (!response.ok) {
             const errorText = await response.text().catch(() => "");
+            const errorLower = errorText.toLowerCase();
 
             // Detect sequence rejection errors from the sidecar
             // The sidecar rejects records with sequence <= existing sequence
             const isSequenceError =
               response.status === 400 &&
-              (errorText.toLowerCase().includes('sequence') ||
-               errorText.toLowerCase().includes('rejecting ipns record'));
+              (errorLower.includes('sequence') ||
+               errorLower.includes('rejecting ipns record'));
+
+            // Detect version mismatch errors from the sidecar
+            // The sidecar rejects records where _meta.version != current_version + 1
+            const isVersionMismatch =
+              response.status === 400 &&
+              errorLower.includes('version_mismatch');
 
             const error = new Error(`HTTP ${response.status}: ${errorText.slice(0, 100)}`) as Error & {
               isSequenceRejection?: boolean;
+              isVersionMismatch?: boolean;
               httpStatus?: number;
             };
             error.isSequenceRejection = isSequenceError;
+            error.isVersionMismatch = isVersionMismatch;
             error.httpStatus = response.status;
             throw error;
           }
@@ -1390,9 +1399,42 @@ export class IpfsStorageService implements IpfsTransport {
       try {
         httpSuccess = await this.publishIpnsViaHttp(currentMarshalledRecord);
       } catch (error: unknown) {
-        // Check if this is a sequence rejection error
-        const err = error as Error & { isSequenceRejection?: boolean };
-        if (err.isSequenceRejection) {
+        // Check if this is a sequence or version rejection error
+        const err = error as Error & { isSequenceRejection?: boolean; isVersionMismatch?: boolean };
+
+        if (err.isVersionMismatch) {
+          // Version mismatch: content's _meta.version doesn't match expected (remote + 1)
+          // This requires re-uploading content with corrected version - cannot fix in IPNS layer alone
+          console.error(`📦 VERSION MISMATCH detected - content has wrong version`);
+          console.error(`📦 Recovery requires: fetch remote version -> rebuild content -> re-upload -> re-publish`);
+
+          // Fetch latest to update our version tracking for retry loop
+          const httpResolver = getIpfsHttpResolver();
+          httpResolver.invalidateIpnsCache();
+          const resolution = await this.resolveIpnsProgressively();
+
+          if (resolution.best) {
+            // Update sequence tracking
+            this.lastKnownRemoteSequence = resolution.best.sequence;
+            console.log(`📦 Updated remote sequence tracking to ${resolution.best.sequence}`);
+
+            // Fetch remote content to get actual version
+            try {
+              const remoteContent = await this.fetchRemoteContent(resolution.best.cid);
+              if (remoteContent?._meta?.version) {
+                console.log(`📦 Remote content version is ${remoteContent._meta.version}`);
+                // Signal to caller that version needs correction
+                // The background retry loop will handle this with a full re-sync
+              }
+            } catch (fetchErr) {
+              console.warn(`📦 Could not fetch remote content for version check:`, fetchErr);
+            }
+          }
+
+          // Fall through - version mismatch requires full re-sync, will be handled by retry loop
+          console.warn(`📦 Version mismatch will be resolved by background retry loop`);
+
+        } else if (err.isSequenceRejection) {
           console.warn(`📦 Sequence rejection detected - fetching latest and retrying...`);
 
           // Fetch latest IPNS record to get correct sequence
@@ -1435,7 +1477,7 @@ export class IpfsStorageService implements IpfsTransport {
             // Fall through to DHT path
           }
         } else {
-          // Not a sequence error - log and continue to DHT path
+          // Not a sequence/version error - log and continue to DHT path
           console.warn(`📦 HTTP IPNS publish failed (non-sequence error):`, error);
         }
       }
