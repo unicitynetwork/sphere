@@ -1,0 +1,49 @@
+Token Sending flow (we have outbox_token_list only):
+
+In inventorySync:
+
+Skip 0.1
+Skip 2
+Skip 3.2
+Skip 5.2
+Skip 7
+
+Step 8.0: "In NORMAL mode: ensure commitment has inclusion proof (wait if needed), fetch from aggregator, if exclusion proof, submit the commitment and fetch the inclusion proof (retry till succeeded with the exponential backoff and 1m max interval)". We no longer need to wait for the inclusion proofs to come, just push to the aggregator the commitment for the registration and forget. Do this is the background and do not block the execution to wait for the HTTP call to finish, queue this token immediately to Nostr (unless this token has been burned). We no longer need to include the inclusion proofs for our token spending transactions when sending to the recipient. The recipient himself is absolutely capable to send the commitments and get the inclusion proofs.
+
+Stop at Step 8.0!
+
+In Sphere, in sendViaNostrLoop, as soon as all the tokens from outbox_token_list have been confirmed to be sent by Nostr (do not wait for the other tokens in the Nostr delivery queue), assume the respective payment transaction to succeed. Note, sendViaNostrLoop can still be clearing up the queue by sending other tokens in the background, but in the specific UX flow when we transfer some specific tokens, we should not wait for all other unrelated tokens transfers to complete
+
+In sendTokensFromInventory(send_token_list), in the Init Phase, we no longer need to persist commitments of the spending transactions to IPFS since those can be always re-calculated (in case we fail to persist our tokens with the spending transactions later on). While, in the Complete Phase we just maintaining the inventory data structure.
+
+
+
+Token Reception flow (we have incoming_token_list only):
+
+Skip 0.2
+Skip 2
+Skip 3.2
+Skip 7
+Skip 8.5 and 8.5a
+Skip 9
+Skip 10
+
+In 7.1 receiveTokensToInventoryLoop:
+  1) Collection Phase:
+```
+while (incoming queue non-empty or was not empty at most 3s ago) {
+	if(queue is empty now) wait till it gets non-empty for at most 3s
+	if(queue is non-empty right now){
+		tokens_to_process = all unprocessed tokens yet from the queue, empty the queue
+		incoming_token_list = collect all queued tokens
+		Call and wait for completion of `inventorySync(null, tokens_to_process)`
+	}
+}
+```
+In Phase 2 Persisting phase, we persist all the tokens from incoming_token_list into IPFS. And, for each token, once confirmed it persisted into IPFS storage, we can remove the respective event from Nostr relay
+
+In Phase 3 we just maintain the integrity of the inventory and ensure it is synced to IPFS
+
+
+Note: In Sphere GUI, for each cryptocurrency we should display also the unconfirmed non-zero balance if present (the unconfirmed balance comes from the tokens that lack unicity inclusion proofs for at least one or more commitments in the token's transaction history)
+

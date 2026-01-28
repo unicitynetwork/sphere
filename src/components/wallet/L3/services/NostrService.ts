@@ -29,6 +29,7 @@ import { IdentityManager } from "./IdentityManager";
 import { Buffer } from "buffer";
 import { Token } from "@unicitylabs/state-transition-sdk/lib/token/Token";
 import { TransferTransaction } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferTransaction";
+import { TransferCommitment } from "@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment";
 import { AddressScheme } from "@unicitylabs/state-transition-sdk/lib/address/AddressScheme";
 import { NametagService } from "./NametagService";
 import { ProxyAddress } from "@unicitylabs/state-transition-sdk/lib/address/ProxyAddress";
@@ -426,15 +427,16 @@ export class NostrService {
       );
 
       console.log("Token transfer decrypted successfully!");
-      console.log("📦 [TokenTransfer] Decrypted payload preview:", tokenJson.slice(0, 200) + (tokenJson.length > 200 ? '...' : ''));
-      console.log("📦 [TokenTransfer] Payload length:", tokenJson.length);
-      console.log("📦 [TokenTransfer] Contains sourceToken:", tokenJson.includes("sourceToken"));
-      console.log("📦 [TokenTransfer] Contains transferTx:", tokenJson.includes("transferTx"));
+
+      // Check for proper transfer format (sourceToken + transferTx or commitmentData)
+      const hasSourceToken = tokenJson.includes("sourceToken");
+      const hasTransferTx = tokenJson.includes("transferTx");
+      const hasCommitmentData = tokenJson.includes("commitmentData");
 
       if (
         tokenJson.startsWith("{") &&
-        tokenJson.includes("sourceToken") &&
-        tokenJson.includes("transferTx")
+        hasSourceToken &&
+        (hasTransferTx || hasCommitmentData)
       ) {
         console.log("Processing proper token transfer with finalization ...");
 
@@ -447,7 +449,8 @@ export class NostrService {
         }
         return await this.handleProperTokenTransfer(payloadObj, event.pubkey);
       }
-      console.warn("⚠️ [TokenTransfer] Unknown transfer format - missing sourceToken or transferTx");
+      console.warn("⚠️ [TokenTransfer] Unknown transfer format - missing sourceToken or transferTx/commitmentData");
+      console.warn("📦 [TokenTransfer] hasSourceToken:", hasSourceToken, "hasTransferTx:", hasTransferTx, "hasCommitmentData:", hasCommitmentData);
       return null; // Unknown transfer format
     } catch (error) {
       console.error("Failed to handle token transfer", error);
@@ -458,7 +461,8 @@ export class NostrService {
   private async handleProperTokenTransfer(payloadObj: Record<string, any>, senderPubkey: string): Promise<UiToken | null> {
     try {
       let sourceTokenInput = payloadObj["sourceToken"];
-      let transferTxInput = payloadObj["transferTx"];
+      // Support both transferTx (new format) and commitmentData (old INSTANT_SEND format)
+      let transferTxInput = payloadObj["transferTx"] || payloadObj["commitmentData"];
 
       if (typeof sourceTokenInput === "string") {
         try {
@@ -472,19 +476,43 @@ export class NostrService {
         try {
           transferTxInput = JSON.parse(transferTxInput);
         } catch (e) {
-          console.error("Failed to parse transferTx string", e);
+          console.error("Failed to parse transferTx/commitmentData string", e);
         }
       }
 
       if (!sourceTokenInput || !transferTxInput) {
-        console.error("Missing sourceToken or transferTx in payload");
+        console.error("Missing sourceToken or transferTx/commitmentData in payload");
         return null;
       }
 
       const sourceToken = await Token.fromJSON(sourceTokenInput);
-      const transferTx = await TransferTransaction.fromJSON(transferTxInput);
 
-      return await this.finalizeTransfer(sourceToken, transferTx, senderPubkey);
+      // Try parsing as TransferTransaction first, then fall back to TransferCommitment
+      let transferTx: TransferTransaction | null = null;
+      let transferCommitment: TransferCommitment | null = null;
+
+      try {
+        transferTx = await TransferTransaction.fromJSON(transferTxInput);
+        console.log("📦 [TokenTransfer] Parsed as TransferTransaction");
+      } catch (txError) {
+        console.log("📦 [TokenTransfer] Not a TransferTransaction, trying TransferCommitment...");
+        try {
+          transferCommitment = await TransferCommitment.fromJSON(transferTxInput);
+          console.log("📦 [TokenTransfer] Parsed as TransferCommitment (INSTANT_SEND mode)");
+        } catch (commitmentError) {
+          console.error("Failed to parse as either TransferTransaction or TransferCommitment:", txError, commitmentError);
+          return null;
+        }
+      }
+
+      // Use whichever we successfully parsed
+      const transferData = transferTx || transferCommitment;
+      if (!transferData) {
+        console.error("No valid transfer data parsed");
+        return null;
+      }
+
+      return await this.finalizeTransfer(sourceToken, transferData as TransferTransaction, senderPubkey);
     } catch (error) {
       console.error("Error handling proper token transfer", error);
       return null;
@@ -493,10 +521,35 @@ export class NostrService {
 
   private async finalizeTransfer(
     sourceToken: Token<any>,
-    transferTx: TransferTransaction,
+    transferInput: TransferTransaction | TransferCommitment,
     senderPubkey: string
   ): Promise<UiToken | null> {
     try {
+      // Handle TransferCommitment (INSTANT_SEND mode) - submit to aggregator and get proof
+      let transferTx: TransferTransaction;
+      if (transferInput instanceof TransferCommitment) {
+        console.log("📦 [TokenTransfer] Received TransferCommitment - submitting to aggregator...");
+
+        const client = ServiceProvider.stateTransitionClient;
+        const response = await client.submitTransferCommitment(transferInput);
+
+        if (response.status !== 'SUCCESS') {
+          console.error(`📦 [TokenTransfer] Aggregator submission failed: ${response.status}`);
+          throw new Error(`Transfer commitment submission failed: ${response.status}`);
+        }
+        console.log("📦 [TokenTransfer] Commitment submitted, waiting for inclusion proof...");
+
+        // Wait for inclusion proof
+        const { waitInclusionProofWithDevBypass } = await import('../../../../utils/devTools');
+        const inclusionProof = await waitInclusionProofWithDevBypass(transferInput, 60000);
+
+        // Convert to TransferTransaction
+        transferTx = transferInput.toTransaction(inclusionProof);
+        console.log("📦 [TokenTransfer] Converted to TransferTransaction with inclusion proof");
+      } else {
+        transferTx = transferInput;
+      }
+
       const recipientAddress = transferTx.data.recipient;
       console.log(`Recipient address: ${recipientAddress}`);
 
