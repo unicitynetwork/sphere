@@ -33,7 +33,7 @@ import {
   forkedKeyFromTokenIdAndState, parseForkedKey
 } from './types/TxfTypes';
 import type { TxfInclusionProof } from './types/TxfTypes';
-import { tokenToTxf, txfToToken, getCurrentStateHash, extractLastInclusionProof } from './TxfSerializer';
+import { tokenToTxf, txfToToken, getCurrentStateHash } from './TxfSerializer';
 import { STORAGE_KEY_GENERATORS } from '../../../../config/storageKeys';
 import { getIpfsHttpResolver } from './IpfsHttpResolver';
 import { getIpfsTransport } from './IpfsStorageService';
@@ -2068,10 +2068,10 @@ async function step7_5_verifyTombstones(ctx: SyncContext): Promise<void> {
   const validationService = getTokenValidationService();
   const tombstonesToRemove: number[] = [];
 
-  // OPTIMIZATION: Build Sent folder lookup map for O(1) lookups
-  // Key: tokenId:stateHash -> SentTokenEntry
+  // OPTIMIZATION: Build Sent folder lookup map for O(1) lookups by tokenId
+  // Key: tokenId -> SentTokenEntry (we search transactions for matching stateHash)
   const sentLookupMap = buildSentLookupMap(ctx.sent);
-  console.log(`  Built Sent lookup map: ${sentLookupMap.size} entries`);
+  console.log(`  Built Sent lookup map: ${sentLookupMap.size} entries (by tokenId)`);
 
   // Counters for logging
   let verifiedLocal = 0;
@@ -2083,15 +2083,15 @@ async function step7_5_verifyTombstones(ctx: SyncContext): Promise<void> {
   // PHASE 1: Verify tombstones locally using Sent folder proofs
   for (let i = 0; i < ctx.tombstones.length; i++) {
     const tombstone = ctx.tombstones[i];
-    const lookupKey = `${tombstone.tokenId}:${tombstone.stateHash}`;
-    const sentEntry = sentLookupMap.get(lookupKey);
+    const sentEntry = sentLookupMap.get(tombstone.tokenId);
 
     if (sentEntry?.token) {
-      // FAST PATH: Verify locally using Sent folder proof
-      const proof = extractLastInclusionProof(sentEntry.token);
-      if (proof) {
+      // FAST PATH: Find a transaction proof that matches the tombstone's stateHash
+      const matchingProof = findMatchingProofForTombstone(sentEntry, tombstone.stateHash);
+
+      if (matchingProof) {
         const isSpent = await validationService.verifyInclusionProofLocally(
-          proof,
+          matchingProof,
           tombstone.stateHash,
           ctx.publicKey,
           tombstone.tokenId
@@ -2104,7 +2104,7 @@ async function step7_5_verifyTombstones(ctx: SyncContext): Promise<void> {
       }
     }
 
-    // Sent entry not found or local verification failed - mark as orphan
+    // Sent entry not found or no matching proof - mark as orphan
     orphanTombstones.push({ index: i, tombstone });
   }
 
@@ -2161,40 +2161,57 @@ async function step7_5_verifyTombstones(ctx: SyncContext): Promise<void> {
 
 /**
  * Build a lookup map from Sent folder entries for fast tombstone verification.
- * Key format: tokenId:stateHash -> SentTokenEntry
+ * Key format: tokenId -> SentTokenEntry
  *
- * This allows O(1) lookup to find if we have the inclusion proof for a tombstone.
- * Priority for stateHash:
- * 1. entry.stateHash (new entries with explicit field)
- * 2. getCurrentStateHash(token) (from transactions or _integrity)
- * 3. inclusionProof.authenticator.stateHash (extract from proof itself)
+ * We key by tokenId only (not tokenId:stateHash) because:
+ * - Tombstones can record ANY state in the token's history
+ * - The Sent entry contains the FULL token with ALL transactions
+ * - We need to scan transactions to find the proof for the tombstone's specific stateHash
  */
 function buildSentLookupMap(sent: SentTokenEntry[]): Map<string, SentTokenEntry> {
   const map = new Map<string, SentTokenEntry>();
 
   for (const entry of sent) {
     if (!entry.token?.genesis?.data?.tokenId) continue;
-
     const tokenId = entry.token.genesis.data.tokenId;
-
-    // Try multiple sources for stateHash (in priority order)
-    let stateHash = entry.stateHash || getCurrentStateHash(entry.token);
-
-    // Fallback: extract from inclusion proof's authenticator
-    if (!stateHash) {
-      const proof = extractLastInclusionProof(entry.token);
-      if (proof?.authenticator?.stateHash) {
-        stateHash = proof.authenticator.stateHash;
-      }
-    }
-
-    if (stateHash) {
-      const key = `${tokenId}:${stateHash}`;
-      map.set(key, entry);
-    }
+    // Key by tokenId only - we'll search transactions for matching stateHash later
+    map.set(tokenId, entry);
   }
 
   return map;
+}
+
+/**
+ * Find a transaction proof in the Sent entry that matches the tombstone's stateHash.
+ *
+ * The tombstone's stateHash could match:
+ * 1. A transaction's inclusionProof.authenticator.stateHash (the state spent by that tx)
+ * 2. The genesis inclusionProof.authenticator.stateHash (for genesis-only or first-spend tokens)
+ *
+ * Returns the matching proof if found, null otherwise.
+ */
+function findMatchingProofForTombstone(
+  sentEntry: SentTokenEntry,
+  tombstoneStateHash: string
+): TxfInclusionProof | null {
+  const token = sentEntry.token;
+  if (!token) return null;
+
+  // Check all transactions for a matching proof
+  if (token.transactions && token.transactions.length > 0) {
+    for (const tx of token.transactions) {
+      if (tx.inclusionProof?.authenticator?.stateHash === tombstoneStateHash) {
+        return tx.inclusionProof;
+      }
+    }
+  }
+
+  // Check genesis proof
+  if (token.genesis?.inclusionProof?.authenticator?.stateHash === tombstoneStateHash) {
+    return token.genesis.inclusionProof;
+  }
+
+  return null;
 }
 
 /**
