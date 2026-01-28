@@ -11,6 +11,7 @@ import {
   type TxfToken,
   type TxfGenesis,
   type TxfTransaction,
+  type TxfInclusionProof,
   type TombstoneEntry,
   type InvalidatedNametagEntry,
   isTokenKey,
@@ -979,4 +980,26 @@ export async function repairTokenMissingStateHash(token: Token): Promise<Token> 
   } catch {
     return token;
   }
+}
+
+/**
+ * Extract the last inclusion proof from a TxfToken.
+ * This is used for tombstone verification using Sent folder proofs.
+ *
+ * For tokens with transactions: returns the proof from the last transaction
+ * For genesis-only tokens: returns the genesis inclusion proof
+ * Returns null if no valid proof found
+ *
+ * @param token - The TXF token to extract proof from
+ * @returns The last inclusion proof, or null if not found
+ */
+export function extractLastInclusionProof(token: TxfToken): TxfInclusionProof | null {
+  // If token has transactions, get proof from last transaction
+  if (token.transactions && token.transactions.length > 0) {
+    const lastTx = token.transactions[token.transactions.length - 1];
+    return lastTx.inclusionProof || null;
+  }
+
+  // Genesis-only token: use genesis inclusion proof
+  return token.genesis?.inclusionProof || null;
 }

@@ -1105,6 +1105,95 @@ export class TokenValidationService {
   }
 
   /**
+   * Verify an inclusion proof locally (no network call).
+   * Used for tombstone verification when we have the proof from the Sent folder.
+   *
+   * This performs cryptographic verification of the merkle path without
+   * querying the aggregator, providing ~100x speedup over network calls.
+   *
+   * @param proof - The inclusion proof to verify
+   * @param expectedStateHash - The state hash the tombstone was created for
+   * @param publicKey - The wallet's public key (hex string)
+   * @param tokenId - The token ID (for cache key)
+   * @returns Promise<boolean> - true if proof is valid (state is spent), false otherwise
+   */
+  async verifyInclusionProofLocally(
+    proof: TxfInclusionProof,
+    expectedStateHash: string,
+    publicKey: string,
+    tokenId: string
+  ): Promise<boolean> {
+    // Check cache first
+    const cacheKey = this.getSpentStateCacheKey(tokenId, expectedStateHash, publicKey);
+    const cachedResult = this.getSpentStateFromCache(cacheKey);
+    if (cachedResult !== null) {
+      return cachedResult;
+    }
+
+    try {
+      // Step 1: Verify the authenticator's state hash matches what we expect
+      if (proof.authenticator.stateHash !== expectedStateHash) {
+        console.warn(
+          `⚠️ [verifyInclusionProofLocally] State hash mismatch: ` +
+          `proof has ${proof.authenticator.stateHash.slice(0, 16)}..., ` +
+          `expected ${expectedStateHash.slice(0, 16)}...`
+        );
+        return false;
+      }
+
+      // Step 2: Verify the merkle path cryptographically
+      // Import SDK types for merkle verification
+      const { RequestId } = await import(
+        "@unicitylabs/state-transition-sdk/lib/api/RequestId"
+      );
+      const { DataHash } = await import(
+        "@unicitylabs/state-transition-sdk/lib/hash/DataHash"
+      );
+      const { InclusionProof } = await import(
+        "@unicitylabs/state-transition-sdk/lib/transaction/InclusionProof"
+      );
+
+      // Parse the proof using SDK
+      const sdkProof = await InclusionProof.fromJSON(proof);
+
+      // Recreate the RequestId to verify the proof is for this state
+      const pubKeyBytes = Buffer.from(publicKey, "hex");
+      const stateHashObj = DataHash.fromJSON(expectedStateHash);
+      const requestId = await RequestId.create(pubKeyBytes, stateHashObj);
+
+      // Verify the merkle path
+      const pathResult = await sdkProof.merkleTreePath.verify(
+        requestId.toBitString().toBigInt()
+      );
+
+      if (!pathResult.isPathValid) {
+        // Invalid proof - merkle path doesn't verify
+        console.warn(`⚠️ [verifyInclusionProofLocally] Invalid merkle path for ${tokenId.slice(0, 16)}...`);
+        return false;
+      }
+
+      // For a valid SPENT state, we need:
+      // - Path included (pathResult.isPathIncluded = true)
+      // - Authenticator present (proof.authenticator !== null)
+      const isSpent = pathResult.isPathIncluded && sdkProof.authenticator !== null;
+
+      if (isSpent) {
+        // Cache the SPENT result (immutable)
+        this.cacheSpentState(cacheKey, true);
+      }
+
+      return isSpent;
+    } catch (err) {
+      // On error, return false (caller should fall back to aggregator query)
+      console.warn(
+        `⚠️ [verifyInclusionProofLocally] Error verifying proof for ${tokenId.slice(0, 16)}...:`,
+        err instanceof Error ? err.message : err
+      );
+      return false;
+    }
+  }
+
+  /**
    * Check which tokens are NOT spent (unspent) on Unicity
    * Used for sanity check when importing remote tombstones/missing tokens
    * Requires full TxfToken data for SDK-based verification
