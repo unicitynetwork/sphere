@@ -1,7 +1,17 @@
 # Token Inventory Management Specification
 
-**Version:** 3.4
+**Version:** 3.5
 **Last Updated:** 2026-01-28
+
+> **v3.5 Changes:** Instant token transfers and sender recovery:
+> - Section 2: New terminology (Unconfirmed Balance, INSTANT modes, Payment Session, Sender Recovery)
+> - Section 6.1: INSTANT_SEND and INSTANT_RECEIVE sync modes
+> - Section 7.1: Rewritten receiveTokensToInventoryLoop (3-phase model)
+> - Section 7.2: Updated sendTokensFromInventory (skip IPFS on critical path)
+> - Section 7.3: Updated sendViaNostrLoop (payment session tracking)
+> - Section 7.3: Fire-and-forget aggregator submission (after Nostr confirmation)
+> - Section 14: NEW - Sender Token Recovery from Nostr
+> - Edge cases 13.27-13.33: Instant transfer scenarios
 
 > **v3.4 Changes:** Version chain integrity and server validation contract:
 > - Section 10.8: Version High Water Mark (HWM) tracking to prevent data regression
@@ -65,6 +75,12 @@
 | **Tab Leader** | Browser tab (highest instanceId) responsible for IPNS publish operations |
 | **BroadcastChannel** | Web API for cross-tab communication; used for lock acquisition and heartbeat |
 | **NAMETAG Mode** | Minimal sync mode that fetches only the nametag token for a given user. Used for login/preview pages to display Unicity ID without full inventory sync. Skips all token processing steps except nametag retrieval. |
+| **Unconfirmed Balance** | Sum of token values lacking inclusion proofs for at least one commitment in their transaction history |
+| **INSTANT_SEND Mode** | Sync mode for send operations: skip IPFS persistence, immediate Nostr delivery, fire-and-forget aggregator submission after Nostr confirmation |
+| **INSTANT_RECEIVE Mode** | Sync mode for receive operations: localStorage-first with deferred IPFS sync |
+| **Payment Session** | Transient tracking structure for specific token transfers to determine per-transfer success |
+| **Sender Recovery** | Process of retrieving sent tokens from Nostr relay using sender's own pubkey as author filter |
+| **Deferred Proof Acquisition** | Pattern where recipients (not senders) fetch their own inclusion proofs |
 
 ---
 
@@ -372,11 +388,14 @@ interface OutboxEntry {
 
 **Signature:**
 ```typescript
-inventorySync(
+inventorySync(options: {
   incoming_token_list?: Token[],
   outbox_token_list?: Token[],
-  completed_list?: CompletedTransfer[]
-): Promise<SyncResult>
+  completed_list?: CompletedTransfer[],
+  instant_send?: boolean,        // INSTANT_SEND mode
+  instant_receive?: boolean,     // INSTANT_RECEIVE mode
+  payment_session_id?: string,   // Track specific transfer
+}): Promise<SyncResult>
 ```
 
 **Return Type:**
@@ -400,9 +419,11 @@ interface SyncResult {
 **Mode Detection (in order of precedence):**
 1. If LOCAL = true: always LOCAL mode (skip IPFS reads/writes)
 2. If recoveryDepth is set (>=0): RECOVERY mode (traverse version chain)
-2. If NAMETAG = true: minimal functionality mode to fetch the nametag token only for the given user
-3. If `incoming_token_list` OR `outbox_token_list` non-empty: FAST mode
-4. Otherwise (all empty, possible completed_list present): NORMAL mode
+3. If NAMETAG = true: minimal functionality mode to fetch the nametag token only for the given user
+4. If INSTANT_SEND = true: INSTANT_SEND mode (skip steps 0.1, 2, 3.2, 5.2, 7, 9, 10)
+5. If INSTANT_RECEIVE = true: INSTANT_RECEIVE mode (skip steps 0.2, 2, 3.2, 7, 8.5, 8.5a, 9, 10)
+6. If `incoming_token_list` OR `outbox_token_list` non-empty: FAST mode
+7. Otherwise (all empty, possible completed_list present): NORMAL mode
 
 **Mode Exclusivity:**
 - Modes are mutually exclusive (only ONE mode active per sync call)
@@ -722,6 +743,8 @@ Keep one copy, merge any additional data (proofs, metadata).
 #### Step 8: Merge/Reconstruct Inventory (If NAMETAG is TRUE, skip directly to 8.4)
 
 **8.0) Outbox Processing:**
+
+**Standard Mode (NORMAL/FAST):**
 - **Boomerang Check:** If tokenId exists in incoming tokens, compare stateHash (see Section 9.3)
 - For tokens marked for sending:
   - In NORMAL mode: ensure commitment has inclusion proof (wait if needed), fetch from aggregator, if exclusion proof, submit the commitment and fetch the inclusion proof (retry till succeeded with the exponential backoff and 1m max interval)
@@ -729,6 +752,13 @@ Keep one copy, merge any additional data (proofs, metadata).
   - If burned: move directly to Sent folder
 - Proofs can be fetched concurrently
 - Don't wait for Nostr delivery to complete
+
+**INSTANT_SEND Mode:**
+- **Boomerang Check:** Same as standard mode
+- **Immediate Nostr Queue:** Queue tokens to Nostr immediately (unless burned). Nostr serves as persistence layer.
+- **No Aggregator Submission Here:** Aggregator submission happens in sendViaNostrLoop AFTER Nostr confirmation
+- **No Proof Wait:** Recipients are responsible for fetching their own inclusion proofs
+- **Burn Handling:** Burned tokens move directly to Sent folder (no Nostr delivery)
 
 **8.1) Active Tokens:**
 - Tokens whose current state is NOT in spent cache
@@ -831,38 +861,41 @@ Keep one copy, merge any additional data (proofs, metadata).
 
 ### 7.1 receiveTokensToInventoryLoop
 
-Monitors Nostr for incoming tokens. Runs continuously as single background instance.
+Monitors Nostr for incoming tokens. Runs continuously as single background instance. Uses a 3-phase model optimized for instant token receipt.
 
-**1) Collection Phase:**
+**Phase 1 - Collection (Critical Path):**
 ```
-while (true) {
-  wait 3 seconds
-  if (new token arrived in last 3s) {
-    continue waiting  // Batch more tokens
-  } else {
-    break  // No new tokens, process batch
+while (queue non-empty OR was non-empty ≤3s ago) {
+  if (queue empty now) wait up to 3s for new tokens
+  if (queue non-empty) {
+    tokens_to_process = drain queue
+    Save to localStorage immediately
+    Call inventorySync({ instant_receive: true, incoming_token_list: tokens_to_process })
   }
 }
-incoming_token_list = collect all queued tokens
 ```
 
-**2) Persisting Phase:**
-- Call `inventorySync(incoming_token_list)` (FAST mode)
-- Wait for success
-- Notify Nostr service to clear processed events
-- Only clear events for tokens in this batch
+**Phase 2 - Persisting (Background):**
+- For each token confirmed in localStorage:
+  - Trigger background IPFS sync (non-blocking)
+  - After IPFS confirmation, remove respective Nostr event from relay
+- Continue accepting new tokens while persisting
 
-**3) Finalizing Phase:**
-- Call `inventorySync()` (NORMAL mode)
-- Updates spent token list
-- Return to Collection Phase
+**Phase 3 - Finalizing:**
+- Call `inventorySync()` in NORMAL mode to:
+  - Fetch inclusion proofs for received tokens
+  - Update spent token cache
+  - Ensure inventory integrity
+- Return to Phase 1
 
-### 7.2 sendTokensFromInventory(send_token_list)
+### 7.2 sendTokensFromInventory(send_token_list, payment_session_id?)
 
-Called when user sends tokens (including splits and mints).
+Called when user sends tokens (including splits and mints). Supports instant mode for faster user experience.
+
+**Standard Mode (default):**
 
 **1) Init Phase:**
-- Call `inventorySync(null, send_token_list)` (FAST mode)
+- Call `inventorySync({ outbox_token_list: send_token_list })` (FAST mode)
 - Persists commitments to IPFS
 - Places tokens in Outbox
 
@@ -872,9 +905,23 @@ Called when user sends tokens (including splits and mints).
 - Queues tokens for Nostr delivery
 - Burns go directly to Sent folder
 
+**INSTANT_SEND Mode:**
+
+**1) Init Phase:**
+- Call `inventorySync({ instant_send: true, outbox_token_list: send_token_list, payment_session_id })`
+- Do NOT persist commitments to IPFS (can be recalculated if needed)
+- Place tokens in Outbox with status READY_TO_SEND
+- Queue tokens to Nostr immediately (Nostr serves as persistence layer)
+
+**2) Complete Phase:**
+- Do NOT call NORMAL sync
+- Return immediately after Nostr delivery confirmed for payment session tokens
+- Aggregator submission happens in sendViaNostrLoop after Nostr confirmation
+- Background sync will handle IPFS persistence later
+
 ### 7.3 sendViaNostrLoop
 
-Processes Nostr delivery queue in background.
+Processes Nostr delivery queue in background. Supports payment session tracking for instant transfers.
 
 **1) Collection Phase:**
 - While queue non-empty:
@@ -886,8 +933,22 @@ Processes Nostr delivery queue in background.
 **2) Completion Phase:**
 - Wait for queue to stay empty for 3 seconds
 - Build `completed_list` with all sent tokens' IDs, state hashes, and proofs
-- Call `inventorySync(null, null, completed_list)`
+- Call `inventorySync({ completed_list })`
 - Moves completed tokens to Sent folder
+
+**Payment Session Tracking (INSTANT_SEND mode):**
+- Track which tokens belong to current payment session via `payment_session_id`
+- Report success when ALL tokens from specific `payment_session_id` confirmed via Nostr
+- Do NOT wait for unrelated tokens in queue to complete
+- Continue processing other queued tokens in background
+- Enables instant UI feedback: "3/5 tokens sent" progress reporting
+
+**Fire-and-Forget Aggregator Submission (INSTANT_SEND mode):**
+- **Trigger:** Immediately after each token is confirmed registered with Nostr relay
+- **Rationale:** Nostr confirmation ensures transaction/commitment persistence before aggregator submission
+- **Action:** Submit spending commitment to aggregator in background (non-blocking HTTP call)
+- **No Wait:** Do not wait for aggregator response; recipients fetch their own inclusion proofs
+- **Failure Handling:** If aggregator submission fails, recipient will submit commitment themselves (deferred proof acquisition)
 
 ### 7.4 LazyRecoveryLoop
 
@@ -1687,6 +1748,151 @@ Each received token has an **embedded copy** of the nametag in its `nametags` ar
 - `NametagService.recoverNametagProofs()` - called from `refreshNametagProof()` when exclusion proof detected
 - `TokenRecoveryService.recoverNametagInvalidatedTokens()` - called after successful nametag proof recovery
 - `TokenRecoveryService.updateEmbeddedNametagProof()` - updates embedded nametag's proof within a token
+
+### 13.27 INSTANT_SEND Aggregator Failure
+
+**Scenario:** Background aggregator submission fails after Nostr delivery.
+
+**Resolution:**
+1. Recipient will submit commitment themselves (deferred proof acquisition)
+2. Sender's token shows as "Sent (unconfirmed)" until recipient confirms
+3. Sender's Sent folder entry updated when proof becomes available
+4. No action required from sender - transfer completes from recipient side
+
+### 13.28 INSTANT_RECEIVE IPFS Failure
+
+**Scenario:** Background IPFS sync fails after token saved to localStorage.
+
+**Resolution:**
+1. Token usable locally immediately
+2. Retry IPFS sync on next NORMAL sync cycle
+3. Nostr event retained until IPFS confirms
+4. If IPFS fails persistently: token remains in localStorage, user warned about cross-device sync
+
+### 13.29 Payment Session Partial Delivery
+
+**Scenario:** 3 of 5 tokens in payment session delivered via Nostr.
+
+**Resolution:**
+1. Report partial success to UI: "3/5 tokens sent"
+2. Continue delivery attempts for remaining 2 tokens
+3. User sees real-time progress updates
+4. After 10 retries per token: mark failed tokens individually
+5. Successful tokens already in Sent folder
+
+### 13.30 Sender Recovery Duplicate Detection
+
+**Scenario:** Recovered token already exists in Sent folder.
+
+**Resolution:**
+1. Compare by `tokenId:stateHash` composite key
+2. Skip without error if match found
+3. Log: "Skipping duplicate recovered token: {tokenId}"
+4. Continue processing remaining recovered tokens
+
+### 13.31 Sender Recovery During Active Send
+
+**Scenario:** Recovery runs while tokens are being sent.
+
+**Resolution:**
+1. Check outbox before adding recovered tokens
+2. Exclude outbox tokens from recovery (marked as in-flight)
+3. Only recover tokens not currently in outbox
+4. Prevents duplicate send attempts
+
+### 13.32 Unconfirmed Balance Display
+
+**Scenario:** Token received but inclusion proof not yet fetched.
+
+**Resolution:**
+1. Display in UI as "Unconfirmed: X tokens (value)"
+2. Separate unconfirmed balance from confirmed balance
+3. Allow spending only after confirmation (proof acquired)
+4. Background task fetches proofs automatically
+
+### 13.33 Recipient Proof Fetch Failure
+
+**Scenario:** Recipient cannot fetch inclusion proof for received token.
+
+**Resolution:**
+1. Retry with exponential backoff (1s, 2s, 4s, 8s, 16s, 30s, 60s max)
+2. After 10 failures: mark token as PENDING_PROOF
+3. Token visible in inventory but not spendable
+4. Show status: "Awaiting confirmation"
+5. Continue retrying in background (no limit)
+
+---
+
+## 14. Sender Token Recovery from Nostr
+
+### 14.1 Purpose
+
+Allow senders to recover tokens they have sent if localStorage is lost before IPFS sync completes. This leverages the NIP-04 symmetric encryption property where both sender and recipient can decrypt the same event.
+
+### 14.2 Technical Background
+
+- NIP-04 uses ECDH to create shared secret between sender and recipient
+- Shared secret is symmetric: `ECDH(senderPriv, recipientPub) = ECDH(recipientPriv, senderPub)`
+- Token transfer events contain: encrypted payload, sender pubkey (author), recipient pubkey (#p tag)
+- Sender can query own events: `{ authors: [myPubkey], kinds: [TOKEN_TRANSFER] }`
+
+### 14.3 Recovery Flow
+
+```
+1. Query Nostr: { authors: [walletPubkey], kinds: [TOKEN_TRANSFER], since: cutoffTime }
+2. For each event:
+   a. Extract recipientPubkey from #p tag
+   b. Decrypt payload using TokenTransferProtocol.parseTokenTransfer()
+   c. Extract token data and transfer transaction
+3. For each recovered token:
+   a. Validate token structure
+   b. Check if already in Sent folder (avoid duplicates)
+   c. Add to Sent folder with proof (if available)
+4. Trigger NORMAL sync to persist recovered data to IPFS
+```
+
+### 14.4 Constraints
+
+- Recovery returns only SENT tokens (not active tokens)
+- Tokens without Nostr events (burned tokens, direct transfers via other channels) cannot be recovered
+- Event deletion by recipient does not prevent sender recovery (events tagged with #p)
+- Recovery requires wallet private key (cannot recover from public key alone)
+
+### 14.5 Implementation: SenderRecoveryService
+
+```typescript
+interface SenderRecoveryService {
+  recoverSentTokensFromNostr(options: {
+    since?: number,      // Unix timestamp cutoff
+    limit?: number,      // Max events to fetch
+  }): Promise<RecoveryResult>;
+}
+
+interface RecoveryResult {
+  tokensRecovered: number;
+  tokensSkipped: number;  // Already in Sent folder
+  errors: RecoveryError[];
+}
+
+interface RecoveryError {
+  eventId: string;
+  reason: string;
+}
+```
+
+### 14.6 Trigger Conditions
+
+Sender recovery should be triggered:
+1. **Manual trigger:** User clicks "Recover sent tokens" button
+2. **Automatic on wallet restore:** After importing wallet from seed phrase
+3. **Automatic on fresh device:** When Sent folder is empty but Nostr has historical events
+
+### 14.7 Performance Considerations
+
+- Query with reasonable `since` timestamp (default: 30 days)
+- Use pagination (`limit`) for large result sets
+- Cache already-processed event IDs to avoid re-processing
+- Run recovery in background to avoid blocking UI
 
 ---
 
