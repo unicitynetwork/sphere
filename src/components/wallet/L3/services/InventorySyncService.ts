@@ -575,7 +575,7 @@ async function executeFullSync(ctx: SyncContext, params: SyncParams): Promise<Sy
 
   // Step 8: Folder Assignment / Merge Inventory
   stepStart = performance.now();
-  step8_mergeInventory(ctx);
+  await step8_mergeInventory(ctx);
   stepTimings['Step 8'] = performance.now() - stepStart;
   console.log(`⏱️ [Step 8] Merge Inventory completed in ${stepTimings['Step 8'].toFixed(1)}ms`);
 
@@ -2080,14 +2080,31 @@ async function step7_5_verifyTombstones(ctx: SyncContext): Promise<void> {
   // Collect orphan tombstones that need aggregator verification
   const orphanTombstones: { index: number; tombstone: TombstoneEntry }[] = [];
 
+  // Counter for upgraded tombstones
+  let tombstonesUpgraded = 0;
+
   // PHASE 1: Verify tombstones locally using Sent folder proofs
   for (let i = 0; i < ctx.tombstones.length; i++) {
     const tombstone = ctx.tombstones[i];
     const sentEntry = sentLookupMap.get(tombstone.tokenId);
 
     if (sentEntry?.token) {
+      // Check if tombstone has invalid stateHash (e.g., tokenId instead of proper hash)
+      // Valid state hashes start with "0000" prefix
+      let effectiveStateHash = tombstone.stateHash;
+      if (!effectiveStateHash.startsWith('0000')) {
+        // Invalid stateHash detected - try to compute correct one from Sent token
+        const computedHash = await computeFinalStateHashCached(sentEntry.token);
+        if (computedHash && computedHash.startsWith('0000')) {
+          // Upgrade the tombstone with correct stateHash
+          tombstone.stateHash = computedHash;
+          effectiveStateHash = computedHash;
+          tombstonesUpgraded++;
+        }
+      }
+
       // FAST PATH: Find a transaction proof that can verify the tombstone
-      const match = await findMatchingProofForTombstone(sentEntry, tombstone.stateHash);
+      const match = await findMatchingProofForTombstone(sentEntry, effectiveStateHash);
 
       if (match) {
         // Verify using the stateHash that the proof actually authenticates
@@ -2156,7 +2173,8 @@ async function step7_5_verifyTombstones(ctx: SyncContext): Promise<void> {
   const elapsedMs = Date.now() - startTime;
   console.log(
     `  ✓ Verified ${ctx.tombstones.length} tombstones in ${elapsedMs}ms ` +
-    `(local: ${verifiedLocal}, aggregator: ${verifiedAggregator}, false positives: ${tombstonesToRemove.length})`
+    `(local: ${verifiedLocal}, aggregator: ${verifiedAggregator}, false positives: ${tombstonesToRemove.length}` +
+    (tombstonesUpgraded > 0 ? `, upgraded: ${tombstonesUpgraded}` : '') + `)`
   );
 }
 
@@ -2282,7 +2300,7 @@ async function attemptTokenRecovery(ctx: SyncContext, tombstone: TombstoneEntry)
   return null;
 }
 
-function step8_mergeInventory(ctx: SyncContext): void {
+async function step8_mergeInventory(ctx: SyncContext): Promise<void> {
   console.log(`📦 [Step 8] Merge Inventory`);
 
   // Step 8.1: Handle completed transfers (mark as SPENT, move to Sent)
@@ -2301,8 +2319,30 @@ function step8_mergeInventory(ctx: SyncContext): void {
                            (expectedHash && currentStateHash === expectedHash);
 
         if (hashMatches) {
-          // Add tombstone (use tokenId as fallback if no stateHash)
-          const tombstoneHash = currentStateHash || completed.tokenId;
+          // Compute state hash for tombstone - use existing or compute for legacy tokens
+          // IMPORTANT: tokenId is NOT a valid fallback (causes tombstone verification to fail)
+          let tombstoneHash = currentStateHash;
+          if (!tombstoneHash) {
+            // Legacy token: compute final state hash using SDK
+            tombstoneHash = (await computeFinalStateHashCached(token)) ?? '';
+            if (tombstoneHash) {
+              console.log(`  📦 Computed stateHash for legacy token ${completed.tokenId.slice(0, 8)}...`);
+            }
+          }
+
+          // Skip tombstone creation if we couldn't compute a valid state hash
+          if (!tombstoneHash || !tombstoneHash.startsWith('0000')) {
+            console.warn(`  ⚠️ Cannot create tombstone for ${completed.tokenId.slice(0, 8)}...: invalid stateHash`);
+            // Still move to Sent folder (token was spent) but don't create invalid tombstone
+            ctx.sent.push({
+              token,
+              timestamp: Date.now(),
+              spentAt: Date.now(),
+            });
+            ctx.tokens.delete(completed.tokenId);
+            console.log(`  ✓ Moved ${completed.tokenId.slice(0, 8)}... to Sent (no tombstone)`);
+            continue;
+          }
 
           // Move to Sent folder (include stateHash for tombstone verification lookup)
           ctx.sent.push({
