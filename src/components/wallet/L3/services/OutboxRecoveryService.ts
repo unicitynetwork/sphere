@@ -8,6 +8,7 @@
  * Recovery by status:
  * - PENDING_IPFS_SYNC: Re-sync to IPFS, then continue
  * - READY_TO_SUBMIT: Submit to aggregator (idempotent)
+ * - READY_TO_SEND: (INSTANT_SEND) Re-queue for Nostr delivery or mark complete if spent
  * - SUBMITTED: Poll for inclusion proof
  * - PROOF_RECEIVED: Retry Nostr delivery
  * - NOSTR_SENT: Just mark as completed
@@ -358,6 +359,14 @@ export class OutboxRecoveryService {
           detail.newStatus = "COMPLETED";
           break;
 
+        case "READY_TO_SEND":
+          // INSTANT_SEND mode: Token was ready for Nostr delivery but app crashed/closed
+          // Check if token is already spent (background aggregator may have succeeded)
+          await this.resumeFromReadyToSend(entry, outboxRepo, nostrService);
+          detail.status = "recovered";
+          detail.newStatus = "COMPLETED";
+          break;
+
         case "SUBMITTED":
           await this.resumeFromSubmitted(entry, outboxRepo, nostrService);
           detail.status = "recovered";
@@ -573,6 +582,99 @@ export class OutboxRecoveryService {
     entry.status = "SUBMITTED";
 
     await this.resumeFromSubmitted(entry, outboxRepo, nostrService);
+  }
+
+  /**
+   * Resume from READY_TO_SEND (INSTANT_SEND mode):
+   * The token was prepared for instant Nostr delivery but the app crashed/closed
+   * before Nostr delivery completed.
+   *
+   * Recovery strategy:
+   * 1. Check if token is already spent on aggregator (background submission may have succeeded)
+   * 2. If spent: Mark as COMPLETED (transfer succeeded via background lane)
+   * 3. If not spent: Re-send via Nostr with instant send payload
+   */
+  private async resumeFromReadyToSend(
+    entry: OutboxEntry,
+    outboxRepo: OutboxRepository,
+    nostrService: NostrService
+  ): Promise<void> {
+    console.log(`📤 OutboxRecovery: Resuming from READY_TO_SEND (INSTANT_SEND mode)...`);
+
+    // First check if token is already spent (background aggregator may have succeeded,
+    // or recipient already submitted the commitment)
+    const publicKey = await this.getOwnerPublicKey();
+    if (publicKey && entry.sourceTokenJson) {
+      try {
+        const identity = await this.getIdentityFromManager();
+        if (identity) {
+          const tokens = await getTokensForAddress(identity.address);
+          const sourceToken = tokens.find(t => t.id === entry.sourceTokenId);
+          if (sourceToken) {
+            const recoveryService = TokenRecoveryService.getInstance();
+            const spentCheck = await recoveryService.checkTokenSpent(sourceToken, publicKey);
+
+            if (spentCheck.isSpent) {
+              // Token is spent - the transfer succeeded (either via background aggregator
+              // or recipient submitted the commitment from the Nostr payload)
+              console.log(`📤 OutboxRecovery: Token ${entry.sourceTokenId.slice(0, 8)}... already spent - marking COMPLETED`);
+              outboxRepo.updateStatus(entry.id, "COMPLETED");
+              window.dispatchEvent(new Event("wallet-updated"));
+              return;
+            }
+          }
+        }
+      } catch (spentCheckError) {
+        console.warn(`📤 OutboxRecovery: Failed to check token spent status:`, spentCheckError);
+        // Continue to retry Nostr delivery
+      }
+    }
+
+    // Token not spent - re-send via Nostr with instant send payload
+    // Build the INSTANT_SEND payload (includes commitmentData for recipient to submit if needed)
+    const payload = JSON.stringify({
+      sourceToken: entry.sourceTokenJson,
+      transferTx: JSON.stringify(JSON.parse(entry.commitmentJson)), // commitment as transfer data
+      commitmentData: entry.commitmentJson, // Recipient can submit this if aggregator didn't receive it
+    });
+
+    console.log(`📤 OutboxRecovery: Re-sending INSTANT_SEND to ${entry.recipientNametag || entry.recipientPubkey.slice(0, 8)}...`);
+
+    // Send via Nostr
+    await nostrService.sendTokenTransfer(entry.recipientPubkey, payload);
+
+    // Update status to NOSTR_SENT, then COMPLETED
+    outboxRepo.updateStatus(entry.id, "NOSTR_SENT");
+    outboxRepo.updateStatus(entry.id, "COMPLETED");
+
+    // Fire-and-forget: Submit to aggregator in background (if not already submitted)
+    this.submitToAggregatorBackground(entry).catch(err => {
+      console.warn(`📤 OutboxRecovery: Background aggregator submission failed:`, err);
+      // Non-fatal: recipient can submit from commitmentData in payload
+    });
+
+    console.log(`📤 OutboxRecovery: INSTANT_SEND entry ${entry.id.slice(0, 8)}... recovered via Nostr`);
+  }
+
+  /**
+   * Submit commitment to aggregator in background (fire-and-forget)
+   * Used by INSTANT_SEND recovery to ensure aggregator has the commitment
+   */
+  private async submitToAggregatorBackground(entry: OutboxEntry): Promise<void> {
+    try {
+      const commitment = await this.reconstructCommitment(entry);
+      const client = ServiceProvider.stateTransitionClient;
+      const response = await client.submitTransferCommitment(commitment);
+
+      if (response.status === "SUCCESS" || response.status === "REQUEST_ID_EXISTS") {
+        console.log(`📤 OutboxRecovery: Background aggregator submission succeeded for ${entry.id.slice(0, 8)}`);
+      } else {
+        console.warn(`📤 OutboxRecovery: Background aggregator submission returned: ${response.status}`);
+      }
+    } catch (err) {
+      // Log but don't throw - this is fire-and-forget
+      console.warn(`📤 OutboxRecovery: Background aggregator error:`, err);
+    }
   }
 
   /**
