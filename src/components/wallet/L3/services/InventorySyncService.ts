@@ -2164,7 +2164,10 @@ async function step7_5_verifyTombstones(ctx: SyncContext): Promise<void> {
  * Key format: tokenId:stateHash -> SentTokenEntry
  *
  * This allows O(1) lookup to find if we have the inclusion proof for a tombstone.
- * Uses entry.stateHash directly (if available), with fallback to computing from token.
+ * Priority for stateHash:
+ * 1. entry.stateHash (new entries with explicit field)
+ * 2. getCurrentStateHash(token) (from transactions or _integrity)
+ * 3. inclusionProof.authenticator.stateHash (extract from proof itself)
  */
 function buildSentLookupMap(sent: SentTokenEntry[]): Map<string, SentTokenEntry> {
   const map = new Map<string, SentTokenEntry>();
@@ -2173,8 +2176,17 @@ function buildSentLookupMap(sent: SentTokenEntry[]): Map<string, SentTokenEntry>
     if (!entry.token?.genesis?.data?.tokenId) continue;
 
     const tokenId = entry.token.genesis.data.tokenId;
-    // Use stored stateHash (new entries) or compute from token (legacy entries)
-    const stateHash = entry.stateHash || getCurrentStateHash(entry.token);
+
+    // Try multiple sources for stateHash (in priority order)
+    let stateHash = entry.stateHash || getCurrentStateHash(entry.token);
+
+    // Fallback: extract from inclusion proof's authenticator
+    if (!stateHash) {
+      const proof = extractLastInclusionProof(entry.token);
+      if (proof?.authenticator?.stateHash) {
+        stateHash = proof.authenticator.stateHash;
+      }
+    }
 
     if (stateHash) {
       const key = `${tokenId}:${stateHash}`;
