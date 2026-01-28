@@ -533,11 +533,16 @@ export class NostrService {
         const client = ServiceProvider.stateTransitionClient;
         const response = await client.submitTransferCommitment(transferInput);
 
-        if (response.status !== 'SUCCESS') {
+        if (response.status !== 'SUCCESS' && response.status !== 'REQUEST_ID_EXISTS') {
           console.error(`📦 [TokenTransfer] Aggregator submission failed: ${response.status}`);
           throw new Error(`Transfer commitment submission failed: ${response.status}`);
         }
-        console.log("📦 [TokenTransfer] Commitment submitted, waiting for inclusion proof...");
+
+        if (response.status === 'REQUEST_ID_EXISTS') {
+          console.log("📦 [TokenTransfer] Commitment already submitted by sender, waiting for inclusion proof...");
+        } else {
+          console.log("📦 [TokenTransfer] Commitment submitted, waiting for inclusion proof...");
+        }
 
         // Wait for inclusion proof
         const { waitInclusionProofWithDevBypass } = await import('../../../../utils/devTools');
