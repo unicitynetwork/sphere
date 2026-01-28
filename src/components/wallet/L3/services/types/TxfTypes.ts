@@ -54,6 +54,7 @@ export interface SentTokenEntry {
   token: TxfToken;           // Complete token data
   timestamp: number;         // When moved to Sent (epoch ms)
   spentAt: number;           // When token was spent (epoch ms, from inclusion proof)
+  stateHash?: string;        // State hash when spent (for tombstone verification lookup)
 }
 
 /**

@@ -1999,11 +1999,12 @@ async function step7_detectSpentTokens(ctx: SyncContext): Promise<void> {
       const txf = ctx.tokens.get(txfTokenId);
 
       if (txf) {
-        // Move to Sent folder
+        // Move to Sent folder (include stateHash for tombstone verification lookup)
         ctx.sent.push({
           token: txf,
           timestamp: Date.now(),
-          spentAt: Date.now()
+          spentAt: Date.now(),
+          stateHash: spentInfo.stateHash
         });
 
         // Add tombstone
@@ -2163,6 +2164,7 @@ async function step7_5_verifyTombstones(ctx: SyncContext): Promise<void> {
  * Key format: tokenId:stateHash -> SentTokenEntry
  *
  * This allows O(1) lookup to find if we have the inclusion proof for a tombstone.
+ * Uses entry.stateHash directly (if available), with fallback to computing from token.
  */
 function buildSentLookupMap(sent: SentTokenEntry[]): Map<string, SentTokenEntry> {
   const map = new Map<string, SentTokenEntry>();
@@ -2171,7 +2173,8 @@ function buildSentLookupMap(sent: SentTokenEntry[]): Map<string, SentTokenEntry>
     if (!entry.token?.genesis?.data?.tokenId) continue;
 
     const tokenId = entry.token.genesis.data.tokenId;
-    const stateHash = getCurrentStateHash(entry.token);
+    // Use stored stateHash (new entries) or compute from token (legacy entries)
+    const stateHash = entry.stateHash || getCurrentStateHash(entry.token);
 
     if (stateHash) {
       const key = `${tokenId}:${stateHash}`;
@@ -2230,16 +2233,19 @@ function step8_mergeInventory(ctx: SyncContext): void {
                            (expectedHash && currentStateHash === expectedHash);
 
         if (hashMatches) {
-          // Move to Sent folder
+          // Add tombstone (use tokenId as fallback if no stateHash)
+          const tombstoneHash = currentStateHash || completed.tokenId;
+
+          // Move to Sent folder (include stateHash for tombstone verification lookup)
           ctx.sent.push({
             token,
             timestamp: Date.now(),
             spentAt: Date.now(),
+            stateHash: tombstoneHash,
           });
           ctx.tokens.delete(completed.tokenId);
 
-          // Add tombstone (use tokenId as fallback if no stateHash)
-          const tombstoneHash = currentStateHash || completed.tokenId;
+          // Add tombstone
           ctx.tombstones.push({
             tokenId: completed.tokenId,
             stateHash: tombstoneHash,
