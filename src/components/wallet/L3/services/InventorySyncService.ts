@@ -2086,20 +2086,21 @@ async function step7_5_verifyTombstones(ctx: SyncContext): Promise<void> {
     const sentEntry = sentLookupMap.get(tombstone.tokenId);
 
     if (sentEntry?.token) {
-      // FAST PATH: Find a transaction proof that matches the tombstone's stateHash
-      const matchingProof = findMatchingProofForTombstone(sentEntry, tombstone.stateHash);
+      // FAST PATH: Find a transaction proof that can verify the tombstone
+      const match = findMatchingProofForTombstone(sentEntry, tombstone.stateHash);
 
-      if (matchingProof) {
-        const isSpent = await validationService.verifyInclusionProofLocally(
-          matchingProof,
-          tombstone.stateHash,
+      if (match) {
+        // Verify using the stateHash that the proof actually authenticates
+        const isValid = await validationService.verifyInclusionProofLocally(
+          match.proof,
+          match.verifyStateHash,
           ctx.publicKey,
           tombstone.tokenId
         );
 
-        if (isSpent) {
+        if (isValid) {
           verifiedLocal++;
-          continue; // Tombstone verified, keep it
+          continue; // Tombstone verified (transaction to this state was valid), keep it
         }
       }
     }
@@ -2182,33 +2183,59 @@ function buildSentLookupMap(sent: SentTokenEntry[]): Map<string, SentTokenEntry>
 }
 
 /**
- * Find a transaction proof in the Sent entry that matches the tombstone's stateHash.
+ * Find a transaction proof in the Sent entry that can verify the tombstone's stateHash.
  *
- * The tombstone's stateHash could match:
- * 1. A transaction's inclusionProof.authenticator.stateHash (the state spent by that tx)
- * 2. The genesis inclusionProof.authenticator.stateHash (for genesis-only or first-spend tokens)
+ * KEY INSIGHT: Tombstones record `newStateHash` (the state AFTER a transaction),
+ * but proofs authenticate `previousStateHash` (the state BEFORE that transaction).
  *
- * Returns the matching proof if found, null otherwise.
+ * So we need to find a transaction where:
+ * - tx.newStateHash === tombstoneStateHash (this tx created the tombstoned state)
+ * - tx.inclusionProof authenticates tx.previousStateHash
+ *
+ * We return the proof AND the stateHash it authenticates (previousStateHash),
+ * so verification can use the correct stateHash.
+ *
+ * Returns { proof, verifyStateHash } if found, null otherwise.
  */
 function findMatchingProofForTombstone(
   sentEntry: SentTokenEntry,
   tombstoneStateHash: string
-): TxfInclusionProof | null {
+): { proof: TxfInclusionProof; verifyStateHash: string } | null {
   const token = sentEntry.token;
   if (!token) return null;
 
-  // Check all transactions for a matching proof
+  // Check all transactions for one that CREATED the tombstoned state
   if (token.transactions && token.transactions.length > 0) {
     for (const tx of token.transactions) {
-      if (tx.inclusionProof?.authenticator?.stateHash === tombstoneStateHash) {
-        return tx.inclusionProof;
+      // Found a tx that created the tombstoned state
+      if (tx.newStateHash === tombstoneStateHash && tx.inclusionProof?.authenticator) {
+        return {
+          proof: tx.inclusionProof,
+          verifyStateHash: tx.inclusionProof.authenticator.stateHash, // previousStateHash
+        };
       }
     }
   }
 
-  // Check genesis proof
+  // Also check: maybe the tombstone matches a proof's authenticator directly
+  // (for cases where tombstone records the spent state, not the new state)
+  if (token.transactions && token.transactions.length > 0) {
+    for (const tx of token.transactions) {
+      if (tx.inclusionProof?.authenticator?.stateHash === tombstoneStateHash) {
+        return {
+          proof: tx.inclusionProof,
+          verifyStateHash: tombstoneStateHash,
+        };
+      }
+    }
+  }
+
+  // Check genesis proof authenticator
   if (token.genesis?.inclusionProof?.authenticator?.stateHash === tombstoneStateHash) {
-    return token.genesis.inclusionProof;
+    return {
+      proof: token.genesis.inclusionProof,
+      verifyStateHash: tombstoneStateHash,
+    };
   }
 
   return null;
