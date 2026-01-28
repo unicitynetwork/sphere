@@ -426,6 +426,10 @@ export class NostrService {
       );
 
       console.log("Token transfer decrypted successfully!");
+      console.log("📦 [TokenTransfer] Decrypted payload preview:", tokenJson.slice(0, 200) + (tokenJson.length > 200 ? '...' : ''));
+      console.log("📦 [TokenTransfer] Payload length:", tokenJson.length);
+      console.log("📦 [TokenTransfer] Contains sourceToken:", tokenJson.includes("sourceToken"));
+      console.log("📦 [TokenTransfer] Contains transferTx:", tokenJson.includes("transferTx"));
 
       if (
         tokenJson.startsWith("{") &&
@@ -443,6 +447,7 @@ export class NostrService {
         }
         return await this.handleProperTokenTransfer(payloadObj, event.pubkey);
       }
+      console.warn("⚠️ [TokenTransfer] Unknown transfer format - missing sourceToken or transferTx");
       return null; // Unknown transfer format
     } catch (error) {
       console.error("Failed to handle token transfer", error);

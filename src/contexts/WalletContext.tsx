@@ -1042,7 +1042,9 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     const payload = JSON.stringify({
       sourceToken: JSON.stringify(sourceToken.toJSON()),
-      // Include commitment data so recipient can submit if needed
+      // transferTx is required for receiver to finalize the transfer
+      transferTx: JSON.stringify(transferCommitment.toJSON()),
+      // Also include as commitmentData for backward compatibility (recipient can submit if needed)
       commitmentData: JSON.stringify(transferCommitment.toJSON()),
       tokenId: sourceToken.id.toString(),
       stateHash,
