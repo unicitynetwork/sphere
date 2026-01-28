@@ -455,10 +455,12 @@ export function validateOutboxEntry(entry: OutboxEntry): { valid: boolean; error
   }
 
   // Status-specific validation
+  // Note: In INSTANT_SEND mode, we don't require inclusionProofJson because:
+  // - NOSTR_SENT: Token sent via Nostr before getting proof
+  // - COMPLETED: Nostr delivery succeeded; recipient fetches their own proof
+  // Only PROOF_RECEIVED explicitly requires the proof (legacy flow)
   switch (entry.status) {
     case "PROOF_RECEIVED":
-    case "NOSTR_SENT":
-    case "COMPLETED":
       if (!entry.inclusionProofJson) {
         return { valid: false, error: "Missing inclusionProofJson for status " + entry.status };
       }
