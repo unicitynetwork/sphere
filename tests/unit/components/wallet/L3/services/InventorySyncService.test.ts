@@ -74,6 +74,11 @@ vi.mock("../../../../../../src/components/wallet/L3/services/TokenValidationServ
     isTokenStateSpent: vi.fn().mockImplementation(async (tokenId: string, stateHash: string) => {
       return mockSpentTokens.some(s => s.tokenId === tokenId && s.stateHash === stateHash);
     }),
+    // Mock for Step 7.5: verifyInclusionProofLocally (local verification of tombstone proofs)
+    // Returns true if the proof is valid (default mock assumes all proofs are valid)
+    verifyInclusionProofLocally: vi.fn().mockImplementation(async () => {
+      return true; // Default: all proofs verify successfully
+    }),
   })),
 }));
 

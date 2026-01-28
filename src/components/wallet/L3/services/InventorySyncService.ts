@@ -33,7 +33,7 @@ import {
   forkedKeyFromTokenIdAndState, parseForkedKey
 } from './types/TxfTypes';
 import type { TxfInclusionProof } from './types/TxfTypes';
-import { tokenToTxf, txfToToken, getCurrentStateHash } from './TxfSerializer';
+import { tokenToTxf, txfToToken, getCurrentStateHash, computeFinalStateHashCached } from './TxfSerializer';
 import { STORAGE_KEY_GENERATORS } from '../../../../config/storageKeys';
 import { getIpfsHttpResolver } from './IpfsHttpResolver';
 import { getIpfsTransport } from './IpfsStorageService';
@@ -2087,7 +2087,7 @@ async function step7_5_verifyTombstones(ctx: SyncContext): Promise<void> {
 
     if (sentEntry?.token) {
       // FAST PATH: Find a transaction proof that can verify the tombstone
-      const match = findMatchingProofForTombstone(sentEntry, tombstone.stateHash);
+      const match = await findMatchingProofForTombstone(sentEntry, tombstone.stateHash);
 
       if (match) {
         // Verify using the stateHash that the proof actually authenticates
@@ -2195,20 +2195,32 @@ function buildSentLookupMap(sent: SentTokenEntry[]): Map<string, SentTokenEntry>
  * We return the proof AND the stateHash it authenticates (previousStateHash),
  * so verification can use the correct stateHash.
  *
+ * LEGACY TOKEN SUPPORT: For the LAST transaction only, if newStateHash is missing,
+ * we compute it using the SDK. This handles tokens sent before the newStateHash field
+ * was added. SDK limitation: can only compute the final state hash, not intermediate ones.
+ *
  * Returns { proof, verifyStateHash } if found, null otherwise.
  */
-function findMatchingProofForTombstone(
+async function findMatchingProofForTombstone(
   sentEntry: SentTokenEntry,
   tombstoneStateHash: string
-): { proof: TxfInclusionProof; verifyStateHash: string } | null {
+): Promise<{ proof: TxfInclusionProof; verifyStateHash: string } | null> {
   const token = sentEntry.token;
   if (!token) return null;
 
   // Check all transactions for one that CREATED the tombstoned state
   if (token.transactions && token.transactions.length > 0) {
-    for (const tx of token.transactions) {
+    for (let i = 0; i < token.transactions.length; i++) {
+      const tx = token.transactions[i];
+      let txNewStateHash = tx.newStateHash;
+
+      // For the LAST transaction only, compute newStateHash if missing
+      if (!txNewStateHash && i === token.transactions.length - 1) {
+        txNewStateHash = (await computeFinalStateHashCached(token)) ?? undefined;
+      }
+
       // Found a tx that created the tombstoned state
-      if (tx.newStateHash === tombstoneStateHash && tx.inclusionProof?.authenticator) {
+      if (txNewStateHash === tombstoneStateHash && tx.inclusionProof?.authenticator) {
         return {
           proof: tx.inclusionProof,
           verifyStateHash: tx.inclusionProof.authenticator.stateHash, // previousStateHash

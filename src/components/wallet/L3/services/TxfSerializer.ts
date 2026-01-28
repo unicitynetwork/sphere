@@ -1003,3 +1003,79 @@ export function extractLastInclusionProof(token: TxfToken): TxfInclusionProof | 
   // Genesis-only token: use genesis inclusion proof
   return token.genesis?.inclusionProof || null;
 }
+
+// ==========================================
+// State Hash Computation for Legacy Tokens
+// ==========================================
+
+/**
+ * Cache for computed state hashes: tokenId -> finalStateHash
+ * Avoids recomputing the same tokens repeatedly during sync operations.
+ */
+const stateHashCache = new Map<string, string>();
+
+/**
+ * Compute the current/final state hash for a token using the SDK.
+ * This is the stateHash that would be in the last transaction's newStateHash field.
+ * Returns null if computation fails or token has no transactions.
+ *
+ * LIMITATION: SDK can only compute the FINAL state hash (after all transactions).
+ * Cannot compute intermediate transaction hashes (SDK doesn't expose intermediate states).
+ *
+ * USE CASE: Handles legacy tokens sent before newStateHash was stored in transactions.
+ * For single-transaction tokens (95% of cases), this computes the missing hash.
+ *
+ * @param txf - The TXF token to compute state hash for
+ * @returns The final state hash as hex string, or null if computation failed
+ */
+export async function computeFinalStateHash(txf: TxfToken): Promise<string | null> {
+  if (!txf.transactions || txf.transactions.length === 0) {
+    return null; // Genesis-only token, no transaction to compute for
+  }
+
+  // If last transaction already has newStateHash, return it
+  const lastTx = txf.transactions[txf.transactions.length - 1];
+  if (lastTx.newStateHash) {
+    return lastTx.newStateHash;
+  }
+
+  try {
+    const { Token } = await import("@unicitylabs/state-transition-sdk/lib/token/Token");
+    const sdkToken = await Token.fromJSON(txf);
+    const calculatedStateHash = await sdkToken.state.calculateHash();
+    return calculatedStateHash.toJSON();
+  } catch (err) {
+    console.warn(`Failed to compute state hash for token:`, err);
+    return null;
+  }
+}
+
+/**
+ * Compute final state hash with caching to avoid redundant SDK calculations.
+ * Caches results by tokenId for performance during batch operations.
+ *
+ * @param txf - The TXF token to compute state hash for
+ * @returns The final state hash as hex string, or null if computation failed
+ */
+export async function computeFinalStateHashCached(txf: TxfToken): Promise<string | null> {
+  const tokenId = txf.genesis?.data?.tokenId;
+  if (!tokenId) return null;
+
+  // Check cache first
+  const cached = stateHashCache.get(tokenId);
+  if (cached) return cached;
+
+  const result = await computeFinalStateHash(txf);
+  if (result) {
+    stateHashCache.set(tokenId, result);
+  }
+  return result;
+}
+
+/**
+ * Clear the state hash computation cache.
+ * Useful for tests or when memory needs to be freed.
+ */
+export function clearStateHashCache(): void {
+  stateHashCache.clear();
+}
