@@ -28,10 +28,12 @@ import type { NametagData } from '../services/types/TxfTypes';
  * - LOCAL: Skip IPFS entirely, localStorage only (Section 6.2)
  * - RECOVERY: Traverse IPFS version chain to recover lost tokens (Section 6.4)
  * - NAMETAG: Fetch only nametag tokens, read-only (Section 6.3)
+ * - INSTANT_SEND: Skip IPFS reads, Nostr-first delivery (Section 13, v3.5)
+ * - INSTANT_RECEIVE: Immediate localStorage save, deferred IPFS (Section 13, v3.5)
  * - FAST: Skip Step 7 spent detection, for speed (Section 6.1)
  * - NORMAL: Full sync with all validation (Section 6.1)
  */
-export type SyncMode = 'LOCAL' | 'RECOVERY' | 'NAMETAG' | 'FAST' | 'NORMAL';
+export type SyncMode = 'LOCAL' | 'RECOVERY' | 'NAMETAG' | 'INSTANT_SEND' | 'INSTANT_RECEIVE' | 'FAST' | 'NORMAL';
 
 /**
  * Sync operation result status
@@ -44,6 +46,8 @@ export type SyncMode = 'LOCAL' | 'RECOVERY' | 'NAMETAG' | 'FAST' | 'NORMAL';
  * - PARTIAL_SUCCESS: localStorage saved but IPFS publish failed (ipnsPublishPending=true)
  * - LOCAL_ONLY: Operated in LOCAL mode (no IPFS)
  * - NAMETAG_ONLY: NAMETAG mode completed (lightweight return)
+ * - INSTANT_SEND_COMPLETE: INSTANT_SEND mode completed (Nostr delivery done, background lanes running)
+ * - INSTANT_RECEIVE_COMPLETE: INSTANT_RECEIVE mode completed (localStorage saved, IPFS deferred)
  * - ERROR: Critical failure, operation aborted
  */
 export type SyncStatus =
@@ -51,6 +55,8 @@ export type SyncStatus =
   | 'PARTIAL_SUCCESS'
   | 'LOCAL_ONLY'
   | 'NAMETAG_ONLY'
+  | 'INSTANT_SEND_COMPLETE'
+  | 'INSTANT_RECEIVE_COMPLETE'
   | 'ERROR';
 
 /**

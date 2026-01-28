@@ -9,6 +9,7 @@ import type { SyncMode, CircuitBreakerState } from '../../types/SyncTypes';
 import type { OutboxEntry } from '../types/OutboxTypes';
 import type { Token } from '../../data/model';
 import type { CompletedTransfer } from '../types/QueueTypes';
+import type { PaymentSession } from '../../types/InstantTransferTypes';
 
 /**
  * Parameters for sync mode detection
@@ -34,6 +35,15 @@ export interface SyncModeParams {
 
   /** Circuit breaker state (may auto-activate LOCAL mode) */
   circuitBreaker?: CircuitBreakerState;
+
+  /** Enable INSTANT_SEND mode (skip IPFS reads, Nostr-first) */
+  instantSend?: boolean;
+
+  /** Enable INSTANT_RECEIVE mode (immediate localStorage, deferred IPFS) */
+  instantReceive?: boolean;
+
+  /** Associated payment session (for instant modes) */
+  paymentSession?: PaymentSession;
 }
 
 /**
@@ -70,7 +80,10 @@ export function detectSyncMode(params: SyncModeParams): SyncMode {
     incomingTokens,
     outboxTokens,
     completedList,
-    circuitBreaker
+    circuitBreaker,
+    instantSend = false,
+    instantReceive = false,
+    paymentSession
   } = params;
 
   // Precedence 1: Explicit LOCAL flag
@@ -94,7 +107,17 @@ export function detectSyncMode(params: SyncModeParams): SyncMode {
     return 'NAMETAG';
   }
 
-  // Precedence 4: FAST mode (incoming OR outbox OR completed non-empty)
+  // Precedence 4: INSTANT_SEND mode (v3.5 - Nostr-first delivery)
+  if (instantSend && paymentSession?.direction === 'SEND') {
+    return 'INSTANT_SEND';
+  }
+
+  // Precedence 5: INSTANT_RECEIVE mode (v3.5 - immediate localStorage)
+  if (instantReceive && paymentSession?.direction === 'RECEIVE') {
+    return 'INSTANT_RECEIVE';
+  }
+
+  // Precedence 6: FAST mode (incoming OR outbox OR completed non-empty)
   const hasIncoming = Array.isArray(incomingTokens) && incomingTokens.length > 0;
   const hasOutbox = Array.isArray(outboxTokens) && outboxTokens.length > 0;
   const hasCompleted = Array.isArray(completedList) && completedList.length > 0;
@@ -103,7 +126,7 @@ export function detectSyncMode(params: SyncModeParams): SyncMode {
     return 'FAST';
   }
 
-  // Precedence 5: Default to NORMAL
+  // Precedence 7: Default to NORMAL
   return 'NORMAL';
 }
 
@@ -119,11 +142,26 @@ export function shouldSkipIpfs(mode: SyncMode): boolean {
 }
 
 /**
+ * Checks if the current mode should skip IPFS reads (but may still write)
+ * INSTANT_SEND skips IPFS reads for speed but writes are deferred to background
+ */
+export function shouldSkipIpfsRead(mode: SyncMode): boolean {
+  return mode === 'INSTANT_SEND' || mode === 'LOCAL';
+}
+
+/**
  * Checks if the current mode should skip spent detection (Step 7)
- * FAST and LOCAL modes skip spent detection for speed
+ * FAST, LOCAL, and INSTANT modes skip spent detection for speed
  */
 export function shouldSkipSpentDetection(mode: SyncMode): boolean {
-  return mode === 'FAST' || mode === 'LOCAL';
+  return mode === 'FAST' || mode === 'LOCAL' || mode === 'INSTANT_SEND' || mode === 'INSTANT_RECEIVE';
+}
+
+/**
+ * Checks if the mode is an instant transfer mode
+ */
+export function isInstantMode(mode: SyncMode): boolean {
+  return mode === 'INSTANT_SEND' || mode === 'INSTANT_RECEIVE';
 }
 
 /**

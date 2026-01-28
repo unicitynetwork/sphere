@@ -17,8 +17,9 @@ import {
   detectSyncMode,
   shouldSkipIpfs,
   shouldSkipSpentDetection,
-  shouldAcquireSyncLock
+  shouldAcquireSyncLock,
 } from './utils/SyncModeDetector';
+import type { PaymentSession } from '../types/InstantTransferTypes';
 import { getCircuitBreakerService } from './CircuitBreakerService';
 import { getSyncCoordinator } from './SyncCoordinator';
 import {
@@ -161,6 +162,26 @@ export interface SyncParams {
    * Use for pre-transfer sync where speed is critical.
    */
   skipExtendedVerification?: boolean;
+
+  /**
+   * Enable INSTANT_SEND mode (v3.5).
+   * Skip IPFS reads, use Nostr-first delivery.
+   * Background lanes handle aggregator and IPFS.
+   */
+  instantSend?: boolean;
+
+  /**
+   * Enable INSTANT_RECEIVE mode (v3.5).
+   * Save tokens to localStorage immediately.
+   * IPFS sync deferred to background.
+   */
+  instantReceive?: boolean;
+
+  /**
+   * Associated payment session for instant modes.
+   * Required when instantSend or instantReceive is true.
+   */
+  paymentSession?: PaymentSession;
 }
 
 /**
@@ -3754,4 +3775,100 @@ export function clearImportInProgress(): void {
  */
 export function isImportInProgress(): boolean {
   return sessionStorage.getItem(IMPORT_SESSION_FLAG) === "true";
+}
+
+// ============================================
+// SENT TOKENS MANAGEMENT
+// ============================================
+
+/**
+ * Get sent tokens for an address (from _sent folder)
+ * Used by SenderRecoveryService to check for duplicates
+ */
+export function getSentTokensForAddress(address: string): SentTokenEntry[] {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const storage = getInventoryStorage();
+  const json = storage.getItem(storageKey);
+  if (!json) return [];
+
+  try {
+    const data = JSON.parse(json) as TxfStorageData;
+    if (data._sent && Array.isArray(data._sent)) {
+      return [...data._sent] as SentTokenEntry[];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Add a sent token entry to the _sent folder
+ * Used by SenderRecoveryService during recovery
+ */
+export function addSentToken(
+  address: string,
+  entry: SentTokenEntry
+): void {
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const storage = getInventoryStorage();
+  const json = storage.getItem(storageKey);
+
+  let data: TxfStorageData;
+  if (json) {
+    try {
+      data = JSON.parse(json) as TxfStorageData;
+    } catch {
+      data = {
+        _meta: {
+          version: 1,
+          address,
+          ipnsName: '',
+          formatVersion: '2.0',
+        },
+      };
+    }
+  } else {
+    data = {
+      _meta: {
+        version: 1,
+        address,
+        ipnsName: '',
+        formatVersion: '2.0',
+      },
+    };
+  }
+
+  // Initialize _sent array if needed
+  if (!data._sent) {
+    data._sent = [];
+  }
+
+  // Extract tokenId from TxfToken structure
+  const entryTokenId = entry.token?.genesis?.data?.tokenId || '';
+
+  // Check for duplicates by tokenId and timestamp
+  const isDuplicate = data._sent.some(
+    (existing: SentTokenEntry) => {
+      const existingTokenId = existing.token?.genesis?.data?.tokenId || '';
+      return existingTokenId === entryTokenId &&
+        existing.timestamp === entry.timestamp;
+    }
+  );
+
+  if (isDuplicate) {
+    console.log(`📤 [addSentToken] Skipping duplicate: ${entryTokenId.slice(0, 8)}...`);
+    return;
+  }
+
+  // Add entry
+  data._sent.push(entry);
+
+  // Update version
+  data._meta = data._meta || { version: 0, address, ipnsName: '', formatVersion: '2.0' };
+  data._meta.version = (data._meta.version || 0) + 1;
+
+  // Save
+  storage.setItem(storageKey, JSON.stringify(data));
+  console.log(`📤 [addSentToken] Added sent token ${entryTokenId.slice(0, 8)}... to _sent folder`);
 }

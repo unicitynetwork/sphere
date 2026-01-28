@@ -821,9 +821,26 @@ export class NostrService {
       senderPubkey: senderPubkey,
     });
 
-    // Token will be saved via InventorySync through the background loop mechanism
-    // No need to save here - queueIncomingToken() handles the sync
-    console.log(`📦 Token prepared for sync: ${uiToken.id}`);
+    // INSTANT_RECEIVE: Save to localStorage IMMEDIATELY before batching
+    // This ensures token is visible in UI right away (< 500ms)
+    try {
+      const { saveTokenImmediately, dispatchWalletUpdated } = await import('./InventorySyncService');
+      const identity = await this.identityManager.getCurrentIdentity();
+      if (identity?.address) {
+        saveTokenImmediately(identity.address, uiToken);
+        console.log(`💾 [INSTANT_RECEIVE] Token ${uiToken.id.slice(0, 8)} saved immediately to localStorage`);
+
+        // Dispatch wallet-updated so UI shows token NOW
+        dispatchWalletUpdated();
+      }
+    } catch (err) {
+      console.warn(`⚠️ [INSTANT_RECEIVE] Failed to save token immediately:`, err);
+      // Continue - background loop will handle sync
+    }
+
+    // Token will also be saved via InventorySync through the background loop mechanism
+    // for IPFS persistence (Phase 2 of 3-phase receive model)
+    console.log(`📦 Token prepared for background sync: ${uiToken.id}`);
 
     // Record to transaction history
     if (amount && coinId) {

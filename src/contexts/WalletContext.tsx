@@ -938,7 +938,241 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     },
   });
 
-  // Helper function to execute direct transfer
+  /**
+   * INSTANT_SEND: Execute transfer with Nostr-first delivery
+   *
+   * Critical path (2-3s): commitment → outbox → Nostr delivery
+   * Background lanes (fire-and-forget): aggregator, IPFS sync
+   *
+   * Per TOKEN_INVENTORY_SPEC.md v3.5 Section 13
+   */
+  const executeInstantSend = async (
+    sourceToken: SdkToken<any>,
+    uiId: string,
+    recipientAddress: ProxyAddress,
+    recipientPubkey: string,
+    signingService: SigningService,
+    recipientNametag: string
+  ): Promise<string> => {
+    const { OutboxRepository } = await import('../repositories/OutboxRepository');
+    const { createOutboxEntry } = await import('../components/wallet/L3/services/types/OutboxTypes');
+    const { getPaymentSessionManager } = await import('../components/wallet/L3/services/PaymentSessionManager');
+    const outboxRepo = OutboxRepository.getInstance();
+    const sessionManager = getPaymentSessionManager();
+
+    const startTime = performance.now();
+
+    const identity = await identityManager.getCurrentIdentity();
+    if (!identity) throw new Error('Wallet locked');
+
+    outboxRepo.setCurrentAddress(identity.address);
+
+    // Phase A: Create commitment (synchronous crypto, ~10ms)
+    console.log(`⚡ [INSTANT_SEND] Phase A: Creating commitment...`);
+    const salt = Buffer.alloc(32);
+    window.crypto.getRandomValues(salt);
+
+    const transferCommitment = await TransferCommitment.create(
+      sourceToken,
+      recipientAddress,
+      salt,
+      null,
+      null,
+      signingService
+    );
+
+    let amount = '0';
+    let coinId = '';
+    const coinsOpt = sourceToken.coins;
+    if (coinsOpt) {
+      const rawCoins = coinsOpt.coins;
+      const firstItem = rawCoins[0];
+      if (Array.isArray(firstItem) && firstItem.length === 2) {
+        coinId = firstItem[0]?.toString() || '';
+        const val = firstItem[1];
+        if (Array.isArray(val)) {
+          amount = val[1]?.toString() || '0';
+        } else if (val) {
+          amount = val.toString();
+        }
+      }
+    }
+
+    // Phase B: Persist to outbox (localStorage, ~1ms)
+    console.log(`⚡ [INSTANT_SEND] Phase B: Saving to outbox...`);
+    const outboxEntry = createOutboxEntry(
+      'DIRECT_TRANSFER',
+      uiId,
+      recipientNametag,
+      recipientPubkey,
+      JSON.stringify((recipientAddress as any).toJSON ? (recipientAddress as any).toJSON() : recipientAddress),
+      amount,
+      coinId,
+      Buffer.from(salt).toString('hex'),
+      JSON.stringify(sourceToken.toJSON()),
+      JSON.stringify(transferCommitment.toJSON())
+    );
+
+    outboxRepo.addEntry(outboxEntry);
+    outboxRepo.updateEntry(outboxEntry.id, { status: 'READY_TO_SEND' });
+
+    // Phase C: Create payment session
+    console.log(`⚡ [INSTANT_SEND] Phase C: Creating payment session...`);
+    const session = sessionManager.createSession({
+      direction: 'SEND',
+      sourceTokenId: uiId,
+      recipientNametag,
+      recipientPubkey,
+      amount,
+      coinId,
+      salt: Buffer.from(salt).toString('hex'),
+    });
+
+    sessionManager.advancePhase(session.id, 'COMMITMENT_CREATED', {
+      commitmentJson: JSON.stringify(transferCommitment.toJSON()),
+      outboxEntryId: outboxEntry.id,
+    });
+
+    // Phase D: Build Nostr payload (commitment data for recipient to submit)
+    console.log(`⚡ [INSTANT_SEND] Phase D: Building Nostr payload...`);
+
+    // Calculate state hash for tracking
+    const stateHashResult = await sourceToken.state.calculateHash();
+    const stateHash = stateHashResult.toString();
+
+    const payload = JSON.stringify({
+      sourceToken: JSON.stringify(sourceToken.toJSON()),
+      // Include commitment data so recipient can submit if needed
+      commitmentData: JSON.stringify(transferCommitment.toJSON()),
+      tokenId: sourceToken.id.toString(),
+      stateHash,
+    });
+
+    // Phase E: Queue for Nostr delivery
+    console.log(`⚡ [INSTANT_SEND] Phase E: Queueing for Nostr delivery...`);
+    let deliveryQueue: ReturnType<typeof InventoryBackgroundLoopsManager.prototype.getDeliveryQueue> | null = null;
+    try {
+      const loopsManager = InventoryBackgroundLoopsManager.getInstance();
+      if (loopsManager.isReady()) {
+        deliveryQueue = loopsManager.getDeliveryQueue();
+      }
+    } catch {
+      // Loops manager not initialized
+    }
+
+    if (!deliveryQueue) {
+      // Fallback: Direct Nostr send (not using queue)
+      console.log(`⚡ [INSTANT_SEND] Using direct Nostr send (queue not available)...`);
+      const sent = await nostrService.sendTokenTransfer(recipientPubkey, payload);
+      if (!sent) {
+        sessionManager.markFailed(
+          session.id,
+          'NOSTR_DELIVERY_FAILED',
+          'Failed to send via Nostr (direct)',
+          false
+        );
+        throw new Error('Failed to send via Nostr');
+      }
+      sessionManager.advancePhase(session.id, 'NOSTR_DELIVERED');
+    } else {
+      // Use delivery queue for better error handling
+      const queueEntryId = crypto.randomUUID();
+      await deliveryQueue.queueForDelivery({
+        id: queueEntryId,
+        outboxEntryId: outboxEntry.id,
+        recipientPubkey,
+        recipientNametag,
+        payloadJson: payload,
+        retryCount: 0,
+        createdAt: Date.now(),
+        paymentSessionId: session.id,
+        commitmentJson: JSON.stringify(transferCommitment.toJSON()),
+      });
+
+      // Phase F: Wait for Nostr confirmation (critical path, 1-2s)
+      console.log(`⚡ [INSTANT_SEND] Phase F: Waiting for Nostr confirmation...`);
+      // Note: If Nostr delivery fails, error propagates up - payment session already marked failed by queue
+      const nostrEventId = await deliveryQueue.waitForDelivery(queueEntryId, 30000);
+      outboxRepo.updateEntry(outboxEntry.id, {
+        status: 'NOSTR_SENT',
+        nostrEventId,
+      });
+      console.log(`⚡ [INSTANT_SEND] Nostr delivery confirmed: ${nostrEventId.slice(0, 8)}...`);
+    }
+
+    // Phase G: Launch background lanes (fire-and-forget)
+    console.log(`⚡ [INSTANT_SEND] Phase G: Launching background lanes...`);
+
+    // Background IPFS sync (non-blocking)
+    if (identity.ipnsName) {
+      inventorySync({
+        address: identity.address,
+        publicKey: identity.publicKey,
+        ipnsName: identity.ipnsName,
+        skipExtendedVerification: true,
+      }).then(result => {
+        if (result.status === 'SUCCESS' || result.status === 'PARTIAL_SUCCESS') {
+          sessionManager.updateBackgroundStatus(session.id, undefined, 'SYNCED');
+          console.log(`⚡ [INSTANT_SEND] Background IPFS sync completed`);
+        } else {
+          sessionManager.updateBackgroundStatus(session.id, undefined, 'FAILED');
+          console.warn(`⚡ [INSTANT_SEND] Background IPFS sync failed: ${result.errorMessage}`);
+        }
+      }).catch(err => {
+        sessionManager.updateBackgroundStatus(session.id, undefined, 'FAILED');
+        console.warn(`⚡ [INSTANT_SEND] Background IPFS sync error:`, err);
+      });
+    }
+
+    // Background token removal (non-blocking)
+    const allTokens = getTokensForAddress(identity.address);
+    const tokenToRemove = allTokens.find(t => t.id === uiId);
+    if (tokenToRemove && identity.publicKey && identity.ipnsName) {
+      const txf = tokenToTxf(tokenToRemove);
+      if (txf) {
+        const tokenStateHash = getCurrentStateHash(txf) ?? '';
+        removeTokenFromInventory(
+          identity.address,
+          identity.publicKey,
+          identity.ipnsName,
+          uiId,
+          tokenStateHash
+        ).then(() => {
+          console.log(`⚡ [INSTANT_SEND] Background token removal completed`);
+        }).catch(err => {
+          console.warn(`⚡ [INSTANT_SEND] Background token removal failed:`, err);
+        });
+      }
+    }
+
+    // Mark outbox entry as completed (background lanes don't affect this)
+    outboxRepo.updateEntry(outboxEntry.id, { status: 'COMPLETED' });
+
+    const criticalPathMs = performance.now() - startTime;
+    console.log(`⚡ [INSTANT_SEND] Critical path completed in ${criticalPathMs.toFixed(0)}ms`);
+
+    // Mark session as completed
+    sessionManager.advancePhase(session.id, 'COMPLETED');
+
+    return session.id;
+  };
+
+  /**
+   * Execute direct token transfer
+   *
+   * Supports two modes:
+   * - Standard (instant=false): Full blocking flow with proof before Nostr
+   * - INSTANT_SEND (instant=true, DEFAULT): Nostr-first, background aggregator/IPFS
+   *
+   * @param sourceToken - SDK token to transfer
+   * @param uiId - UI token ID
+   * @param recipientAddress - Recipient's proxy address
+   * @param recipientPubkey - Recipient's Nostr pubkey
+   * @param signingService - Signing service for commitment
+   * @param nostr - Nostr service instance
+   * @param recipientNametag - Recipient's human-readable nametag
+   * @param options - Transfer options (instant mode, etc.)
+   */
   const executeDirectTransfer = async (
     sourceToken: SdkToken<any>,
     uiId: string,
@@ -946,8 +1180,23 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     recipientPubkey: string,
     signingService: SigningService,
     nostr: NostrService,
-    recipientNametag: string
+    recipientNametag: string,
+    options?: { instant?: boolean }
   ) => {
+    const instant = options?.instant ?? true;  // DEFAULT: instant mode enabled
+
+    if (instant) {
+      return executeInstantSend(
+        sourceToken,
+        uiId,
+        recipientAddress,
+        recipientPubkey,
+        signingService,
+        recipientNametag
+      );
+    }
+
+    // Standard (legacy) blocking flow below
     const { OutboxRepository } = await import('../repositories/OutboxRepository');
     const { createOutboxEntry } = await import('../components/wallet/L3/services/types/OutboxTypes');
     const outboxRepo = OutboxRepository.getInstance();

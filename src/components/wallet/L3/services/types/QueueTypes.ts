@@ -72,6 +72,22 @@ export interface NostrDeliveryQueueEntry {
   lastError?: string;
   /** Don't retry before this time (epoch ms) */
   backoffUntil?: number;
+
+  // ==========================================
+  // INSTANT_SEND mode fields (v3.5)
+  // ==========================================
+
+  /**
+   * Associated PaymentSession ID (for instant mode tracking)
+   * When set, Nostr delivery triggers background aggregator submission
+   */
+  paymentSessionId?: string;
+
+  /**
+   * Serialized TransferCommitment (for background aggregator submission)
+   * Only set in INSTANT_SEND mode
+   */
+  commitmentJson?: string;
 }
 
 /**

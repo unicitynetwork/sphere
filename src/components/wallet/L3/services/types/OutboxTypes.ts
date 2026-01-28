@@ -17,6 +17,7 @@
 export type OutboxEntryStatus =
   | "PENDING_IPFS_SYNC"  // Saved to localStorage, awaiting IPFS confirmation
   | "READY_TO_SUBMIT"    // IPFS confirmed, safe to submit to aggregator
+  | "READY_TO_SEND"      // INSTANT_SEND: Ready for Nostr delivery (skip aggregator wait)
   | "SUBMITTED"          // Submitted to aggregator, awaiting inclusion proof
   | "PROOF_RECEIVED"     // Have inclusion proof, ready for Nostr delivery
   | "NOSTR_SENT"         // Sent via Nostr, awaiting confirmation
@@ -356,6 +357,7 @@ export function isRetryableStatus(status: OutboxEntryStatus): boolean {
   return (
     status === "PENDING_IPFS_SYNC" ||
     status === "READY_TO_SUBMIT" ||
+    status === "READY_TO_SEND" ||
     status === "SUBMITTED" ||
     status === "PROOF_RECEIVED" ||
     status === "NOSTR_SENT"
@@ -364,8 +366,29 @@ export function isRetryableStatus(status: OutboxEntryStatus): boolean {
 
 /**
  * Get the next expected status after current status
+ *
+ * Standard flow: PENDING_IPFS_SYNC -> READY_TO_SUBMIT -> SUBMITTED -> PROOF_RECEIVED -> NOSTR_SENT -> COMPLETED
+ * INSTANT_SEND flow: PENDING_IPFS_SYNC -> READY_TO_SEND -> NOSTR_SENT -> COMPLETED
  */
-export function getNextStatus(current: OutboxEntryStatus): OutboxEntryStatus | null {
+export function getNextStatus(current: OutboxEntryStatus, instantMode: boolean = false): OutboxEntryStatus | null {
+  if (instantMode) {
+    // INSTANT_SEND flow: skip aggregator wait
+    const instantStatusOrder: OutboxEntryStatus[] = [
+      "PENDING_IPFS_SYNC",
+      "READY_TO_SEND",
+      "NOSTR_SENT",
+      "COMPLETED",
+    ];
+
+    const currentIndex = instantStatusOrder.indexOf(current);
+    if (currentIndex === -1 || currentIndex >= instantStatusOrder.length - 1) {
+      return null;
+    }
+
+    return instantStatusOrder[currentIndex + 1];
+  }
+
+  // Standard flow
   const statusOrder: OutboxEntryStatus[] = [
     "PENDING_IPFS_SYNC",
     "READY_TO_SUBMIT",

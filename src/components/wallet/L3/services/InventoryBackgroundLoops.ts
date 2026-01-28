@@ -23,6 +23,7 @@ import { DEFAULT_LOOP_CONFIG } from './types/QueueTypes';
 import { inventorySync, type SyncParams } from './InventorySyncService';
 import { getIpfsHttpResolver } from './IpfsHttpResolver';
 import type { RecoveryStats } from '../types/SyncTypes';
+import { getPaymentSessionManager } from './PaymentSessionManager';
 
 /**
  * Batches incoming Nostr tokens with 3-second idle detection
@@ -428,6 +429,25 @@ export class NostrDeliveryQueue {
         this.completedEntries.shift();
       }
 
+      // INSTANT_SEND: Notify payment session of Nostr delivery
+      if (entry.paymentSessionId) {
+        const sessionManager = getPaymentSessionManager();
+        sessionManager.advancePhase(entry.paymentSessionId, 'NOSTR_DELIVERED', {
+          nostrEventId: eventId,
+        });
+
+        // Fire-and-forget background aggregator submission
+        if (entry.commitmentJson) {
+          this.submitToAggregatorBackground(entry).catch(err => {
+            console.warn(`📤 [DeliveryQueue] Background aggregator failed: ${err.message}`);
+            // Non-fatal: recipient handles via deferred proof acquisition
+            if (entry.paymentSessionId) {
+              sessionManager.updateBackgroundStatus(entry.paymentSessionId, 'FAILED', undefined);
+            }
+          });
+        }
+      }
+
     } catch (error) {
       entry.retryCount++;
       entry.lastError = error instanceof Error ? error.message : String(error);
@@ -436,6 +456,17 @@ export class NostrDeliveryQueue {
         console.error(`❌ [DeliveryQueue] Max retries reached for ${entry.id.slice(0, 8)}`);
         // Keep in queue but mark as permanently failed
         // UI can display these for manual intervention
+
+        // Notify payment session of failure
+        if (entry.paymentSessionId) {
+          const sessionManager = getPaymentSessionManager();
+          sessionManager.markFailed(
+            entry.paymentSessionId,
+            'NOSTR_DELIVERY_FAILED',
+            `Nostr delivery failed after ${this.config.deliveryMaxRetries} retries: ${entry.lastError}`,
+            false
+          );
+        }
       } else {
         // Calculate backoff
         const backoffIndex = Math.min(entry.retryCount - 1, this.config.deliveryBackoffMs.length - 1);
@@ -444,6 +475,62 @@ export class NostrDeliveryQueue {
 
         console.warn(`⚠️ [DeliveryQueue] Retry ${entry.retryCount}/${this.config.deliveryMaxRetries} for ${entry.id.slice(0, 8)} in ${backoffMs}ms`);
       }
+    }
+  }
+
+  /**
+   * Background aggregator submission for INSTANT_SEND mode
+   * Fire-and-forget: recipient handles proof acquisition if this fails
+   *
+   * @param entry - Queue entry with commitmentJson
+   */
+  private async submitToAggregatorBackground(entry: NostrDeliveryQueueEntry): Promise<void> {
+    if (!entry.commitmentJson) {
+      console.warn('📤 [DeliveryQueue] No commitmentJson for background aggregator submission');
+      return;
+    }
+
+    try {
+      console.log(`📤 [DeliveryQueue] Background aggregator submission for ${entry.id.slice(0, 8)}...`);
+
+      // Update payment session status
+      if (entry.paymentSessionId) {
+        const sessionManager = getPaymentSessionManager();
+        sessionManager.updateBackgroundStatus(entry.paymentSessionId, 'PENDING', undefined);
+      }
+
+      // Dynamic import to avoid circular dependencies
+      const { TransferCommitment } = await import('@unicitylabs/state-transition-sdk/lib/transaction/TransferCommitment');
+      const { ServiceProvider } = await import('./ServiceProvider');
+
+      // Reconstruct commitment from JSON
+      const commitmentData = JSON.parse(entry.commitmentJson);
+      const commitment = await TransferCommitment.fromJSON(commitmentData);
+
+      // Submit to aggregator
+      const client = ServiceProvider.stateTransitionClient;
+      const res = await client.submitTransferCommitment(commitment);
+
+      if (res.status === 'SUCCESS' || res.status === 'REQUEST_ID_EXISTS') {
+        console.log(`✅ [DeliveryQueue] Background aggregator submitted: ${res.status}`);
+
+        // Update payment session
+        if (entry.paymentSessionId) {
+          const sessionManager = getPaymentSessionManager();
+          sessionManager.updateBackgroundStatus(entry.paymentSessionId, 'SUBMITTED', undefined);
+        }
+      } else {
+        console.warn(`⚠️ [DeliveryQueue] Background aggregator rejected: ${res.status}`);
+        // Non-fatal: recipient will handle proof acquisition
+        if (entry.paymentSessionId) {
+          const sessionManager = getPaymentSessionManager();
+          sessionManager.updateBackgroundStatus(entry.paymentSessionId, 'FAILED', undefined);
+        }
+      }
+    } catch (err) {
+      console.warn(`⚠️ [DeliveryQueue] Background aggregator error:`, err);
+      // Non-fatal: recipient will handle proof acquisition
+      throw err; // Re-throw for caller's .catch()
     }
   }
 
@@ -601,6 +688,64 @@ export class NostrDeliveryQueue {
    */
   getCompletedEntries(): NostrDeliveryQueueEntry[] {
     return [...this.completedEntries];
+  }
+
+  /**
+   * Get entry by ID (for per-transfer tracking in INSTANT_SEND mode)
+   * Searches both pending queue and completed entries
+   *
+   * @param id - Entry ID to find
+   * @returns Entry if found, undefined otherwise
+   */
+  getEntryById(id: string): NostrDeliveryQueueEntry | undefined {
+    // Check pending queue first
+    const pending = this.queue.get(id);
+    if (pending) return { ...pending };
+
+    // Check completed entries
+    const completed = this.completedEntries.find(e => e.id === id);
+    if (completed) return { ...completed };
+
+    return undefined;
+  }
+
+  /**
+   * Wait for a specific entry to complete Nostr delivery
+   * Used by INSTANT_SEND to wait for the critical path
+   *
+   * @param entryId - Entry ID to wait for
+   * @param timeoutMs - Timeout in milliseconds
+   * @returns Promise resolving to Nostr event ID
+   */
+  async waitForDelivery(entryId: string, timeoutMs: number = 30000): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const checkInterval = 100; // Check every 100ms
+      let elapsed = 0;
+
+      const check = () => {
+        const entry = this.getEntryById(entryId);
+
+        if (entry?.nostrEventId) {
+          resolve(entry.nostrEventId);
+          return;
+        }
+
+        if (entry?.retryCount && entry.retryCount >= this.config.deliveryMaxRetries) {
+          reject(new Error(`Delivery failed after ${entry.retryCount} retries: ${entry.lastError}`));
+          return;
+        }
+
+        elapsed += checkInterval;
+        if (elapsed >= timeoutMs) {
+          reject(new Error(`Delivery timeout after ${timeoutMs}ms`));
+          return;
+        }
+
+        setTimeout(check, checkInterval);
+      };
+
+      check();
+    });
   }
 
   /**

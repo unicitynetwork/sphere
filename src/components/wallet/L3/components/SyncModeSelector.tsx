@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Cloud, CloudOff, RefreshCw, Clock, AlertTriangle, Zap, History } from 'lucide-react';
+import { Cloud, CloudOff, RefreshCw, Clock, AlertTriangle, Zap, History, Send, Download } from 'lucide-react';
 import type { SyncMode, CircuitBreakerState, SyncResult } from '../types/SyncTypes';
 
 interface SyncModeSelectorProps {
@@ -69,6 +69,20 @@ const MODE_CONFIG: Record<SyncMode, {
     color: 'text-orange-400',
     bgColor: 'bg-orange-500/10',
     description: 'Changes saved locally only'
+  },
+  INSTANT_SEND: {
+    label: 'Sending',
+    icon: Send,
+    color: 'text-cyan-400',
+    bgColor: 'bg-cyan-500/10',
+    description: 'Instant send via Nostr'
+  },
+  INSTANT_RECEIVE: {
+    label: 'Receiving',
+    icon: Download,
+    color: 'text-teal-400',
+    bgColor: 'bg-teal-500/10',
+    description: 'Instant receive via Nostr'
   }
 };
 

@@ -702,6 +702,7 @@ export class OutboxRepository {
     const byStatus: Record<OutboxEntryStatus, number> = {
       PENDING_IPFS_SYNC: 0,
       READY_TO_SUBMIT: 0,
+      READY_TO_SEND: 0,
       SUBMITTED: 0,
       PROOF_RECEIVED: 0,
       NOSTR_SENT: 0,
@@ -717,6 +718,7 @@ export class OutboxRepository {
     const mintByStatus: Record<OutboxEntryStatus, number> = {
       PENDING_IPFS_SYNC: 0,
       READY_TO_SUBMIT: 0,
+      READY_TO_SEND: 0,
       SUBMITTED: 0,
       PROOF_RECEIVED: 0,
       NOSTR_SENT: 0,
