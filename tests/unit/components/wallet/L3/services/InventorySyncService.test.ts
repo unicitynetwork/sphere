@@ -799,7 +799,7 @@ describe("inventorySync", () => {
       expect(mockCheckSpentTokensSpy).toHaveBeenCalled();
     });
 
-    it("should add tombstone when token is detected as spent", async () => {
+    it("should add to Sent folder when token is detected as spent", async () => {
       const spentTokenId = "tomb1".padEnd(64, "0");
       const spentStateHash = "0000" + "a".repeat(60);
 
@@ -816,11 +816,12 @@ describe("inventorySync", () => {
       const params = createBaseSyncParams();
       const result = await inventorySync(params);
 
-      expect(result.operationStats.tombstonesAdded).toBeGreaterThanOrEqual(1);
+      // Token should be moved to Sent folder (tombstones deprecated)
+      expect(result.inventoryStats?.sentTokens).toBeGreaterThanOrEqual(1);
 
-      // Verify tombstone in localStorage
+      // Verify token in Sent folder in localStorage
       const stored = getLocalStorage();
-      expect(stored?._tombstones?.length).toBeGreaterThanOrEqual(1);
+      expect(stored?._sent?.length).toBeGreaterThanOrEqual(1);
     });
 
     it("should skip spent detection in FAST mode", async () => {
@@ -1154,7 +1155,7 @@ describe("inventorySync", () => {
       expect(typeof result.operationStats.tokensUpdated).toBe("number");
       expect(typeof result.operationStats.conflictsResolved).toBe("number");
       expect(typeof result.operationStats.tokensValidated).toBe("number");
-      expect(typeof result.operationStats.tombstonesAdded).toBe("number");
+      // Note: tombstonesAdded removed - tombstones deprecated, Sent folder provides spent state tracking
 
       // All counters should be non-negative
       expect(result.operationStats.tokensImported).toBeGreaterThanOrEqual(0);
@@ -1223,7 +1224,7 @@ describe("inventorySync", () => {
       expect(result.inventoryStats?.activeTokens).toBe(0);
     });
 
-    it("should add tombstone for completed transfer", async () => {
+    it("should add to Sent folder for completed transfer", async () => {
       // Use storage key format (unpadded) since ctx.tokens uses storage keys
       const tokenId = "completed2";
       // Use DEFAULT_STATE_HASH to match the mock token's _integrity.currentStateHash
@@ -1246,7 +1247,8 @@ describe("inventorySync", () => {
 
       const result = await inventorySync(params);
 
-      expect(result.operationStats.tombstonesAdded).toBeGreaterThanOrEqual(1);
+      // Token should be moved to Sent folder (tombstones deprecated)
+      expect(result.inventoryStats?.sentTokens).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -1457,7 +1459,7 @@ describe("inventorySync", () => {
       // Token should remain active, not moved to sent
       expect(result.inventoryStats?.activeTokens).toBe(1);
       expect(result.inventoryStats?.sentTokens).toBe(0);
-      expect(result.operationStats.tombstonesAdded).toBe(0);
+      // Note: tombstonesAdded removed - tombstones deprecated, Sent folder provides spent state tracking
     });
 
     it("should handle completedList for token not in inventory", async () => {

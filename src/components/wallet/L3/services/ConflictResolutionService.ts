@@ -11,6 +11,7 @@ import type {
   MergeResult,
   TxfTransaction,
   TombstoneEntry,
+  SentTokenEntry,
   NametagData,
 } from "./types/TxfTypes";
 import {
@@ -139,43 +140,91 @@ export class ConflictResolutionService {
       merged._nametag = this.mergeNametags(localNametag, remoteNametag);
     }
 
-    // Merge tombstones (union of local and remote by tokenId+stateHash)
-    // This ensures deleted token states stay deleted across devices
-    const localTombstones: TombstoneEntry[] = local._tombstones || [];
-    const remoteTombstones: TombstoneEntry[] = remote._tombstones || [];
+    // Merge Sent folder (union of local and remote by tokenId)
+    // The Sent folder tracks spent token states with complete inclusion proofs.
+    // Once a state has an inclusion proof, it's permanently spent (no rollbacks).
+    const localSent: SentTokenEntry[] = local._sent || [];
+    const remoteSent: SentTokenEntry[] = remote._sent || [];
 
-    // Use Map for deduplication by tokenId+stateHash key
-    const tombstoneMap = new Map<string, TombstoneEntry>();
-    for (const t of [...localTombstones, ...remoteTombstones]) {
-      const key = `${t.tokenId}:${t.stateHash}`;
-      if (!tombstoneMap.has(key)) {
-        tombstoneMap.set(key, t);
+    // Use Map for deduplication by tokenId (one entry per token)
+    const sentMap = new Map<string, SentTokenEntry>();
+    for (const s of [...localSent, ...remoteSent]) {
+      const tokenId = s.token?.genesis?.data?.tokenId;
+      if (!tokenId) continue;
+      // Keep the most recent entry (by timestamp) for each tokenId
+      const existing = sentMap.get(tokenId);
+      if (!existing || (s.timestamp && (!existing.timestamp || s.timestamp > existing.timestamp))) {
+        sentMap.set(tokenId, s);
       }
     }
-    const mergedTombstones = [...tombstoneMap.values()];
+    const mergedSent = [...sentMap.values()];
 
-    if (mergedTombstones.length > 0) {
-      merged._tombstones = mergedTombstones;
-      console.log(`📦 Merged ${mergedTombstones.length} tombstone(s) (${localTombstones.length} local + ${remoteTombstones.length} remote)`);
+    if (mergedSent.length > 0) {
+      merged._sent = mergedSent;
+      console.log(`📦 Merged ${mergedSent.length} sent token(s) (${localSent.length} local + ${remoteSent.length} remote)`);
     }
 
-    // Build tombstone lookup set (tokenId:stateHash)
-    const tombstoneKeySet = new Set(tombstoneMap.keys());
+    // Build Sent folder lookup set (tokenId:stateHash for all proven spent states)
+    // Each Sent entry contains an inclusion proof that proves a state was spent
+    const spentStateKeySet = new Set<string>();
+    for (const s of mergedSent) {
+      const tokenId = s.token?.genesis?.data?.tokenId;
+      if (!tokenId) continue;
 
-    // Add all tokens (excluding tombstoned states)
+      // Add the explicitly stored stateHash (if available)
+      if (s.stateHash) {
+        spentStateKeySet.add(`${tokenId}:${s.stateHash}`);
+      }
+
+      // Add all authenticator stateHashes from transactions (each proves a spent state)
+      if (s.token?.transactions) {
+        for (const tx of s.token.transactions) {
+          const authHash = tx.inclusionProof?.authenticator?.stateHash;
+          if (authHash) {
+            spentStateKeySet.add(`${tokenId}:${authHash}`);
+          }
+        }
+      }
+
+      // Add genesis authenticator stateHash
+      const genesisAuthHash = s.token?.genesis?.inclusionProof?.authenticator?.stateHash;
+      if (genesisAuthHash) {
+        spentStateKeySet.add(`${tokenId}:${genesisAuthHash}`);
+      }
+    }
+
+    // BACKWARD COMPATIBILITY: Also merge tombstones (but don't use them for filtering)
+    // This ensures old IPFS data is preserved during transition period
+    const localTombstones: TombstoneEntry[] = local._tombstones || [];
+    const remoteTombstones: TombstoneEntry[] = remote._tombstones || [];
+    if (localTombstones.length > 0 || remoteTombstones.length > 0) {
+      const tombstoneMap = new Map<string, TombstoneEntry>();
+      for (const t of [...localTombstones, ...remoteTombstones]) {
+        const key = `${t.tokenId}:${t.stateHash}`;
+        if (!tombstoneMap.has(key)) {
+          tombstoneMap.set(key, t);
+        }
+      }
+      // Note: We store but don't use tombstones for filtering anymore
+      // They're kept for backward compatibility during migration
+      // merged._tombstones = [...tombstoneMap.values()]; // Commented out - stop writing tombstones
+      console.log(`📦 Tombstones found but ignored (${tombstoneMap.size} total, using Sent folder instead)`);
+    }
+
+    // Add all tokens (excluding states proven spent in Sent folder)
     for (const [tokenId, token] of mergedTokens) {
       // Get the token's current state hash
       const stateHash = getCurrentStateHash(token);
       if (!stateHash) {
-        console.warn(`📦 Token ${tokenId.slice(0, 8)}... has undefined stateHash, skipping tombstone check`);
+        console.warn(`📦 Token ${tokenId.slice(0, 8)}... has undefined stateHash, skipping spent check`);
         merged[keyFromTokenId(tokenId)] = token;
         continue;
       }
-      const tombstoneKey = `${tokenId}:${stateHash}`;
+      const spentKey = `${tokenId}:${stateHash}`;
 
-      // Don't include tokens whose current state is tombstoned
-      if (tombstoneKeySet.has(tombstoneKey)) {
-        console.log(`📦 Excluding tombstoned token ${tokenId.slice(0, 8)}... (state ${stateHash.slice(0, 12)}...) from merge`);
+      // Don't include tokens whose current state is in Sent folder (proven spent)
+      if (spentStateKeySet.has(spentKey)) {
+        console.log(`📦 Excluding spent token ${tokenId.slice(0, 8)}... (state ${stateHash.slice(0, 12)}...) from merge`);
         removedTokens.push(tokenId);
         continue;
       }
@@ -211,7 +260,7 @@ export class ConflictResolutionService {
     }
 
     console.log(
-      `📦 Merge complete: ${mergedTokens.size - removedTokens.length} active, ${mergedArchived.size} archived, ${mergedForked.size} forked, ${conflicts.length} conflicts resolved, ${newTokens.length} new, ${removedTokens.length} tombstoned`
+      `📦 Merge complete: ${mergedTokens.size - removedTokens.length} active, ${mergedArchived.size} archived, ${mergedForked.size} forked, ${conflicts.length} conflicts resolved, ${newTokens.length} new, ${removedTokens.length} spent/excluded`
     );
 
     return {

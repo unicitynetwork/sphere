@@ -281,7 +281,7 @@ export async function buildTxfStorageData(
   tokens: Token[],
   meta: Omit<TxfMeta, "formatVersion">,
   nametag?: NametagData,
-  tombstones?: TombstoneEntry[],
+  _tombstones?: unknown, // Deprecated: tombstones no longer written to IPFS
   archivedTokens?: Map<string, TxfToken>,
   forkedTokens?: Map<string, TxfToken>,
   outboxEntries?: OutboxEntry[],
@@ -309,10 +309,9 @@ export async function buildTxfStorageData(
     }
   }
 
-  // Add tombstones for spent token states (prevents zombie token resurrection)
-  if (tombstones && tombstones.length > 0) {
-    storageData._tombstones = tombstones;
-  }
+  // Note: Tombstones are deprecated - Sent folder now provides spent state tracking.
+  // We no longer write _tombstones to IPFS. Old IPFS data may still contain them
+  // and will be read during parseTxfStorageData() for backward compatibility.
 
   // Add outbox entries (CRITICAL for transfer recovery)
   if (outboxEntries && outboxEntries.length > 0) {
@@ -444,10 +443,11 @@ export function parseTxfStorageData(data: unknown): {
     }
   }
 
-  // Extract tombstones (state-hash-aware entries)
+  // Extract tombstones (DEPRECATED - kept for backward compat with old IPFS data)
+  // Tombstones are no longer created or used - Sent folder provides spent state tracking.
+  // We still parse them in case old IPFS data contains them, but they are ignored.
   if (storageData._tombstones && Array.isArray(storageData._tombstones)) {
     for (const entry of storageData._tombstones) {
-      // Parse TombstoneEntry objects (new format)
       if (
         typeof entry === "object" &&
         entry !== null &&
@@ -457,8 +457,6 @@ export function parseTxfStorageData(data: unknown): {
       ) {
         result.tombstones.push(entry as TombstoneEntry);
       }
-      // Legacy string format: discard (no state hash info)
-      // Per migration strategy: start fresh with state-hash-aware tombstones
     }
   }
 

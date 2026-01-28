@@ -33,7 +33,7 @@ import {
   forkedKeyFromTokenIdAndState, parseForkedKey
 } from './types/TxfTypes';
 import type { TxfInclusionProof } from './types/TxfTypes';
-import { tokenToTxf, txfToToken, getCurrentStateHash, computeFinalStateHashCached } from './TxfSerializer';
+import { tokenToTxf, txfToToken, getCurrentStateHash } from './TxfSerializer';
 import { STORAGE_KEY_GENERATORS } from '../../../../config/storageKeys';
 import { getIpfsHttpResolver } from './IpfsHttpResolver';
 import { getIpfsTransport } from './IpfsStorageService';
@@ -208,7 +208,7 @@ interface SyncContext {
   tokens: Map<string, TxfToken>;
 
   // Archived tokens: tokens that were spent/transferred (keyed by tokenId)
-  // Used for recovery if a tombstone is found to be incorrect (BFT rollback)
+  // Used for recovery operations
   archivedTokens: Map<string, TxfToken>;
 
   // Forked tokens: tokens saved at specific states for conflict resolution
@@ -219,7 +219,6 @@ interface SyncContext {
   sent: SentTokenEntry[];
   invalid: InvalidTokenEntry[];
   outbox: OutboxEntry[];
-  tombstones: TombstoneEntry[];
   nametags: NametagData[];
 
   // Completed transfers to mark as SPENT (from Step 0)
@@ -565,12 +564,14 @@ async function executeFullSync(ctx: SyncContext, params: SyncParams): Promise<Sy
     console.log(`⏱️ [Step 7] Detect Spent Tokens completed in ${stepTimings['Step 7'].toFixed(1)}ms`);
   }
 
-  // Step 7.5: Verify Tombstones (skip in FAST/LOCAL mode)
+  // Step 7.5: Sent Folder Verification (lightweight)
+  // Note: Tombstones have been deprecated in favor of Sent folder.
+  // Sent folder entries contain complete inclusion proofs which are
+  // cryptographically verified during creation - no re-verification needed.
   if (!shouldSkipSpentDetection(ctx.mode)) {
     stepStart = performance.now();
-    await step7_5_verifyTombstones(ctx);
+    console.log(`🔍 [Step 7.5] Sent folder: ${ctx.sent.length} entries (proof verification skipped - proofs verified at creation)`);
     stepTimings['Step 7.5'] = performance.now() - stepStart;
-    console.log(`⏱️ [Step 7.5] Verify Tombstones completed in ${stepTimings['Step 7.5'].toFixed(1)}ms`);
   }
 
   // Step 8: Folder Assignment / Merge Inventory
@@ -650,7 +651,6 @@ function initializeContext(params: SyncParams, mode: SyncMode, startTime: number
     sent: [],
     invalid: [],
     outbox: [],
-    tombstones: [],
     nametags: [],
     completedList: [],
     localVersion: 0,
@@ -792,11 +792,8 @@ async function loadFromTxfStorageDataFormat(ctx: SyncContext, data: Record<strin
     return; // NAMETAG mode but no nametag found
   }
 
-  // Load tombstones
-  if (data._tombstones && Array.isArray(data._tombstones)) {
-    ctx.tombstones.push(...(data._tombstones as TombstoneEntry[]));
-    console.log(`  Loaded ${ctx.tombstones.length} tombstones`);
-  }
+  // Note: Tombstones are deprecated - old IPFS data may contain _tombstones but they are ignored.
+  // Sent folder now provides spent state tracking.
 
   // Load active tokens from _<tokenId> keys
   let tokenCount = 0;
@@ -878,11 +875,7 @@ async function loadFromStoredWalletFormat(ctx: SyncContext, data: Record<string,
     return;
   }
 
-  // Load tombstones
-  if (data.tombstones && Array.isArray(data.tombstones)) {
-    ctx.tombstones.push(...(data.tombstones as TombstoneEntry[]));
-    console.log(`  Loaded ${ctx.tombstones.length} tombstones`);
-  }
+  // Note: Legacy tombstones in StoredWallet format are ignored - Sent folder provides spent state tracking.
 
   // Load tokens from tokens: Token[] array and convert to TxfToken format
   const tokens = data.tokens as Token[] | undefined;
@@ -1136,17 +1129,11 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
     console.log(`  📤 ${localOnlyTokenIds.size} local-only token(s) not in remote - will upload`);
   }
 
-  // 3. Merge remote tombstones (union merge)
+  // 3. Remote tombstones (deprecated - using Sent folder instead)
+  // Note: Tombstones are ignored - Sent folder now provides equivalent protection.
+  // Old IPFS data may contain tombstones, we just log and skip them.
   if (remoteData._tombstones && Array.isArray(remoteData._tombstones)) {
-    const existingKeys = new Set(
-      ctx.tombstones.map(t => `${t.tokenId}:${t.stateHash}`)
-    );
-    for (const tombstone of remoteData._tombstones as TombstoneEntry[]) {
-      const key = `${tombstone.tokenId}:${tombstone.stateHash}`;
-      if (!existingKeys.has(key)) {
-        ctx.tombstones.push(tombstone);
-      }
-    }
+    console.log(`  📦 Ignoring ${remoteData._tombstones.length} remote tombstone(s) (deprecated)`);
   }
 
   // 4. Merge remote sent tokens (union merge by tokenId:stateHash)
@@ -1253,7 +1240,7 @@ async function step2_loadIpfs(ctx: SyncContext): Promise<void> {
   }
 
   ctx.stats.tokensImported = tokensImported;
-  console.log(`  ✓ Loaded from IPFS: ${tokensImported} new tokens, ${ctx.tombstones.length} tombstones`);
+  console.log(`  ✓ Loaded from IPFS: ${tokensImported} new tokens`);
 
   // Update Version High Water Mark after successfully loading remote data
   // This tracks the highest version we've seen from IPFS
@@ -1444,17 +1431,10 @@ async function step2_5_traverseVersionChain(ctx: SyncContext): Promise<void> {
       }
     }
 
-    // Merge tombstones from historical version (union merge)
+    // Historical tombstones (deprecated - using Sent folder instead)
+    // Note: Tombstones are ignored during recovery - Sent folder provides equivalent protection.
     if (historicalData._tombstones && Array.isArray(historicalData._tombstones)) {
-      const existingKeys = new Set(
-        ctx.tombstones.map(t => `${t.tokenId}:${t.stateHash}`)
-      );
-      for (const tombstone of historicalData._tombstones as TombstoneEntry[]) {
-        const key = `${tombstone.tokenId}:${tombstone.stateHash}`;
-        if (!existingKeys.has(key)) {
-          ctx.tombstones.push(tombstone);
-        }
-      }
+      console.log(`    📦 Ignoring ${historicalData._tombstones.length} historical tombstone(s) (deprecated)`);
     }
 
     const tokensAdded = ctx.tokens.size - tokensBefore;
@@ -1993,13 +1973,15 @@ async function step7_detectSpentTokens(ctx: SyncContext): Promise<void> {
       }
     );
 
-    // Move spent tokens to Sent folder and add tombstones
+    // Move spent tokens to Sent folder
+    // Note: Tombstones are no longer created - Sent folder provides equivalent protection
+    // with complete inclusion proofs for spent state verification.
     for (const spentInfo of result.spentTokens) {
       const txfTokenId = tokenIdMap.get(spentInfo.localId) || spentInfo.tokenId;
       const txf = ctx.tokens.get(txfTokenId);
 
       if (txf) {
-        // Move to Sent folder (include stateHash for tombstone verification lookup)
+        // Move to Sent folder (include stateHash for spent state lookup)
         ctx.sent.push({
           token: txf,
           timestamp: Date.now(),
@@ -2007,17 +1989,9 @@ async function step7_detectSpentTokens(ctx: SyncContext): Promise<void> {
           stateHash: spentInfo.stateHash
         });
 
-        // Add tombstone
-        ctx.tombstones.push({
-          tokenId: spentInfo.tokenId,
-          stateHash: spentInfo.stateHash,
-          timestamp: Date.now()
-        });
-
         // Remove from active
         ctx.tokens.delete(txfTokenId);
         ctx.stats.tokensRemoved++;
-        ctx.stats.tombstonesAdded++;
 
         console.log(`  💸 Token ${spentInfo.tokenId.slice(0, 8)}... is SPENT, moved to Sent folder`);
       }
@@ -2037,268 +2011,12 @@ async function step7_detectSpentTokens(ctx: SyncContext): Promise<void> {
   }
 }
 
-/**
- * Step 7.5: Verify Tombstones Against Aggregator
- *
- * Tombstones track spent states (tokenId:stateHash).
- * Multi-device sync requires tombstone verification to prevent:
- * - False tombstones from network forks
- * - BFT finality rollbacks before PoW finality
- *
- * OPTIMIZATION: Use Sent folder proofs for local verification (99% faster).
- * When a token is spent, both a tombstone AND a Sent entry are created
- * simultaneously. The Sent entry contains the full inclusion proof, so we
- * can verify locally without querying the aggregator.
- *
- * For each tombstone:
- * 1. Look up matching Sent token by tokenId:stateHash
- * 2. If found: verify proof locally (pure crypto, no network call)
- * 3. If not found (orphan): fall back to aggregator query (parallel batches)
- * 4. If verification fails: remove tombstone, recover token to Active
- */
-async function step7_5_verifyTombstones(ctx: SyncContext): Promise<void> {
-  const startTime = Date.now();
-  console.log(`🔍 [Step 7.5] Verify tombstones against aggregator`);
-
-  if (ctx.tombstones.length === 0) {
-    console.log(`  No tombstones to verify`);
-    return;
-  }
-
-  const validationService = getTokenValidationService();
-  const tombstonesToRemove: number[] = [];
-
-  // OPTIMIZATION: Build Sent folder lookup map for O(1) lookups by tokenId
-  // Key: tokenId -> SentTokenEntry (we search transactions for matching stateHash)
-  const sentLookupMap = buildSentLookupMap(ctx.sent);
-  console.log(`  Built Sent lookup map: ${sentLookupMap.size} entries (by tokenId)`);
-
-  // Counters for logging
-  let verifiedLocal = 0;
-  let verifiedAggregator = 0;
-
-  // Collect orphan tombstones that need aggregator verification
-  const orphanTombstones: { index: number; tombstone: TombstoneEntry }[] = [];
-
-  // Counter for upgraded tombstones
-  let tombstonesUpgraded = 0;
-
-  // PHASE 1: Verify tombstones locally using Sent folder proofs
-  for (let i = 0; i < ctx.tombstones.length; i++) {
-    const tombstone = ctx.tombstones[i];
-    const sentEntry = sentLookupMap.get(tombstone.tokenId);
-
-    if (sentEntry?.token) {
-      // Check if tombstone has invalid stateHash (e.g., tokenId instead of proper hash)
-      // Valid state hashes start with "0000" prefix
-      let effectiveStateHash = tombstone.stateHash;
-      if (!effectiveStateHash.startsWith('0000')) {
-        // Invalid stateHash detected - try to compute correct one from Sent token
-        const computedHash = await computeFinalStateHashCached(sentEntry.token);
-        if (computedHash && computedHash.startsWith('0000')) {
-          // Upgrade the tombstone with correct stateHash
-          tombstone.stateHash = computedHash;
-          effectiveStateHash = computedHash;
-          tombstonesUpgraded++;
-        }
-      }
-
-      // FAST PATH: Find a transaction proof that can verify the tombstone
-      const match = await findMatchingProofForTombstone(sentEntry, effectiveStateHash);
-
-      if (match) {
-        // Verify using the stateHash that the proof actually authenticates
-        const isValid = await validationService.verifyInclusionProofLocally(
-          match.proof,
-          match.verifyStateHash,
-          ctx.publicKey,
-          tombstone.tokenId
-        );
-
-        if (isValid) {
-          verifiedLocal++;
-          continue; // Tombstone verified (transaction to this state was valid), keep it
-        }
-      }
-    }
-
-    // Sent entry not found or no matching proof - mark as orphan
-    orphanTombstones.push({ index: i, tombstone });
-  }
-
-  // PHASE 2: Verify orphan tombstones via aggregator (parallel batches)
-  if (orphanTombstones.length > 0) {
-    const BATCH_SIZE = 10; // Process 10 tombstones in parallel
-
-    for (let batchStart = 0; batchStart < orphanTombstones.length; batchStart += BATCH_SIZE) {
-      const batch = orphanTombstones.slice(batchStart, batchStart + BATCH_SIZE);
-
-      const batchResults = await Promise.all(
-        batch.map(async ({ index, tombstone }) => {
-          const isSpent = await validationService.isTokenStateSpent(
-            tombstone.tokenId,
-            tombstone.stateHash,
-            ctx.publicKey
-          );
-          return { index, tombstone, isSpent };
-        })
-      );
-
-      for (const { index, tombstone, isSpent } of batchResults) {
-        if (isSpent) {
-          verifiedAggregator++;
-        } else {
-          console.warn(`  🔄 False tombstone detected: ${tombstone.tokenId.slice(0, 8)}... stateHash=${tombstone.stateHash.slice(0, 16)}...`);
-          tombstonesToRemove.push(index);
-
-          // Attempt to recover token from archived/forked storage
-          const recoveredToken = await attemptTokenRecovery(ctx, tombstone);
-          if (recoveredToken) {
-            ctx.tokens.set(tombstone.tokenId, recoveredToken);
-            if (!ctx.stats.tokensRecovered) {
-              ctx.stats.tokensRecovered = 0;
-            }
-            ctx.stats.tokensRecovered++;
-          }
-        }
-      }
-    }
-  }
-
-  // Remove invalid tombstones (reverse order to maintain indices)
-  for (const idx of tombstonesToRemove.sort((a, b) => b - a)) {
-    ctx.tombstones.splice(idx, 1);
-  }
-
-  const elapsedMs = Date.now() - startTime;
-  console.log(
-    `  ✓ Verified ${ctx.tombstones.length} tombstones in ${elapsedMs}ms ` +
-    `(local: ${verifiedLocal}, aggregator: ${verifiedAggregator}, false positives: ${tombstonesToRemove.length}` +
-    (tombstonesUpgraded > 0 ? `, upgraded: ${tombstonesUpgraded}` : '') + `)`
-  );
-}
-
-/**
- * Build a lookup map from Sent folder entries for fast tombstone verification.
- * Key format: tokenId -> SentTokenEntry
- *
- * We key by tokenId only (not tokenId:stateHash) because:
- * - Tombstones can record ANY state in the token's history
- * - The Sent entry contains the FULL token with ALL transactions
- * - We need to scan transactions to find the proof for the tombstone's specific stateHash
- */
-function buildSentLookupMap(sent: SentTokenEntry[]): Map<string, SentTokenEntry> {
-  const map = new Map<string, SentTokenEntry>();
-
-  for (const entry of sent) {
-    if (!entry.token?.genesis?.data?.tokenId) continue;
-    const tokenId = entry.token.genesis.data.tokenId;
-    // Key by tokenId only - we'll search transactions for matching stateHash later
-    map.set(tokenId, entry);
-  }
-
-  return map;
-}
-
-/**
- * Find a transaction proof in the Sent entry that can verify the tombstone's stateHash.
- *
- * KEY INSIGHT: Tombstones record `newStateHash` (the state AFTER a transaction),
- * but proofs authenticate `previousStateHash` (the state BEFORE that transaction).
- *
- * So we need to find a transaction where:
- * - tx.newStateHash === tombstoneStateHash (this tx created the tombstoned state)
- * - tx.inclusionProof authenticates tx.previousStateHash
- *
- * We return the proof AND the stateHash it authenticates (previousStateHash),
- * so verification can use the correct stateHash.
- *
- * LEGACY TOKEN SUPPORT: For the LAST transaction only, if newStateHash is missing,
- * we compute it using the SDK. This handles tokens sent before the newStateHash field
- * was added. SDK limitation: can only compute the final state hash, not intermediate ones.
- *
- * Returns { proof, verifyStateHash } if found, null otherwise.
- */
-async function findMatchingProofForTombstone(
-  sentEntry: SentTokenEntry,
-  tombstoneStateHash: string
-): Promise<{ proof: TxfInclusionProof; verifyStateHash: string } | null> {
-  const token = sentEntry.token;
-  if (!token) return null;
-
-  // Check all transactions for one that CREATED the tombstoned state
-  if (token.transactions && token.transactions.length > 0) {
-    for (let i = 0; i < token.transactions.length; i++) {
-      const tx = token.transactions[i];
-      let txNewStateHash = tx.newStateHash;
-
-      // For the LAST transaction only, compute newStateHash if missing
-      if (!txNewStateHash && i === token.transactions.length - 1) {
-        txNewStateHash = (await computeFinalStateHashCached(token)) ?? undefined;
-      }
-
-      // Found a tx that created the tombstoned state
-      if (txNewStateHash === tombstoneStateHash && tx.inclusionProof?.authenticator) {
-        return {
-          proof: tx.inclusionProof,
-          verifyStateHash: tx.inclusionProof.authenticator.stateHash, // previousStateHash
-        };
-      }
-    }
-  }
-
-  // Also check: maybe the tombstone matches a proof's authenticator directly
-  // (for cases where tombstone records the spent state, not the new state)
-  if (token.transactions && token.transactions.length > 0) {
-    for (const tx of token.transactions) {
-      if (tx.inclusionProof?.authenticator?.stateHash === tombstoneStateHash) {
-        return {
-          proof: tx.inclusionProof,
-          verifyStateHash: tombstoneStateHash,
-        };
-      }
-    }
-  }
-
-  // Check genesis proof authenticator
-  if (token.genesis?.inclusionProof?.authenticator?.stateHash === tombstoneStateHash) {
-    return {
-      proof: token.genesis.inclusionProof,
-      verifyStateHash: tombstoneStateHash,
-    };
-  }
-
-  return null;
-}
-
-/**
- * Attempt to recover a token that was falsely tombstoned
- *
- * Checks archived and forked token storage in SyncContext for a matching token.
- * If found, returns the token for restoration to active inventory.
- *
- * NOTE: Per TOKEN_INVENTORY_SPEC.md Section 6.1, we now read from SyncContext
- * instead of WalletRepository, eliminating the dual-ownership race condition.
- */
-async function attemptTokenRecovery(ctx: SyncContext, tombstone: TombstoneEntry): Promise<TxfToken | null> {
-  // Check archived tokens in SyncContext (loaded in Step 1)
-  const archivedToken = ctx.archivedTokens.get(tombstone.tokenId);
-  if (archivedToken) {
-    console.log(`    ♻️ Recovered from archived: ${tombstone.tokenId.slice(0, 8)}...`);
-    return archivedToken;
-  }
-
-  // Check forked tokens with exact state match
-  const forkedKey = `${tombstone.tokenId}_${tombstone.stateHash}`;
-  const forkedToken = ctx.forkedTokens.get(forkedKey);
-  if (forkedToken) {
-    console.log(`    ♻️ Recovered from forked: ${tombstone.tokenId.slice(0, 8)}... (state: ${tombstone.stateHash.slice(0, 12)}...)`);
-    return forkedToken;
-  }
-
-  console.log(`    ⚠️ Cannot recover token ${tombstone.tokenId.slice(0, 8)}... - not found in SyncContext archives`);
-  return null;
-}
+// NOTE: step7_5_verifyTombstones and related helpers (buildSentLookupMap, findMatchingProofForTombstone,
+// attemptTokenRecovery) have been removed as part of tombstone deprecation.
+// Tombstones are no longer created or verified - Sent folder provides spent state tracking.
+// Per design assumption: once an inclusion proof exists, the state is permanently spent (no rollbacks).
+// Note: Sent folder checks are implemented inline in ConflictResolutionService and IpfsStorageService
+// using efficient Set-based lookups for O(1) performance.
 
 async function step8_mergeInventory(ctx: SyncContext): Promise<void> {
   console.log(`📦 [Step 8] Merge Inventory`);
@@ -2319,47 +2037,37 @@ async function step8_mergeInventory(ctx: SyncContext): Promise<void> {
                            (expectedHash && currentStateHash === expectedHash);
 
         if (hashMatches) {
-          // Compute state hash for tombstone - use existing or compute for legacy tokens
-          // IMPORTANT: tokenId is NOT a valid fallback (causes tombstone verification to fail)
-          let tombstoneHash = currentStateHash;
-          if (!tombstoneHash) {
-            // Legacy token: compute final state hash using SDK
-            tombstoneHash = (await computeFinalStateHashCached(token)) ?? '';
-            if (tombstoneHash) {
-              console.log(`  📦 Computed stateHash for legacy token ${completed.tokenId.slice(0, 8)}...`);
-            }
+          // Get the SPENT state hash (the state BEFORE the transfer)
+          // The inclusion proof authenticates our spent state with:
+          //   RequestId.create(ourPubKey, spentStateHash)
+          let spentStateHash = '';
+
+          // Get from the last transaction's previousStateHash (the state we spent)
+          const lastTx = token.transactions?.[token.transactions.length - 1];
+          if (lastTx?.previousStateHash) {
+            spentStateHash = lastTx.previousStateHash;
+          } else if (lastTx?.inclusionProof?.authenticator?.stateHash) {
+            // Fallback to authenticator.stateHash (should equal previousStateHash)
+            spentStateHash = lastTx.inclusionProof.authenticator.stateHash;
+          } else if (!token.transactions || token.transactions.length === 0) {
+            // Genesis-only token: use genesis proof's stateHash
+            spentStateHash = token.genesis?.inclusionProof?.authenticator?.stateHash ?? '';
           }
 
-          // Skip tombstone creation if we couldn't compute a valid state hash
-          if (!tombstoneHash || !tombstoneHash.startsWith('0000')) {
-            console.warn(`  ⚠️ Cannot create tombstone for ${completed.tokenId.slice(0, 8)}...: invalid stateHash`);
-            // Still move to Sent folder (token was spent) but don't create invalid tombstone
-            ctx.sent.push({
-              token,
-              timestamp: Date.now(),
-              spentAt: Date.now(),
-            });
-            ctx.tokens.delete(completed.tokenId);
-            console.log(`  ✓ Moved ${completed.tokenId.slice(0, 8)}... to Sent (no tombstone)`);
-            continue;
+          // Legacy fallback
+          if (!spentStateHash) {
+            spentStateHash = token.genesis?.inclusionProof?.authenticator?.stateHash ?? '';
           }
 
-          // Move to Sent folder (include stateHash for tombstone verification lookup)
+          // Move to Sent folder (with stateHash for spent state lookup)
+          // Note: Tombstones are no longer created - Sent folder provides equivalent protection
           ctx.sent.push({
             token,
             timestamp: Date.now(),
             spentAt: Date.now(),
-            stateHash: tombstoneHash,
+            stateHash: spentStateHash || undefined,
           });
           ctx.tokens.delete(completed.tokenId);
-
-          // Add tombstone
-          ctx.tombstones.push({
-            tokenId: completed.tokenId,
-            stateHash: tombstoneHash,
-            timestamp: Date.now(),
-          });
-          ctx.stats.tombstonesAdded++;
 
           console.log(`  ✓ Marked ${completed.tokenId.slice(0, 8)}... as SPENT`);
         } else {
@@ -2953,7 +2661,6 @@ async function step8_6_recoverNametagInvalidatedTokens(ctx: SyncContext): Promis
 
           // Move to active inventory
           ctx.tokens.set(tokenId, recoveredTxf);
-          ctx.stats.tokensRecovered = (ctx.stats.tokensRecovered || 0) + 1;
           recovered++;
 
           // Track for removal from invalid list
@@ -3028,7 +2735,7 @@ function updateEmbeddedNametagProof(
 /**
  * Compare two TxfStorageData objects for content equality.
  * Ignores _meta.version and _meta.lastCid since those change every sync.
- * Returns true if content (tokens, nametags, tombstones, etc.) is identical.
+ * Returns true if content (tokens, nametags, sent, etc.) is identical.
  */
 function isContentEqual(a: TxfStorageData, b: TxfStorageData): boolean {
   // Compare nametag
@@ -3036,10 +2743,7 @@ function isContentEqual(a: TxfStorageData, b: TxfStorageData): boolean {
   const nametagB = JSON.stringify(b._nametag || null);
   if (nametagA !== nametagB) return false;
 
-  // Compare tombstones
-  const tombstonesA = JSON.stringify(a._tombstones || []);
-  const tombstonesB = JSON.stringify(b._tombstones || []);
-  if (tombstonesA !== tombstonesB) return false;
+  // Note: Tombstones are deprecated and no longer compared
 
   // Compare sent
   const sentA = JSON.stringify(a._sent || []);
@@ -3117,23 +2821,8 @@ function buildStorageDataFromContext(ctx: SyncContext): TxfStorageData {
     storageData._nametag = ctx.nametags[0];
   }
 
-  // Add tombstones - deduplicate by tokenId:stateHash to prevent duplicates
-  // Duplicates can accumulate from multiple sync cycles detecting the same spent token
-  if (ctx.tombstones.length > 0) {
-    const seenKeys = new Set<string>();
-    const deduped: TombstoneEntry[] = [];
-    for (const t of ctx.tombstones) {
-      const key = `${t.tokenId}:${t.stateHash}`;
-      if (!seenKeys.has(key)) {
-        seenKeys.add(key);
-        deduped.push(t);
-      }
-    }
-    storageData._tombstones = deduped;
-    if (deduped.length < ctx.tombstones.length) {
-      console.log(`  🧹 Deduplicated tombstones: ${ctx.tombstones.length} → ${deduped.length}`);
-    }
-  }
+  // Note: Tombstones are deprecated and no longer written to IPFS.
+  // The Sent folder now provides equivalent protection with complete inclusion proofs.
 
   // Add sent tokens - deduplicate by tokenId:stateHash to prevent duplicates
   // Uses getCurrentStateHash to get state from token structure
@@ -3276,7 +2965,7 @@ function step9_prepareStorage(ctx: SyncContext): void {
   }
 
   console.log(`  ✓ Wrote to localStorage: version=${storageData._meta.version}, ${ctx.tokens.size} tokens`);
-  console.log(`  ✓ Folders: ${ctx.sent.length} sent, ${ctx.invalid.length} invalid, ${ctx.tombstones.length} tombstones`);
+  console.log(`  ✓ Folders: ${ctx.sent.length} sent, ${ctx.invalid.length} invalid`);
 }
 
 async function step10_uploadIpfs(ctx: SyncContext): Promise<void> {
@@ -3338,8 +3027,7 @@ async function step10_uploadIpfs(ctx: SyncContext): Promise<void> {
   const tokenKeys = Object.keys(storageData).filter(k => isTokenKey(k));
   const tokenCount = tokenKeys.length;
   const sentCount = storageData._sent?.length || 0;
-  const tombstoneCount = storageData._tombstones?.length || 0;
-  console.log(`  📦 Upload payload: version=${storageData._meta?.version}, tokens=${tokenCount}, sent=${sentCount}, tombstones=${tombstoneCount}`);
+  console.log(`  📦 Upload payload: version=${storageData._meta?.version}, tokens=${tokenCount}, sent=${sentCount}`);
   // Log token IDs to help trace missing tokens (e.g., change tokens from splits)
   if (tokenCount <= 15) {
     const tokenIds = tokenKeys.map(k => tokenIdFromKey(k).slice(0, 8)).join(', ');
@@ -3477,7 +3165,6 @@ function buildInventoryStats(ctx: SyncContext): TokenInventoryStats {
     outboxTokens: ctx.outbox.length,
     invalidTokens: ctx.invalid.length,
     nametagTokens: ctx.nametags.length,
-    tombstoneCount: ctx.tombstones.length
   };
 }
 
@@ -3567,29 +3254,13 @@ export function getNametagForAddress(address: string): NametagData | null {
 
 /**
  * Get tombstones for an address
- * Read-only query - does not trigger sync
- * Supports both TxfStorageData format (new) and StoredWallet format (legacy)
+ * @deprecated Tombstones are deprecated - Sent folder now provides spent state tracking.
+ * This function is kept for backward compatibility but always returns an empty array.
  */
-export function getTombstonesForAddress(address: string): TombstoneEntry[] {
-  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
-  const storage = getInventoryStorage();
-  const json = storage.getItem(storageKey);
-  if (!json) return [];
-
-  try {
-    const data = JSON.parse(json) as Record<string, unknown>;
-    // Check new TxfStorageData format first (_tombstones)
-    if (data._tombstones && Array.isArray(data._tombstones)) {
-      return data._tombstones as TombstoneEntry[];
-    }
-    // Fall back to legacy StoredWallet format (tombstones)
-    if (data.tombstones && Array.isArray(data.tombstones)) {
-      return data.tombstones as TombstoneEntry[];
-    }
-    return [];
-  } catch {
-    return [];
-  }
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function getTombstonesForAddress(_address: string): TombstoneEntry[] {
+  // Tombstones deprecated - Sent folder provides spent state tracking
+  return [];
 }
 
 /**

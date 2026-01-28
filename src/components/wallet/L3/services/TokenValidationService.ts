@@ -994,7 +994,10 @@ export class TokenValidationService {
 
   /**
    * Check if a specific token state (tokenId + stateHash) was spent
-   * Used for tombstone verification (Step 7.5 in InventorySyncService)
+   *
+   * Note: This method was originally used for tombstone verification (Step 7.5).
+   * Tombstones have been deprecated - Sent folder now provides spent state tracking.
+   * This method is kept for potential future use cases.
    *
    * This queries the aggregator to determine if a specific state was consumed
    * by a subsequent transaction. Returns true if spent, false if unspent.
@@ -1039,7 +1042,7 @@ export class TokenValidationService {
 
     try {
       // Query aggregator using RequestId derived from publicKey + stateHash
-      // This approach works for tombstone verification where we only have tokenId + stateHash
+      // This approach works when we only have tokenId + stateHash (without full token)
       const { RequestId } = await import(
         "@unicitylabs/state-transition-sdk/lib/api/RequestId"
       );
@@ -1106,16 +1109,19 @@ export class TokenValidationService {
 
   /**
    * Verify an inclusion proof locally (no network call).
-   * Used for tombstone verification when we have the proof from the Sent folder.
+   *
+   * Note: This method was originally used for tombstone verification.
+   * Tombstones have been deprecated - Sent folder now provides spent state tracking.
+   * This method is kept for potential future local proof verification use cases.
    *
    * This performs cryptographic verification of the merkle path without
    * querying the aggregator, providing ~100x speedup over network calls.
    *
    * @param proof - The inclusion proof to verify
-   * @param expectedStateHash - The state hash the tombstone was created for
+   * @param expectedStateHash - The expected state hash
    * @param publicKey - The wallet's public key (hex string)
    * @param tokenId - The token ID (for cache key)
-   * @returns Promise<boolean> - true if proof is valid (state is spent), false otherwise
+   * @returns Promise<boolean> - true if proof is valid, false otherwise
    */
   async verifyInclusionProofLocally(
     proof: TxfInclusionProof,
@@ -1166,6 +1172,16 @@ export class TokenValidationService {
         requestId.toBitString().toBigInt()
       );
 
+      // DEBUG: Log verification details
+      console.log(`  🔍 [verifyLocal] Token ${tokenId.slice(0, 8)}...`, {
+        expectedStateHash: expectedStateHash.slice(0, 20) + '...',
+        proofAuthStateHash: proof.authenticator.stateHash.slice(0, 20) + '...',
+        publicKeyUsed: publicKey.slice(0, 16) + '...',
+        pathValid: pathResult.isPathValid,
+        pathIncluded: pathResult.isPathIncluded,
+        hasAuthenticator: sdkProof.authenticator !== null
+      });
+
       if (!pathResult.isPathValid) {
         // Invalid proof - merkle path doesn't verify
         console.warn(`⚠️ [verifyInclusionProofLocally] Invalid merkle path for ${tokenId.slice(0, 16)}...`);
@@ -1176,6 +1192,14 @@ export class TokenValidationService {
       // - Path included (pathResult.isPathIncluded = true)
       // - Authenticator present (proof.authenticator !== null)
       const isSpent = pathResult.isPathIncluded && sdkProof.authenticator !== null;
+
+      if (!isSpent && pathResult.isPathValid) {
+        // Path is valid but NOT included - RequestId doesn't match what's in the tree
+        console.warn(
+          `⚠️ [verifyInclusionProofLocally] Path valid but NOT included for ${tokenId.slice(0, 16)}... ` +
+          `(RequestId mismatch - likely wrong publicKey or stateHash)`
+        );
+      }
 
       if (isSpent) {
         // Cache the SPENT result (immutable)
@@ -1195,16 +1219,15 @@ export class TokenValidationService {
 
   /**
    * Check which tokens are NOT spent (unspent) on Unicity
-   * Used for sanity check when importing remote tombstones/missing tokens
+   * Used for sanity check when importing remote or missing tokens
    * Requires full TxfToken data for SDK-based verification
    * Returns array of tokenIds that are still valid/unspent
    *
    * NOTE: This now uses checkSingleTokenSpent internally to respect dev mode bypass
    *
    * @param options.treatErrorsAsUnspent - If true (default), network errors assume token is unspent.
-   *   Use false for tombstone recovery where errors should NOT restore tokens.
    *   - true: errors → assume unspent → for live tokens, safe (don't delete)
-   *   - false: errors → assume spent → for tombstones, safe (don't restore)
+   *   - false: errors → assume spent → safe (don't restore erroneously)
    */
   async checkUnspentTokens(
     tokens: Map<string, TxfToken>,
@@ -1257,7 +1280,7 @@ export class TokenValidationService {
             // Safe fallback for live tokens: assume unspent → don't delete
             unspentTokenIds.push(tokenId);
           }
-          // Safe fallback for tombstones: assume spent → don't restore (no action needed)
+          // If treatErrorsAsUnspent=false: assume spent (no action needed)
         } else if (!result.spent) {
           unspentTokenIds.push(tokenId);
         }
@@ -1268,7 +1291,7 @@ export class TokenValidationService {
           // Safe fallback for live tokens: assume unspent → don't delete
           unspentTokenIds.push(tokenId);
         }
-        // Safe fallback for tombstones: assume spent → don't restore (no action needed)
+        // If treatErrorsAsUnspent=false: assume spent (no action needed)
       }
     }
     return unspentTokenIds;

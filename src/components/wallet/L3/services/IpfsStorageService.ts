@@ -19,6 +19,7 @@ import {
   getTokensForAddress,
   getArchivedTokensForAddress,
   getTombstonesForAddress,
+  getSentTokensForAddress,
   getNametagForAddress,
   clearNametagForAddress,
 } from "./InventorySyncService";
@@ -3203,10 +3204,35 @@ export class IpfsStorageService implements IpfsTransport {
     // IMPORT/UPDATE TOKENS FROM REMOTE
     // ==========================================
 
-    // Build combined tombstone lookup (tokenId:stateHash -> true)
-    const allTombstoneKeys = new Set<string>();
-    for (const t of walletRepo.getTombstones()) {
-      allTombstoneKeys.add(`${t.tokenId}:${t.stateHash}`);
+    // Build Sent folder lookup (tokenId:stateHash -> true) for spent state detection
+    // Once an inclusion proof exists, the state is permanently spent (no rollbacks).
+    const walletAddress = walletRepo.getWallet()?.address ?? '';
+    const sentTokens = walletAddress ? getSentTokensForAddress(walletAddress) : [];
+    const spentStateKeys = new Set<string>();
+    for (const s of sentTokens) {
+      const tokenId = s.token?.genesis?.data?.tokenId;
+      if (!tokenId) continue;
+
+      // Add the explicitly stored stateHash
+      if (s.stateHash) {
+        spentStateKeys.add(`${tokenId}:${s.stateHash}`);
+      }
+
+      // Add all authenticator stateHashes from transactions
+      if (s.token?.transactions) {
+        for (const tx of s.token.transactions) {
+          const authHash = tx.inclusionProof?.authenticator?.stateHash;
+          if (authHash) {
+            spentStateKeys.add(`${tokenId}:${authHash}`);
+          }
+        }
+      }
+
+      // Add genesis authenticator stateHash
+      const genesisAuthHash = s.token?.genesis?.inclusionProof?.authenticator?.stateHash;
+      if (genesisAuthHash) {
+        spentStateKeys.add(`${tokenId}:${genesisAuthHash}`);
+      }
     }
 
     // Build local token map for comparison (re-get as they may have changed after restore)
@@ -3274,13 +3300,12 @@ export class IpfsStorageService implements IpfsTransport {
         }
       }
 
-      // Skip if this specific state is tombstoned
-      // Genesis-only tokens (stateHash undefined) can't be tombstoned since tombstones
-      // are created on transfer, and genesis-only tokens have never been transferred
+      // Skip if this specific state is in Sent folder (proven spent)
+      // Genesis-only tokens (stateHash undefined) can't be spent since they've never been transferred
       if (stateHash) {
-        const tombstoneKey = `${tokenId}:${stateHash}`;
-        if (allTombstoneKeys.has(tombstoneKey)) {
-          console.log(`📦 Skipping tombstoned token ${tokenId.slice(0, 8)}... state ${stateHash.slice(0, 8)}... from remote`);
+        const spentKey = `${tokenId}:${stateHash}`;
+        if (spentStateKeys.has(spentKey)) {
+          console.log(`📦 Skipping spent token ${tokenId.slice(0, 8)}... state ${stateHash.slice(0, 8)}... from remote`);
           continue;
         }
       }

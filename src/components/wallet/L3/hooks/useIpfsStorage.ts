@@ -137,7 +137,7 @@ export function useIpfsStorage() {
         }
 
         // CRITICAL: Validate restored tokens against aggregator to detect spent tokens
-        // that bypassed tombstone checks (e.g., tokens with different state hashes)
+        // that may be stale in the restored data (e.g., tokens with different state hashes)
         console.log(`📦 Running post-restore spent token validation...`);
         const validationService = getTokenValidationService();
         const allTokens = await getTokensForAddress(identity.address);
@@ -200,7 +200,7 @@ export function useIpfsStorage() {
         }
 
         // CRITICAL: Validate restored tokens against aggregator to detect spent tokens
-        // that bypassed tombstone checks (e.g., tokens with different state hashes)
+        // that may be stale in the restored data (e.g., tokens with different state hashes)
         console.log(`📦 Running post-restore spent token validation...`);
         const validationService = getTokenValidationService();
         const allTokens = await getTokensForAddress(identity.address);

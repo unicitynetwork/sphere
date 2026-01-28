@@ -59,7 +59,7 @@ describe("createDefaultSyncOperationStats", () => {
     expect(stats.tokensUpdated).toBe(0);
     expect(stats.conflictsResolved).toBe(0);
     expect(stats.tokensValidated).toBe(0);
-    expect(stats.tombstonesAdded).toBe(0);
+    // Note: tombstonesAdded removed - tombstones deprecated, Sent folder provides spent state tracking
   });
 
   it("should return a new object each time", () => {
@@ -71,13 +71,13 @@ describe("createDefaultSyncOperationStats", () => {
 
   it("should have all required fields", () => {
     const stats = createDefaultSyncOperationStats();
+    // Note: tombstonesAdded removed - tombstones deprecated, Sent folder provides spent state tracking
     const requiredFields: (keyof SyncOperationStats)[] = [
       "tokensImported",
       "tokensRemoved",
       "tokensUpdated",
       "conflictsResolved",
       "tokensValidated",
-      "tombstonesAdded",
     ];
     for (const field of requiredFields) {
       expect(stats).toHaveProperty(field);
@@ -97,7 +97,7 @@ describe("createDefaultTokenInventoryStats", () => {
     expect(stats.outboxTokens).toBe(0);
     expect(stats.invalidTokens).toBe(0);
     expect(stats.nametagTokens).toBe(0);
-    expect(stats.tombstoneCount).toBe(0);
+    // Note: tombstoneCount removed - tombstones deprecated, Sent folder provides spent state tracking
   });
 
   it("should return a new object each time", () => {
@@ -109,13 +109,13 @@ describe("createDefaultTokenInventoryStats", () => {
 
   it("should have all required fields per spec Section 3.1", () => {
     const stats = createDefaultTokenInventoryStats();
+    // Note: tombstoneCount removed - tombstones deprecated, Sent folder provides spent state tracking
     const requiredFields: (keyof TokenInventoryStats)[] = [
       "activeTokens",
       "sentTokens",
       "outboxTokens",
       "invalidTokens",
       "nametagTokens",
-      "tombstoneCount",
     ];
     for (const field of requiredFields) {
       expect(stats).toHaveProperty(field);

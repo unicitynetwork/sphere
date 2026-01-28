@@ -127,7 +127,7 @@ export interface SyncOperationStats {
   /** New tokens added from IPFS */
   tokensImported: number;
 
-  /** Tokens tombstoned/invalidated */
+  /** Tokens invalidated/moved to Sent folder */
   tokensRemoved: number;
 
   /** Existing tokens updated to newer state */
@@ -139,17 +139,11 @@ export interface SyncOperationStats {
   /** Tokens checked against aggregator (Step 7) */
   tokensValidated: number;
 
-  /** New tombstones created */
-  tombstonesAdded: number;
-
   /** Nametag bindings published to Nostr (Step 8.5) */
   nametagsPublished: number;
 
   /** Nametags recovered by re-submitting to aggregator (Step 8.5a) */
   nametagsRecovered?: number;
-
-  /** Tokens recovered from false tombstones (Step 7.5) */
-  tokensRecovered?: number;
 }
 
 /**
@@ -157,7 +151,6 @@ export interface SyncOperationStats {
  *
  * Note: Extends spec's tokenStats (Section 6.1) with additional fields:
  * - nametagTokens: Count of Unicity ID tokens (Section 3.1 Nametags folder)
- * - tombstoneCount: Total tombstone markers (Section 3.6 conflict resolution)
  */
 export interface TokenInventoryStats {
   /** ACTIVE status tokens (unspent, ready for transactions) */
@@ -174,9 +167,6 @@ export interface TokenInventoryStats {
 
   /** Nametag tokens (Unicity IDs) */
   nametagTokens: number;
-
-  /** Total tombstone markers */
-  tombstoneCount: number;
 }
 
 /**
@@ -276,7 +266,6 @@ export function createDefaultSyncOperationStats(): SyncOperationStats {
     tokensUpdated: 0,
     conflictsResolved: 0,
     tokensValidated: 0,
-    tombstonesAdded: 0,
     nametagsPublished: 0,
   };
 }
@@ -291,6 +280,5 @@ export function createDefaultTokenInventoryStats(): TokenInventoryStats {
     outboxTokens: 0,
     invalidTokens: 0,
     nametagTokens: 0,
-    tombstoneCount: 0,
   };
 }

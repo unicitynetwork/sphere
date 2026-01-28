@@ -848,7 +848,7 @@ describe("Token Inventory Sync Integration", () => {
       expect(sentEntry.token?.genesis?.data?.tokenId).toBe(spentTokenId);
     });
 
-    it("should add tombstone for spent token", async () => {
+    it("should add to Sent folder for spent token", async () => {
       const spentTokenId = "tomb1".padEnd(64, "0");
       const spentStateHash = "0000" + "a".repeat(60);
 
@@ -865,17 +865,18 @@ describe("Token Inventory Sync Integration", () => {
       const params = createBaseSyncParams();
       const result = await inventorySync(params);
 
-      expect(result.operationStats.tombstonesAdded).toBeGreaterThanOrEqual(1);
+      // Token should be moved to Sent folder (tombstones deprecated)
+      expect(result.inventoryStats?.sentTokens).toBeGreaterThanOrEqual(1);
 
-      // VERIFY: Tombstone in localStorage
+      // VERIFY: Token in Sent folder in localStorage
       const stored = getLocalStorage();
-      expect(stored?._tombstones?.length).toBeGreaterThanOrEqual(1);
+      expect(stored?._sent?.length).toBeGreaterThanOrEqual(1);
 
-      // VERIFY: Tombstone has correct tokenId and stateHash
-      const tombstone = stored?._tombstones?.find(t =>
-        t.tokenId === spentTokenId || t.tokenId?.includes("tomb1")
+      // VERIFY: Sent entry has correct tokenId
+      const sentEntry = stored?._sent?.find(s =>
+        s.token?.genesis?.data?.tokenId === spentTokenId || s.token?.genesis?.data?.tokenId?.includes("tomb1")
       );
-      expect(tombstone).toBeDefined();
+      expect(sentEntry).toBeDefined();
     });
   });
 });

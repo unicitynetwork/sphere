@@ -24,7 +24,8 @@ export interface NametagData {
 
 /**
  * Tombstone entry for tracking spent token states
- * Tracks both tokenId AND stateHash to allow same token to return with new state
+ * @deprecated Tombstones are deprecated - Sent folder now provides spent state tracking.
+ * This type is kept for backward compatibility when reading old IPFS data.
  */
 export interface TombstoneEntry {
   tokenId: string;    // 64-char hex token ID
@@ -71,12 +72,12 @@ export interface InvalidTokenEntry {
 
 /**
  * Complete storage data structure for IPFS
- * Contains metadata, nametag, tombstones, outbox, invalidated nametags, and all tokens keyed by their IDs
+ * Contains metadata, nametag, outbox, sent, and all tokens keyed by their IDs
  */
 export interface TxfStorageData {
   _meta: TxfMeta;
   _nametag?: NametagData;
-  _tombstones?: TombstoneEntry[];              // State-hash-aware tombstones (spent token states)
+  _tombstones?: TombstoneEntry[];              // @deprecated - kept for backward compat reading old IPFS data
   _invalidatedNametags?: InvalidatedNametagEntry[]; // Nametags that failed Nostr validation
   _outbox?: OutboxEntry[];                     // Pending transfers (CRITICAL for recovery)
   _mintOutbox?: MintOutboxEntry[];             // Pending mints (CRITICAL for recovery)

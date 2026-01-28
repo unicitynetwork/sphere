@@ -53,10 +53,13 @@ export type AggregatorErrorType =
 
 /**
  * Recovery action taken after error classification
- * - REMOVE_AND_TOMBSTONE: Token is invalid, deleted permanently
+ * - REMOVE_AND_TOMBSTONE: Token is spent, moved to Sent folder (legacy name kept for compatibility)
  * - REVERT_AND_KEEP: Reverted to committed state, token still valid
- * - REVERT_AND_TOMBSTONE: Reverted but sanity check found it spent
+ * - REVERT_AND_TOMBSTONE: Reverted but sanity check found it spent, moved to Sent folder
  * - NO_ACTION: No recovery action needed/possible
+ *
+ * Note: Tombstones are deprecated - Sent folder now tracks spent states.
+ * The action names are kept for backward compatibility.
  */
 export type FailureRecoveryAction =
   | "REMOVE_AND_TOMBSTONE"
@@ -73,7 +76,7 @@ export interface FailureRecoveryResult {
   tokenId: string;
   tokenRestored?: boolean;         // True if token was reverted and kept
   tokenRemoved?: boolean;          // True if token was removed
-  tombstoned?: boolean;            // True if tombstone was added
+  tombstoned?: boolean;            // True if token was marked as spent (moved to Sent folder)
   skippedDueToNetworkError?: boolean; // True if skipped due to network error
   error?: string;                  // Error message if recovery failed
 }
@@ -794,12 +797,13 @@ export class TokenRecoveryService {
   }
 
   /**
-   * Remove a token and add tombstone for its current state
+   * Remove a spent token (moves to Sent folder)
+   * Note: Tombstones are no longer created - Sent folder provides equivalent protection.
    */
   private async removeAndTombstoneToken(token: Token): Promise<FailureRecoveryResult> {
     const tokenId = token.id;
 
-    console.log(`📦 Recovery: Removing spent token ${tokenId.slice(0, 8)}... and adding tombstone`);
+    console.log(`📦 Recovery: Removing spent token ${tokenId.slice(0, 8)}... (moving to Sent folder)`);
 
     // Get identity context
     const identity = await this.identityManager.getCurrentIdentity();
