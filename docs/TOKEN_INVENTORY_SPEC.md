@@ -1,7 +1,14 @@
 # Token Inventory Management Specification
 
-**Version:** 3.5
-**Last Updated:** 2026-01-28
+**Version:** 3.6
+**Last Updated:** 2026-01-30
+
+> **v3.6 Changes:** INSTANT_SPLIT mode for fast token splits:
+> - Section 2: New terminology (SplitCommitmentBundle, INSTANT_SPLIT Mode)
+> - Section 15: NEW - INSTANT_SPLIT Mode (fast token splits with deferred proof acquisition)
+> - Reduces split latency from ~42s to ~2-3s by applying INSTANT_SEND pattern
+> - Recipients submit commitments and fetch proofs in background
+> - Change token self-received via Nostr for uniform handling and recovery
 
 > **v3.5 Changes:** Instant token transfers and sender recovery:
 > - Section 2: New terminology (Unconfirmed Balance, INSTANT modes, Payment Session, Sender Recovery)
@@ -81,6 +88,8 @@
 | **Payment Session** | Transient tracking structure for specific token transfers to determine per-transfer success |
 | **Sender Recovery** | Process of retrieving sent tokens from Nostr relay using sender's own pubkey as author filter |
 | **Deferred Proof Acquisition** | Pattern where recipients (not senders) fetch their own inclusion proofs |
+| **INSTANT_SPLIT Mode** | Sync mode for split operations: create all commitments upfront, deliver via Nostr, recipients submit commitments and fetch proofs in background |
+| **SplitCommitmentBundle** | Package containing burn + mint commitments for split operation, sent via Nostr for recipient-side proof acquisition |
 
 ---
 
@@ -1893,6 +1902,789 @@ Sender recovery should be triggered:
 - Use pagination (`limit`) for large result sets
 - Cache already-processed event IDs to avoid re-processing
 - Run recovery in background to avoid blocking UI
+
+---
+
+## 15. INSTANT_SPLIT Mode
+
+### 15.1 Overview and Motivation
+
+**Problem:** Standard token splits require 4 sequential blocking aggregator calls:
+1. Submit burn commitment → wait for inclusion proof (~10s)
+2. Submit mint commitment (recipient) → wait for inclusion proof (~10s)
+3. Submit mint commitment (change) → wait for inclusion proof (~10s)
+4. Nostr delivery of finalized tokens
+
+Total critical path: ~42 seconds for a simple split operation.
+
+**SDK Constraint:** The Unicity SDK requires the burn inclusion proof before mint commitments can be created (`createSplitMintCommitments` depends on `BurnTransaction`). Additionally, `MintCommitment` lacks `toJSON/fromJSON` methods, preventing serialization for Nostr transport. These constraints prevent a fully deferred approach.
+
+**Solution (INSTANT_SPLIT_LITE):** Optimize the split by:
+1. **Parallelize mint submissions** - Submit both mints simultaneously instead of sequentially
+2. **Apply INSTANT_SEND to final transfer** - Send payment token via Nostr immediately after mint proofs, let recipient fetch transfer proof in background
+3. **Background IPFS sync** - Defer IPFS persistence off the critical path
+
+**Performance:**
+- Standard split: ~42 seconds (4 sequential waits)
+- INSTANT_SPLIT: ~4-5 seconds (burn + parallel mints + instant send)
+- **Improvement: 10x faster**
+
+**Why Not Full Deferred?**
+- `createSplitMintCommitments()` requires `BurnTransaction` (with proof) as input
+- `MintCommitment` cannot be serialized for transport (no `toJSON/fromJSON`)
+- These are SDK architecture constraints, not implementation issues
+
+**Benefits:**
+- Critical path: 4-5 seconds (90% reduction)
+- Same security model as standard split (burn proof validates split)
+- Payment token delivered instantly via Nostr
+- Background proof acquisition for transfer only
+
+### 15.2 Split Operation Structure
+
+A split operation consists of three phases, where only the transfer phase can be deferred.
+
+```typescript
+interface InstantSplitOperation {
+  // Unique identifier for this split operation
+  splitGroupId: string;
+
+  // Phase 1: Burn (MUST be confirmed before mints)
+  burn: {
+    commitment: TransferCommitment;
+    proof: InclusionProof;
+    transaction: TransferTransaction;
+  };
+
+  // Phase 2: Mints (can be parallel after burn confirms)
+  mints: [
+    {
+      role: 'PAYMENT';
+      commitment: MintCommitment;
+      proof: InclusionProof;
+      token: Token;  // Fully minted with proof
+      recipientAddress: string;
+    },
+    {
+      role: 'CHANGE';
+      commitment: MintCommitment;
+      proof: InclusionProof;
+      token: Token;  // Fully minted with proof
+      recipientAddress: string;  // Sender's own address
+    }
+  ];
+
+  // Phase 3: Transfer (INSTANT_SEND - Nostr first, proof background)
+  transfer: {
+    commitment: TransferCommitment;
+    nostrEventId?: string;  // Set immediately
+    proof?: InclusionProof; // Fetched in background
+  };
+
+  // Metadata
+  createdAt: number;
+  paymentSessionId?: string;
+}
+```
+
+**Critical Properties:**
+- Burn proof REQUIRED before mints can be created (SDK constraint)
+- Mint proofs REQUIRED before transfer can be created (token must be valid)
+- Only transfer proof can be deferred (recipient fetches via INSTANT_SEND pattern)
+- Salt values MUST be persisted (cannot be reproduced after creation)
+
+### 15.3 Sender Flow
+
+The sender executes burn and mints, then applies INSTANT_SEND to the transfer.
+
+```mermaid
+sequenceDiagram
+    participant UI as User Interface
+    participant Sender as Sender Service
+    participant Agg as Aggregator
+    participant Nostr as Nostr Relay
+
+    UI->>Sender: splitToken(sourceToken, amount, recipientAddr)
+
+    Note over Sender,Agg: Phase 1: Burn (Required - SDK constraint)
+    Sender->>Agg: submitBurnCommitment()
+    Agg-->>Sender: requestId
+    Sender->>Agg: waitInclusionProof(burnRequestId)
+    Agg-->>Sender: burnProof (~2s)
+
+    Note over Sender,Agg: Phase 2: Parallel Mints (Optimized)
+    par Submit Mints in Parallel
+        Sender->>Agg: submitMintCommitment(payment)
+    and
+        Sender->>Agg: submitMintCommitment(change)
+    end
+    par Fetch Proofs in Parallel
+        Agg-->>Sender: paymentMintProof
+    and
+        Agg-->>Sender: changeMintProof
+    end
+    Note over Sender: (~2s for parallel mints)
+
+    Note over Sender,Nostr: Phase 3: INSTANT_SEND Transfer (Fast!)
+    Sender->>Sender: Create transfer commitment
+    Sender->>Nostr: Send paymentToken + transferCommitment
+    Nostr-->>Sender: ack
+    Sender-->>UI: Split complete (~4-5s total)
+
+    Note over Sender,Agg: Phase 4: Background (No UI blocking)
+    Sender->>Agg: submitTransferCommitment()
+    Sender->>Sender: Save changeToken to Active folder
+    Sender->>Sender: Sync to IPFS
+```
+
+**Implementation Steps:**
+
+**1) Validation:**
+- Verify source token is unspent
+- Verify sufficient balance (amount ≤ sourceToken.value)
+- Verify recipient address is valid
+
+**2) Burn Phase (Required - SDK constraint):**
+```typescript
+const splitGroupId = generateSplitGroupId();
+
+// Create and submit burn commitment
+const burnCommitment = await split.createBurnCommitment(burnSalt, signingService);
+await client.submitTransferCommitment(burnCommitment);
+
+// Wait for burn proof (~2s) - REQUIRED before mints can be created
+const burnProof = await waitInclusionProof(burnCommitment.requestId);
+const burnTransaction = burnCommitment.toTransaction(burnProof);
+```
+
+**3) Parallel Mints Phase (Optimized from 4s to 2s):**
+```typescript
+// Create mint commitments (requires burn transaction)
+const mintCommitments = await split.createSplitMintCommitments(
+  trustBase,
+  burnTransaction  // SDK REQUIRES burn proof for this call
+);
+
+// Submit mints in PARALLEL (not sequential!)
+await Promise.all(
+  mintCommitments.map(c => client.submitMintCommitment(c))
+);
+
+// Fetch proofs in PARALLEL
+const mintProofs = await Promise.all(
+  mintCommitments.map(c => waitInclusionProof(c.requestId))
+);
+
+// Reconstruct tokens with proofs
+const [paymentToken, changeToken] = await Promise.all([
+  createAndVerifyToken(mintCommitments[0], mintProofs[0]),
+  createAndVerifyToken(mintCommitments[1], mintProofs[1])
+]);
+```
+
+**4) INSTANT_SEND Transfer (Fast!):**
+```typescript
+// Create transfer commitment for payment token
+const transferCommitment = await TransferCommitment.create(
+  paymentToken,
+  recipientAddress,
+  transferSalt,
+  null, null,
+  signingService
+);
+
+// Send via Nostr IMMEDIATELY (don't wait for transfer proof)
+// This is exactly the INSTANT_SEND pattern from Section 7.2
+await nostrService.sendInstantSendToken({
+  token: paymentToken,              // Fully minted with proof
+  commitment: transferCommitment,   // TransferCommitment (serializable!)
+  recipientPubkey: recipientNostrPubkey
+});
+
+// CRITICAL: Save change token to sender's Active folder BEFORE returning
+await saveChangeTokenToLocalStorage(changeToken);
+```
+
+**5) Critical Path Complete:**
+- Return success to UI (~4-5s elapsed)
+- Source token status: SPENT (moved to Sent folder)
+- Change token status: ACTIVE (in sender's Active folder)
+- Payment token status: SENT via Nostr (tracked in outbox)
+
+**6) Background Processing (No UI blocking):**
+```typescript
+// Fire-and-forget transfer submission
+client.submitTransferCommitment(transferCommitment).catch(err => {
+  // Log error but don't fail - recipient will submit
+  console.error('Background transfer submission failed:', err);
+});
+
+// Sync to IPFS in background
+inventorySync({ mode: 'FAST' });  // Skip spent detection for speed
+```
+
+### 15.4 Recipient Flow
+
+Recipients receive a **fully minted token** with a transfer commitment (same as INSTANT_SEND). They only need to fetch the transfer proof.
+
+**Key Insight:** Unlike the original INSTANT_SPLIT proposal, recipients do NOT need to submit burn/mint commitments - the sender already did that and waited for those proofs.
+
+```mermaid
+sequenceDiagram
+    participant Nostr as Nostr Relay
+    participant Receiver as Receiver Service
+    participant Agg as Aggregator
+    participant Store as localStorage
+
+    Nostr->>Receiver: InstantSendPayload (token + transferCommitment)
+
+    Note over Receiver: Phase 1: Immediate Receipt
+    Receiver->>Receiver: Decrypt payload
+    Receiver->>Receiver: Validate token structure (already has mint proof!)
+    Receiver->>Store: Save to localStorage (Active folder)
+    Receiver->>Receiver: Trigger wallet-updated event
+    Receiver-->>Nostr: Delete event (acknowledged)
+
+    Note over Receiver: User sees token immediately!
+
+    Note over Receiver,Agg: Phase 2: Background Transfer Proof
+    Receiver->>Agg: submitTransferCommitment() (idempotent)
+    Agg-->>Receiver: requestId or REQUEST_ID_EXISTS
+    Receiver->>Agg: getInclusionProof(transferRequestId)
+    Agg-->>Receiver: transferProof
+
+    Receiver->>Receiver: Attach transfer proof to token
+    Receiver->>Store: Update token (now fully confirmed)
+    Receiver->>Receiver: Trigger wallet-updated event
+
+    Note over Receiver: Token now confirmed and spendable
+```
+
+**Implementation:**
+
+This follows the **exact same INSTANT_RECEIVE pattern from Section 7.1**. The recipient:
+1. Receives token via Nostr (already has valid mint proof from sender)
+2. Saves to localStorage immediately (visible to user)
+3. Submits transfer commitment (idempotent - may already be submitted by sender)
+4. Fetches transfer proof in background
+5. Token becomes fully confirmed and spendable
+
+**Code:**
+```typescript
+// Handled by existing receiveTokensToInventoryLoop (Section 7.1)
+// No special handling needed - token is already minted!
+  token: paymentToken,
+  commitmentBundle: {
+    burn: burnCommitment,
+    mint: mintCommitment1
+### 15.5 Change Token Handling
+
+With the revised INSTANT_SPLIT_LITE approach, the change token is handled **locally** by the sender:
+
+**Approach:**
+- Change token is minted with proof during Phase 2 (parallel mints)
+- Saved directly to sender's Active folder (no Nostr round-trip)
+- Synced to IPFS in background
+
+**Rationale:**
+- Change token doesn't need to be "sent" anywhere (it stays with sender)
+- Avoiding Nostr self-send saves ~200ms on critical path
+- Recovery handled by existing IPFS version chain (Section 6.4 RECOVERY mode)
+
+**Flow:**
+1. Sender creates both mint commitments (payment + change)
+2. Both mints submitted and proofs fetched in parallel (~2s)
+3. Change token saved directly to sender's Active folder
+4. Payment token sent via INSTANT_SEND to recipient
+5. IPFS sync persists change token in background
+
+### 15.6 Recovery Mechanisms
+
+#### 15.6.1 Sender Recovery
+
+With INSTANT_SPLIT_LITE, sender recovery uses **existing infrastructure**:
+
+**Payment Token Recovery:**
+- Uses existing Sender Recovery Service (Section 14)
+- Queries Nostr for sent events: `{ authors: [myPubkey], kinds: [TOKEN_TRANSFER] }`
+- Recovers payment token data and adds to Sent folder
+- **No special handling needed** - same as INSTANT_SEND recovery
+
+**Change Token Recovery:**
+- Uses existing IPFS RECOVERY mode (Section 6.4)
+- Traverses IPFS version chain to find change token
+- **No special handling needed** - change token is just a regular Active token
+
+**Implementation:** No new code required - existing services handle both scenarios.
+
+#### 15.6.2 Recipient Recovery
+
+Recipient recovery for INSTANT_SPLIT is **identical to INSTANT_SEND recovery**:
+
+**Recovery Path:**
+1. Token saved to localStorage immediately on receipt
+2. If browser crashes before transfer proof fetched:
+   - Token persists in localStorage with `pendingProof: true`
+   - On restart: `receiveTokensToInventoryLoop` detects pending proofs
+   - Fetches transfer proof and updates token
+
+**Implementation:** No new code required - existing INSTANT_RECEIVE handling (Section 7.1) covers this.
+
+#### 15.6.3 Split Burn Recovery
+
+If burn succeeds but BOTH mints fail (rare, per Section 13.25):
+
+**Recovery Path:**
+1. Detect both mint commitments failed after 10 retries
+2. Verify burn was included (fetch proof from aggregator)
+3. Create recovery mint to sender for total value
+4. User notification: "Split failed - tokens recovered to wallet"
+
+**Note:** This uses existing Split Burn Recovery (Section 13.25) - no changes needed for INSTANT_SPLIT.
+
+#### 15.6.4 Partial Mint Failure
+
+If one mint succeeds but other fails:
+
+**Scenario A: Payment mint succeeds, change mint fails**
+- Payment token sent via INSTANT_SEND to recipient
+- Recovery mint created for change amount
+- Sender notified: "Split completed, change recovery in progress"
+
+**Scenario B: Payment mint fails, change mint succeeds**
+- Change token saved to sender's Active folder
+- Recovery mint created for payment amount (to sender)
+- Sender must manually re-send to recipient
+- User notified: "Split failed - payment returned to wallet"
+
+**Implementation:**
+```typescript
+async function handlePartialMintFailure(
+  successfulMint: MintCommitment,
+  failedMint: MintCommitment,
+  failedRole: 'PAYMENT' | 'CHANGE'
+): Promise<void> {
+  // Create recovery mint for failed amount
+  const recoveryMint = await createRecoveryMint(
+    failedMint.amount,
+    senderAddress  // Always recover to sender
+  );
+
+  await client.submitMintCommitment(recoveryMint);
+  const proof = await waitInclusionProof(recoveryMint.requestId);
+
+  // Save recovered token
+  await saveToActive(recoveryMint.token, proof);
+
+  if (failedRole === 'PAYMENT') {
+    notifyUser('Split failed - payment returned to wallet. Please retry.');
+  } else {
+    notifyUser('Split completed with change recovery.');
+  }
+}
+```
+
+### 15.7 Error Handling
+
+#### 15.7.1 Pre-Flight Validation Failures
+
+**Before burn submission**, if validation fails:
+
+| Error | Action |
+|-------|--------|
+| Source token already spent | Return error immediately |
+| Insufficient balance | Return error immediately |
+| Invalid recipient address | Return error immediately |
+| SDK commitment creation fails | Return error immediately |
+
+**Result:** Clean failure, no partial state persisted.
+
+#### 15.7.2 Burn Phase Failures
+
+| Error | Action |
+|-------|--------|
+| Aggregator unreachable | Retry with exponential backoff (max 10 retries) |
+| Burn commitment rejected | Return error to user - cannot proceed |
+| Proof timeout (60s) | Retry proof fetch - commitment may still be processing |
+
+**Note:** If burn fails, no value is lost - source token remains in Active folder.
+
+#### 15.7.3 Mint Phase Failures
+
+| Error | Action |
+|-------|--------|
+| One mint fails, one succeeds | Create recovery mint for failed amount |
+| Both mints fail | Create single recovery mint for total value |
+| Proof timeout | Retry with unlimited backoff - mints are already submitted |
+
+**Note:** Per Section 13.25, split burn recovery ensures no value loss.
+
+#### 15.7.4 Transfer Phase Failures (INSTANT_SEND)
+
+| Error | Action |
+|-------|--------|
+| Nostr delivery fails | Retry in background (payment token already minted) |
+| Transfer submission fails | Recipient can submit (idempotent) |
+| Transfer proof timeout | Recipient fetches in background |
+**Critical Insight:** With INSTANT_SPLIT_LITE, only the transfer uses INSTANT_SEND pattern. Burn and mints are fully completed by sender before Nostr delivery.
+
+### 15.8 PaymentSession Extensions for Splits
+
+PaymentSession tracking (Section 7.3) extends to support split operations.
+
+```typescript
+interface SplitPaymentSession extends PaymentSession {
+  type: 'INSTANT_SPLIT';
+
+  // Split-specific tracking
+  splitGroupId: string;
+
+  // Phase tracking
+  phases: {
+    burn: 'PENDING' | 'SUBMITTED' | 'CONFIRMED' | 'FAILED';
+    mints: 'PENDING' | 'SUBMITTED' | 'CONFIRMED' | 'PARTIAL' | 'FAILED';
+    transfer: 'PENDING' | 'NOSTR_DELIVERED' | 'CONFIRMED' | 'FAILED';
+  };
+
+  // Timing for performance monitoring
+  timing: {
+    burnStartedAt?: number;
+    burnConfirmedAt?: number;
+    mintsStartedAt?: number;
+    mintsConfirmedAt?: number;
+    nostrDeliveredAt?: number;
+  };
+}
+```
+
+**Progress Display:**
+```typescript
+// UI progress: "Split: Burning... / Minting (2/2)... / Sending..."
+function getSplitProgress(session: SplitPaymentSession): string {
+  if (session.phases.burn !== 'CONFIRMED') {
+    return 'Burning token...';
+  }
+  if (session.phases.mints !== 'CONFIRMED') {
+    return 'Minting new tokens...';
+  }
+  if (session.phases.transfer !== 'NOSTR_DELIVERED') {
+    return 'Sending to recipient...';
+  }
+  return 'Complete!';
+}
+```
+
+**Completion Criteria:**
+```typescript
+// Session complete when payment token delivered via Nostr
+function isSplitSessionComplete(session: SplitPaymentSession): boolean {
+  return session.phases.transfer === 'NOSTR_DELIVERED' ||
+         session.phases.transfer === 'CONFIRMED';
+}
+
+// User sees "Transfer complete" after ~4-5s
+// Background transfer proof continues
+```
+
+### 15.9 Nostr Message Format
+
+Since INSTANT_SPLIT_LITE uses the **standard INSTANT_SEND pattern** for the transfer phase, no new Nostr event types are needed. The payment token is sent using the existing `TOKEN_TRANSFER` event (kind 21065).
+
+**Why No Special Split Event:**
+- Payment token is fully minted with proof before Nostr delivery
+- Recipient receives a complete, valid token (same as any INSTANT_SEND)
+- Recipient only needs to fetch transfer proof (same as INSTANT_SEND)
+- No burn/mint commitments sent to recipient (sender already confirmed those)
+
+**Event Structure:** Same as Section 7.2 (INSTANT_SEND):
+```json
+{
+  "kind": 21065,
+  "pubkey": "<sender_nostr_pubkey>",
+  "created_at": 1234567890,
+  "tags": [
+    ["p", "<recipient_nostr_pubkey>"]
+  ],
+  "content": "<encrypted_TokenTransferPayload>"
+}
+```
+
+**TokenTransferPayload:** Contains fully minted token + transfer commitment (same as any INSTANT_SEND).
+
+### 15.10 State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> Validating: User initiates split
+
+    Validating --> BurnPhase: Validation passed
+    Validating --> Failed: Validation failed
+
+    BurnPhase --> BurnSubmitted: Commitment submitted
+    BurnSubmitted --> BurnConfirmed: Proof received (~2s)
+    BurnSubmitted --> Failed: Burn rejected
+
+    BurnConfirmed --> MintPhase: Create mint commitments
+
+    MintPhase --> MintsSubmitted: Both mints submitted (parallel)
+    MintsSubmitted --> MintsConfirmed: Both proofs received (~2s)
+    MintsSubmitted --> PartialMint: One mint failed
+
+    MintsConfirmed --> TransferPhase: Create transfer commitment
+
+    TransferPhase --> NostrDelivered: Payment sent via Nostr
+    NostrDelivered --> Completed: Critical path done (~4-5s total)
+
+    PartialMint --> RecoveryMint: Create recovery mint
+    RecoveryMint --> PartialRecovery: Value recovered
+
+    Completed --> [*]
+    PartialRecovery --> [*]
+    Failed --> [*]
+
+    note right of MintsSubmitted
+        Parallel mint submissions
+        (not sequential)
+    end note
+
+    note right of NostrDelivered
+        Critical path ends here
+        Background: transfer proof
+    end note
+```
+
+### 15.11 Implementation Changes
+
+#### 15.11.1 TokenSplitExecutor Modifications
+
+Add `instant` option to `executeSplitPlan()`:
+
+```typescript
+async executeSplitPlan(
+  plan: SplitPlan,
+  recipientAddress: IAddress,
+  signingService: SigningService,
+  onTokenBurned: (uiId: string) => void,
+  outboxContext?: OutboxContext,
+  persistenceCallbacks?: SplitPersistenceCallbacks,
+  options?: { instant?: boolean }  // NEW
+): Promise<SplitTokenResult>
+```
+
+#### 15.11.2 Key Code Changes
+
+**Parallelize mint submissions (currently sequential):**
+```typescript
+// BEFORE (sequential - ~4s total):
+for (const mint of mintCommitments) {
+  await client.submitMintCommitment(mint);
+  const proof = await waitInclusionProof(mint.requestId);
+}
+
+// AFTER (parallel - ~2s total):
+await Promise.all(
+  mintCommitments.map(c => client.submitMintCommitment(c))
+);
+const mintProofs = await Promise.all(
+  mintCommitments.map(c => waitInclusionProof(c.requestId))
+);
+```
+
+**Apply INSTANT_SEND to transfer phase:**
+```typescript
+// Instead of waiting for transfer proof before Nostr delivery:
+const transferCommitment = await TransferCommitment.create(
+  paymentToken,
+  recipientAddress,
+  transferSalt,
+  null, null,
+  signingService
+);
+
+// Send via Nostr IMMEDIATELY (don't wait for transfer proof)
+await nostrService.sendInstantSendToken({
+  token: paymentToken,              // Fully minted with proof
+  commitment: transferCommitment,   // TransferCommitment (serializable!)
+  recipientPubkey: recipientNostrPubkey
+});
+
+// Background: submit transfer and fetch proof
+backgroundQueue.add(async () => {
+  await client.submitTransferCommitment(transferCommitment);
+  const proof = await waitInclusionProof(transferCommitment.requestId);
+  await updateTokenWithTransferProof(paymentTokenId, proof);
+});
+```
+
+### 15.12 Performance Characteristics
+
+#### 15.12.1 Standard Split vs INSTANT_SPLIT_LITE
+
+| Metric | Standard Split | INSTANT_SPLIT_LITE | Improvement |
+|--------|---------------|-------------------|-------------|
+| **Critical Path** | ~42s | ~4-5s | **~10x faster** |
+| Burn submission + proof | ~2s | ~2s | Same (required) |
+| Mint submissions (parallel) | ~4s sequential | ~2s parallel | **2x faster** |
+| Transfer submission + proof | ~2s | 0s (background) | **Eliminated** |
+| Nostr delivery | ~2s | ~0.5s | Same |
+| IPFS persistence | ~4-5s | 0s (deferred) | **Skipped** |
+| **User wait time** | ~42s | ~4-5s | **~10x faster** |
+
+**Note:** Due to SDK constraints, burn proof is required before creating mint commitments. The ~4-5s critical path is the practical minimum achievable.
+
+#### 15.12.2 Background Processing
+
+| Phase | Duration | User Impact |
+|-------|----------|-------------|
+| Transfer proof | ~2s | Background, no UI block |
+| IPFS sync | ~4-5s | Background, no impact |
+| **Total background** | ~6-7s | Zero UI blocking |
+
+### 15.13 Security Considerations
+
+#### 15.13.1 Commitment Integrity
+
+**Threat:** Attacker modifies commitments in transit via Nostr.
+
+**Mitigation:**
+- Commitments are cryptographically signed by sender
+- Aggregator validates authenticator signature on submission
+- Modified commitments will be rejected by aggregator
+- Recipient cannot spend tokens without valid inclusion proofs
+
+**Result:** No additional risk vs standard split.
+
+#### 15.13.2 Nostr Relay Censorship
+
+**Threat:** Nostr relay refuses to deliver split events.
+
+**Mitigation:**
+- Same as INSTANT_SEND (Section 13.6)
+- Retry with exponential backoff
+- After 24 hours: mark FAILED, notify user
+- User can manually retry or contact recipient to pull from IPFS
+
+**Result:** Same risk model as INSTANT_SEND.
+
+#### 15.13.3 Double-Spend Prevention
+
+**Threat:** Sender initiates two splits of the same token simultaneously.
+
+**Mitigation:**
+- Source token marked as SPENT in sender's inventory immediately when burn submitted
+- Burn proof acquired BEFORE mint commitments can be created (SDK constraint)
+- First burn to reach aggregator wins - second burn rejected
+- UI prevents selecting tokens with pending split operations
+
+**Result:** SDK constraints naturally prevent double-spend at sender side.
+
+#### 15.13.4 Transfer Phase Race Condition
+
+**Threat:** Sender delivers payment token via Nostr, then tries to spend it themselves.
+
+**Mitigation:** Same as INSTANT_SEND (Section 13.6.3):
+- Payment token marked as SENT in sender's inventory after Nostr delivery
+- Recipient submits transfer commitment to aggregator (background)
+- First transfer commitment wins - double-spend rejected
+
+### 15.14 Edge Cases
+
+#### 15.14.1 INSTANT_SPLIT During Network Partition
+
+**Scenario:** Payment delivered via Nostr, then network partitions before change delivery.
+
+**Resolution:**
+1. Outbox entry status: INSTANT_SPLIT_PARTIAL
+2. On network recovery: resume change delivery
+3. Retry with exponential backoff (max 60s interval)
+4. After 24 hours: mark change delivery FAILED
+5. User notification: "Payment sent successfully, change token pending"
+6. Change token persisted in outbox - will be recovered on next sync
+
+#### 15.14.2 Recipient Offline During Split
+
+**Scenario:** Sender sends INSTANT_SPLIT_LITE, recipient offline for 48 hours.
+
+**Resolution:**
+1. Nostr relay buffers events (relay-dependent, typically 7-30 days)
+2. When recipient comes online: receiveTokensToInventoryLoop fetches buffered events
+3. Recipient receives fully minted payment token (same as INSTANT_SEND)
+4. Background: fetch transfer proof (if sender didn't complete it)
+5. No special handling required
+
+**Note:** If relay deletes events before recipient retrieves them, tokens are lost (same risk as INSTANT_SEND).
+
+#### 15.14.3 Change Amount Zero
+
+**Scenario:** Split amount exactly equals source token value (no change).
+
+**Resolution:**
+1. Detect change amount === 0 during validation
+2. Skip change token creation and delivery entirely
+3. Only burn + 1 mint commitment needed (payment only)
+4. Degenerates to INSTANT_SEND pattern (Section 7.2)
+
+**Implementation:**
+```typescript
+if (changeAmount === 0n) {
+  return await createDirectTransfer({
+    sourceToken,
+    amount: paymentAmount,
+    recipient: recipientAddress,
+    instant: true
+  });
+}
+```
+
+#### 15.14.4 Duplicate Split Detection
+
+**Scenario:** Nostr relay delivers same InstantSplitPayload twice (event replay).
+
+**Resolution:**
+1. Deduplication by splitGroupId (similar to Section 13.15 event deduplication)
+2. Check localStorage: if token with same tokenId:stateHash exists, skip
+3. If outbox entry with same splitGroupId exists, skip
+4. Log: "Skipping duplicate split event: {splitGroupId}"
+
+### 15.15 Implementation Checklist
+
+**Phase 1: Parallel Mint Optimization**
+- [ ] Refactor `TokenSplitExecutor.executeSplitPlan()` to submit mints in parallel
+- [ ] Update `Promise.all()` pattern for mint submissions
+- [ ] Update `Promise.all()` pattern for mint proof fetching
+- [ ] Measure performance improvement (target: 4s → 2s for mints)
+
+**Phase 2: INSTANT_SEND Integration for Transfer Phase**
+- [ ] Add `instant` option to `executeSplitPlan()` signature
+- [ ] Apply `INSTANT_SEND` mode for payment token transfer
+- [ ] Skip waiting for transfer proof before Nostr delivery
+- [ ] Queue background transfer proof acquisition
+- [ ] Update recipient to handle payment token same as INSTANT_SEND
+
+**Phase 3: SplitPaymentSession Tracking**
+- [ ] `SplitPaymentSession` type definition
+- [ ] Phase tracking: burn → mints → transfer
+- [ ] Progress callbacks for UI updates
+- [ ] Timing metrics collection
+
+**Phase 4: Recovery Mechanisms**
+- [ ] Extend `OutboxRecoveryService` for partial split recovery
+- [ ] Handle mint failure with recovery mint
+- [ ] Handle transfer delivery failure with retry
+- [ ] Outbox entry schema update for split state
+
+**Phase 5: Edge Cases**
+- [ ] Zero change amount (degenerate to INSTANT_SEND)
+- [ ] Partial mint failure recovery
+- [ ] Network partition during transfer phase
+- [ ] IPFS sync failure handling
+
+**Phase 6: Testing**
+- [ ] Unit tests for commitment creation
+- [ ] Integration tests for Nostr delivery
+- [ ] E2E tests for full split flow
+- [ ] Recovery scenario tests
+- [ ] Performance benchmarks
 
 ---
 

@@ -42,6 +42,8 @@ interface SplitTokenResult {
   outboxEntryId?: string;
   /** Split group ID for recovery (if outbox enabled) */
   splitGroupId?: string;
+  /** True if Nostr delivery was done in INSTANT mode (caller should skip redundant delivery) */
+  nostrDelivered?: boolean;
 }
 
 /**
@@ -123,7 +125,9 @@ export class TokenSplitExecutor {
       ownerPublicKey: string;
     },
     /** Optional callbacks for immediate token persistence (critical for safety) */
-    persistenceCallbacks?: SplitPersistenceCallbacks
+    persistenceCallbacks?: SplitPersistenceCallbacks,
+    /** Optional settings for instant mode */
+    options?: { instant?: boolean }
   ): Promise<{
     tokensForRecipient: SdkToken<any>[];
     tokensKeptBySender: SdkToken<any>[];
@@ -133,6 +137,8 @@ export class TokenSplitExecutor {
     outboxEntryIds: string[];
     /** Split group ID for recovery */
     splitGroupId?: string;
+    /** True if Nostr delivery was done in INSTANT mode (caller should skip redundant delivery) */
+    nostrDelivered?: boolean;
   }> {
     console.log(`⚙️ Executing split plan using TokenSplitBuilder...`);
 
@@ -143,6 +149,7 @@ export class TokenSplitExecutor {
       recipientTransferTxs: [] as TransferTransaction[],
       outboxEntryIds: [] as string[],
       splitGroupId: undefined as string | undefined,
+      nostrDelivered: false,
     };
 
     if (
@@ -164,7 +171,8 @@ export class TokenSplitExecutor {
         onTokenBurned,
         plan.tokenToSplit.uiToken.id,
         outboxContext,
-        persistenceCallbacks
+        persistenceCallbacks,
+        options
       );
 
       result.tokensForRecipient.push(splitResult.tokenForRecipient);
@@ -178,6 +186,10 @@ export class TokenSplitExecutor {
       }
       if (splitResult.splitGroupId) {
         result.splitGroupId = splitResult.splitGroupId;
+      }
+      // Propagate Nostr delivery flag from INSTANT mode
+      if (splitResult.nostrDelivered) {
+        result.nostrDelivered = true;
       }
     }
 
@@ -199,7 +211,8 @@ export class TokenSplitExecutor {
       recipientPubkey: string;
       ownerPublicKey: string;
     },
-    persistenceCallbacks?: SplitPersistenceCallbacks
+    persistenceCallbacks?: SplitPersistenceCallbacks,
+    options?: { instant?: boolean }
   ): Promise<SplitTokenResult> {
     const tokenIdHex = Buffer.from(tokenToSplit.id.bytes).toString("hex");
     console.log(`🔪 Splitting token ${tokenIdHex.slice(0, 8)}...`);
@@ -612,9 +625,13 @@ export class TokenSplitExecutor {
       "Sender (Change)"
     );
 
+    // === STEP 5: TRANSFER TO RECIPIENT ===
+    const isInstantMode = options?.instant === true;
+
     // === STEP 4: PRE-TRANSFER SYNC CHECKPOINT ===
-    // CRITICAL: Sync to IPFS BEFORE transfer to ensure all minted tokens are backed up
-    if (persistenceCallbacks?.onPreTransferSync) {
+    // In INSTANT mode: Skip this blocking sync - tokens are on blockchain and localStorage
+    // In standard mode: Sync to IPFS BEFORE transfer to ensure all minted tokens are backed up
+    if (!isInstantMode && persistenceCallbacks?.onPreTransferSync) {
       console.log("📦 Pre-transfer IPFS sync checkpoint...");
       try {
         const syncSuccess = await persistenceCallbacks.onPreTransferSync();
@@ -629,11 +646,11 @@ export class TokenSplitExecutor {
         console.error("⚠️ Pre-transfer IPFS sync error:", syncError);
         // Continue - tokens are on blockchain and in localStorage
       }
+    } else if (isInstantMode) {
+      console.log("⚡ INSTANT mode: Skipping pre-transfer IPFS sync (will sync after Nostr delivery)");
     }
-
-    // === STEP 5: TRANSFER TO RECIPIENT ===
     console.log(
-      `🚀 Transferring split token to ${recipientAddress.address}...`
+      `🚀 Transferring split token to ${recipientAddress.address}... ${isInstantMode ? '(INSTANT mode)' : ''}`
     );
 
     const transferSalt = await sha256(seedString + "_transfer_salt");
@@ -671,89 +688,172 @@ export class TokenSplitExecutor {
         3 // Index 3 = transfer phase (after burn=0, mint-sender=1, mint-recipient=2)
       );
 
-      // Set status to READY_TO_SUBMIT since IPFS sync should happen at caller level
-      transferEntry.status = "READY_TO_SUBMIT";
+      // Set status based on mode
+      transferEntry.status = isInstantMode ? "READY_TO_SEND" : "READY_TO_SUBMIT";
       outboxRepo.addEntry(transferEntry);
       outboxRepo.addEntryToSplitGroup(splitGroupId, transferEntry.id);
       transferEntryId = transferEntry.id;
-      console.log(`📤 Outbox: Added split transfer entry ${transferEntry.id.slice(0, 8)}...`);
+      console.log(`📤 Outbox: Added split transfer entry ${transferEntry.id.slice(0, 8)}... (${transferEntry.status})`);
     }
 
-    const transferRes = await this.client.submitTransferCommitment(transferCommitment);
+    let transferTx: TransferTransaction | null = null;
+    let nostrDeliveredInInstantMode = false;
 
-    if (
-      transferRes.status !== "SUCCESS" &&
-      transferRes.status !== "REQUEST_ID_EXISTS"
-    ) {
-      // Mark outbox entry as failed
-      if (outboxRepo && transferEntryId) {
-        outboxRepo.updateStatus(transferEntryId, "FAILED", `Transfer failed: ${transferRes.status}`);
+    if (isInstantMode) {
+      // === INSTANT_SEND MODE: Send via Nostr FIRST, background aggregator ===
+      console.log("⚡ INSTANT_SEND mode: Delivering via Nostr immediately...");
+
+      try {
+        // Send via Nostr WITHOUT waiting for aggregator proof
+        const { NostrService } = await import('../NostrService');
+        const nostrService = NostrService.getInstance();
+
+        // Prepare payload: sourceToken + transferCommitment (recipient will submit and fetch proof)
+        const payload = {
+          sourceToken: JSON.stringify(recipientTokenBeforeTransfer.toJSON()),
+          commitmentData: JSON.stringify(transferCommitment.toJSON()), // Use commitmentData key for INSTANT_SEND
+          amount: splitAmount.toString(),
+          coinId: Buffer.from(coinId.bytes).toString("hex"),
+        };
+
+        const payloadJson = JSON.stringify(payload);
+
+        // Send to recipient via Nostr
+        const nostrEventId = await nostrService.sendTokenToRecipient(
+          outboxContext!.recipientPubkey,
+          payloadJson
+        );
+
+        console.log(`✅ INSTANT_SEND: Token sent via Nostr (event ${nostrEventId.slice(0, 8)}...)`);
+
+        // Update outbox: Nostr delivered
+        if (outboxRepo && transferEntryId) {
+          outboxRepo.updateEntry(transferEntryId, {
+            status: "NOSTR_SENT",
+            nostrEventId: nostrEventId,
+            nostrConfirmedAt: Date.now(),
+          });
+        }
+
+        // Fire-and-forget aggregator submission (background)
+        // The recipient will also submit when they receive, making this idempotent
+        console.log("🔄 Background: Submitting transfer commitment to aggregator...");
+        this.client.submitTransferCommitment(transferCommitment)
+          .then((res) => {
+            if (res.status === "SUCCESS" || res.status === "REQUEST_ID_EXISTS") {
+              console.log("✅ Background: Transfer commitment submitted");
+              if (outboxRepo && transferEntryId) {
+                outboxRepo.updateStatus(transferEntryId, "COMPLETED");
+              }
+            } else {
+              console.warn(`⚠️ Background: Transfer submission failed: ${res.status} (recipient will submit)`);
+            }
+          })
+          .catch((err) => {
+            console.error("❌ Background: Transfer submission error:", err, "(recipient will submit)");
+          });
+
+        // In instant mode, we create a placeholder transaction for type compatibility
+        // The actual proof will be fetched by recipient in background
+        transferTx = {
+          data: transferCommitment.transactionData,
+          genesis: false,
+        } as any; // Type assertion needed since we're creating a partial object
+
+        // Mark that Nostr delivery was done so caller doesn't try again
+        nostrDeliveredInInstantMode = true;
+        console.log("✅ INSTANT_SEND split transfer complete!");
+
+      } catch (nostrError) {
+        console.error("❌ INSTANT_SEND Nostr delivery failed:", nostrError);
+
+        // Mark outbox entry as failed
+        if (outboxRepo && transferEntryId) {
+          outboxRepo.updateStatus(transferEntryId, "FAILED", `Nostr delivery failed: ${nostrError}`);
+        }
+
+        throw new Error(`INSTANT_SEND Nostr delivery failed: ${nostrError}`);
       }
-      // Transfer of split token failed - the minted recipient token may still be valid
-      // This is different from burn failure: original token is gone, but we have minted tokens
-      // The recipient token in our wallet can be recovered by reverting to committed state
-      if (outboxContext?.ownerPublicKey && outboxContext?.walletAddress) {
-        // Find the minted recipient token that we just persisted
-        const recipientTokenIdHex = Buffer.from(recipientTokenBeforeTransfer.id.bytes).toString("hex");
-        const tokens = getTokensForAddress(outboxContext.walletAddress);
-        const mintedToken = tokens.find(t => {
-          // Check if this token's SDK token ID matches the recipient token we're trying to transfer
-          if (!t.jsonData) return false;
-          try {
-            const tokenData = JSON.parse(t.jsonData);
-            if (tokenData?.id?.bytes) {
-              const tokenIdHex = Buffer.from(tokenData.id.bytes).toString("hex");
-              return tokenIdHex === recipientTokenIdHex;
+
+    } else {
+      // === STANDARD MODE: Submit to aggregator, wait for proof, then send ===
+      const transferRes = await this.client.submitTransferCommitment(transferCommitment);
+
+      if (
+        transferRes.status !== "SUCCESS" &&
+        transferRes.status !== "REQUEST_ID_EXISTS"
+      ) {
+        // Mark outbox entry as failed
+        if (outboxRepo && transferEntryId) {
+          outboxRepo.updateStatus(transferEntryId, "FAILED", `Transfer failed: ${transferRes.status}`);
+        }
+        // Transfer of split token failed - the minted recipient token may still be valid
+        // This is different from burn failure: original token is gone, but we have minted tokens
+        // The recipient token in our wallet can be recovered by reverting to committed state
+        if (outboxContext?.ownerPublicKey && outboxContext?.walletAddress) {
+          // Find the minted recipient token that we just persisted
+          const recipientTokenIdHex = Buffer.from(recipientTokenBeforeTransfer.id.bytes).toString("hex");
+          const tokens = getTokensForAddress(outboxContext.walletAddress);
+          const mintedToken = tokens.find(t => {
+            // Check if this token's SDK token ID matches the recipient token we're trying to transfer
+            if (!t.jsonData) return false;
+            try {
+              const tokenData = JSON.parse(t.jsonData);
+              if (tokenData?.id?.bytes) {
+                const tokenIdHex = Buffer.from(tokenData.id.bytes).toString("hex");
+                return tokenIdHex === recipientTokenIdHex;
+              }
+            } catch { /* ignore parse errors */ }
+            return false;
+          });
+          if (mintedToken) {
+            try {
+              const recoveryService = TokenRecoveryService.getInstance();
+              const recovery = await recoveryService.handleTransferFailure(
+                mintedToken,
+                transferRes.status,
+                outboxContext.ownerPublicKey
+              );
+              console.log(`📤 Split transfer failed: ${transferRes.status}, recovery: ${recovery.action}`);
+              if (recovery.tokenRestored || recovery.tokenRemoved) {
+                dispatchWalletUpdated();
+              }
+            } catch (recoveryErr) {
+              console.error(`📤 Token recovery after split transfer failure failed:`, recoveryErr);
             }
-          } catch { /* ignore parse errors */ }
-          return false;
-        });
-        if (mintedToken) {
-          try {
-            const recoveryService = TokenRecoveryService.getInstance();
-            const recovery = await recoveryService.handleTransferFailure(
-              mintedToken,
-              transferRes.status,
-              outboxContext.ownerPublicKey
-            );
-            console.log(`📤 Split transfer failed: ${transferRes.status}, recovery: ${recovery.action}`);
-            if (recovery.tokenRestored || recovery.tokenRemoved) {
-              dispatchWalletUpdated();
-            }
-          } catch (recoveryErr) {
-            console.error(`📤 Token recovery after split transfer failure failed:`, recoveryErr);
           }
         }
+        throw new Error(`Transfer failed: ${transferRes.status}`);
       }
-      throw new Error(`Transfer failed: ${transferRes.status}`);
+
+      // Update outbox: submitted
+      if (outboxRepo && transferEntryId) {
+        outboxRepo.updateStatus(transferEntryId, "SUBMITTED");
+      }
+
+      const transferProof = await waitInclusionProofWithDevBypass(transferCommitment);
+
+      transferTx = transferCommitment.toTransaction(transferProof);
+
+      // Update outbox: proof received (ready for Nostr delivery)
+      if (outboxRepo && transferEntryId) {
+        outboxRepo.updateEntry(transferEntryId, {
+          status: "PROOF_RECEIVED",
+          inclusionProofJson: JSON.stringify(transferProof.toJSON()),
+          transferTxJson: JSON.stringify(transferTx.toJSON()),
+        });
+      }
+
+      console.log("✅ Split transfer complete!");
     }
-
-    // Update outbox: submitted
-    if (outboxRepo && transferEntryId) {
-      outboxRepo.updateStatus(transferEntryId, "SUBMITTED");
-    }
-
-    const transferProof = await waitInclusionProofWithDevBypass(transferCommitment);
-
-    const transferTx = transferCommitment.toTransaction(transferProof);
-
-    // Update outbox: proof received (ready for Nostr delivery)
-    if (outboxRepo && transferEntryId) {
-      outboxRepo.updateEntry(transferEntryId, {
-        status: "PROOF_RECEIVED",
-        inclusionProofJson: JSON.stringify(transferProof.toJSON()),
-        transferTxJson: JSON.stringify(transferTx.toJSON()),
-      });
-    }
-
-    console.log("✅ Split transfer complete!");
 
     return {
       tokenForRecipient: recipientTokenBeforeTransfer,
       tokenForSender: senderToken,
-      recipientTransferTx: transferTx,
+      recipientTransferTx: transferTx!,
       outboxEntryId: transferEntryId,
       splitGroupId: splitGroupId,
+      nostrDelivered: nostrDeliveredInInstantMode,
     };
   }
 

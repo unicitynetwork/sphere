@@ -33,6 +33,7 @@ import {
   dispatchWalletUpdated,
   inventorySync,
   saveTokenImmediately,
+  removeTokenImmediately,
 } from '../components/wallet/L3/services/InventorySyncService';
 import { tokenToTxf, getCurrentStateHash } from '../components/wallet/L3/services/TxfSerializer';
 import { NametagService } from '../components/wallet/L3/services/NametagService';
@@ -783,7 +784,10 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
               if (options?.skipSync) {
                 const uiToken = await createUiTokenFromSdk(sdkToken, params.coinId);
                 saveTokenImmediately(identity.address, uiToken);
-                console.log(`🔒 Change token saved (sync deferred for batching)`);
+                // CRITICAL: Even in skipSync mode, we must update the UI to show the change token
+                // The IPFS sync is deferred but the UI should reflect the new token immediately
+                dispatchWalletUpdated();
+                console.log(`🔒 Change token saved (sync deferred, UI updated)`);
               } else {
                 await saveChangeTokenToWallet(sdkToken, params.coinId, {
                   address: identity.address,
@@ -828,29 +832,40 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           recipientAddress,
           signingService,
           async (burnedId) => {
+            // INSTANT mode: Remove burned token immediately from localStorage
+            // This avoids triggering a full inventory sync during the split operation
+            console.log(`🔥 [BURN CALLBACK] Looking for token with id=${burnedId.slice(0, 8)}... in ${allTokens.length} tokens`);
             const burnedToken = allTokens.find(t => t.id === burnedId);
             if (burnedToken) {
+              console.log(`🔥 [BURN CALLBACK] Found token: ${burnedToken.id.slice(0, 8)}...`);
               const txf = tokenToTxf(burnedToken);
               if (!txf) {
                 console.warn(`Cannot convert burned token ${burnedId.slice(0, 8)} to TXF`);
               } else {
                 const stateHash = getCurrentStateHash(txf) ?? '';
-                if (stateHash && identity.publicKey && identity.ipnsName) {
-                  await removeTokenFromInventory(
-                    identity.address,
-                    identity.publicKey,
-                    identity.ipnsName,
-                    burnedId,
-                    stateHash
-                  ).catch(err => {
-                    console.error(`Failed to remove burned token ${burnedId.slice(0, 8)}:`, err);
-                  });
+                const sdkTokenId = txf.genesis?.data?.tokenId;
+                if (stateHash && sdkTokenId) {
+                  // Use immediate removal for INSTANT mode - no full sync
+                  const removed = removeTokenImmediately(identity.address, sdkTokenId, stateHash);
+                  if (removed) {
+                    console.log(`🔥 Burned token ${sdkTokenId.slice(0, 8)}... removed immediately`);
+                    // Update UI to show the source token is being processed
+                    dispatchWalletUpdated();
+                  } else {
+                    console.warn(`🔥 Failed to remove burned token ${sdkTokenId.slice(0, 8)}... from localStorage`);
+                  }
+                } else {
+                  console.warn(`🔥 [BURN CALLBACK] Missing stateHash=${!!stateHash} or sdkTokenId=${!!sdkTokenId}`);
                 }
               }
+            } else {
+              console.warn(`🔥 [BURN CALLBACK] Token NOT FOUND! burnedId=${burnedId}`);
+              console.warn(`🔥 [BURN CALLBACK] Available IDs (first 5): ${allTokens.slice(0, 5).map(t => t.id.slice(0, 8)).join(', ')}`);
             }
           },
           outboxContext,
-          persistenceCallbacks
+          persistenceCallbacks,
+          { instant: true } // INSTANT_SPLIT_LITE: Skip waiting for transfer proof before Nostr delivery
         );
 
         if (plan.splitAmount) {
@@ -865,73 +880,91 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           );
         }
 
-        let deliveryQueue: ReturnType<typeof InventoryBackgroundLoopsManager.prototype.getDeliveryQueue> | null = null;
-        try {
-          const loopsManager = InventoryBackgroundLoopsManager.getInstance();
-          if (loopsManager.isReady()) {
-            deliveryQueue = loopsManager.getDeliveryQueue();
-          }
-        } catch {
-          // Loops manager not initialized
-        }
-
-        for (let i = 0; i < splitResult.tokensForRecipient.length; i++) {
-          const token = splitResult.tokensForRecipient[i];
-          const tx = splitResult.recipientTransferTxs[i];
-          const outboxEntryId = splitResult.outboxEntryIds[i];
-
-          const sourceTokenString = JSON.stringify(token.toJSON());
-          const transferTxString = JSON.stringify(tx.toJSON());
-
-          const stateHashResult = await token.state.calculateHash();
-          const stateHash = stateHashResult.toString();
-
-          const payload = JSON.stringify({
-            sourceToken: sourceTokenString,
-            transferTx: transferTxString,
-            tokenId: token.id.toString(),
-            stateHash,
-          });
-
-          if (deliveryQueue) {
-            const queueEntry: NostrDeliveryQueueEntry = {
-              id: crypto.randomUUID(),
-              outboxEntryId: outboxEntryId || '',
-              recipientPubkey,
-              recipientNametag,
-              payloadJson: payload,
-              retryCount: 0,
-              createdAt: Date.now(),
-            };
-
-            await deliveryQueue.queueForDelivery(queueEntry);
-            console.log(`📨 Queued split token for Nostr delivery (queue ID: ${queueEntry.id.slice(0, 8)})`);
-
-            if (outboxEntryId) {
-              console.log(`📤 Outbox: Split transfer ${outboxEntryId.slice(0, 8)}... queued for delivery`);
+        // INSTANT mode: Nostr delivery was already done inside executeSplitPlan
+        // Skip redundant delivery loop to avoid tx.toJSON() errors on placeholder objects
+        if (!splitResult.nostrDelivered) {
+          let deliveryQueue: ReturnType<typeof InventoryBackgroundLoopsManager.prototype.getDeliveryQueue> | null = null;
+          try {
+            const loopsManager = InventoryBackgroundLoopsManager.getInstance();
+            if (loopsManager.isReady()) {
+              deliveryQueue = loopsManager.getDeliveryQueue();
             }
-          } else {
-            console.log('📨 Sending split token via Nostr (direct)...');
-            await nostrService.sendTokenTransfer(recipientPubkey, payload, undefined, undefined, params.eventId);
+          } catch {
+            // Loops manager not initialized
+          }
 
-            if (outboxEntryId) {
-              outboxRepo.updateStatus(outboxEntryId, 'NOSTR_SENT');
-              outboxRepo.updateStatus(outboxEntryId, 'COMPLETED');
-              console.log(`📤 Outbox: Split transfer ${outboxEntryId.slice(0, 8)}... sent via Nostr (direct)`);
+          for (let i = 0; i < splitResult.tokensForRecipient.length; i++) {
+            const token = splitResult.tokensForRecipient[i];
+            const tx = splitResult.recipientTransferTxs[i];
+            const outboxEntryId = splitResult.outboxEntryIds[i];
+
+            const sourceTokenString = JSON.stringify(token.toJSON());
+            const transferTxString = JSON.stringify(tx.toJSON());
+
+            const stateHashResult = await token.state.calculateHash();
+            const stateHash = stateHashResult.toString();
+
+            const payload = JSON.stringify({
+              sourceToken: sourceTokenString,
+              transferTx: transferTxString,
+              tokenId: token.id.toString(),
+              stateHash,
+            });
+
+            if (deliveryQueue) {
+              const queueEntry: NostrDeliveryQueueEntry = {
+                id: crypto.randomUUID(),
+                outboxEntryId: outboxEntryId || '',
+                recipientPubkey,
+                recipientNametag,
+                payloadJson: payload,
+                retryCount: 0,
+                createdAt: Date.now(),
+              };
+
+              await deliveryQueue.queueForDelivery(queueEntry);
+              console.log(`📨 Queued split token for Nostr delivery (queue ID: ${queueEntry.id.slice(0, 8)})`);
+
+              if (outboxEntryId) {
+                console.log(`📤 Outbox: Split transfer ${outboxEntryId.slice(0, 8)}... queued for delivery`);
+              }
+            } else {
+              console.log('📨 Sending split token via Nostr (direct)...');
+              await nostrService.sendTokenTransfer(recipientPubkey, payload, undefined, undefined, params.eventId);
+
+              if (outboxEntryId) {
+                outboxRepo.updateStatus(outboxEntryId, 'NOSTR_SENT');
+                outboxRepo.updateStatus(outboxEntryId, 'COMPLETED');
+                console.log(`📤 Outbox: Split transfer ${outboxEntryId.slice(0, 8)}... sent via Nostr (direct)`);
+              }
             }
           }
+        } else {
+          console.log('⚡ INSTANT mode: Nostr delivery already completed in executor, skipping redundant delivery');
         }
 
         if (splitResult.splitGroupId) {
           outboxRepo.removeSplitGroup(splitResult.splitGroupId);
         }
 
-        await ipfsService.syncNow({
-          priority: SyncPriority.MEDIUM,
-          callerContext: 'post-split-sync',
-        }).catch(err => {
-          console.warn('⚠️ Final IPFS sync after split failed:', err);
-        });
+        // INSTANT mode: Fire-and-forget IPFS sync (don't block the user)
+        // Standard mode: Await the sync for consistency
+        if (splitResult.nostrDelivered) {
+          console.log('⚡ INSTANT mode: Starting background IPFS sync (fire-and-forget)');
+          ipfsService.syncNow({
+            priority: SyncPriority.MEDIUM,
+            callerContext: 'post-split-sync',
+          }).catch(err => {
+            console.warn('⚠️ Background IPFS sync after split failed:', err);
+          });
+        } else {
+          await ipfsService.syncNow({
+            priority: SyncPriority.MEDIUM,
+            callerContext: 'post-split-sync',
+          }).catch(err => {
+            console.warn('⚠️ Final IPFS sync after split failed:', err);
+          });
+        }
       }
 
       return true;

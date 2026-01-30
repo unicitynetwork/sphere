@@ -115,6 +115,17 @@ export function queuePendingToken(token: Token): void {
   _pendingTokens.push(token);
 }
 
+/**
+ * Check if a token ID exists in the sent folder.
+ * Used to avoid merging tokens that are already in the sent folder.
+ */
+function isTokenInSent(sent: SentTokenEntry[], tokenId: string): boolean {
+  return sent.some(entry => {
+    const entryTokenId = entry.token?.genesis?.data?.tokenId;
+    return entryTokenId === tokenId;
+  });
+}
+
 // ============================================
 // Types
 // ============================================
@@ -262,6 +273,10 @@ interface SyncContext {
 
   // Performance optimization options
   skipExtendedVerification: boolean;  // Skip extended IPFS/IPNS verification delays
+
+  // Track token IDs loaded at Step 1 (for merge logic in Step 9)
+  // Used to detect tokens added to localStorage DURING sync (not ones we removed)
+  originalTokenIds: Set<string>;
 }
 
 // ============================================
@@ -679,6 +694,8 @@ function initializeContext(params: SyncParams, mode: SyncMode, startTime: number
     remoteVersionRegressed: false,
     // Performance optimization
     skipExtendedVerification: params.skipExtendedVerification ?? false,
+    // Track original token IDs for merge detection
+    originalTokenIds: new Set(),
   };
 }
 
@@ -767,6 +784,15 @@ async function step1_loadLocalStorage(ctx: SyncContext): Promise<void> {
     // Load from TxfStorageData format (the canonical format)
     await loadFromTxfStorageDataFormat(ctx, data);
   }
+
+  // CRITICAL: Record all token IDs that existed at the START of sync
+  // This is used in Step 9 to detect tokens added DURING sync via saveTokenImmediately()
+  // Tokens in originalTokenIds that are later removed (invalid/spent) should NOT be merged back
+  // Tokens NOT in originalTokenIds that appear in localStorage at Step 9 were added during sync
+  for (const tokenId of ctx.tokens.keys()) {
+    ctx.originalTokenIds.add(tokenId);
+  }
+  console.log(`  📝 Recorded ${ctx.originalTokenIds.size} original token IDs for merge detection`);
 }
 
 // Load from TxfStorageData format (canonical format per spec)
@@ -2902,7 +2928,8 @@ function step9_prepareStorage(ctx: SyncContext): void {
 
   // Build TxfStorageData from context
   // Note: buildStorageDataFromContext increments version internally (ctx.localVersion + 1)
-  const storageData = buildStorageDataFromContext(ctx);
+  // Using 'let' because we may need to rebuild after merging tokens added during sync
+  let storageData = buildStorageDataFromContext(ctx);
 
   // Read current localStorage to compare content
   const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(ctx.address);
@@ -2915,6 +2942,43 @@ function step9_prepareStorage(ctx: SyncContext): void {
     } catch {
       // Malformed JSON - treat as no existing data (will overwrite)
       console.warn(`  ⚠️ Malformed JSON in localStorage, will overwrite`);
+    }
+  }
+
+  // CRITICAL: Merge any tokens that were added to localStorage DURING sync
+  // This handles the race condition where saveTokenImmediately() adds tokens
+  // while a sync is in progress. Without this, the sync would overwrite those tokens.
+  //
+  // Key insight: We must distinguish between:
+  // 1. Tokens that existed at sync START and were intentionally removed (invalid/spent) → DON'T merge
+  // 2. Tokens added to localStorage DURING sync via saveTokenImmediately() → DO merge
+  //
+  // We use ctx.originalTokenIds (populated in Step 1) to make this distinction:
+  // - If tokenId IS in originalTokenIds: it existed at start, removal was intentional
+  // - If tokenId is NOT in originalTokenIds: it was added during sync, must merge
+  let mergedCount = 0;
+  if (existingData) {
+    for (const [key, value] of Object.entries(existingData)) {
+      if (!isTokenKey(key)) continue;
+      const tokenId = tokenIdFromKey(key);
+      // Only merge if:
+      // 1. Token was NOT present at sync start (not in originalTokenIds) - it's truly new
+      // 2. Token is not already in our current context
+      // 3. Token is not in sent folder (wasn't transferred during this sync)
+      if (!ctx.originalTokenIds.has(tokenId) && !ctx.tokens.has(tokenId) && !isTokenInSent(ctx.sent, tokenId)) {
+        // Add it to our context so it's included in the write-back
+        ctx.tokens.set(tokenId, value as TxfToken);
+        mergedCount++;
+        console.log(`  📥 Merged token ${tokenId.slice(0, 8)}... added during sync`);
+      }
+    }
+    if (mergedCount > 0) {
+      console.log(`  ✅ Merged ${mergedCount} token(s) that were added during this sync`);
+      // CRITICAL: Rebuild storageData to include the merged tokens!
+      // The original storageData was built BEFORE the merge, so we need to rebuild it
+      // to ensure merged tokens are included in both localStorage and IPFS upload.
+      storageData = buildStorageDataFromContext(ctx);
+      console.log(`  🔄 Rebuilt storage data to include merged tokens (now ${ctx.tokens.size} tokens)`);
     }
   }
 
@@ -3604,6 +3668,72 @@ export function saveTokenImmediately(address: string, token: Token): void {
     storage.setItem(storageKey, JSON.stringify(data));
     console.log(`💾 [IMMEDIATE] Token ${sdkTokenId.slice(0, 8)}... saved directly to localStorage`);
   }
+}
+
+/**
+ * Remove a token immediately from localStorage and move it to Sent folder.
+ * Used for INSTANT mode where we don't want to trigger a full sync.
+ *
+ * NOTE: This does NOT dispatch wallet-updated. Caller must handle that.
+ *
+ * @param address - Wallet address
+ * @param tokenId - SDK token ID (64-char hex, not UI UUID)
+ * @param stateHash - State hash when burned/spent
+ * @returns true if token was found and removed, false otherwise
+ */
+export function removeTokenImmediately(address: string, tokenId: string, stateHash: string): boolean {
+  console.log(`🗑️ [IMMEDIATE] removeTokenImmediately called for token ${tokenId.slice(0, 8)}...`);
+
+  const storageKey = STORAGE_KEY_GENERATORS.walletByAddress(address);
+  const storage = getInventoryStorage();
+  const json = storage.getItem(storageKey);
+
+  if (!json) {
+    console.log(`🗑️ [IMMEDIATE] No storage data found for address ${address.slice(0, 8)}...`);
+    return false;
+  }
+
+  let data: TxfStorageData;
+  try {
+    data = JSON.parse(json) as TxfStorageData;
+  } catch {
+    console.error(`🗑️ [IMMEDIATE] Failed to parse storage data`);
+    return false;
+  }
+
+  const tokenKey = `_${tokenId}`;
+  const txf = data[tokenKey] as TxfToken | undefined;
+
+  if (!txf) {
+    console.log(`🗑️ [IMMEDIATE] Token ${tokenId.slice(0, 8)}... not found in storage`);
+    return false;
+  }
+
+  // Remove from active tokens
+  delete data[tokenKey];
+
+  // Add to Sent folder
+  const now = Date.now();
+  const sentEntry: SentTokenEntry = {
+    token: txf,
+    timestamp: now,
+    spentAt: now,
+    stateHash: stateHash,
+  };
+
+  if (!data._sent) {
+    data._sent = [];
+  }
+  data._sent.push(sentEntry);
+
+  // Increment version
+  data._meta = data._meta || { version: 0, address, ipnsName: '', formatVersion: '2.0' };
+  data._meta.version = (data._meta.version || 0) + 1;
+
+  storage.setItem(storageKey, JSON.stringify(data));
+  console.log(`🗑️ [IMMEDIATE] Token ${tokenId.slice(0, 8)}... removed and moved to Sent folder`);
+
+  return true;
 }
 
 /**

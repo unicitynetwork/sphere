@@ -691,6 +691,10 @@ export function getCurrentStateHash(txf: TxfToken): string | undefined {
     if (lastTx?.newStateHash) {
       return lastTx.newStateHash;
     }
+    // Fallback: check authenticator from last transaction's inclusion proof
+    if (lastTx?.inclusionProof?.authenticator?.stateHash) {
+      return lastTx.inclusionProof.authenticator.stateHash;
+    }
     // Missing newStateHash is expected for older tokens - SDK will calculate it
     return undefined;
   }
@@ -698,6 +702,12 @@ export function getCurrentStateHash(txf: TxfToken): string | undefined {
   // Genesis-only tokens: check _integrity.currentStateHash (computed post-import)
   if (txf._integrity?.currentStateHash) {
     return txf._integrity.currentStateHash;
+  }
+
+  // Genesis-only tokens: check genesis inclusion proof authenticator
+  // This is where newly minted tokens store their initial stateHash
+  if (txf.genesis?.inclusionProof?.authenticator?.stateHash) {
+    return txf.genesis.inclusionProof.authenticator.stateHash;
   }
 
   // No stored state hash available - SDK must calculate it

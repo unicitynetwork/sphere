@@ -273,6 +273,71 @@ export interface PendingIpfsSyncEntry {
 }
 
 // ============================================
+// INSTANT_SPLIT Types (Section 15)
+// ============================================
+
+/**
+ * Split payment session for tracking token split transfers
+ * Similar to PaymentSession but tracks the multi-phase split operation
+ */
+export interface SplitPaymentSession {
+  /** Unique session identifier */
+  id: string;
+
+  /** Direction (always 'SEND' for split operations) */
+  direction: 'SEND';
+
+  /** Source token ID being split */
+  sourceTokenId: string;
+
+  /** Payment amount (sent to recipient) */
+  paymentAmount: string;
+
+  /** Change amount (kept by sender) */
+  changeAmount: string;
+
+  /** Recipient's human-readable nametag */
+  recipientNametag?: string;
+
+  /** Recipient's Nostr public key */
+  recipientPubkey?: string;
+
+  /** Phase tracking for split operation */
+  phases: {
+    /** Burn phase status */
+    burn: 'PENDING' | 'SUBMITTED' | 'CONFIRMED' | 'FAILED';
+    /** Mints phase status (parallel submission) */
+    mints: 'PENDING' | 'SUBMITTED' | 'CONFIRMED' | 'PARTIAL' | 'FAILED';
+    /** Transfer phase status (INSTANT_SEND) */
+    transfer: 'PENDING' | 'NOSTR_DELIVERED' | 'CONFIRMED' | 'FAILED';
+  };
+
+  /** Timing information for performance tracking */
+  timing: {
+    burnStartedAt?: number;
+    burnConfirmedAt?: number;
+    mintsStartedAt?: number;
+    mintsConfirmedAt?: number;
+    nostrDeliveredAt?: number;
+  };
+
+  /** Payment token ID (after mint) */
+  paymentTokenId?: string;
+
+  /** Change token ID (after mint) */
+  changeTokenId?: string;
+
+  /** Split group ID (links all outbox entries) */
+  splitGroupId?: string;
+
+  /** Creation timestamp */
+  createdAt: number;
+
+  /** Last update timestamp */
+  updatedAt: number;
+}
+
+// ============================================
 // Sender Recovery Types (Section 14)
 // ============================================
 
