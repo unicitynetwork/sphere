@@ -1400,12 +1400,23 @@ async function step2_5_traverseVersionChain(ctx: SyncContext): Promise<void> {
 
     // Merge tokens from historical version
     const tokensBefore = ctx.tokens.size;
+    let skippedAsSent = 0;  // Track tokens skipped because they're in sent folder
     for (const key of Object.keys(historicalData)) {
       if (isTokenKey(key)) {
         const remoteTxf = historicalData[key] as TxfToken;
         if (!remoteTxf?.genesis?.data?.tokenId) continue;
 
         const tokenId = tokenIdFromKey(key);
+
+        // CRITICAL: Skip tokens that are in the sent folder (they were spent/burned)
+        // This prevents recovering spent tokens from old IPFS versions.
+        // Without this check, a token that was burned in the current version would be
+        // "recovered" from historical versions where it was still active.
+        if (isTokenInSent(ctx.sent, tokenId)) {
+          skippedAsSent++;
+          continue;  // Skip - token was already spent/transferred
+        }
+
         const localTxf = ctx.tokens.get(tokenId);
 
         // Add token if not present, or prefer remote if it has more transactions
@@ -1478,6 +1489,9 @@ async function step2_5_traverseVersionChain(ctx: SyncContext): Promise<void> {
     console.log(`  📦 v${version} (${currentCid.slice(0, 12)}...): ${tokenKeyCount} token keys, nametag=${hasNametag}, sent=${hasSent}, lastCid=${hasLastCid}`);
     if (tokensAdded > 0) {
       console.log(`     ✓ Recovered ${tokensAdded} tokens (total: ${ctx.tokens.size})`);
+    }
+    if (skippedAsSent > 0) {
+      console.log(`     🚫 Skipped ${skippedAsSent} spent tokens (already in sent folder)`);
     }
 
     // Get next CID in chain
@@ -2103,6 +2117,29 @@ async function step8_mergeInventory(ctx: SyncContext): Promise<void> {
     }
   }
 
+  // Step 8.1a: Remove active tokens that are already in the sent folder
+  // This is a safety net that handles cases where tokens were incorrectly recovered
+  // from old IPFS versions before the sent folder check was added to version chain traversal.
+  // It also handles edge cases where the same token ID appears in both active and sent folders.
+  const sentTokenIds = new Set(
+    ctx.sent
+      .map(s => s.token?.genesis?.data?.tokenId)
+      .filter((id): id is string => !!id)
+  );
+
+  let removedAsSent = 0;
+  for (const tokenId of ctx.tokens.keys()) {
+    if (sentTokenIds.has(tokenId)) {
+      ctx.tokens.delete(tokenId);
+      removedAsSent++;
+      console.log(`  🗑️ Removed ${tokenId.slice(0, 8)}... from active (already in sent folder)`);
+    }
+  }
+
+  if (removedAsSent > 0) {
+    console.log(`  ✓ Removed ${removedAsSent} active token(s) that were already in sent folder`);
+  }
+
   // Step 8.2: Detect boomerang tokens (outbox tokens that returned to us)
   //
   // A "boomerang" occurs when:
@@ -2128,6 +2165,11 @@ async function step8_mergeInventory(ctx: SyncContext): Promise<void> {
 
     const currentStateHash = getCurrentStateHash(token);
     if (!currentStateHash) {
+      continue;
+    }
+
+    // Skip INSTANT_SPLIT V2 entries (no commitment - recipient creates it)
+    if (!outboxEntry.commitmentJson) {
       continue;
     }
 
@@ -2161,7 +2203,7 @@ async function step8_mergeInventory(ctx: SyncContext): Promise<void> {
     }
   }
 
-  console.log(`  Merge complete: ${ctx.tokens.size} active, ${ctx.sent.length} sent, ${ctx.invalid.length} invalid, ${ctx.outbox.length} outbox, ${boomerangTokens.length} boomerangs removed`);
+  console.log(`  Merge complete: ${ctx.tokens.size} active, ${ctx.sent.length} sent, ${ctx.invalid.length} invalid, ${ctx.outbox.length} outbox, ${removedAsSent} sent-duplicates removed, ${boomerangTokens.length} boomerangs removed`);
 }
 
 /**
