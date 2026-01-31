@@ -1478,21 +1478,26 @@ export class TokenValidationService {
         const requestId = await RequestId.create(pubKeyBytes, calculatedStateHash);
 
         const calculatedStateHashStr = calculatedStateHash.toJSON();
-        const hashesMatch = !localStateHash || calculatedStateHashStr === localStateHash;
 
-        // CRITICAL FIX: If calculated hash doesn't match expected hash, DON'T query aggregator
-        // Querying with wrong hash will check wrong SMT slot and may return false "spent" result
-        // This protects against incorrectly archiving valid tokens
-        if (!hashesMatch) {
-          console.warn(`⚠️ [SpentCheck] Hash mismatch for ${tokenId.slice(0, 16)}... - treating as UNSPENT (safe default)`);
+        // NOTE: We no longer compare against localStateHash here.
+        // The localStateHash from getCurrentStateHash() may be stale for received tokens:
+        // - For genesis-only tokens, it returns genesis.inclusionProof.authenticator.stateHash
+        // - But that's the hash from when the token was MINTED (sender's state)
+        // - For received tokens, the current state.predicate is the RECIPIENT's state
+        // - So the calculated hash (current state) correctly differs from stored hash (genesis state)
+        //
+        // We ALWAYS use the SDK-calculated hash for aggregator queries since that represents
+        // the current state we need to check for spent status.
 
-          // Return unspent - don't archive tokens when we can't verify their state
+        // Second cache lookup with SDK-calculated hash (for received tokens whose localStateHash differs)
+        const sdkCacheKey = this.getSpentStateCacheKey(tokenId, calculatedStateHashStr, publicKey);
+        const sdkCachedResult = this.getSpentStateFromCache(sdkCacheKey);
+        if (sdkCachedResult !== null) {
           return {
             tokenId,
             localId: token.id,
-            stateHash: localStateHash || calculatedStateHashStr,
-            spent: false,
-            error: "Hash mismatch - treating as unspent for safety",
+            stateHash: calculatedStateHashStr,
+            spent: sdkCachedResult,
           };
         }
 
@@ -1530,8 +1535,7 @@ export class TokenValidationService {
             throw new Error("Invalid proof: authenticator present but path not included");
           }
         }
-        // Cache using SDK-calculated state hash
-        const sdkCacheKey = this.getSpentStateCacheKey(tokenId, calculatedStateHashStr, publicKey);
+        // Cache using SDK-calculated state hash (reuse sdkCacheKey from above)
         this.cacheSpentState(sdkCacheKey, spent);
 
         return {
@@ -1552,17 +1556,19 @@ export class TokenValidationService {
         const prodStateHash = await sdkToken.state.calculateHash();
         const prodStateHashStr = prodStateHash.toJSON();
 
-        // CRITICAL FIX: Check for hash mismatch in production mode too
-        const prodHashesMatch = !localStateHash || prodStateHashStr === localStateHash;
-        if (!prodHashesMatch) {
-          console.warn(`⚠️ [SpentCheck/Prod] Hash mismatch for ${tokenId.slice(0, 16)}... - treating as UNSPENT (safe default)`);
+        // NOTE: We no longer compare against localStateHash here.
+        // See comment in dev mode block above for explanation.
+        // We ALWAYS use the SDK-calculated hash (prodStateHashStr) for aggregator queries.
 
+        // Second cache lookup with SDK-calculated hash (for received tokens whose localStateHash differs)
+        const prodCacheKey = this.getSpentStateCacheKey(tokenId, prodStateHashStr, publicKey);
+        const prodCachedResult = this.getSpentStateFromCache(prodCacheKey);
+        if (prodCachedResult !== null) {
           return {
             tokenId,
             localId: token.id,
-            stateHash: localStateHash || prodStateHashStr,
-            spent: false,
-            error: "Hash mismatch - treating as unspent for safety",
+            stateHash: prodStateHashStr,
+            spent: prodCachedResult,
           };
         }
 
@@ -1575,8 +1581,7 @@ export class TokenValidationService {
 
         spent = isSpent === true;
 
-        // Cache using SDK-calculated state hash
-        const prodCacheKey = this.getSpentStateCacheKey(tokenId, prodStateHashStr, publicKey);
+        // Cache using SDK-calculated state hash (reuse prodCacheKey from above)
         this.cacheSpentState(prodCacheKey, spent);
 
         return {
