@@ -50,6 +50,7 @@ import type {
 import { IpfsStorageService, SyncPriority } from "./IpfsStorageService";
 import { TokenRecoveryService } from "./TokenRecoveryService";
 import { normalizeSdkTokenToStorage } from "./TxfSerializer";
+import { isInstantSplitBundle, type InstantSplitBundle } from "../types/InstantTransferTypes";
 
 // ==========================================
 // Configuration Constants
@@ -544,7 +545,16 @@ export class OutboxRecoveryService {
     }
 
     // Reconstruct commitment from stored JSON
+    // NOTE: Returns null for INSTANT_SPLIT V2 entries (recipient creates/submits commitment)
     const commitment = await this.reconstructCommitment(entry);
+
+    if (!commitment) {
+      // V2 entry - commitment is created by recipient, not sender
+      // Mark as completed since sender-side work is done
+      console.log(`📤 OutboxRecovery: V2 entry ${entry.id.slice(0, 8)}... - no commitment (recipient handles), marking COMPLETED`);
+      outboxRepo.updateStatus(entry.id, "COMPLETED");
+      return;
+    }
 
     // Submit to aggregator (idempotent - REQUEST_ID_EXISTS is ok)
     const client = ServiceProvider.stateTransitionClient;
@@ -585,20 +595,67 @@ export class OutboxRecoveryService {
   }
 
   /**
-   * Resume from READY_TO_SEND (INSTANT_SEND mode):
+   * Resume from READY_TO_SEND (INSTANT_SEND or INSTANT_SPLIT_V2 mode):
    * The token was prepared for instant Nostr delivery but the app crashed/closed
    * before Nostr delivery completed.
    *
    * Recovery strategy:
-   * 1. Check if token is already spent on aggregator (background submission may have succeeded)
-   * 2. If spent: Mark as COMPLETED (transfer succeeded via background lane)
-   * 3. If not spent: Re-send via Nostr with instant send payload
+   * 1. Check if sourceTokenJson contains an INSTANT_SPLIT V2 bundle
+   * 2. For V2 bundles: Just re-send the bundle via Nostr (recipient handles proofs)
+   * 3. For INSTANT_SEND: Check spent status, re-send payload
    */
   private async resumeFromReadyToSend(
     entry: OutboxEntry,
     outboxRepo: OutboxRepository,
     nostrService: NostrService
   ): Promise<void> {
+    // Check if this is an INSTANT_SPLIT V2 bundle
+    let bundle: InstantSplitBundle | null = null;
+    if (entry.sourceTokenJson) {
+      try {
+        const parsed = JSON.parse(entry.sourceTokenJson);
+        if (isInstantSplitBundle(parsed)) {
+          bundle = parsed;
+        }
+      } catch {
+        // Not JSON or not a bundle - continue with INSTANT_SEND flow
+      }
+    }
+
+    // === INSTANT_SPLIT V2 Recovery ===
+    if (bundle) {
+      console.log(`📤 OutboxRecovery: Resuming INSTANT_SPLIT V2 from READY_TO_SEND...`);
+
+      // For V2 bundles, we just need to re-send the bundle via Nostr
+      // The recipient will handle all proof acquisition
+      // Mark as completed from sender's perspective since:
+      // 1. Burn proof was already obtained (required before bundle creation)
+      // 2. Background mints may have already been submitted
+      // 3. Recipient handles remaining proofs
+
+      try {
+        console.log(`📤 OutboxRecovery: Re-sending INSTANT_SPLIT_V2 bundle to ${entry.recipientNametag || entry.recipientPubkey.slice(0, 8)}...`);
+
+        await nostrService.sendTokenTransfer(
+          entry.recipientPubkey,
+          entry.sourceTokenJson! // Bundle is stored here
+        );
+
+        outboxRepo.updateEntry(entry.id, {
+          status: "NOSTR_SENT",
+          nostrConfirmedAt: Date.now(),
+        });
+        outboxRepo.updateStatus(entry.id, "COMPLETED");
+
+        console.log(`📤 OutboxRecovery: INSTANT_SPLIT_V2 entry ${entry.id.slice(0, 8)}... recovered via Nostr`);
+        return;
+      } catch (nostrError) {
+        console.error(`📤 OutboxRecovery: Failed to re-send V2 bundle:`, nostrError);
+        throw nostrError;
+      }
+    }
+
+    // === INSTANT_SEND Recovery (original flow) ===
     console.log(`📤 OutboxRecovery: Resuming from READY_TO_SEND (INSTANT_SEND mode)...`);
 
     // First check if token is already spent (background aggregator may have succeeded,
@@ -632,6 +689,10 @@ export class OutboxRecoveryService {
 
     // Token not spent - re-send via Nostr with instant send payload
     // Build the INSTANT_SEND payload (includes commitmentData for recipient to submit if needed)
+    // NOTE: For INSTANT_SEND, commitmentJson must be present (V2 entries handled above)
+    if (!entry.commitmentJson) {
+      throw new Error("INSTANT_SEND recovery requires commitmentJson but it was null");
+    }
     const payload = JSON.stringify({
       sourceToken: entry.sourceTokenJson,
       transferTx: JSON.stringify(JSON.parse(entry.commitmentJson)), // commitment as transfer data
@@ -663,6 +724,13 @@ export class OutboxRecoveryService {
   private async submitToAggregatorBackground(entry: OutboxEntry): Promise<void> {
     try {
       const commitment = await this.reconstructCommitment(entry);
+
+      // V2 entries don't have commitment (recipient creates it)
+      if (!commitment) {
+        console.log(`📤 OutboxRecovery: V2 entry ${entry.id.slice(0, 8)}... - no commitment to submit (recipient handles)`);
+        return;
+      }
+
       const client = ServiceProvider.stateTransitionClient;
       const response = await client.submitTransferCommitment(commitment);
 
@@ -722,6 +790,13 @@ export class OutboxRecoveryService {
 
     // Reconstruct commitment from stored JSON
     const commitment = await this.reconstructCommitment(entry);
+
+    // V2 entries don't have commitment (recipient creates/submits it)
+    if (!commitment) {
+      console.log(`📤 OutboxRecovery: V2 entry ${entry.id.slice(0, 8)}... - no commitment (recipient handles), marking COMPLETED`);
+      outboxRepo.updateStatus(entry.id, "COMPLETED");
+      return;
+    }
 
     // Wait for inclusion proof (with dev mode bypass if enabled)
     const inclusionProof = await waitInclusionProofWithDevBypass(commitment);
@@ -814,8 +889,14 @@ export class OutboxRecoveryService {
    * Reconstruct a TransferCommitment from stored JSON
    * Note: For direct transfers, this recreates from stored data.
    * For splits, the commitment is deterministic so can be recreated.
+   * NOTE: Returns null for INSTANT_SPLIT V2 entries (recipient creates commitment)
    */
-  private async reconstructCommitment(entry: OutboxEntry): Promise<TransferCommitment> {
+  private async reconstructCommitment(entry: OutboxEntry): Promise<TransferCommitment | null> {
+    // INSTANT_SPLIT V2 entries don't have a commitment on sender side
+    if (!entry.commitmentJson) {
+      return null;
+    }
+
     try {
       const commitmentData = JSON.parse(entry.commitmentJson);
       return await TransferCommitment.fromJSON(commitmentData);

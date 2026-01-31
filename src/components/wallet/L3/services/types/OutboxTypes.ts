@@ -109,8 +109,9 @@ export interface OutboxEntry {
   /**
    * Serialized transfer commitment (TransferCommitment.toJSON() as string)
    * Contains: requestId, transactionData (including salt), authenticator
+   * NOTE: null for INSTANT_SPLIT V2 entries (recipient creates the commitment)
    */
-  commitmentJson: string;
+  commitmentJson: string | null;
 
   // ==========================================
   // Post-Submission Data (filled during flow)
@@ -419,7 +420,7 @@ export function createOutboxEntry(
   coinId: string,
   salt: string,
   sourceTokenJson: string,
-  commitmentJson: string,
+  commitmentJson: string | null, // null for INSTANT_SPLIT V2 (recipient creates commitment)
   splitGroupId?: string,
   splitGroupIndex?: number
 ): OutboxEntry {
@@ -450,8 +451,14 @@ export function createOutboxEntry(
  */
 export function validateOutboxEntry(entry: OutboxEntry): { valid: boolean; error?: string } {
   // Basic required fields
-  if (!entry.id || !entry.sourceTokenId || !entry.salt || !entry.commitmentJson) {
-    return { valid: false, error: "Missing required fields (id, sourceTokenId, salt, or commitmentJson)" };
+  // NOTE: commitmentJson can be null for INSTANT_SPLIT V2 entries (recipient creates commitment)
+  // In that case, sourceTokenJson contains the bundle with all necessary data
+  if (!entry.id || !entry.sourceTokenId || !entry.salt) {
+    return { valid: false, error: "Missing required fields (id, sourceTokenId, or salt)" };
+  }
+  // For non-V2 entries, commitmentJson is required; for V2, sourceTokenJson (bundle) is required
+  if (!entry.commitmentJson && !entry.sourceTokenJson) {
+    return { valid: false, error: "Missing both commitmentJson and sourceTokenJson" };
   }
 
   // Status-specific validation

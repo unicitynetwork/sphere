@@ -503,3 +503,99 @@ export function createPaymentSessionError(
     details,
   };
 }
+
+// ============================================
+// INSTANT_SPLIT V2 Types (True Instant Split)
+// ============================================
+
+/**
+ * Bundle payload for INSTANT_SPLIT V2 (True Instant Split)
+ *
+ * This bundle defers ALL proof acquisition to the recipient,
+ * reducing sender-side latency from ~5.6s to ~0.3s (just Nostr delivery).
+ *
+ * Flow:
+ * 1. Sender: create burn commitment + mint data → send bundle via Nostr → SUCCESS
+ * 2. Sender (background): submit burn → submit mints
+ * 3. Recipient: submit burn (idempotent) → submit mint → create transfer → finalize
+ *
+ * Key insight: In dev mode, mint commitments can be created without burn proof.
+ * The aggregator is idempotent, so both sender and recipient can submit.
+ */
+export interface InstantSplitBundle {
+  /** Bundle version - allows graceful fallback for future changes */
+  version: '2.0';
+
+  /** Bundle type identifier */
+  type: 'INSTANT_SPLIT';
+
+  /**
+   * Burn commitment JSON (recipient submits if sender hasn't yet)
+   * This is the commitment, NOT the transaction with proof.
+   */
+  burnCommitment: string;
+
+  /** Recipient's MintTransactionData JSON (they recreate commitment and submit) */
+  recipientMintData: string;
+
+  /** Payment amount (display metadata) */
+  amount: string;
+
+  /** Coin ID hex */
+  coinId: string;
+
+  /** Token type hex */
+  tokenTypeHex: string;
+
+  /** Split group ID for recovery correlation */
+  splitGroupId: string;
+
+  /** Sender's pubkey for acknowledgment */
+  senderPubkey: string;
+
+  /** Salt for recipient predicate creation (hex) */
+  recipientSaltHex: string;
+
+  /** Salt for transfer commitment creation (hex) */
+  transferSaltHex: string;
+}
+
+/**
+ * Type guard to check if an object is an InstantSplitBundle
+ */
+export function isInstantSplitBundle(obj: unknown): obj is InstantSplitBundle {
+  if (typeof obj !== 'object' || obj === null) {
+    return false;
+  }
+
+  const bundle = obj as Record<string, unknown>;
+  return (
+    bundle.type === 'INSTANT_SPLIT' &&
+    bundle.version === '2.0' &&
+    typeof bundle.burnCommitment === 'string' &&
+    typeof bundle.recipientMintData === 'string' &&
+    typeof bundle.amount === 'string' &&
+    typeof bundle.coinId === 'string' &&
+    typeof bundle.splitGroupId === 'string' &&
+    typeof bundle.senderPubkey === 'string' &&
+    typeof bundle.recipientSaltHex === 'string' &&
+    typeof bundle.transferSaltHex === 'string'
+  );
+}
+
+/**
+ * Result from processing an INSTANT_SPLIT bundle
+ */
+export interface InstantSplitProcessResult {
+  /** Whether processing succeeded */
+  success: boolean;
+
+  /** The finalized token (if successful) */
+  token?: import('../data/model').Token;
+
+  /** Error message (if failed) */
+  error?: string;
+
+  /** Processing duration in ms */
+  durationMs: number;
+}

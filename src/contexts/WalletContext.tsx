@@ -865,7 +865,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           },
           outboxContext,
           persistenceCallbacks,
-          { instant: true } // INSTANT_SPLIT_LITE: Skip waiting for transfer proof before Nostr delivery
+          { instantV2: true } // INSTANT_SPLIT V2: Defer mint/transfer proofs to recipient (~2s vs ~5.6s)
         );
 
         if (plan.splitAmount) {
@@ -897,6 +897,13 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             const token = splitResult.tokensForRecipient[i];
             const tx = splitResult.recipientTransferTxs[i];
             const outboxEntryId = splitResult.outboxEntryIds[i];
+
+            // Skip null entries (can occur in INSTANT_SPLIT V2 mode, but this loop
+            // shouldn't run in that case since nostrDelivered would be true)
+            if (!token || !tx) {
+              console.warn(`⚠️ Skipping null token/tx at index ${i}`);
+              continue;
+            }
 
             const sourceTokenString = JSON.stringify(token.toJSON());
             const transferTxString = JSON.stringify(tx.toJSON());
