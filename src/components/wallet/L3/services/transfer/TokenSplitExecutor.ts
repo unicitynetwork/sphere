@@ -404,12 +404,13 @@ export class TokenSplitExecutor {
       // The SDK's SplitMintReason requires Merkle tree proofs we don't have access to
 
       // Create mint transaction data for recipient token
+      // In V2 mode, mint directly to recipientAddress; in standard mode, mint to senderAddress
       const recipientMintData = await MintTransactionData.create(
         recipientTokenId,
         tokenToSplit.type,
         null, // tokenData
         coinDataA, // coin data for recipient amount
-        senderAddress,
+        recipientTokenOwner, // V2 mode: recipientAddress, standard mode: senderAddress
         Buffer.from(recipientSalt),
         null, // recipientDataHash
         null  // reason - dev mode skip
