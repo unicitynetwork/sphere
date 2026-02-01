@@ -132,6 +132,28 @@ export class NametagService {
       if (!ownerAddress)
         return { status: "error", message: "Failed to derive owner address" };
 
+      // Consistency check: verify the identity address matches the wallet address
+      // This detects cache race conditions that could cause "Recipient address mismatch" errors
+      const ownerAddressStr = ownerAddress.toString();
+      if (identity.address !== ownerAddressStr) {
+        console.error(`❌ [Nametag] Identity address mismatch detected!`);
+        console.error(`   identity.address: ${identity.address}`);
+        console.error(`   ownerAddress:     ${ownerAddressStr}`);
+        console.error(`   This indicates a cache race condition - retrying...`);
+
+        // Retry by fetching fresh identity
+        const freshIdentity = await this.identityManager.getCurrentIdentity();
+        if (!freshIdentity) {
+          return { status: "error", message: "Failed to get fresh identity" };
+        }
+        const freshOwnerAddress = await this.identityManager.getWalletAddress();
+        if (!freshOwnerAddress || freshIdentity.address !== freshOwnerAddress.toString()) {
+          return { status: "error", message: "Identity address mismatch - please try again" };
+        }
+        console.log(`✅ [Nametag] Fresh identity is consistent, proceeding...`);
+        return this.mintNametagAndPublish(nametag); // Retry with fresh state
+      }
+
       const sdkToken = await this.mintNametagOnBlockchain(
         cleanTag,
         ownerAddress,

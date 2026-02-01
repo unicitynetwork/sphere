@@ -865,7 +865,13 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           },
           outboxContext,
           persistenceCallbacks,
-          { instantV2: true } // INSTANT_SPLIT V2: Defer mint/transfer proofs to recipient (~2s vs ~5.6s)
+          // INSTANT_SPLIT V3 "Nostr-First" mode:
+          // 1. Burn → wait proof (~2s, SDK requirement)
+          // 2. Create mint commitments (no submission)
+          // 3. Create transfer commitment from mint data (no mint proof needed!)
+          // 4. Package bundle → send via Nostr → SUCCESS (~2.1s total)
+          // 5. Submit to aggregator in background
+          { instantV2: true }
         );
 
         if (plan.splitAmount) {

@@ -432,7 +432,7 @@ export class NostrService {
 
       console.log("Token transfer decrypted successfully!");
 
-      // Try to parse as JSON to check for INSTANT_SPLIT bundle
+      // Try to parse as JSON to check for INSTANT_SPLIT V3 bundle
       let payloadObj: Record<string, any> | null = null;
       try {
         if (tokenJson.startsWith("{")) {
@@ -442,9 +442,9 @@ export class NostrService {
         // Not valid JSON - continue with other checks
       }
 
-      // Check for INSTANT_SPLIT V2 bundle (highest priority)
+      // Check for INSTANT_SPLIT V4 bundle (highest priority)
       if (payloadObj && isInstantSplitBundle(payloadObj)) {
-        console.log("📦 [TokenTransfer] Detected INSTANT_SPLIT V2 bundle");
+        console.log("📦 [TokenTransfer] Detected INSTANT_SPLIT V4 bundle (True Nostr-First)");
         const result = await this.processInstantSplitBundle(payloadObj as InstantSplitBundle, event.pubkey);
         return result.success ? result.token || null : null;
       }
@@ -949,27 +949,28 @@ export class NostrService {
   }
 
   // ============================================
-  // INSTANT_SPLIT V2 Bundle Processing
+  // INSTANT_SPLIT V4 Bundle Processing
   // ============================================
 
   /**
-   * Process an INSTANT_SPLIT V2 bundle.
+   * Process an INSTANT_SPLIT V4 "True Nostr-First" bundle.
    *
-   * This method handles bundles where the sender defers ALL proof
-   * acquisition to the recipient, minimizing sender-side latency.
+   * V4 achieves near-zero sender latency (~0.3s) by sending ALL commitments
+   * via Nostr BEFORE any aggregator submission. The recipient handles all
+   * proof acquisition.
    *
    * Flow:
-   * 1. Submit burn commitment (idempotent - sender may have submitted already)
-   * 2. Deserialize MintTransactionData → recreate MintCommitment → submit → wait for proof
+   * 1. Submit burn commitment → wait for proof (idempotent - sender also submits in background)
+   * 2. Submit mint commitment → wait for proof
    * 3. Reconstruct minted token
-   * 4. Create TransferCommitment → submit → wait for proof
-   * 5. Finalize token and save
+   * 4. Submit pre-created transfer commitment → wait for proof
+   * 5. Finalize token with transfer and save
    */
   private async processInstantSplitBundle(
     bundle: InstantSplitBundle,
     senderPubkey: string
   ): Promise<InstantSplitProcessResult> {
-    console.log("📦 Processing INSTANT_SPLIT V2 bundle...");
+    console.log("📦 Processing INSTANT_SPLIT V4 bundle (True Nostr-First)...");
     const startTime = performance.now();
 
     try {
@@ -983,8 +984,9 @@ export class NostrService {
       const signingService = await SigningService.createFromSecret(secret);
 
       const client = ServiceProvider.stateTransitionClient;
+      const { waitInclusionProofWithDevBypass } = await import('../../../../utils/devTools');
 
-      // 1. Submit burn commitment (idempotent - sender may have submitted, or we do)
+      // 1. Submit burn commitment (idempotent - sender also submits in background)
       const burnCommitmentJson = JSON.parse(bundle.burnCommitment);
       const burnCommitment = await TransferCommitment.fromJSON(burnCommitmentJson);
       console.log(`  📦 Burn commitment: requestId=${burnCommitment.requestId.toString().slice(0, 16)}...`);
@@ -994,6 +996,10 @@ export class NostrService {
         throw new Error(`Burn submission failed: ${burnResponse.status}`);
       }
       console.log(`  📦 Burn submitted: ${burnResponse.status}`);
+
+      // Wait for burn proof (needed to ensure burn is on-chain before proceeding)
+      await waitInclusionProofWithDevBypass(burnCommitment, 60000);
+      console.log(`  📦 Burn proof received`);
 
       // 2. Deserialize MintTransactionData
       const mintDataJson = JSON.parse(bundle.recipientMintData);
@@ -1005,7 +1011,7 @@ export class NostrService {
       const mintCommitment = await MintCommitment.create(mintData);
       console.log(`  📦 MintCommitment recreated: requestId=${mintCommitment.requestId.toString().slice(0, 16)}...`);
 
-      // 4. Submit mint commitment (idempotent - sender may have also submitted)
+      // 4. Submit mint commitment (idempotent - sender also submits in background)
       const mintResponse = await client.submitMintCommitment(mintCommitment);
       if (mintResponse.status !== 'SUCCESS' && mintResponse.status !== 'REQUEST_ID_EXISTS') {
         throw new Error(`Mint submission failed: ${mintResponse.status}`);
@@ -1013,7 +1019,6 @@ export class NostrService {
       console.log(`  📦 Mint submitted: ${mintResponse.status}`);
 
       // 5. Wait for mint inclusion proof
-      const { waitInclusionProofWithDevBypass } = await import('../../../../utils/devTools');
       const mintProof = await waitInclusionProofWithDevBypass(mintCommitment, 60000);
       const mintTransaction = mintCommitment.toTransaction(mintProof);
       console.log(`  📦 Mint proof received`);
@@ -1051,13 +1056,55 @@ export class NostrService {
       }
       console.log(`  📦 Minted token reconstructed`);
 
-      // V2 optimization: Token is minted directly to recipient's address
-      // No transfer step needed - recipient already owns the token!
-      // This saves ~3-5 seconds (no transfer commitment + proof wait)
+      // 7. Submit pre-created transfer commitment (idempotent - sender also submits in background)
+      const transferCommitmentJson = JSON.parse(bundle.transferCommitment);
+      const transferCommitment = await TransferCommitment.fromJSON(transferCommitmentJson);
+      console.log(`  📦 Transfer commitment: requestId=${transferCommitment.requestId.toString().slice(0, 16)}...`);
 
-      // 7. Verify the token (in production mode)
+      const transferResponse = await client.submitTransferCommitment(transferCommitment);
+      if (transferResponse.status !== 'SUCCESS' && transferResponse.status !== 'REQUEST_ID_EXISTS') {
+        throw new Error(`Transfer submission failed: ${transferResponse.status}`);
+      }
+      console.log(`  📦 Transfer submitted: ${transferResponse.status}`);
+
+      // 8. Wait for transfer inclusion proof
+      const transferProof = await waitInclusionProofWithDevBypass(transferCommitment, 60000);
+      const transferTransaction = transferCommitment.toTransaction(transferProof);
+      console.log(`  📦 Transfer proof received`);
+
+      // 9. Create recipient's final state (after transfer)
+      const transferSalt = Buffer.from(bundle.transferSaltHex, "hex");
+      const finalRecipientPredicate = await UnmaskedPredicate.create(
+        mintData.tokenId,
+        tokenType,
+        signingService,
+        HashAlgorithm.SHA256,
+        transferSalt
+      );
+      const finalRecipientState = new TokenState(finalRecipientPredicate, null);
+
+      // 10. Finalize token with transfer transaction
+      let finalToken: Token<any>;
+      if (ServiceProvider.isTrustBaseVerificationSkipped()) {
+        console.log("  ⚠️ Dev mode: finalizing token without verification");
+        const tokenJson = mintedToken.toJSON() as any;
+        tokenJson.state = finalRecipientState.toJSON();
+        tokenJson.transactions = [transferTransaction.toJSON()];
+        finalToken = await Token.fromJSON(tokenJson);
+      } else {
+        finalToken = await client.finalizeTransaction(
+          ServiceProvider.getRootTrustBase(),
+          mintedToken,
+          finalRecipientState,
+          transferTransaction,
+          []
+        );
+      }
+      console.log(`  📦 Token finalized with transfer`);
+
+      // 11. Verify the final token (in production mode)
       if (!ServiceProvider.isTrustBaseVerificationSkipped()) {
-        const verification = await mintedToken.verify(ServiceProvider.getRootTrustBase());
+        const verification = await finalToken.verify(ServiceProvider.getRootTrustBase());
         if (!verification.isSuccessful) {
           console.error("  ❌ Token verification failed:", verification);
           throw new Error(`Token verification failed: ${verification}`);
@@ -1065,11 +1112,11 @@ export class NostrService {
         console.log(`  ✅ Token verified`);
       }
 
-      // 8. Save the minted token directly (no transfer needed in V2)
-      const uiToken = await this.saveReceivedToken(mintedToken, senderPubkey);
+      // 12. Save the finalized token
+      const uiToken = await this.saveReceivedToken(finalToken, senderPubkey);
 
       const duration = performance.now() - startTime;
-      console.log(`✅ INSTANT_SPLIT V2 bundle processed in ${duration.toFixed(0)}ms`);
+      console.log(`✅ INSTANT_SPLIT V4 bundle processed in ${duration.toFixed(0)}ms`);
 
       return {
         success: true,
@@ -1079,7 +1126,7 @@ export class NostrService {
     } catch (error) {
       const duration = performance.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`❌ INSTANT_SPLIT V2 bundle processing failed:`, error);
+      console.error(`❌ INSTANT_SPLIT V4 bundle processing failed:`, error);
 
       return {
         success: false,

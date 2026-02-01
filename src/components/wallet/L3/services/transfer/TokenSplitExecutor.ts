@@ -59,7 +59,14 @@ interface SplitTokenResult {
 export interface SplitExecutionOptions {
   /** INSTANT_SPLIT LITE: Skip waiting for transfer proof before Nostr delivery */
   instant?: boolean;
-  /** INSTANT_SPLIT V2: Send Nostr immediately after burn, defer mint proofs to recipient */
+  /**
+   * INSTANT_SPLIT V3 (Nostr-First):
+   * 1. Burn → submit → wait proof (~2s, SDK requirement)
+   * 2. Create mint commitments from burn tx (no submission)
+   * 3. Create transfer commitment from mint data (no submission, no mint proof needed!)
+   * 4. Package bundle → send via Nostr → SUCCESS (~2.1s total)
+   * 5. Submit mint/transfer to aggregator in background
+   */
   instantV2?: boolean;
 }
 
@@ -276,11 +283,19 @@ export class TokenSplitExecutor {
 
     const coinDataA = TokenCoinData.create([[coinId, splitAmount]]);
 
-    // In V2 mode: mint recipient's token directly to recipientAddress
-    // This allows recipient to reconstruct with Token.mint() using their own signingService
-    // In standard mode: mint to senderAddress, then transfer (existing flow)
-    const isInstantV2Mode = options?.instantV2 === true;
-    const recipientTokenOwner = isInstantV2Mode ? recipientAddress : senderAddress;
+    // V3 "Nostr-First" mode: Mint to sender, create transfer commitment WITHOUT mint proof,
+    // package bundle with burnTransaction + recipientMintData + transferCommitment,
+    // send via Nostr immediately, then submit to aggregator in background.
+    //
+    // This achieves ~2.1s sender-side latency (burn proof wait + packaging + Nostr).
+    // Key insight: TransferCommitment.create() only needs token.state and token.nametagTokens,
+    // it does NOT need the genesis transaction or mint proof.
+    const isInstantV2Mode = options?.instantV2 === true; // V2 flag enables V3 flow
+    const recipientTokenOwner = senderAddress; // Always mint to sender, then transfer
+
+    if (isInstantV2Mode) {
+      console.log(`⚡ INSTANT_SPLIT V3 mode enabled: Nostr-first with pre-created transfer commitment`);
+    }
 
     builder.createToken(
       recipientTokenId,
@@ -307,7 +322,7 @@ export class TokenSplitExecutor {
     // 4. Build Split Object
     const split = await builder.build(tokenToSplit);
 
-    // === STEP 1: BURN ===
+    // === STEP 1: CREATE BURN COMMITMENT ===
     const burnSalt = await sha256(seedString + "_burn_salt");
     const burnCommitment = await split.createBurnCommitment(burnSalt, signingService);
 
@@ -319,8 +334,8 @@ export class TokenSplitExecutor {
     // Create outbox entry for BURN BEFORE submitting to aggregator
     // This ensures we can recover if browser crashes after burn is submitted
     let burnEntryId: string | undefined;
+    const coinIdHex = Buffer.from(coinId.bytes).toString("hex");
     if (outboxRepo && outboxContext && splitGroupId) {
-      const coinIdHex = Buffer.from(coinId.bytes).toString("hex");
       const burnEntry = createOutboxEntry(
         "SPLIT_BURN",
         uiTokenId,
@@ -340,6 +355,159 @@ export class TokenSplitExecutor {
       outboxRepo.addEntryToSplitGroup(splitGroupId, burnEntry.id);
       burnEntryId = burnEntry.id;
       console.log(`📤 Outbox: Added SPLIT_BURN entry ${burnEntry.id.slice(0, 8)}...`);
+    }
+
+    // === INSTANT_SPLIT V4: TRUE NOSTR-FIRST ===
+    // Create ALL commitments before ANY aggregator submission, then send via Nostr FIRST.
+    // The aggregator only sees hashes - it doesn't validate SplitMintReason content.
+    // In dev mode, mint commitments use reason=null, so hash doesn't depend on burn proof.
+    if (isInstantV2Mode && outboxContext && ServiceProvider.isTrustBaseVerificationSkipped()) {
+      console.log("⚡ INSTANT_SPLIT_V4: TRUE NOSTR-FIRST - Creating ALL commitments before submission...");
+      const v4StartTime = performance.now();
+
+      // === Step 1: Create mint commitments with reason=null (no burn proof needed!) ===
+      console.log("✨ V4: Creating mint commitments with reason=null (no burn proof dependency)...");
+
+      const recipientMintData = await MintTransactionData.create(
+        recipientTokenId,
+        tokenToSplit.type,
+        null, // tokenData
+        coinDataA,
+        recipientTokenOwner,
+        Buffer.from(recipientSalt),
+        null, // recipientDataHash
+        null  // reason = null - hash doesn't depend on burn proof!
+      );
+      const recipientMintCommitment = await MintCommitment.create(recipientMintData);
+
+      const senderMintData = await MintTransactionData.create(
+        senderTokenId,
+        tokenToSplit.type,
+        null,
+        coinDataB,
+        senderAddress,
+        Buffer.from(senderSalt),
+        null,
+        null  // reason = null
+      );
+      const senderMintCommitment = await MintCommitment.create(senderMintData);
+
+      console.log(`✅ V4: Mint commitments created (requestIds: ${recipientMintCommitment.requestId.toString().slice(0,16)}..., ${senderMintCommitment.requestId.toString().slice(0,16)}...)`);
+
+      // === Step 2: Create transfer commitment from mint data (no proofs needed!) ===
+      const transferSalt = await sha256(seedString + "_transfer_salt");
+      const transferSaltHex = Buffer.from(transferSalt).toString("hex");
+
+      const transferCommitment = await this.createTransferCommitmentFromMintData(
+        recipientMintData,
+        recipientAddress,
+        transferSalt,
+        signingService
+      );
+      console.log(`✅ V4: Transfer commitment created (requestId: ${transferCommitment.requestId.toString().slice(0,16)}...)`);
+
+      // === Step 3: Package V4 bundle (all commitments, no proofs) ===
+      const recipientAddressStr = (recipientAddress as any).address || JSON.stringify((recipientAddress as any).toJSON ? (recipientAddress as any).toJSON() : recipientAddress);
+      const bundle: InstantSplitBundle = {
+        version: '4.0',
+        type: 'INSTANT_SPLIT',
+        burnCommitment: JSON.stringify(burnCommitment.toJSON()), // Commitment, not transaction!
+        recipientMintData: JSON.stringify(recipientMintData.toJSON()),
+        transferCommitment: JSON.stringify(transferCommitment.toJSON()),
+        amount: splitAmount.toString(),
+        coinId: coinIdHex,
+        tokenTypeHex: Buffer.from(tokenToSplit.type.bytes).toString("hex"),
+        splitGroupId: splitGroupId!,
+        senderPubkey: outboxContext.ownerPublicKey,
+        recipientSaltHex: Buffer.from(recipientSalt).toString("hex"),
+        transferSaltHex: transferSaltHex,
+      };
+
+      // Create outbox entry for V4 tracking
+      if (outboxRepo && splitGroupId) {
+        const v4Entry = createOutboxEntry(
+          "SPLIT_TRANSFER",
+          uiTokenId,
+          outboxContext.recipientNametag,
+          outboxContext.recipientPubkey,
+          recipientAddressStr,
+          splitAmount.toString(),
+          coinIdHex,
+          transferSaltHex,
+          JSON.stringify(bundle),
+          JSON.stringify(transferCommitment.toJSON()),
+          splitGroupId,
+          3
+        );
+        v4Entry.status = "READY_TO_SEND";
+        outboxRepo.addEntry(v4Entry);
+        outboxRepo.addEntryToSplitGroup(splitGroupId, v4Entry.id);
+        transferEntryId = v4Entry.id;
+        console.log(`📤 Outbox: Added INSTANT_SPLIT_V4 entry ${v4Entry.id.slice(0, 8)}...`);
+      }
+
+      // === Step 4: SEND VIA NOSTR FIRST! (critical path ~100-300ms) ===
+      try {
+        const { NostrService } = await import('../NostrService');
+        const nostrService = NostrService.getInstance();
+        const nostrEventId = await nostrService.sendTokenToRecipient(
+          outboxContext.recipientPubkey,
+          JSON.stringify(bundle)
+        );
+
+        const nostrDuration = performance.now() - v4StartTime;
+        console.log(`✅ INSTANT_SPLIT_V4: Bundle sent via Nostr (${nostrEventId.slice(0, 8)}...) in ${nostrDuration.toFixed(0)}ms`);
+        console.log(`   🚀 NO AGGREGATOR WAIT - True Nostr-first achieved!`);
+
+        // Update outbox
+        if (outboxRepo && transferEntryId) {
+          outboxRepo.updateEntry(transferEntryId, {
+            status: "NOSTR_SENT",
+            nostrEventId: nostrEventId,
+            nostrConfirmedAt: Date.now(),
+          });
+        }
+
+        // Mark token as burned in UI (it will be burned once aggregator submission completes)
+        onTokenBurned(uiTokenId);
+
+        // === Step 5: BACKGROUND - Submit ALL to aggregator (fire-and-forget) ===
+        this.submitBackgroundV4(
+          burnCommitment,
+          senderMintCommitment,
+          recipientMintCommitment,
+          transferCommitment,
+          {
+            outboxRepo,
+            burnEntryId,
+            transferEntryId,
+            persistenceCallbacks,
+            signingService,
+            tokenType: tokenToSplit.type,
+            coinId,
+            senderTokenId,
+            senderSalt,
+            walletAddress: outboxContext.walletAddress,
+          }
+        );
+
+        // Return immediately - split is "complete" from user's perspective
+        return {
+          tokenForRecipient: null,
+          tokenForSender: null,
+          recipientTransferTx: null,
+          outboxEntryId: transferEntryId,
+          splitGroupId: splitGroupId,
+          nostrDelivered: true,
+        };
+      } catch (nostrError) {
+        console.error("❌ INSTANT_SPLIT_V4 Nostr delivery failed:", nostrError);
+        if (outboxRepo && transferEntryId) {
+          outboxRepo.updateStatus(transferEntryId, "FAILED", `Nostr delivery failed: ${nostrError}`);
+        }
+        console.log("⚠️ Falling back to standard flow after V4 failure...");
+        // Fall through to standard flow
+      }
     }
 
     // === STANDARD FLOW: Submit burn and wait for proof ===
@@ -404,7 +572,8 @@ export class TokenSplitExecutor {
       // The SDK's SplitMintReason requires Merkle tree proofs we don't have access to
 
       // Create mint transaction data for recipient token
-      // In V2 mode, mint directly to recipientAddress; in standard mode, mint to senderAddress
+      // Always mint to senderAddress (recipientTokenOwner), then transfer later
+      // V2 mode that mints directly to recipient is not feasible due to key format mismatch
       const recipientMintData = await MintTransactionData.create(
         recipientTokenId,
         tokenToSplit.type,
@@ -440,137 +609,9 @@ export class TokenSplitExecutor {
       );
     }
 
-    // === INSTANT_SPLIT V2: Send bundle immediately after mint commitments created ===
-    // At this point: burn proof received (~2s), mint commitments created from burn tx
-    // V2 sends Nostr immediately (skip ~3.5s mint proof wait + ~5s IPFS sync)
-    // Note: isInstantV2Mode already declared above when determining recipientTokenOwner
-    if (isInstantV2Mode && outboxContext) {
-      console.log("⚡ INSTANT_SPLIT_V2: Packaging bundle for immediate Nostr delivery...");
-      const v2StartTime = performance.now();
-
-      // Find recipient's and sender's mint commitments
-      const recipientIdHex = Buffer.from(recipientTokenId.bytes).toString("hex");
-      const senderIdHex = Buffer.from(senderTokenId.bytes).toString("hex");
-
-      const recipientMintCommitment = mintCommitments.find((c: any) =>
-        Buffer.from(c.transactionData.tokenId.bytes).toString("hex") === recipientIdHex
-      );
-      const senderMintCommitment = mintCommitments.find((c: any) =>
-        Buffer.from(c.transactionData.tokenId.bytes).toString("hex") === senderIdHex
-      );
-
-      if (!recipientMintCommitment || !senderMintCommitment) {
-        throw new Error("INSTANT_SPLIT_V2: Failed to find recipient/sender mint commitments");
-      }
-
-      // Generate transfer salt for recipient to use when creating TransferCommitment
-      const transferSalt = await sha256(seedString + "_transfer_salt");
-      const transferSaltHex = Buffer.from(transferSalt).toString("hex");
-
-      // Package the INSTANT_SPLIT bundle
-      // Include burnCommitment for reference (recipient can submit if needed)
-      // Include recipientMintData (recipient recreates commitment and submits)
-      const coinIdHex = Buffer.from(coinId.bytes).toString("hex");
-      const recipientAddressStr = (recipientAddress as any).address || JSON.stringify((recipientAddress as any).toJSON ? (recipientAddress as any).toJSON() : recipientAddress);
-      const bundle: InstantSplitBundle = {
-        version: '2.0',
-        type: 'INSTANT_SPLIT',
-        burnCommitment: JSON.stringify(burnCommitment.toJSON()),
-        recipientMintData: JSON.stringify(recipientMintCommitment.transactionData.toJSON()),
-        amount: splitAmount.toString(),
-        coinId: coinIdHex,
-        tokenTypeHex: Buffer.from(tokenToSplit.type.bytes).toString("hex"),
-        splitGroupId: splitGroupId!,
-        senderPubkey: outboxContext.ownerPublicKey,
-        recipientSaltHex: Buffer.from(recipientSalt).toString("hex"),
-        transferSaltHex: transferSaltHex,
-      };
-
-      // Create outbox entry for V2 tracking BEFORE sending
-      if (outboxRepo && splitGroupId) {
-        const v2Entry = createOutboxEntry(
-          "SPLIT_TRANSFER",
-          uiTokenId,
-          outboxContext.recipientNametag,
-          outboxContext.recipientPubkey,
-          recipientAddressStr,
-          splitAmount.toString(),
-          coinIdHex,
-          transferSaltHex,
-          JSON.stringify(bundle), // Store bundle as source for recovery
-          null, // No commitment JSON on sender side - recipient creates it
-          splitGroupId,
-          3 // Index 3 = transfer phase
-        );
-        v2Entry.status = "READY_TO_SEND";
-        outboxRepo.addEntry(v2Entry);
-        outboxRepo.addEntryToSplitGroup(splitGroupId, v2Entry.id);
-        transferEntryId = v2Entry.id;
-        console.log(`📤 Outbox: Added INSTANT_SPLIT_V2 entry ${v2Entry.id.slice(0, 8)}...`);
-      }
-
-      // Send via Nostr IMMEDIATELY - this is the critical path (~100ms)
-      try {
-        const { NostrService } = await import('../NostrService');
-        const nostrService = NostrService.getInstance();
-        const nostrEventId = await nostrService.sendTokenToRecipient(
-          outboxContext.recipientPubkey,
-          JSON.stringify(bundle)
-        );
-
-        const v2Duration = performance.now() - v2StartTime;
-        console.log(`✅ INSTANT_SPLIT_V2: Bundle sent via Nostr (${nostrEventId.slice(0, 8)}...) in ${v2Duration.toFixed(0)}ms`);
-        console.log(`   Total sender-side time: burn proof (~2s) + packaging (${v2Duration.toFixed(0)}ms)`);
-
-        // Update outbox entry
-        if (outboxRepo && transferEntryId) {
-          outboxRepo.updateEntry(transferEntryId, {
-            status: "NOSTR_SENT",
-            nostrEventId: nostrEventId,
-            nostrConfirmedAt: Date.now(),
-          });
-        }
-
-        // === BACKGROUND: Submit mints and save change token (fire-and-forget) ===
-        // Both sender and recipient may submit mints - aggregator handles idempotency
-        // Note: Burn is already submitted and has proof - only need to process mints
-        this.submitBackgroundMintsAfterBurn(
-          senderMintCommitment,
-          recipientMintCommitment,
-          {
-            outboxRepo,
-            transferEntryId,
-            persistenceCallbacks,
-            signingService,
-            tokenType: tokenToSplit.type,
-            coinId,
-            senderTokenId,
-            senderSalt,
-            walletAddress: outboxContext.walletAddress,
-          }
-        );
-
-        // Return immediately - split is "complete" from user's perspective
-        return {
-          tokenForRecipient: null, // Not reconstructed on sender side in V2
-          tokenForSender: null,    // Will be saved by background worker
-          recipientTransferTx: null,
-          outboxEntryId: transferEntryId,
-          splitGroupId: splitGroupId,
-          nostrDelivered: true,
-        };
-      } catch (nostrError) {
-        console.error("❌ INSTANT_SPLIT_V2 Nostr delivery failed:", nostrError);
-
-        // Mark outbox entry as failed
-        if (outboxRepo && transferEntryId) {
-          outboxRepo.updateStatus(transferEntryId, "FAILED", `Nostr delivery failed: ${nostrError}`);
-        }
-
-        // Fall through to standard V1 flow as recovery
-        console.log("⚠️ Falling back to V1 flow after V2 failure...");
-      }
-    }
+    // Note: INSTANT_SPLIT V4 block above handles fast path in dev mode.
+    // If V4 was enabled and succeeded, we already returned.
+    // If we reach here, either V4 is not enabled (production) or it failed (fallback to standard).
 
     // === HYBRID APPROACH: Sequential Submissions + Parallel Proof Waiting ===
 
@@ -1078,19 +1119,83 @@ export class TokenSplitExecutor {
   }
 
   // ============================================
-  // INSTANT_SPLIT V2 Helper Methods
+  // INSTANT_SPLIT V3 Helper Methods
   // ============================================
 
   /**
-   * Submit mint commitments in background (fire-and-forget for V2 mode).
-   * The sender's change token is saved after its proof is received.
-   * The recipient will also submit - aggregator handles idempotency.
+   * Create a TransferCommitment from MintTransactionData WITHOUT waiting for mint proof.
+   *
+   * Key insight: TransferCommitment.create() only needs token.state and token.nametagTokens.
+   * It does NOT need the genesis transaction or mint proof.
+   *
+   * This enables V3 "Nostr-First" flow where we package the transfer commitment
+   * BEFORE submitting mint to aggregator.
    */
-  private submitBackgroundMintsAfterBurn(
+  private async createTransferCommitmentFromMintData(
+    mintData: MintTransactionData<any>,
+    recipientAddress: IAddress,
+    transferSalt: Uint8Array,
+    signingService: SigningService
+  ): Promise<TransferCommitment> {
+    // Recreate the predicate from mint data
+    const predicate = await UnmaskedPredicate.create(
+      mintData.tokenId,
+      mintData.tokenType,
+      signingService,
+      HashAlgorithm.SHA256,
+      mintData.salt
+    );
+
+    // Create token state (what TransferCommitment.create actually uses)
+    const state = new TokenState(predicate, null);
+
+    // Create a minimal token-like object
+    // TransferCommitment.create() only accesses token.state and token.nametagTokens
+    // It does NOT need genesis transaction, transactions array, or any proofs
+    const minimalToken = {
+      state,
+      nametagTokens: [],
+      // These properties are accessed for logging/metadata but not for commitment calculation
+      id: mintData.tokenId,
+      type: mintData.tokenType,
+    };
+
+    console.log(`📝 Creating TransferCommitment from mint data (no mint proof required)`);
+    console.log(`   - tokenId: ${Buffer.from(mintData.tokenId.bytes).toString("hex").slice(0, 16)}...`);
+    console.log(`   - recipient: ${recipientAddress.address}`);
+
+    // Create the transfer commitment
+    const transferCommitment = await TransferCommitment.create(
+      minimalToken as any, // Type assertion needed for minimal object
+      recipientAddress,
+      transferSalt,
+      null, // recipientData
+      null, // recipientDataHash
+      signingService
+    );
+
+    console.log(`✅ TransferCommitment created: requestId=${transferCommitment.requestId.toString().slice(0, 16)}...`);
+
+    return transferCommitment;
+  }
+
+  /**
+   * V4 "True Nostr-First" background submission.
+   *
+   * Submits ALL commitments to aggregator in PARALLEL after Nostr delivery.
+   * Then waits for ALL proofs in parallel.
+   * Finally persists tokens to localStorage and triggers IPFS sync.
+   *
+   * Both sender and recipient submit - aggregator handles idempotency.
+   */
+  private submitBackgroundV4(
+    burnCommitment: TransferCommitment,
     senderMintCommitment: any,
     recipientMintCommitment: any,
+    transferCommitment: TransferCommitment,
     context: {
       outboxRepo: OutboxRepository | null;
+      burnEntryId?: string;
       transferEntryId?: string;
       persistenceCallbacks?: SplitPersistenceCallbacks;
       signingService: SigningService;
@@ -1101,80 +1206,165 @@ export class TokenSplitExecutor {
       walletAddress: string;
     }
   ): void {
-    // High priority: sender's change token (we want this saved ASAP)
-    this.client.submitMintCommitment(senderMintCommitment)
-      .then(async (res) => {
-        if (res.status === 'SUCCESS' || res.status === 'REQUEST_ID_EXISTS') {
-          console.log("✅ Background: Sender mint submitted");
+    console.log("🔄 Background V4: Starting PARALLEL submission of all commitments...");
+    const startTime = performance.now();
 
+    // Step 1: Submit ALL commitments in PARALLEL
+    const submissions = Promise.all([
+      this.client.submitTransferCommitment(burnCommitment)
+        .then(res => {
+          console.log(`✅ Background V4: Burn submitted: ${res.status}`);
+          if (context.outboxRepo && context.burnEntryId) {
+            context.outboxRepo.updateStatus(context.burnEntryId, 'SUBMITTED');
+          }
+          return { type: 'burn', status: res.status };
+        })
+        .catch(err => {
+          console.error("❌ Background V4: Burn submission error:", err);
+          return { type: 'burn', status: 'ERROR', error: err };
+        }),
+
+      this.client.submitMintCommitment(senderMintCommitment)
+        .then(res => {
+          console.log(`✅ Background V4: Sender mint submitted: ${res.status}`);
+          return { type: 'senderMint', status: res.status };
+        })
+        .catch(err => {
+          console.warn("⚠️ Background V4: Sender mint error:", err);
+          return { type: 'senderMint', status: 'ERROR', error: err };
+        }),
+
+      this.client.submitMintCommitment(recipientMintCommitment)
+        .then(res => {
+          console.log(`✅ Background V4: Recipient mint submitted: ${res.status}`);
+          return { type: 'recipientMint', status: res.status };
+        })
+        .catch(err => {
+          console.warn("⚠️ Background V4: Recipient mint error:", err);
+          return { type: 'recipientMint', status: 'ERROR', error: err };
+        }),
+
+      this.client.submitTransferCommitment(transferCommitment)
+        .then(res => {
+          console.log(`✅ Background V4: Transfer submitted: ${res.status}`);
+          return { type: 'transfer', status: res.status };
+        })
+        .catch(err => {
+          console.warn("⚠️ Background V4: Transfer error:", err);
+          return { type: 'transfer', status: 'ERROR', error: err };
+        }),
+    ]);
+
+    // Continue with proof waiting after all submissions complete
+    submissions.then(async (results) => {
+      const submitDuration = performance.now() - startTime;
+      console.log(`✅ Background V4: All submissions complete in ${submitDuration.toFixed(0)}ms`);
+
+      // Check for critical failures
+      const burnResult = results.find(r => r.type === 'burn');
+      if (burnResult?.status !== 'SUCCESS' && burnResult?.status !== 'REQUEST_ID_EXISTS') {
+        console.error(`❌ Background V4: Burn failed - cannot continue`);
+        return;
+      }
+
+      // Step 2: Wait for ALL proofs in PARALLEL
+      console.log("⏳ Background V4: Waiting for all proofs in parallel...");
+      const proofStartTime = performance.now();
+
+      try {
+        const [burnProof, senderMintProof, _recipientMintProof, transferProof] = await Promise.all([
+          waitInclusionProofWithDevBypass(burnCommitment, 60000),
+          waitInclusionProofWithDevBypass(senderMintCommitment, 60000),
+          waitInclusionProofWithDevBypass(recipientMintCommitment, 60000),
+          waitInclusionProofWithDevBypass(transferCommitment, 60000),
+        ]);
+
+        const proofDuration = performance.now() - proofStartTime;
+        console.log(`✅ Background V4: All proofs received in ${proofDuration.toFixed(0)}ms`);
+
+        // Update outbox with proof info
+        if (context.outboxRepo && context.burnEntryId) {
+          context.outboxRepo.updateEntry(context.burnEntryId, {
+            status: 'PROOF_RECEIVED',
+            inclusionProofJson: JSON.stringify(burnProof.toJSON()),
+          });
+        }
+
+        if (context.outboxRepo && context.transferEntryId) {
+          context.outboxRepo.updateEntry(context.transferEntryId, {
+            status: 'COMPLETED',
+            inclusionProofJson: JSON.stringify(transferProof.toJSON()),
+          });
+        }
+
+        // Step 3: Reconstruct and save change token
+        console.log("💾 Background V4: Saving change token...");
+        const changeToken = await this.createAndVerifyToken(
+          {
+            commitment: senderMintCommitment,
+            inclusionProof: senderMintProof,
+            isForRecipient: false,
+            tokenId: context.senderTokenId,
+            salt: context.senderSalt,
+          },
+          context.signingService,
+          context.tokenType,
+          "Sender (Change) - V4 Background"
+        );
+
+        // Save change token to localStorage
+        if (context.persistenceCallbacks?.onTokenMinted) {
+          await context.persistenceCallbacks.onTokenMinted(changeToken, true, { skipSync: true });
+          console.log("✅ Background V4: Change token saved via callback");
+        } else {
+          const registryService = RegistryService.getInstance();
+          const coinIdHex = Buffer.from(context.coinId.bytes).toString("hex");
+          const def = registryService.getCoinDefinition(coinIdHex);
+
+          const uiToken = new UiToken({
+            id: uuidv4(),
+            name: def?.symbol || "Token",
+            type: context.tokenType.toString(),
+            symbol: def?.symbol,
+            jsonData: JSON.stringify(changeToken.toJSON()),
+            status: TokenStatus.CONFIRMED,
+            amount: changeToken.coins?.coins?.[0]?.[1]?.toString(),
+            coinId: coinIdHex,
+            iconUrl: def ? registryService.getIconUrl(def) || undefined : undefined,
+            timestamp: Date.now(),
+          });
+
+          saveTokenImmediately(context.walletAddress, uiToken);
+          console.log("✅ Background V4: Change token saved directly");
+        }
+
+        // Dispatch wallet updated to refresh UI
+        dispatchWalletUpdated();
+
+        // Step 4: Trigger IPFS sync (if callback provided)
+        if (context.persistenceCallbacks?.onPreTransferSync) {
+          console.log("☁️ Background V4: Triggering IPFS sync...");
           try {
-            // Wait for proof and save change token
-            const proof = await waitInclusionProofWithDevBypass(senderMintCommitment);
-
-            const changeToken = await this.createAndVerifyToken(
-              {
-                commitment: senderMintCommitment,
-                inclusionProof: proof,
-                isForRecipient: false,
-                tokenId: context.senderTokenId,
-                salt: context.senderSalt,
-              },
-              context.signingService,
-              context.tokenType,
-              "Sender (Change) - V2 Background"
-            );
-
-            // Save via persistence callback if available
-            if (context.persistenceCallbacks?.onTokenMinted) {
-              await context.persistenceCallbacks.onTokenMinted(changeToken, true, { skipSync: true });
-              console.log("✅ Background: Change token saved via callback");
+            const syncSuccess = await context.persistenceCallbacks.onPreTransferSync();
+            if (syncSuccess) {
+              console.log("✅ Background V4: IPFS sync completed");
             } else {
-              // Fallback: save directly to localStorage
-              const registryService = RegistryService.getInstance();
-              const coinIdHex = Buffer.from(context.coinId.bytes).toString("hex");
-              const def = registryService.getCoinDefinition(coinIdHex);
-
-              const uiToken = new UiToken({
-                id: uuidv4(),
-                name: def?.symbol || "Token",
-                type: context.tokenType.toString(),
-                symbol: def?.symbol,
-                jsonData: JSON.stringify(changeToken.toJSON()),
-                status: TokenStatus.CONFIRMED,
-                amount: changeToken.coins?.coins?.[0]?.[1]?.toString(),
-                coinId: coinIdHex,
-                iconUrl: def ? registryService.getIconUrl(def) || undefined : undefined,
-                timestamp: Date.now(),
-              });
-
-              saveTokenImmediately(context.walletAddress, uiToken);
-              console.log("✅ Background: Change token saved directly to localStorage");
+              console.warn("⚠️ Background V4: IPFS sync returned false (will retry later)");
             }
-
-            dispatchWalletUpdated();
-          } catch (proofError) {
-            console.error("❌ Background: Failed to get sender mint proof:", proofError);
+          } catch (syncError) {
+            console.warn("⚠️ Background V4: IPFS sync error (will retry later):", syncError);
           }
-        } else {
-          console.warn(`⚠️ Background: Sender mint submission failed: ${res.status}`);
         }
-      })
-      .catch(err => console.warn("❌ Background: Sender mint error:", err));
 
-    // Low priority: recipient mint (redundant - recipient will also submit)
-    this.client.submitMintCommitment(recipientMintCommitment)
-      .then((res) => {
-        if (res.status === 'SUCCESS' || res.status === 'REQUEST_ID_EXISTS') {
-          console.log("✅ Background: Recipient mint submitted (redundant)");
-          // Mark outbox entry as completed from sender's perspective
-          // Recipient will handle transfer commitment creation and submission
-          if (context.outboxRepo && context.transferEntryId) {
-            context.outboxRepo.updateStatus(context.transferEntryId, 'COMPLETED');
-          }
-        } else {
-          console.warn(`⚠️ Background: Recipient mint submission returned: ${res.status} (recipient will submit)`);
-        }
-      })
-      .catch(err => console.warn("⚠️ Background: Recipient mint error (recipient will submit):", err));
+        const totalDuration = performance.now() - startTime;
+        console.log(`🎯 Background V4: Complete in ${totalDuration.toFixed(0)}ms (submit: ${submitDuration.toFixed(0)}ms, proofs: ${proofDuration.toFixed(0)}ms)`);
+
+      } catch (proofError) {
+        console.error("❌ Background V4: Failed to get one or more proofs:", proofError);
+        // Tokens are still on blockchain - they can be recovered via OutboxRecoveryService
+      }
+    }).catch(err => {
+      console.error("❌ Background V4: Submission batch failed:", err);
+    });
   }
 }

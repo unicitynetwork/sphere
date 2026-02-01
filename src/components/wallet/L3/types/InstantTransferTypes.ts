@@ -505,38 +505,50 @@ export function createPaymentSessionError(
 }
 
 // ============================================
-// INSTANT_SPLIT V2 Types (True Instant Split)
+// INSTANT_SPLIT V4 Types (True Nostr-First Split)
 // ============================================
 
 /**
- * Bundle payload for INSTANT_SPLIT V2 (True Instant Split)
+ * Bundle payload for INSTANT_SPLIT V4 (True Nostr-First Split)
  *
- * This bundle defers ALL proof acquisition to the recipient,
- * reducing sender-side latency from ~5.6s to ~0.3s (just Nostr delivery).
+ * V4 achieves near-zero sender latency (~0.3s) by:
+ * 1. Creating ALL commitments locally BEFORE any aggregator submission
+ * 2. Persisting via Nostr FIRST
+ * 3. Then submitting ALL to aggregator in background
+ *
+ * Key insight: The aggregator only sees HASHES - it doesn't validate SplitMintReason content.
+ * In dev mode, we create mint commitments with reason=null, so the hash doesn't depend on burn proof.
  *
  * Flow:
- * 1. Sender: create burn commitment + mint data → send bundle via Nostr → SUCCESS
- * 2. Sender (background): submit burn → submit mints
- * 3. Recipient: submit burn (idempotent) → submit mint → create transfer → finalize
- *
- * Key insight: In dev mode, mint commitments can be created without burn proof.
- * The aggregator is idempotent, so both sender and recipient can submit.
+ * 1. Sender: create burn commitment (don't submit)
+ * 2. Sender: create mint commitments with reason=null (don't submit)
+ * 3. Sender: create transfer commitment from mint data (don't submit)
+ * 4. Sender: package bundle → send via Nostr → SUCCESS (~0.3s total!)
+ * 5. Sender (background): submit burn → wait proof → submit mints → submit transfer
+ * 6. Recipient: submit burn (idempotent) → wait proof → submit mint → wait proof →
+ *              submit transfer → wait proof → finalize
  */
 export interface InstantSplitBundle {
-  /** Bundle version - allows graceful fallback for future changes */
-  version: '2.0';
+  /** Bundle version - V4 is true Nostr-first (all commitments before any submission) */
+  version: '4.0';
 
   /** Bundle type identifier */
   type: 'INSTANT_SPLIT';
 
   /**
-   * Burn commitment JSON (recipient submits if sender hasn't yet)
-   * This is the commitment, NOT the transaction with proof.
+   * Burn commitment JSON (NOT transaction - no proof yet!)
+   * Both sender and recipient submit this to aggregator.
    */
   burnCommitment: string;
 
   /** Recipient's MintTransactionData JSON (they recreate commitment and submit) */
   recipientMintData: string;
+
+  /**
+   * Pre-created TransferCommitment JSON (recipient submits and waits for proof)
+   * Created from mint data WITHOUT any proofs.
+   */
+  transferCommitment: string;
 
   /** Payment amount (display metadata) */
   amount: string;
@@ -571,9 +583,10 @@ export function isInstantSplitBundle(obj: unknown): obj is InstantSplitBundle {
   const bundle = obj as Record<string, unknown>;
   return (
     bundle.type === 'INSTANT_SPLIT' &&
-    bundle.version === '2.0' &&
+    bundle.version === '4.0' &&
     typeof bundle.burnCommitment === 'string' &&
     typeof bundle.recipientMintData === 'string' &&
+    typeof bundle.transferCommitment === 'string' &&
     typeof bundle.amount === 'string' &&
     typeof bundle.coinId === 'string' &&
     typeof bundle.splitGroupId === 'string' &&
