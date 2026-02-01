@@ -35,7 +35,6 @@ import { NametagService } from "./NametagService";
 import { ProxyAddress } from "@unicitylabs/state-transition-sdk/lib/address/ProxyAddress";
 import { SigningService } from "@unicitylabs/state-transition-sdk/lib/sign/SigningService";
 import { UnmaskedPredicate } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicate";
-import { UnmaskedPredicateReference } from "@unicitylabs/state-transition-sdk/lib/predicate/embedded/UnmaskedPredicateReference";
 import { HashAlgorithm } from "@unicitylabs/state-transition-sdk/lib/hash/HashAlgorithm";
 import { TokenState } from "@unicitylabs/state-transition-sdk/lib/token/TokenState";
 import { ServiceProvider } from "./ServiceProvider";
@@ -1052,89 +1051,22 @@ export class NostrService {
       }
       console.log(`  📦 Minted token reconstructed`);
 
-      // 7. Create TransferCommitment (recipient creates this, not sender in V2)
-      // This is the key optimization - sender doesn't need to wait for mint proof to create this
-      const transferSalt = Buffer.from(bundle.transferSaltHex, "hex");
+      // V2 optimization: Token is minted directly to recipient's address
+      // No transfer step needed - recipient already owns the token!
+      // This saves ~3-5 seconds (no transfer commitment + proof wait)
 
-      // Create recipient's own address from their signing service
-      const recipientPredicateRef = await UnmaskedPredicateReference.create(
-        tokenType,
-        signingService.algorithm,
-        signingService.publicKey,
-        HashAlgorithm.SHA256
-      );
-      const recipientAddress = await recipientPredicateRef.toAddress();
-
-      const transferCommitment = await TransferCommitment.create(
-        mintedToken,
-        recipientAddress,
-        transferSalt,
-        null, // recipientDataHash
-        null, // message
-        signingService
-      );
-      console.log(`  📦 TransferCommitment created: requestId=${transferCommitment.requestId.toString().slice(0, 16)}...`);
-
-      // 8. Submit transfer commitment
-      const transferResponse = await client.submitTransferCommitment(transferCommitment);
-      if (transferResponse.status !== 'SUCCESS' && transferResponse.status !== 'REQUEST_ID_EXISTS') {
-        throw new Error(`Transfer submission failed: ${transferResponse.status}`);
+      // 7. Verify the token (in production mode)
+      if (!ServiceProvider.isTrustBaseVerificationSkipped()) {
+        const verification = await mintedToken.verify(ServiceProvider.getRootTrustBase());
+        if (!verification.isSuccessful) {
+          console.error("  ❌ Token verification failed:", verification);
+          throw new Error(`Token verification failed: ${verification}`);
+        }
+        console.log(`  ✅ Token verified`);
       }
-      console.log(`  📦 Transfer submitted: ${transferResponse.status}`);
 
-      // 9. Wait for transfer inclusion proof
-      const transferProof = await waitInclusionProofWithDevBypass(transferCommitment, 60000);
-      const transferTx = transferCommitment.toTransaction(transferProof);
-      console.log(`  📦 Transfer proof received`);
-
-      // 10. Finalize token
-      // Update predicate for the transferred token
-      // Note: transferSalt already declared above from bundle.transferSaltHex
-      const finalPredicate = await UnmaskedPredicate.create(
-        mintData.tokenId,
-        tokenType,
-        signingService,
-        HashAlgorithm.SHA256,
-        transferSalt
-      );
-      const finalState = new TokenState(finalPredicate, null);
-
-      let finalizedToken: Token<any>;
-      if (ServiceProvider.isTrustBaseVerificationSkipped()) {
-        console.log("  ⚠️ Dev mode: finalizing token without verification");
-        const mintedTxf = mintedToken.toJSON();
-        const existingTransactions = mintedTxf.transactions || [];
-
-        // Calculate state hashes for the chain
-        const previousStateHash = await recipientState.calculateHash();
-        const newStateHash = await finalState.calculateHash();
-
-        const newTxJson = {
-          ...transferTx.toJSON(),
-          previousStateHash: previousStateHash.toJSON(),
-          newStateHash: newStateHash.toJSON(),
-        };
-
-        const finalizedTxf = {
-          ...mintedTxf,
-          state: finalState.toJSON(),
-          transactions: [...existingTransactions, newTxJson],
-          nametags: [],
-        };
-        finalizedToken = await Token.fromJSON(finalizedTxf);
-      } else {
-        finalizedToken = await client.finalizeTransaction(
-          ServiceProvider.getRootTrustBase(),
-          mintedToken,
-          finalState,
-          transferTx,
-          []
-        );
-      }
-      console.log(`  📦 Token finalized`);
-
-      // 11. Save the finalized token
-      const uiToken = await this.saveReceivedToken(finalizedToken, senderPubkey);
+      // 8. Save the minted token directly (no transfer needed in V2)
+      const uiToken = await this.saveReceivedToken(mintedToken, senderPubkey);
 
       const duration = performance.now() - startTime;
       console.log(`✅ INSTANT_SPLIT V2 bundle processed in ${duration.toFixed(0)}ms`);

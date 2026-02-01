@@ -276,12 +276,18 @@ export class TokenSplitExecutor {
 
     const coinDataA = TokenCoinData.create([[coinId, splitAmount]]);
 
+    // In V2 mode: mint recipient's token directly to recipientAddress
+    // This allows recipient to reconstruct with Token.mint() using their own signingService
+    // In standard mode: mint to senderAddress, then transfer (existing flow)
+    const isInstantV2Mode = options?.instantV2 === true;
+    const recipientTokenOwner = isInstantV2Mode ? recipientAddress : senderAddress;
+
     builder.createToken(
       recipientTokenId,
       tokenToSplit.type,
       new Uint8Array(0), // tokenData
       coinDataA,
-      senderAddress,
+      recipientTokenOwner,
       recipientSalt,
       null // dataHash
     );
@@ -436,7 +442,7 @@ export class TokenSplitExecutor {
     // === INSTANT_SPLIT V2: Send bundle immediately after mint commitments created ===
     // At this point: burn proof received (~2s), mint commitments created from burn tx
     // V2 sends Nostr immediately (skip ~3.5s mint proof wait + ~5s IPFS sync)
-    const isInstantV2Mode = options?.instantV2 === true;
+    // Note: isInstantV2Mode already declared above when determining recipientTokenOwner
     if (isInstantV2Mode && outboxContext) {
       console.log("⚡ INSTANT_SPLIT_V2: Packaging bundle for immediate Nostr delivery...");
       const v2StartTime = performance.now();
