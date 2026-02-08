@@ -77,17 +77,25 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     all: BigInt(l1BalanceData.total),
   } : { vested: 0n, unvested: 0n, all: 0n };
 
-  // Derive addresses
+  // Derive addresses and load nametags
   useEffect(() => {
     if (!sphere) return;
     try {
-      const count = Math.max(3, currentAddressIndex + 1);
+      const count = currentAddressIndex + 1;
       const derived = sphere.deriveAddresses(count);
       setAddresses(derived.map((addr) => ({
         index: addr.index,
         l1Address: addr.address,
         nametag: addr.index === currentAddressIndex ? (sphere.identity?.nametag ?? undefined) : undefined,
       })));
+
+      // Load nametags for all addresses asynchronously
+      sphere.getNametagsByIndex(count - 1).then((nametagMap: Map<number, string>) => {
+        setAddresses(prev => prev.map(addr => ({
+          ...addr,
+          nametag: nametagMap.get(addr.index) ?? addr.nametag,
+        })));
+      }).catch(() => { /* ignore */ });
     } catch (e) {
       console.error("[L1WalletModal] Failed to derive addresses:", e);
     }
@@ -268,13 +276,13 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
                   onClick={() => setShowDropdown(prev => !prev)}
                   className="w-full flex items-center justify-between gap-2 p-2 bg-white dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-700/50 transition-colors"
                 >
-                  <span className="flex items-center gap-2 text-xs">
-                    <span className="font-mono text-neutral-700 dark:text-neutral-300 truncate">
-                      {selectedAddress.slice(0, 16)}...{selectedAddress.slice(-8)}
-                    </span>
+                  <span className="flex flex-col text-xs">
                     {nametag && (
                       <span className="font-medium text-blue-600 dark:text-blue-400">@{nametag}</span>
                     )}
+                    <span className="font-mono text-neutral-700 dark:text-neutral-300 truncate">
+                      {selectedAddress.slice(0, 16)}...{selectedAddress.slice(-8)}
+                    </span>
                   </span>
                   <ChevronDown className={`w-4 h-4 text-neutral-500 transition-transform shrink-0 ${showDropdown ? "rotate-180" : ""}`} />
                 </button>
@@ -306,13 +314,11 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
                             >
                               <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isSelected ? "bg-blue-500" : "bg-transparent"}`} />
                               <div className="flex-1 min-w-0">
-                                <span className="flex items-center gap-2">
-                                  <span className="font-mono text-neutral-700 dark:text-neutral-300 truncate">
-                                    {addr.l1Address.slice(0, 12)}...{addr.l1Address.slice(-6)}
-                                  </span>
-                                  {addr.nametag && (
-                                    <span className="text-blue-600 dark:text-blue-400 font-medium">@{addr.nametag}</span>
-                                  )}
+                                {addr.nametag && (
+                                  <span className="text-blue-600 dark:text-blue-400 font-medium block">@{addr.nametag}</span>
+                                )}
+                                <span className="font-mono text-neutral-700 dark:text-neutral-300 truncate block">
+                                  {addr.l1Address.slice(0, 12)}...{addr.l1Address.slice(-6)}
                                 </span>
                               </div>
                             </button>

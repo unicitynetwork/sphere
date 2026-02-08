@@ -35,34 +35,38 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
   const [isSwitching, setIsSwitching] = useState(false);
 
   const { sphere } = useSphereContext();
-  const { l1Address, nametag } = useIdentity();
+  const { l1Address, nametag, directAddress } = useIdentity();
   const queryClient = useQueryClient();
 
   const currentAddressIndex = sphere?.getCurrentAddressIndex() ?? 0;
 
-  // Derive addresses on mount / when sphere changes
+  // Derive addresses and load nametags on mount / when sphere changes
   useEffect(() => {
     if (!sphere) return;
     try {
-      const count = Math.max(3, currentAddressIndex + 1);
+      const count = currentAddressIndex + 1;
       const derived = sphere.deriveAddresses(count);
 
-      const result: DerivedAddr[] = derived.map((addr) => {
-        // For current address, use identity nametag
-        const addrNametag = addr.index === currentAddressIndex
+      const result: DerivedAddr[] = derived.map((addr) => ({
+        index: addr.index,
+        l1Address: addr.address,
+        path: addr.path,
+        publicKey: addr.publicKey,
+        // Current address nametag is known synchronously
+        nametag: addr.index === currentAddressIndex
           ? (sphere.identity?.nametag ?? undefined)
-          : undefined;
-
-        return {
-          index: addr.index,
-          l1Address: addr.address,
-          path: addr.path,
-          publicKey: addr.publicKey,
-          nametag: addrNametag,
-        };
-      });
+          : undefined,
+      }));
 
       setAddresses(result);
+
+      // Load nametags for all addresses asynchronously
+      sphere.getNametagsByIndex(count - 1).then((nametagMap: Map<number, string>) => {
+        setAddresses(prev => prev.map(addr => ({
+          ...addr,
+          nametag: nametagMap.get(addr.index) ?? addr.nametag,
+        })));
+      }).catch(() => { /* ignore */ });
     } catch (e) {
       console.error('[AddressSelector] Failed to derive addresses:', e);
     }
@@ -134,12 +138,19 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
 
   // No sphere — show minimal nametag if available
   if (!sphere) {
-    if (displayNametag && compact) {
+    if ((displayNametag || directAddress) && compact) {
       return (
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] sm:text-xs text-neutral-500 font-medium" title={`@${displayNametag}`}>
-            @{truncateNametag(displayNametag)}
-          </span>
+          {displayNametag && (
+            <span className="text-[10px] sm:text-xs text-neutral-500 font-medium" title={`@${displayNametag}`}>
+              @{truncateNametag(displayNametag)}
+            </span>
+          )}
+          {directAddress && (
+            <span className="text-[10px] sm:text-xs font-mono text-neutral-400">
+              {directAddress.slice(0, 8)}...{directAddress.slice(-4)}
+            </span>
+          )}
         </div>
       );
     }
@@ -155,13 +166,16 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
             onClick={() => setShowDropdown(prev => !prev)}
             className="flex items-center gap-1 text-[10px] sm:text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors"
           >
-            {displayNametag ? (
+            {displayNametag && (
               <span className="font-medium" title={`@${displayNametag}`}>@{truncateNametag(displayNametag)}</span>
-            ) : l1Address ? (
-              <span className="font-mono">{l1Address.slice(0, 8)}...</span>
-            ) : (
-              <span className="font-mono text-neutral-400">...</span>
             )}
+            {directAddress ? (
+              <span className={`font-mono ${displayNametag ? 'text-neutral-400 dark:text-neutral-500' : ''}`}>
+                {directAddress.slice(0, 8)}...{directAddress.slice(-4)}
+              </span>
+            ) : !displayNametag ? (
+              <span className="font-mono text-neutral-400">...</span>
+            ) : null}
             <ChevronDown className={`w-3 h-3 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
           </button>
 
@@ -239,20 +253,14 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
 
                         {/* Address info */}
                         <div className="flex-1 min-w-0">
-                          {addrNametag ? (
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                                @{addrNametag}
-                              </span>
-                              <span className="text-xs font-mono text-neutral-400 dark:text-neutral-500">
-                                ({addr.l1Address.slice(0, 8)}...{addr.l1Address.slice(-6)})
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-xs font-mono text-neutral-600 dark:text-neutral-400 truncate">
-                              {addr.l1Address.slice(0, 12)}...{addr.l1Address.slice(-6)}
+                          {addrNametag && (
+                            <span className="text-xs font-medium text-blue-600 dark:text-blue-400 block">
+                              @{addrNametag}
                             </span>
                           )}
+                          <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400 truncate block">
+                            {addr.l1Address.slice(0, 12)}...{addr.l1Address.slice(-6)}
+                          </span>
                         </div>
 
                         {/* Change badge */}
