@@ -78,8 +78,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const queryClient = useQueryClient();
   const { sphere, createWallet, importWallet } = useSphereContext();
 
-  // Step management
-  const [step, setStep] = useState<OnboardingStep>("start");
+  // Step management — start at "nametag" if wallet exists but no nametag yet
+  const [step, setStep] = useState<OnboardingStep>(
+    sphere && !sphere.identity?.nametag ? "nametag" : "start"
+  );
 
   // Common state
   const [isBusy, setIsBusy] = useState(false);

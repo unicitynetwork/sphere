@@ -1,20 +1,24 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { ChevronDown, Plus, Loader2, Check, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useL1Wallet } from '../../L1/hooks/useL1Wallet';
-import { useAddressNametags } from '../../L1/hooks/useAddressNametags';
-import { useSwitchAddress } from '../hooks/useSwitchAddress';
-import { STORAGE_KEYS } from '../../../../config/storageKeys';
-import { CreateAddressModal } from '../modals/CreateAddressModal';
-import { IdentityManager } from '../../L3/services/IdentityManager';
-import type { ExistingAddressData } from '../hooks/useCreateAddress';
-
-const SESSION_KEY = "user-pin-1234";
+import { useIdentity } from '../../../../sdk';
+import { useSphereContext } from '../../../../sdk/hooks/core/useSphere';
+import { SPHERE_KEYS } from '../../../../sdk/queryKeys';
+import { useQueryClient } from '@tanstack/react-query';
 
 /** Truncate long nametags: show first 6 chars + ... + last 3 chars */
 function truncateNametag(nametag: string, maxLength: number = 12): string {
   if (nametag.length <= maxLength) return nametag;
   return `${nametag.slice(0, 6)}...${nametag.slice(-3)}`;
+}
+
+interface DerivedAddr {
+  index: number;
+  l1Address: string;
+  path: string;
+  publicKey: string;
+  nametag?: string;
+  isChange?: boolean;
 }
 
 interface AddressSelectorProps {
@@ -27,109 +31,118 @@ interface AddressSelectorProps {
 export function AddressSelector({ currentNametag, compact = true }: AddressSelectorProps) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [existingAddressForNametag, setExistingAddressForNametag] = useState<ExistingAddressData | undefined>();
+  const [addresses, setAddresses] = useState<DerivedAddr[]>([]);
+  const [isSwitching, setIsSwitching] = useState(false);
 
-  const { wallet } = useL1Wallet();
-  const { nametagState, addressesWithNametags } = useAddressNametags(wallet?.addresses);
-  const { switchToAddress, isSwitching } = useSwitchAddress();
+  const { sphere } = useSphereContext();
+  const { l1Address, nametag } = useIdentity();
+  const queryClient = useQueryClient();
 
-  // Check if any address is still loading nametag from IPNS
-  const isAnyAddressLoading = useMemo(() => {
-    return addressesWithNametags.some(addr => addr.ipnsLoading);
-  }, [addressesWithNametags]);
+  const currentAddressIndex = sphere?.getCurrentAddressIndex() ?? 0;
 
-  // Get current selected path from localStorage
-  const selectedPath = localStorage.getItem(STORAGE_KEYS.L3_SELECTED_ADDRESS_PATH);
-
-  // Find current address info
-  const currentAddress = useMemo(() => {
-    if (!wallet?.addresses) return null;
-    if (selectedPath) {
-      return wallet.addresses.find(a => a.path === selectedPath) || wallet.addresses[0];
-    }
-    return wallet.addresses[0];
-  }, [wallet?.addresses, selectedPath]);
-
-  // Sort addresses: external first (by index), then change (by index)
-  const sortedAddresses = useMemo(() => {
-    if (!wallet?.addresses) return [];
-    return [...wallet.addresses].sort((a, b) => {
-      const aIsChange = a.isChange ? 1 : 0;
-      const bIsChange = b.isChange ? 1 : 0;
-      if (aIsChange !== bIsChange) return aIsChange - bIsChange;
-      return (a.index ?? 0) - (b.index ?? 0);
-    });
-  }, [wallet?.addresses]);
-
-  const handleSelectAddress = async (address: string) => {
-    if (isSwitching) return;
-
-    const selectedAddr = wallet?.addresses.find(a => a.address === address);
-    if (!selectedAddr) return;
-
-    // Don't switch if already on this address
-    if (selectedAddr.address === currentAddress?.address) {
-      setShowDropdown(false);
-      return;
-    }
-
-    setShowDropdown(false);
-
-    // Use the hook to switch address without page reload
-    await switchToAddress(selectedAddr.address, selectedAddr.path || null);
-
-    // Check if the selected address has a nametag
-    const addrNametagInfo = nametagState[selectedAddr.address];
-    const hasNametag = addrNametagInfo?.nametag;
-    const isStillLoading = addrNametagInfo?.ipnsLoading;
-
-    // If no nametag and not loading, prompt user to create one
-    if (!hasNametag && !isStillLoading && selectedAddr.path && selectedAddr.publicKey) {
-      try {
-        // Derive L3 identity for this address to get the private key
-        const identityManager = IdentityManager.getInstance(SESSION_KEY);
-        const l3Identity = await identityManager.deriveIdentityFromPath(selectedAddr.path);
-
-        setExistingAddressForNametag({
-          l1Address: selectedAddr.address,
-          l3Address: l3Identity.address,
-          path: selectedAddr.path,
-          index: selectedAddr.index ?? 0,
-          privateKey: l3Identity.privateKey,
-          publicKey: selectedAddr.publicKey,
-        });
-        setShowCreateModal(true);
-      } catch (err) {
-        console.error('Failed to derive L3 identity for nametag creation:', err);
-      }
-    }
-  };
-
-  const handleNewAddress = () => {
-    if (!wallet || isAnyAddressLoading) return;
-    setShowDropdown(false);
-    setExistingAddressForNametag(undefined); // Clear existing address - we're creating new
-    setShowCreateModal(true);
-  };
-
-  const handleCopyNametag = async () => {
-    if (!currentNametag) return;
+  // Derive addresses on mount / when sphere changes
+  useEffect(() => {
+    if (!sphere) return;
     try {
-      await navigator.clipboard.writeText(`@${currentNametag}`);
+      const count = Math.max(3, currentAddressIndex + 1);
+      const derived = sphere.deriveAddresses(count);
+
+      const result: DerivedAddr[] = derived.map((addr) => {
+        // For current address, use identity nametag
+        const addrNametag = addr.index === currentAddressIndex
+          ? (sphere.identity?.nametag ?? undefined)
+          : undefined;
+
+        return {
+          index: addr.index,
+          l1Address: addr.address,
+          path: addr.path,
+          publicKey: addr.publicKey,
+          nametag: addrNametag,
+        };
+      });
+
+      setAddresses(result);
+    } catch (e) {
+      console.error('[AddressSelector] Failed to derive addresses:', e);
+    }
+  }, [sphere, currentAddressIndex]);
+
+  const displayNametag = currentNametag || nametag;
+
+  const handleCopyNametag = useCallback(async () => {
+    const tagToCopy = currentNametag || nametag;
+    if (!tagToCopy) return;
+    try {
+      await navigator.clipboard.writeText(`@${tagToCopy}`);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy nametag:', err);
     }
-  };
+  }, [currentNametag, nametag]);
 
-  // Get display info for current address
-  const currentNametagInfo = currentAddress ? nametagState[currentAddress.address] : null;
-  const displayNametag = currentNametag || currentNametagInfo?.nametag;
-  const isLoading = currentNametagInfo?.ipnsLoading;
+  const handleSelectAddress = useCallback(async (index: number) => {
+    if (!sphere || isSwitching || index === currentAddressIndex) {
+      setShowDropdown(false);
+      return;
+    }
 
-  if (!wallet?.addresses || wallet.addresses.length === 0) {
+    setShowDropdown(false);
+    setIsSwitching(true);
+
+    try {
+      await sphere.switchToAddress(index);
+
+      // Invalidate queries so UI refreshes with new identity
+      queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.all });
+      queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.payments.all });
+      queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.l1.all });
+
+      window.dispatchEvent(new Event('wallet-updated'));
+    } catch (e) {
+      console.error('[AddressSelector] Failed to switch address:', e);
+    } finally {
+      setIsSwitching(false);
+    }
+  }, [sphere, isSwitching, currentAddressIndex, queryClient]);
+
+  const handleDeriveNew = useCallback(() => {
+    if (!sphere) return;
+    setShowDropdown(false);
+    try {
+      const nextIndex = addresses.length;
+      const newAddr = sphere.deriveAddress(nextIndex);
+      setAddresses(prev => [
+        ...prev,
+        {
+          index: newAddr.index,
+          l1Address: newAddr.address,
+          path: newAddr.path,
+          publicKey: newAddr.publicKey,
+        },
+      ]);
+    } catch (e) {
+      console.error('[AddressSelector] Failed to derive new address:', e);
+    }
+  }, [sphere, addresses.length]);
+
+  // Sort addresses by index
+  const sortedAddresses = useMemo(() => {
+    return [...addresses].sort((a, b) => a.index - b.index);
+  }, [addresses]);
+
+  // No sphere — show minimal nametag if available
+  if (!sphere) {
+    if (displayNametag && compact) {
+      return (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] sm:text-xs text-neutral-500 font-medium" title={`@${displayNametag}`}>
+            @{truncateNametag(displayNametag)}
+          </span>
+        </div>
+      );
+    }
     return null;
   }
 
@@ -142,12 +155,12 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
             onClick={() => setShowDropdown(prev => !prev)}
             className="flex items-center gap-1 text-[10px] sm:text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors"
           >
-            {isLoading ? (
-              <Loader2 className="w-3 h-3 animate-spin" />
-            ) : displayNametag ? (
+            {displayNametag ? (
               <span className="font-medium" title={`@${displayNametag}`}>@{truncateNametag(displayNametag)}</span>
+            ) : l1Address ? (
+              <span className="font-mono">{l1Address.slice(0, 8)}...</span>
             ) : (
-              <span className="font-mono">{currentAddress?.address.slice(0, 8)}...</span>
+              <span className="font-mono text-neutral-400">...</span>
             )}
             <ChevronDown className={`w-3 h-3 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
           </button>
@@ -191,18 +204,15 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
                 {/* Header */}
                 <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2">
                   <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 flex items-center gap-1.5">
-                    {isAnyAddressLoading && (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    )}
-                    {isAnyAddressLoading ? 'Checking nametags...' : `Addresses (${sortedAddresses.length})`}
+                    {isSwitching && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {isSwitching ? 'Switching...' : `Addresses (${sortedAddresses.length})`}
                   </span>
                   <motion.button
-                    whileHover={{ scale: isAnyAddressLoading ? 1 : 1.05 }}
-                    whileTap={{ scale: isAnyAddressLoading ? 1 : 0.95 }}
-                    onClick={handleNewAddress}
-                    disabled={isAnyAddressLoading}
-                    className="flex items-center gap-1 px-2 py-1 text-xs bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-                    title={isAnyAddressLoading ? 'Wait for nametag check to complete' : 'Create new address'}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={handleDeriveNew}
+                    className="flex items-center gap-1 px-2 py-1 text-xs bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-lg transition-colors shrink-0"
+                    title="Derive new address"
                   >
                     <Plus className="w-3 h-3" />
                     <span>New</span>
@@ -212,15 +222,15 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
                 {/* Address list */}
                 <div className="max-h-64 overflow-y-auto custom-scrollbar">
                   {sortedAddresses.map((addr) => {
-                    const nametagInfo = nametagState[addr.address];
-                    const isSelected = addr.address === currentAddress?.address;
-                    const isChange = addr.isChange;
+                    const isSelected = addr.index === currentAddressIndex;
+                    const addrNametag = isSelected ? displayNametag : addr.nametag;
 
                     return (
                       <button
-                        key={addr.address}
-                        onClick={() => handleSelectAddress(addr.address)}
-                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${
+                        key={addr.index}
+                        onClick={() => handleSelectAddress(addr.index)}
+                        disabled={isSwitching}
+                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 ${
                           isSelected ? 'bg-orange-50 dark:bg-orange-900/20' : ''
                         }`}
                       >
@@ -229,40 +239,24 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
 
                         {/* Address info */}
                         <div className="flex-1 min-w-0">
-                          {!nametagInfo || nametagInfo.ipnsLoading ? (
-                            <div className="flex items-center gap-1.5">
-                              <Loader2 className="w-3 h-3 animate-spin text-neutral-400" />
-                              <span className="text-xs font-mono text-neutral-600 dark:text-neutral-400 truncate">
-                                {addr.address.slice(0, 12)}...{addr.address.slice(-6)}
-                              </span>
-                            </div>
-                          ) : nametagInfo.nametag ? (
+                          {addrNametag ? (
                             <div className="flex items-center gap-2">
                               <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                                @{nametagInfo.nametag}
+                                @{addrNametag}
                               </span>
                               <span className="text-xs font-mono text-neutral-400 dark:text-neutral-500">
-                                ({addr.address.slice(0, 8)}...{addr.address.slice(-6)})
-                              </span>
-                            </div>
-                          ) : nametagInfo.hasL3Inventory ? (
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-mono text-neutral-700 dark:text-neutral-300 truncate">
-                                {addr.address.slice(0, 12)}...{addr.address.slice(-6)}
-                              </span>
-                              <span className="px-1 py-0.5 bg-purple-500/20 text-purple-600 dark:text-purple-400 text-[9px] font-bold rounded shrink-0">
-                                L3
+                                ({addr.l1Address.slice(0, 8)}...{addr.l1Address.slice(-6)})
                               </span>
                             </div>
                           ) : (
                             <span className="text-xs font-mono text-neutral-600 dark:text-neutral-400 truncate">
-                              {addr.address.slice(0, 12)}...{addr.address.slice(-6)}
+                              {addr.l1Address.slice(0, 12)}...{addr.l1Address.slice(-6)}
                             </span>
                           )}
                         </div>
 
                         {/* Change badge */}
-                        {isChange && (
+                        {addr.isChange && (
                           <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[9px] font-bold rounded shrink-0">
                             Change
                           </span>
@@ -275,41 +269,29 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
             </>
           )}
         </AnimatePresence>
-
-        {showCreateModal && (
-          <CreateAddressModal
-            isOpen={showCreateModal}
-            onClose={() => {
-              setShowCreateModal(false);
-              setExistingAddressForNametag(undefined);
-            }}
-            existingAddress={existingAddressForNametag}
-          />
-        )}
       </div>
     );
   }
 
-  // Full mode (not used currently, but available for future)
+  // Full mode
   return (
     <div className="relative">
       <button
         onClick={() => setShowDropdown(prev => !prev)}
         className="flex items-center gap-2 px-3 py-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-200/50 dark:hover:bg-neutral-700/50 transition-colors"
       >
-        {isLoading ? (
-          <Loader2 className="w-4 h-4 animate-spin text-neutral-400" />
-        ) : displayNametag ? (
+        {displayNametag ? (
           <span className="text-sm font-medium text-blue-600 dark:text-blue-400">@{displayNametag}</span>
-        ) : (
+        ) : l1Address ? (
           <span className="text-sm font-mono text-neutral-700 dark:text-neutral-300">
-            {currentAddress?.address.slice(0, 8)}...{currentAddress?.address.slice(-6)}
+            {l1Address.slice(0, 8)}...{l1Address.slice(-6)}
           </span>
+        ) : (
+          <span className="text-sm font-mono text-neutral-400">...</span>
         )}
         <ChevronDown className={`w-4 h-4 text-neutral-500 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
       </button>
 
-      {/* Same dropdown as compact mode */}
       <AnimatePresence>
         {showDropdown && (
           <>
@@ -332,11 +314,10 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
                   Select Address
                 </span>
                 <motion.button
-                  whileHover={{ scale: isAnyAddressLoading ? 1 : 1.05 }}
-                  whileTap={{ scale: isAnyAddressLoading ? 1 : 0.95 }}
-                  onClick={handleNewAddress}
-                  disabled={isAnyAddressLoading}
-                  className="flex items-center gap-1 px-2 py-1 text-xs bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-lg transition-colors disabled:opacity-50"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={handleDeriveNew}
+                  className="flex items-center gap-1 px-2 py-1 text-xs bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-lg transition-colors"
                 >
                   <Plus className="w-3 h-3" />
                   <span>New Address</span>
@@ -345,31 +326,32 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
 
               <div className="max-h-64 overflow-y-auto custom-scrollbar">
                 {sortedAddresses.map((addr) => {
-                  const nametagInfo = nametagState[addr.address];
-                  const isSelected = addr.address === currentAddress?.address;
+                  const isSelected = addr.index === currentAddressIndex;
+                  const addrNametag = isSelected ? displayNametag : addr.nametag;
 
                   return (
                     <button
-                      key={addr.address}
-                      onClick={() => handleSelectAddress(addr.address)}
-                      className={`w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${
+                      key={addr.index}
+                      onClick={() => handleSelectAddress(addr.index)}
+                      disabled={isSwitching}
+                      className={`w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 ${
                         isSelected ? 'bg-orange-50 dark:bg-orange-900/20' : ''
                       }`}
                     >
                       <div className={`w-2 h-2 rounded-full shrink-0 ${isSelected ? 'bg-orange-500' : 'bg-transparent'}`} />
                       <div className="flex-1 min-w-0">
-                        {nametagInfo?.nametag ? (
+                        {addrNametag ? (
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-medium text-blue-600 dark:text-blue-400">
-                              @{nametagInfo.nametag}
+                              @{addrNametag}
                             </span>
                             <span className="text-xs font-mono text-neutral-400">
-                              {addr.address.slice(0, 6)}...
+                              {addr.l1Address.slice(0, 6)}...
                             </span>
                           </div>
                         ) : (
                           <span className="text-sm font-mono text-neutral-700 dark:text-neutral-300 truncate">
-                            {addr.address}
+                            {addr.l1Address}
                           </span>
                         )}
                       </div>
@@ -381,17 +363,6 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
           </>
         )}
       </AnimatePresence>
-
-      {showCreateModal && (
-        <CreateAddressModal
-          isOpen={showCreateModal}
-          onClose={() => {
-            setShowCreateModal(false);
-            setExistingAddressForNametag(undefined);
-          }}
-          existingAddress={existingAddressForNametag}
-        />
-      )}
     </div>
   );
 }
