@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { isMock } from '../../hooks/useAgentChat';
 import { ThemeToggle } from '../theme';
-import { ServiceProvider } from '../wallet/L3/services/ServiceProvider';
+import { STORAGE_KEYS } from '../../config/storageKeys';
 import { devReset } from '../../utils/devTools';
 import logoUrl from '/Union.svg';
 
@@ -27,11 +27,15 @@ export function Header() {
   const isMinePage = location.pathname === '/mine';
 
   // Dev config state for showing banner when non-default settings are active
-  const [devConfig, setDevConfig] = useState(() => ServiceProvider.getDevConfig());
+  const getDevConfig = () => ({
+    aggregatorUrl: localStorage.getItem(STORAGE_KEYS.DEV_AGGREGATOR_URL),
+    skipTrustBase: localStorage.getItem(STORAGE_KEYS.DEV_SKIP_TRUST_BASE) === 'true',
+  });
+  const [devConfig, setDevConfig] = useState(getDevConfig);
 
   // Listen for dev config changes via custom event
   useEffect(() => {
-    const handler = () => setDevConfig(ServiceProvider.getDevConfig());
+    const handler = () => setDevConfig(getDevConfig());
     window.addEventListener('dev-config-changed', handler);
     return () => window.removeEventListener('dev-config-changed', handler);
   }, []);

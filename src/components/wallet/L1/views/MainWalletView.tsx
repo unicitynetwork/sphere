@@ -367,6 +367,7 @@ export function MainWalletView({
         selectedAddress={selectedAddress}
         onClose={() => setShowSendModal(false)}
         onSend={handleSendFromModal}
+        vestingBalances={vestingBalances}
       />
 
       <CreateAddressModal

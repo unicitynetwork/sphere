@@ -1,17 +1,24 @@
 import { useState, useEffect } from "react";
 import { X, ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
-import { vestingState } from "../../sdk/vestingState";
-import type { VestingMode, VestingBalances } from "../../sdk/types";
+
+type VestingMode = 'all' | 'vested' | 'unvested';
+
+interface VestingBalances {
+  vested: bigint;
+  unvested: bigint;
+  all: bigint;
+}
 
 interface SendModalProps {
   show: boolean;
   selectedAddress: string;
   onClose: () => void;
   onSend: (destination: string, amount: string) => Promise<void>;
+  vestingBalances?: VestingBalances;
 }
 
-export function SendModal({ show, selectedAddress, onClose, onSend }: SendModalProps) {
+export function SendModal({ show, selectedAddress, onClose, onSend, vestingBalances: propBalances }: SendModalProps) {
   const [destination, setDestination] = useState("");
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -25,14 +32,12 @@ export function SendModal({ show, selectedAddress, onClose, onSend }: SendModalP
       setAmount("");
       setError(null);
       setVestingMode("all");
-    } else {
-      // Sync balances when modal opens
-      setBalances(vestingState.getAllBalances(selectedAddress));
+    } else if (propBalances) {
+      setBalances(propBalances);
     }
-  }, [show, selectedAddress]);
+  }, [show, selectedAddress, propBalances]);
 
   const handleModeChange = (mode: VestingMode) => {
-    vestingState.setMode(mode);
     setVestingMode(mode);
     // Reset amount when mode changes
     setAmount("");

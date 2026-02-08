@@ -40,10 +40,9 @@ export function useTransactionHistory(): UseTransactionHistoryReturn {
         coinId: tx.coinId,
         symbol: tx.symbol,
         amount: tx.amount,
-        counterparty: tx.counterparty ?? '',
+        counterparty: tx.recipientNametag ?? tx.senderPubkey ?? '',
         timestamp: tx.timestamp,
         status: 'completed' as const,
-        memo: tx.memo,
       }));
     },
     enabled: !!sphere,

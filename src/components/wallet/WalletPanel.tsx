@@ -1,14 +1,12 @@
-import { Wallet, Clock, Bell, MoreVertical, Cloud, CloudOff, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Wallet, Clock, Bell, MoreVertical } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { L3WalletView } from './L3/views/L3WalletView';
-import { useWallet } from './L3/hooks/useWallet';
+import { useIdentity } from '../../sdk';
 import { useIncomingPaymentRequests } from './L3/hooks/useIncomingPaymentRequests';
 import { useUIState } from '../../hooks/useUIState';
 import { L1WalletModal } from './L1/modals/L1WalletModal';
 import { AddressSelector } from './shared/components';
-import { useInventorySync } from './L3/hooks/useInventorySync';
-import { useIpfsStorage } from './L3/hooks/useIpfsStorage';
 
 export function WalletPanel() {
   const [showBalances, setShowBalances] = useState(true);
@@ -16,17 +14,9 @@ export function WalletPanel() {
   const [isRequestsOpen, setIsRequestsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isL1WalletOpen, setIsL1WalletOpen] = useState(false);
-  const { identity, nametag, isLoadingIdentity, isValidatingTokens } = useWallet();
+  const { identity, nametag, isLoading: isLoadingIdentity } = useIdentity();
   const { pendingCount, requests } = useIncomingPaymentRequests();
   const { setFullscreen } = useUIState();
-  const { isSyncing: isIpfsSyncing, isEnabled: isIpfsEnabled } = useIpfsStorage();
-  const {
-    isSyncing: isInventorySyncing,
-    mode: syncMode,
-  } = useInventorySync();
-
-  // Combined syncing state
-  const isSyncing = isIpfsSyncing || isInventorySyncing;
 
   // Track previous pending count to detect new requests
   const prevPendingCountRef = useRef<number | null>(null);
@@ -34,13 +24,6 @@ export function WalletPanel() {
 
   // Auto-open PaymentRequestsModal when new pending request arrives
   useEffect(() => {
-    console.log('🔔 WalletPanel useEffect:', {
-      pendingCount,
-      requestsLength: requests.length,
-      prevCount: prevPendingCountRef.current,
-      isInitialized: isInitializedRef.current
-    });
-
     // Skip the very first render - wait for initial data load
     if (!isInitializedRef.current) {
       // Initialize after first real data arrives
@@ -53,7 +36,6 @@ export function WalletPanel() {
 
     // Only open if pending count increased (new request arrived)
     if (prevPendingCountRef.current !== null && pendingCount > prevPendingCountRef.current) {
-      console.log('💰 New payment request detected, opening modal...');
       // Exit fullscreen so the modal is visible
       setFullscreen(false);
       setIsRequestsOpen(true);
@@ -90,28 +72,6 @@ export function WalletPanel() {
             <div className="flex flex-col">
               <div className="flex items-center gap-2">
                 <span className="text-sm sm:text-base text-neutral-900 dark:text-white font-medium tracking-wide">Wallet</span>
-                {isIpfsEnabled && (
-                  <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
-                    isSyncing
-                      ? 'bg-yellow-500/15 text-yellow-600 dark:text-yellow-400'
-                      : isValidatingTokens
-                        ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
-                        : syncMode === 'LOCAL'
-                          ? 'bg-orange-500/15 text-orange-600 dark:text-orange-400'
-                          : 'bg-green-500/15 text-green-600 dark:text-green-400'
-                  }`}>
-                    {isSyncing ? (
-                      <RefreshCw className="w-3 h-3 animate-spin" />
-                    ) : isValidatingTokens ? (
-                      <ShieldCheck className="w-3 h-3 animate-pulse" />
-                    ) : syncMode === 'LOCAL' ? (
-                      <CloudOff className="w-3 h-3" />
-                    ) : (
-                      <Cloud className="w-3 h-3" />
-                    )}
-                    {isSyncing ? 'Syncing' : isValidatingTokens ? 'Verifying' : syncMode === 'LOCAL' ? 'Offline' : 'Synced'}
-                  </span>
-                )}
               </div>
               <AddressSelector currentNametag={nametag} compact />
             </div>

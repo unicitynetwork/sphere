@@ -4,18 +4,12 @@
  */
 import { AnimatePresence } from "framer-motion";
 import { useOnboardingFlow } from "./hooks/useOnboardingFlow";
-import { useWalletImport } from "./hooks/useWalletImport";
-import { useOnboardingConnectionStatus } from "./hooks/useOnboardingConnectionStatus";
-import { WalletScanModal } from "../L1/components/modals/WalletScanModal";
-import { LoadPasswordModal } from "../L1/components/modals/LoadPasswordModal";
-import { ConnectionStatus } from "../L1/components/ConnectionStatus";
 
 // Import screen components
 import {
   StartScreen,
   RestoreScreen,
   RestoreMethodScreen,
-  ImportFileScreen,
   AddressSelectionScreen,
   NametagScreen,
   ProcessingScreen,
@@ -24,9 +18,6 @@ import {
 export type { OnboardingStep } from "./hooks/useOnboardingFlow";
 
 export function CreateWalletFlow() {
-  // L1 connection status hook
-  const connection = useOnboardingConnectionStatus();
-
   // Main onboarding flow hook
   const {
     // Step management
@@ -37,8 +28,6 @@ export function CreateWalletFlow() {
     // State
     isBusy,
     error,
-    setError,
-    setIsBusy,
 
     // Mnemonic restore state
     seedWords,
@@ -66,37 +55,11 @@ export function CreateWalletFlow() {
     handleMintNametag,
     handleDeriveNewAddress,
     handleContinueWithAddress,
-    goToAddressSelection,
 
     // Wallet context
     identity,
     nametag,
-    getUnifiedKeyManager,
   } = useOnboardingFlow();
-
-  // File import hook
-  const walletImport = useWalletImport({
-    getUnifiedKeyManager,
-    goToAddressSelection,
-    setError,
-    setIsBusy,
-  });
-
-  // Show connection status immediately on start screen if not connected
-  // L1 connection is needed for wallet operations (scanning, balance checks, etc.)
-  if (!connection.isConnected && step === "start") {
-    return (
-      <div className="flex flex-col items-center justify-center p-4 md:p-8 text-center relative">
-        <ConnectionStatus
-          state={connection.state}
-          message={connection.message}
-          error={connection.error}
-          onRetry={connection.manualConnect}
-          onCancel={connection.cancelConnect}
-        />
-      </div>
-    );
-  }
 
   return (
     <div className="flex flex-col items-center justify-center p-4 md:p-8 text-center relative">
@@ -119,7 +82,7 @@ export function CreateWalletFlow() {
             isBusy={isBusy}
             error={error}
             onSelectMnemonic={() => setStep("restore")}
-            onSelectFile={() => setStep("importFile")}
+            onSelectFile={() => setStep("restore")}
             onBack={goToStart}
           />
         )}
@@ -132,28 +95,6 @@ export function CreateWalletFlow() {
             onSeedWordsChange={setSeedWords}
             onRestore={handleRestoreWallet}
             onBack={() => setStep("restoreMethod")}
-          />
-        )}
-
-        {step === "importFile" && (
-          <ImportFileScreen
-            selectedFile={walletImport.selectedFile}
-            scanCount={walletImport.scanCount}
-            needsScanning={walletImport.needsScanning}
-            isDragging={walletImport.isDragging}
-            isBusy={isBusy}
-            error={error}
-            onFileSelect={walletImport.handleFileSelect}
-            onClearFile={() => walletImport.setSelectedFile(null)}
-            onScanCountChange={walletImport.setScanCount}
-            onDragOver={walletImport.handleDragOver}
-            onDragLeave={walletImport.handleDragLeave}
-            onDrop={walletImport.handleDrop}
-            onImport={walletImport.handleConfirmImport}
-            onBack={() => {
-              walletImport.setSelectedFile(null);
-              setStep("restoreMethod");
-            }}
           />
         )}
 
@@ -191,26 +132,6 @@ export function CreateWalletFlow() {
           />
         )}
       </AnimatePresence>
-
-      {/* Password Modal for encrypted files */}
-      <LoadPasswordModal
-        show={walletImport.showLoadPasswordModal}
-        onConfirm={walletImport.onConfirmLoadWithPassword}
-        onCancel={() => {
-          walletImport.setShowLoadPasswordModal(false);
-          walletImport.setSelectedFile(null);
-        }}
-      />
-
-      {/* Wallet Scan Modal for .dat and BIP32 .txt files */}
-      <WalletScanModal
-        show={walletImport.showScanModal}
-        wallet={walletImport.pendingWallet}
-        initialScanCount={walletImport.initialScanCount}
-        onSelectAddress={walletImport.onSelectScannedAddress}
-        onSelectAll={walletImport.onSelectAllScannedAddresses}
-        onCancel={walletImport.onCancelScan}
-      />
     </div>
   );
 }

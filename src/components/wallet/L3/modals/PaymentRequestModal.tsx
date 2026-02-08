@@ -1,7 +1,7 @@
 import { Check, Sparkles, Trash2, Loader2, XIcon, ArrowRight, Clock, Receipt, AlertCircle } from 'lucide-react';
 import { useIncomingPaymentRequests } from '../hooks/useIncomingPaymentRequests';
 import { type IncomingPaymentRequest, PaymentRequestStatus } from '../data/model';
-import { useWallet } from '../hooks/useWallet';
+import { useTransfer } from '../../../../sdk';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useState } from 'react';
 import { AmountFormatUtils } from '../utils/currency';
@@ -14,7 +14,7 @@ interface PaymentRequestsModalProps {
 
 export function PaymentRequestsModal({ isOpen, onClose }: PaymentRequestsModalProps) {
   const { requests, pendingCount, reject, clearProcessed, paid } = useIncomingPaymentRequests();
-  const { sendAmount } = useWallet();
+  const { transfer } = useTransfer();
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -33,11 +33,10 @@ export function PaymentRequestsModal({ isOpen, onClose }: PaymentRequestsModalPr
     setErrors(prev => ({ ...prev, [req.id]: '' }));
     try {
       console.log(`Initiating payment for request ${req.requestId} to @${req.recipientNametag}`);
-      await sendAmount({
-        recipientNametag: req.recipientNametag,
+      await transfer({
+        recipient: `@${req.recipientNametag}`,
         amount: req.amount.toString(),
         coinId: req.coinId,
-        eventId: req.id
       });
       paid(req);
     } catch (error: unknown) {

@@ -1,6 +1,6 @@
 import { useContext } from 'react';
 import { Sphere } from '@unicitylabs/sphere-sdk';
-import { SphereContext, type SphereContextValue } from '../../SphereProvider';
+import { SphereContext, type SphereContextValue } from '../../SphereContext';
 
 export function useSphereContext(): SphereContextValue {
   const context = useContext(SphereContext);

@@ -25,8 +25,8 @@ import { v4 as uuidv4 } from "uuid";
 import { TokenSplitExecutor, type SplitPersistenceCallbacks } from "../services/transfer/TokenSplitExecutor";
 import { TokenSplitCalculator } from "../services/transfer/TokenSplitCalculator";
 import { IpfsStorageService, SyncPriority } from "../services/IpfsStorageService";
-import { useServices } from "../../../../contexts/useServices";
-import type { NostrService } from "../services/NostrService";
+import { IdentityManager } from "../services/IdentityManager";
+import { NostrService } from "../services/NostrService";
 import { InventoryBackgroundLoopsManager } from "../services/InventoryBackgroundLoops";
 import type { NostrDeliveryQueueEntry } from "../services/types/QueueTypes";
 import { TokenRecoveryService } from "../services/TokenRecoveryService";
@@ -95,7 +95,8 @@ let _initialSyncTriggered = false;
 
 export const useWallet = () => {
   const queryClient = useQueryClient();
-  const { identityManager, nostrService } = useServices();
+  const identityManager = IdentityManager.getInstance();
+  const nostrService = NostrService.getInstance();
   const nametagService = NametagService.getInstance(identityManager);
 
   // Debounce timer ref for wallet-updated events

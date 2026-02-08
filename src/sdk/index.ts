@@ -1,6 +1,7 @@
 // Provider
-export { SphereProvider, SphereContext } from './SphereProvider';
-export type { SphereContextValue } from './SphereProvider';
+export { SphereProvider } from './SphereProvider';
+export { SphereContext } from './SphereContext';
+export type { SphereContextValue } from './SphereContext';
 
 // Query keys
 export { SPHERE_KEYS } from './queryKeys';

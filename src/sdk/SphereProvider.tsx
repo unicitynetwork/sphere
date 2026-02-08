@@ -1,5 +1,4 @@
 import {
-  createContext,
   useState,
   useEffect,
   useCallback,
@@ -10,40 +9,14 @@ import {
   createBrowserProviders,
   type BrowserProviders,
 } from '@unicitylabs/sphere-sdk/impl/browser';
-import type { NetworkType, Identity } from '@unicitylabs/sphere-sdk';
-
-export interface SphereContextValue {
-  sphere: Sphere | null;
-  providers: BrowserProviders | null;
-
-  isLoading: boolean;
-  isInitialized: boolean;
-  walletExists: boolean;
-  error: Error | null;
-
-  createWallet: (options?: CreateWalletOptions) => Promise<string>;
-  importWallet: (
-    mnemonic: string,
-    options?: ImportWalletOptions,
-  ) => Promise<void>;
-  deleteWallet: () => Promise<void>;
-  reinitialize: () => Promise<void>;
-}
-
-interface CreateWalletOptions {
-  nametag?: string;
-}
-
-interface ImportWalletOptions {
-  nametag?: string;
-}
+import type { NetworkType } from '@unicitylabs/sphere-sdk';
+import { SphereContext } from './SphereContext';
+import type { SphereContextValue, CreateWalletOptions, ImportWalletOptions } from './SphereContext';
 
 interface SphereProviderProps {
   children: ReactNode;
   network?: NetworkType;
 }
-
-export const SphereContext = createContext<SphereContextValue | null>(null);
 
 export function SphereProvider({
   children,

@@ -39,7 +39,11 @@ import { getTokenValidationService } from './TokenValidationService';
 import type { InvalidReasonCode } from '../types/SyncTypes';
 import { NostrService } from './NostrService';
 import { IdentityManager } from './IdentityManager';
-import { invalidateWalletQueries } from '../../../../lib/queryClient';
+import { queryClient } from '../../../../lib/queryClient';
+
+function invalidateWalletQueries() {
+  queryClient.invalidateQueries({ queryKey: ['wallet'] });
+}
 
 // ============================================
 // Sync Lock State (moved from WalletRepository)

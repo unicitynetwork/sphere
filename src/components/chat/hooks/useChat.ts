@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChatRepository } from '../data/ChatRepository';
-import { ChatConversation, ChatMessage } from '../data/models';
-import { useServices } from '../../../contexts/useServices';
+import { ChatMessage, ChatConversation, MessageStatus, MessageType } from '../data/models';
+import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
 import { STORAGE_KEYS } from '../../../config/storageKeys';
 
 const QUERY_KEYS = {
@@ -44,7 +44,7 @@ export interface UseChatReturn {
 
 export const useChat = (): UseChatReturn => {
   const queryClient = useQueryClient();
-  const { nostrService } = useServices();
+  const { sphere } = useSphereContext();
   const [selectedConversation, setSelectedConversation] = useState<ChatConversation | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -126,15 +126,28 @@ export const useChat = (): UseChatReturn => {
   // Send message mutation
   const sendMessageMutation = useMutation({
     mutationFn: async (content: string) => {
-      if (!selectedConversation) throw new Error('No conversation selected');
+      if (!selectedConversation || !sphere) throw new Error('No conversation selected');
 
-      const message = await nostrService.sendDirectMessage(
+      const dm = await sphere.communications.sendDM(
         selectedConversation.participantPubkey,
         content,
-        selectedConversation.participantNametag
       );
 
-      return !!message;
+      // Save sent message to ChatRepository for local persistence
+      const chatMessage = new ChatMessage({
+        id: dm.id,
+        conversationId: selectedConversation.id,
+        content: dm.content,
+        timestamp: dm.timestamp,
+        isFromMe: true,
+        status: MessageStatus.SENT,
+        type: MessageType.TEXT,
+        senderPubkey: dm.senderPubkey,
+        senderNametag: dm.senderNametag ?? undefined,
+      });
+      chatRepository.saveMessage(chatMessage);
+
+      return true;
     },
     onSuccess: () => {
       setMessageInput('');
@@ -155,7 +168,8 @@ export const useChat = (): UseChatReturn => {
         // Check if it's a nametag (contains @ or is not a valid hex string)
         if (pubkeyOrNametag.includes('@') || !/^[0-9a-fA-F]{64}$/.test(pubkeyOrNametag)) {
           nametag = pubkeyOrNametag.replace('@', '');
-          const resolvedPubkey = await nostrService.queryPubkeyByNametag(nametag);
+          const transport = sphere?.getTransport();
+          const resolvedPubkey = await transport?.resolveNametag?.(nametag);
           if (!resolvedPubkey) {
             console.error(`Could not resolve nametag: ${nametag}`);
             return null;
@@ -172,7 +186,7 @@ export const useChat = (): UseChatReturn => {
         return null;
       }
     },
-    [nostrService, queryClient]
+    [sphere, queryClient]
   );
 
   // Select conversation

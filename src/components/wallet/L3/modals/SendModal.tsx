@@ -1,14 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Loader2, User, CheckCircle, Coins, Scissors } from 'lucide-react';
-import { useWallet } from '../hooks/useWallet';
+import { ArrowRight, Loader2, User, CheckCircle, Coins } from 'lucide-react';
+import { useAssets, useTransfer } from '../../../../sdk';
+import { useSphereContext } from '../../../../sdk/hooks/core/useSphere';
 import { AggregatedAsset } from '../data/model';
-import { NostrService } from '../services/NostrService';
-import { IdentityManager } from '../services/IdentityManager';
 import { CurrencyUtils } from '../utils/currency';
-import { TokenSplitCalculator, type SplitPlan } from '../services/transfer/TokenSplitCalculator';
-import { getTokensForAddress } from '../services/InventorySyncService';
 import { BaseModal, ModalHeader, Button } from '../../ui';
 
 type Step = 'recipient' | 'asset' | 'amount' | 'confirm' | 'processing' | 'success';
@@ -19,7 +16,21 @@ interface SendModalProps {
 }
 
 export function SendModal({ isOpen, onClose }: SendModalProps) {
-  const { assets, sendAmount } = useWallet();
+  const { assets: sdkAssets } = useAssets();
+  const { transfer, isLoading: isTransferring } = useTransfer();
+  const { sphere } = useSphereContext();
+
+  // Convert SDK assets to AggregatedAsset instances for display
+  const assets = sdkAssets.map(a => new AggregatedAsset({
+    coinId: a.coinId,
+    symbol: a.symbol,
+    name: a.name,
+    totalAmount: a.totalAmount,
+    decimals: a.decimals,
+    tokenCount: a.tokenCount,
+    priceUsd: 1.0,
+    priceEur: 0.92,
+  }));
 
   // State
   const [step, setStep] = useState<Step>('recipient');
@@ -29,10 +40,6 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
 
   const [selectedAsset, setSelectedAsset] = useState<AggregatedAsset | null>(null);
   const [amountInput, setAmountInput] = useState('');
-
-  // Calculation Preview
-  const [splitPlan, setSplitPlan] = useState<SplitPlan | null>(null);
-  const [isCalculating, setIsCalculating] = useState(false);
 
   // Nametag validation - same as in NametagScreen
   const handleRecipientChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -49,7 +56,6 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
     setRecipient('');
     setSelectedAsset(null);
     setAmountInput('');
-    setSplitPlan(null);
     setRecipientError(null);
   };
 
@@ -58,24 +64,28 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
     onClose();
   };
 
-  // STEP 1: Validate Recipient
+  // STEP 1: Validate Recipient via SDK transport
   const handleRecipientNext = async () => {
     if (!recipient.trim()) return;
     setIsCheckingRecipient(true);
     setRecipientError(null);
 
     try {
-      const identityManager = IdentityManager.getInstance();
-      const nostr = NostrService.getInstance(identityManager);
       const cleanTag = recipient.replace('@', '').replace('@unicity', '').trim();
+      const transport = sphere?.getTransport();
 
-      const pubkey = await nostr.queryPubkeyByNametag(cleanTag);
-
-      if (pubkey) {
+      if (transport?.resolveNametag) {
+        const pubkey = await transport.resolveNametag(cleanTag);
+        if (pubkey) {
+          setRecipient(cleanTag);
+          setStep('asset');
+        } else {
+          setRecipientError(`User @${cleanTag} not found`);
+        }
+      } else {
+        // If transport not available, skip validation and let send() handle it
         setRecipient(cleanTag);
         setStep('asset');
-      } else {
-        setRecipientError(`User @${cleanTag} not found`);
       }
     } catch {
       setRecipientError("Network error");
@@ -84,56 +94,27 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
     }
   };
 
-  // STEP 3: Calculate Plan (Preview)
-  const handleAmountNext = async () => {
+  // STEP 3: Go to confirm
+  const handleAmountNext = () => {
     if (!selectedAsset || !amountInput) return;
-
     const targetAmount = CurrencyUtils.toSmallestUnit(amountInput, selectedAsset.decimals);
     if (targetAmount <= 0n) return;
-
-    setIsCalculating(true);
-    try {
-      const calculator = new TokenSplitCalculator();
-      const identityManager = IdentityManager.getInstance();
-      const identity = await identityManager.getCurrentIdentity();
-      if (!identity) {
-        setRecipientError("No wallet identity found");
-        setIsCalculating(false);
-        return;
-      }
-      const allTokens = getTokensForAddress(identity.address);
-
-      const plan = await calculator.calculateOptimalSplit(
-        allTokens,
-        targetAmount,
-        selectedAsset.coinId
-      );
-
-      if (plan) {
-        setSplitPlan(plan);
-        setStep('confirm');
-      } else {
-        setRecipientError("Insufficient funds or no suitable tokens");
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsCalculating(false);
-    }
+    setStep('confirm');
   };
 
-  // STEP 4: Execute
+  // STEP 4: Execute transfer via SDK
   const handleSend = async () => {
     if (!selectedAsset || !amountInput || !recipient) return;
 
     setStep('processing');
+    setRecipientError(null);
 
     try {
-      console.log(recipient)
-      await sendAmount({
-        recipientNametag: recipient,
-        amount: CurrencyUtils.toSmallestUnit(amountInput, selectedAsset.decimals).toString(),
-        coinId: selectedAsset.coinId
+      const amount = CurrencyUtils.toSmallestUnit(amountInput, selectedAsset.decimals).toString();
+      await transfer({
+        coinId: selectedAsset.coinId,
+        amount,
+        recipient,
       });
 
       setStep('success');
@@ -244,9 +225,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
               </div>
               <Button
                 onClick={handleAmountNext}
-                disabled={!amountInput || isCalculating}
-                loading={isCalculating}
-                loadingText="Calculating..."
+                disabled={!amountInput}
                 fullWidth
               >
                 Review
@@ -254,8 +233,8 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
             </motion.div>
           )}
 
-          {/* 4. CONFIRM (SMART PREVIEW) */}
-          {step === 'confirm' && selectedAsset && splitPlan && (
+          {/* 4. CONFIRM */}
+          {step === 'confirm' && selectedAsset && (
             <motion.div key="conf" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
 
               {/* Summary Card */}
@@ -271,39 +250,25 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
                 </div>
               </div>
 
-              {/* Strategy Details */}
+              {/* Strategy Info */}
               <div className="mb-6 space-y-2">
-                <div className="text-xs font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider ml-1">Strategy</div>
-
-                {splitPlan.requiresSplit ? (
-                  <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-start gap-3">
-                    <Scissors className="w-5 h-5 text-blue-500 dark:text-blue-400 mt-0.5" />
-                    <div>
-                      <div className="text-blue-600 dark:text-blue-400 text-sm font-medium">Token Split Required</div>
-                      <div className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                        We will take a token of <b>{CurrencyUtils.toHumanReadable(splitPlan.tokenToSplit!.amount, selectedAsset.decimals)} {selectedAsset.symbol}</b>,
-                        send exact amount, and keep the change.
-                      </div>
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-start gap-3">
+                  <Coins className="w-5 h-5 text-emerald-500 dark:text-emerald-400 mt-0.5" />
+                  <div>
+                    <div className="text-emerald-600 dark:text-emerald-400 text-sm font-medium">Smart Transfer</div>
+                    <div className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                      Token splitting and transfer optimization is handled automatically.
                     </div>
                   </div>
-                ) : (
-                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-start gap-3">
-                    <Coins className="w-5 h-5 text-emerald-500 dark:text-emerald-400 mt-0.5" />
-                    <div>
-                      <div className="text-emerald-600 dark:text-emerald-400 text-sm font-medium">Direct Transfer</div>
-                      <div className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                        We found {splitPlan.tokensToTransferDirectly.length} token(s) that match the amount exactly. No split needed.
-                      </div>
-                    </div>
-                  </div>
-                )}
+                </div>
               </div>
 
               {recipientError && <p className="text-red-500 text-sm mb-4 text-center">{recipientError}</p>}
 
               <button
                 onClick={handleSend}
-                className="w-full py-3 bg-neutral-900 dark:bg-white text-white dark:text-black font-bold rounded-xl hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors"
+                disabled={isTransferring}
+                className="w-full py-3 bg-neutral-900 dark:bg-white text-white dark:text-black font-bold rounded-xl hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors disabled:opacity-50"
               >
                 Confirm & Send
               </button>

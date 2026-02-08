@@ -6,8 +6,11 @@ import { AgentPage } from './pages/AgentPage';
 import { DevelopersPage } from './pages/DevelopersPage';
 import { MineAlphaPage } from './pages/MineAlphaPage';
 import { DocsPage } from './pages/DocsPage';
+import { useSphereEvents } from './sdk';
 
 export default function App() {
+  useSphereEvents();
+
   return (
     <Routes>
       <Route path="/" element={<IntroPage />} />
