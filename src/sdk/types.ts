@@ -18,4 +18,5 @@ export type {
   BroadcastMessage,
   IncomingPaymentRequest,
   PaymentRequest,
+  Asset,
 } from '@unicitylabs/sphere-sdk';

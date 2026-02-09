@@ -36,7 +36,10 @@ export function SphereProvider({
       setIsLoading(true);
       setError(null);
 
-      const browserProviders = createBrowserProviders({ network });
+      const browserProviders = createBrowserProviders({
+        network,
+        price: { platform: 'coingecko', baseUrl: '/coingecko' },
+      });
       setProviders(browserProviders);
 
       const exists = await Sphere.exists(browserProviders.storage);

@@ -139,8 +139,10 @@ export function L3WalletView({
     totalAmount: a.totalAmount,
     decimals: a.decimals,
     tokenCount: a.tokenCount,
-    priceUsd: 1.0,
-    priceEur: 0.92,
+    iconUrl: a.iconUrl ?? null,
+    priceUsd: a.priceUsd ?? 0,
+    priceEur: a.priceEur ?? 0,
+    change24h: a.change24h ?? 0,
   })), [sdkAssets]);
 
   // Convert SDK tokens to legacy Token instances for TokenRow component
@@ -243,10 +245,11 @@ export function L3WalletView({
   }, [l1Balance]);
 
   const totalValue = useMemo(() => {
-    const l3Value = assets.reduce((sum, asset) => sum + asset.getTotalFiatValue('USD'), 0);
+    // Sum up L3 asset values (using SDK-provided fiat values for accuracy)
+    const l3Value = sdkAssets.reduce((sum, asset) => sum + (asset.fiatValueUsd ?? 0), 0);
     const l1Value = l1AlphaAsset.getTotalFiatValue('USD');
     return l3Value + l1Value;
-  }, [assets, l1AlphaAsset]);
+  }, [sdkAssets, l1AlphaAsset]);
 
   const handleTopUp = async () => {
     if (!nametag) {

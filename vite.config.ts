@@ -68,6 +68,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
           rewrite: (path) => path.replace(/^\/dev-rpc/, ''),
+        },
+        '/coingecko': {
+          target: 'https://api.coingecko.com/api/v3',
+          changeOrigin: true,
+          secure: true,
+          rewrite: (path) => path.replace(/^\/coingecko/, ''),
         }
       }
     },

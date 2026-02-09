@@ -1,51 +1,54 @@
 import { useQuery } from '@tanstack/react-query';
 import { useSphereContext } from '../core/useSphere';
 import { SPHERE_KEYS } from '../../queryKeys';
-import type { TokenBalance } from '@unicitylabs/sphere-sdk';
+import type { Asset } from '../..';
 import { formatAmount } from '../../utils/format';
 
 export interface UseBalanceReturn {
-  balance: TokenBalance | null;
+  asset: Asset | null;
   isLoading: boolean;
   error: Error | null;
   total: string;
-  confirmed: string;
-  unconfirmed: string;
   totalRaw: string;
-  confirmedRaw: string;
-  unconfirmedRaw: string;
+  fiatValueUsd: number | null;
 }
 
-export function useBalance(coinId: string = 'ALPHA'): UseBalanceReturn {
+/**
+ * Get balance for a specific coin or total portfolio value
+ * @param coinId - Coin ID to get balance for, or undefined for total portfolio value in USD
+ */
+export function useBalance(coinId?: string): UseBalanceReturn {
   const { sphere } = useSphereContext();
 
   const query = useQuery({
-    queryKey: SPHERE_KEYS.payments.balance.byCoin(coinId),
-    queryFn: () => {
+    queryKey: coinId
+      ? SPHERE_KEYS.payments.balance.byCoin(coinId)
+      : SPHERE_KEYS.payments.balance.total,
+    queryFn: async () => {
       if (!sphere) return null;
-      // getBalance returns TokenBalance[], find the one for our coinId
-      const balances = sphere.payments.getBalance(coinId);
-      return balances.length > 0 ? balances[0] : null;
+
+      if (coinId) {
+        // Get specific asset
+        const assets = await sphere.payments.getAssets(coinId);
+        return assets.length > 0 ? assets[0] : null;
+      } else {
+        // Get total portfolio value - not returning an asset, just the value
+        return await sphere.payments.getBalance();
+      }
     },
     enabled: !!sphere,
     staleTime: 30_000,
   });
 
-  const balance = query.data ?? null;
+  const asset = (coinId && query.data && typeof query.data !== 'number') ? query.data as Asset : null;
+  const totalValue = !coinId && typeof query.data === 'number' ? query.data : null;
 
   return {
-    balance,
+    asset,
     isLoading: query.isLoading,
     error: query.error,
-    total: balance ? formatAmount(balance.totalAmount, balance.decimals) : '0',
-    confirmed: balance
-      ? formatAmount(balance.confirmedAmount, balance.decimals)
-      : '0',
-    unconfirmed: balance
-      ? formatAmount(balance.unconfirmedAmount, balance.decimals)
-      : '0',
-    totalRaw: balance?.totalAmount ?? '0',
-    confirmedRaw: balance?.confirmedAmount ?? '0',
-    unconfirmedRaw: balance?.unconfirmedAmount ?? '0',
+    total: asset ? formatAmount(asset.totalAmount, asset.decimals) : '0',
+    totalRaw: asset?.totalAmount ?? '0',
+    fiatValueUsd: asset?.fiatValueUsd ?? totalValue,
   };
 }

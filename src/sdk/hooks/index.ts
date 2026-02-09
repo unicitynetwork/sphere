@@ -14,7 +14,7 @@ export type { UseTokensReturn } from './payments/useTokens';
 export { useBalance } from './payments/useBalance';
 export type { UseBalanceReturn } from './payments/useBalance';
 export { useAssets } from './payments/useAssets';
-export type { UseAssetsReturn, Asset } from './payments/useAssets';
+export type { UseAssetsReturn } from './payments/useAssets';
 export { useTransfer } from './payments/useTransfer';
 export type { UseTransferReturn, TransferParams } from './payments/useTransfer';
 export { useTransactionHistory } from './payments/useTransactionHistory';
