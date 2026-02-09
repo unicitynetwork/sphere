@@ -4,6 +4,7 @@ import {
   useCallback,
   type ReactNode,
 } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Sphere } from '@unicitylabs/sphere-sdk';
 import {
   createBrowserProviders,
@@ -12,6 +13,7 @@ import {
 import type { NetworkType } from '@unicitylabs/sphere-sdk';
 import { SphereContext } from './SphereContext';
 import type { SphereContextValue, CreateWalletOptions, ImportWalletOptions } from './SphereContext';
+import { clearAllSphereData } from '../config/storageKeys';
 
 interface SphereProviderProps {
   children: ReactNode;
@@ -22,6 +24,7 @@ export function SphereProvider({
   children,
   network = 'testnet',
 }: SphereProviderProps) {
+  const queryClient = useQueryClient();
   const [sphere, setSphere] = useState<Sphere | null>(null);
   const [providers, setProviders] = useState<BrowserProviders | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -163,18 +166,21 @@ export function SphereProvider({
   );
 
   const deleteWallet = useCallback(async () => {
-    if (sphere) {
-      await sphere.destroy();
-    }
+    // Clear SDK storage before destroying (destroy disconnects providers)
     if (providers) {
       await Sphere.clear({
         storage: providers.storage,
         tokenStorage: providers.tokenStorage,
       });
     }
+    if (sphere) {
+      await sphere.destroy();
+    }
+    clearAllSphereData(true);
+    queryClient.clear();
     setSphere(null);
     setWalletExists(false);
-  }, [sphere, providers]);
+  }, [sphere, providers, queryClient]);
 
   const value: SphereContextValue = {
     sphere,
