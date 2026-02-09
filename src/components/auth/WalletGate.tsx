@@ -79,18 +79,18 @@ function OnboardingScreen() {
 
 export function WalletGate({ children }: WalletGateProps) {
   const { isLoading, isInitialized, walletExists } = useWalletStatus();
-  const { identity, nametag } = useIdentity();
+  const { identity } = useIdentity();
 
   if (isLoading) {
     return <LoadingScreen />;
   }
 
-  // Show onboarding if no wallet, not initialized, or nametag not yet registered
-  if (!walletExists || !isInitialized || !nametag) {
+  // Show onboarding if no wallet or not initialized
+  if (!walletExists || !isInitialized) {
     return <OnboardingScreen />;
   }
 
-  // Wallet exists with nametag — check identity is available
+  // Wallet exists — check identity is available
   if (!identity) {
     return <LoadingScreen />;
   }

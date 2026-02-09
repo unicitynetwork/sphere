@@ -64,6 +64,7 @@ export interface UseOnboardingFlowReturn {
   handleCreateKeys: () => Promise<void>;
   handleRestoreWallet: () => Promise<void>;
   handleMintNametag: () => Promise<void>;
+  handleSkipNametag: () => Promise<void>;
   handleDeriveNewAddress: () => Promise<void>;
   handleContinueWithAddress: () => Promise<void>;
   goToAddressSelection: (skipIpnsCheck?: boolean) => Promise<void>;
@@ -211,6 +212,14 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       setIsBusy(false);
     }
   }, [nametagInput, sphere]);
+
+  // Action: Skip nametag registration — go straight to completion
+  const handleSkipNametag = useCallback(async () => {
+    recordActivity("wallet_created", { isPublic: false });
+    setStep("processing");
+    setProcessingStatus("Setup complete!");
+    setIsProcessingComplete(true);
+  }, []);
 
   // Action: Complete onboarding (called when user clicks "Let's Go")
   const handleCompleteOnboarding = useCallback(async () => {
@@ -363,6 +372,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     handleCreateKeys,
     handleRestoreWallet,
     handleMintNametag,
+    handleSkipNametag,
     handleDeriveNewAddress,
     handleContinueWithAddress,
     goToAddressSelection,

@@ -344,7 +344,7 @@ export function L3WalletView({
     );
   }
 
-  if (!identity || !nametag) {
+  if (!identity) {
     return <CreateWalletFlow />;
   }
 

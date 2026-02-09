@@ -53,6 +53,7 @@ export function CreateWalletFlow() {
     handleCreateKeys,
     handleRestoreWallet,
     handleMintNametag,
+    handleSkipNametag,
     handleDeriveNewAddress,
     handleContinueWithAddress,
 
@@ -121,6 +122,7 @@ export function CreateWalletFlow() {
             error={error}
             onNametagChange={setNametagInput}
             onSubmit={handleMintNametag}
+            onSkip={handleSkipNametag}
           />
         )}
 

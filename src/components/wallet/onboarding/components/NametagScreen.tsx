@@ -10,6 +10,7 @@ interface NametagScreenProps {
   error: string | null;
   onNametagChange: (value: string) => void;
   onSubmit: () => void;
+  onSkip?: () => void;
 }
 
 export function NametagScreen({
@@ -18,6 +19,7 @@ export function NametagScreen({
   error,
   onNametagChange,
   onSubmit,
+  onSkip,
 }: NametagScreenProps) {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.toLowerCase();
@@ -116,6 +118,20 @@ export function NametagScreen({
           <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />
         </span>
       </motion.button>
+
+      {/* Skip Button */}
+      {onSkip && (
+        <motion.button
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+          onClick={onSkip}
+          disabled={isBusy}
+          className="w-full mt-3 py-2.5 text-xs md:text-sm text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors disabled:opacity-50"
+        >
+          Skip for now
+        </motion.button>
+      )}
 
       {error && (
         <motion.p

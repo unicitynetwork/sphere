@@ -40,36 +40,73 @@ export function AddressSelector({ currentNametag, compact = true }: AddressSelec
 
   const currentAddressIndex = sphere?.getCurrentAddressIndex() ?? 0;
 
-  // Derive addresses and load nametags on mount / when sphere changes
+  // Derive addresses and scan for active ones beyond current index
   useEffect(() => {
     if (!sphere) return;
-    try {
-      const count = currentAddressIndex + 1;
-      const derived = sphere.deriveAddresses(count);
+    let cancelled = false;
 
-      const result: DerivedAddr[] = derived.map((addr) => ({
-        index: addr.index,
-        l1Address: addr.address,
-        path: addr.path,
-        publicKey: addr.publicKey,
-        // Current address nametag is known synchronously
-        nametag: addr.index === currentAddressIndex
-          ? (sphere.identity?.nametag ?? undefined)
-          : undefined,
-      }));
+    async function discoverAddresses() {
+      try {
+        // Always include addresses 0..currentAddressIndex
+        const minCount = currentAddressIndex + 1;
+        const derived = sphere!.deriveAddresses(minCount);
 
-      setAddresses(result);
+        const result: DerivedAddr[] = derived.map((addr) => ({
+          index: addr.index,
+          l1Address: addr.address,
+          path: addr.path,
+          publicKey: addr.publicKey,
+          nametag: addr.index === currentAddressIndex
+            ? (sphere!.identity?.nametag ?? undefined)
+            : undefined,
+        }));
 
-      // Load nametags for all addresses asynchronously
-      sphere.getNametagsByIndex(count - 1).then((nametagMap: Map<number, string>) => {
-        setAddresses(prev => prev.map(addr => ({
-          ...addr,
-          nametag: nametagMap.get(addr.index) ?? addr.nametag,
-        })));
-      }).catch(() => { /* ignore */ });
-    } catch (e) {
-      console.error('[AddressSelector] Failed to derive addresses:', e);
+        if (cancelled) return;
+        setAddresses(result);
+
+        // Resolve nametags for non-current addresses via Nostr
+        for (const addr of result) {
+          if (addr.index === currentAddressIndex || cancelled) continue;
+          try {
+            const info = await sphere!.resolve(addr.l1Address);
+            if (cancelled) return;
+            if (info?.nametag) {
+              setAddresses(prev => prev.map(a =>
+                a.index === addr.index ? { ...a, nametag: info.nametag } : a
+              ));
+            }
+          } catch { /* ignore resolve errors */ }
+        }
+
+        // Scan forward: check if next address has identity binding
+        let nextIndex = minCount;
+        const maxScan = nextIndex + 10; // safety limit
+        while (nextIndex < maxScan && !cancelled) {
+          try {
+            const nextAddr = sphere!.deriveAddress(nextIndex);
+            const info = await sphere!.resolve(nextAddr.address);
+            if (cancelled) return;
+            if (!info) break; // no binding — stop scanning
+
+            setAddresses(prev => [...prev, {
+              index: nextIndex,
+              l1Address: nextAddr.address,
+              path: nextAddr.path,
+              publicKey: nextAddr.publicKey,
+              nametag: info.nametag ?? undefined,
+            }]);
+            nextIndex++;
+          } catch {
+            break;
+          }
+        }
+      } catch (e) {
+        console.error('[AddressSelector] Failed to derive addresses:', e);
+      }
     }
+
+    discoverAddresses();
+    return () => { cancelled = true; };
   }, [sphere, currentAddressIndex]);
 
   const displayNametag = currentNametag || nametag;

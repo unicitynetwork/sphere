@@ -1,4 +1,4 @@
-import { Wallet, Clock, Bell, MoreVertical } from 'lucide-react';
+import { Wallet, Clock, Bell, MoreVertical, Tag } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { L3WalletView } from './L3/views/L3WalletView';
@@ -6,6 +6,7 @@ import { useIdentity } from '../../sdk';
 import { useIncomingPaymentRequests } from './L3/hooks/useIncomingPaymentRequests';
 import { useUIState } from '../../hooks/useUIState';
 import { L1WalletModal } from './L1/modals/L1WalletModal';
+import { RegisterNametagModal } from './shared/components/RegisterNametagModal';
 import { AddressSelector } from './shared/components';
 
 export function WalletPanel() {
@@ -14,6 +15,7 @@ export function WalletPanel() {
   const [isRequestsOpen, setIsRequestsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isL1WalletOpen, setIsL1WalletOpen] = useState(false);
+  const [isNametagModalOpen, setIsNametagModalOpen] = useState(false);
   const { identity, nametag, isLoading: isLoadingIdentity } = useIdentity();
   const { pendingCount, requests } = useIncomingPaymentRequests();
   const { setFullscreen } = useUIState();
@@ -43,8 +45,8 @@ export function WalletPanel() {
     prevPendingCountRef.current = pendingCount;
   }, [pendingCount, requests.length, setFullscreen]);
 
-  // Don't render wallet panel if not authenticated - WalletGate handles onboarding
-  if (isLoadingIdentity || !identity || !nametag) {
+  // Don't render wallet panel if not authenticated
+  if (isLoadingIdentity || !identity) {
     return null;
   }
 
@@ -72,8 +74,19 @@ export function WalletPanel() {
             <div className="flex flex-col">
               <div className="flex items-center gap-2">
                 <span className="text-sm sm:text-base text-neutral-900 dark:text-white font-medium tracking-wide">Wallet</span>
+                {!nametag && (
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setIsNametagModalOpen(true)}
+                    className="flex items-center gap-1 px-2 py-0.5 text-[10px] sm:text-xs bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-lg transition-colors border border-orange-500/20"
+                  >
+                    <Tag className="w-3 h-3" />
+                    <span>Register ID</span>
+                  </motion.button>
+                )}
               </div>
-              <AddressSelector currentNametag={nametag} compact />
+              <AddressSelector currentNametag={nametag ?? undefined} compact />
             </div>
           </div>
 
@@ -136,6 +149,12 @@ export function WalletPanel() {
         isOpen={isL1WalletOpen}
         onClose={() => setIsL1WalletOpen(false)}
         showBalances={showBalances}
+      />
+
+      {/* Register Nametag Modal */}
+      <RegisterNametagModal
+        isOpen={isNametagModalOpen}
+        onClose={() => setIsNametagModalOpen(false)}
       />
     </div>
   );

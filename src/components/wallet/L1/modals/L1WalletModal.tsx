@@ -77,28 +77,65 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     all: BigInt(l1BalanceData.total),
   } : { vested: 0n, unvested: 0n, all: 0n };
 
-  // Derive addresses and load nametags
+  // Derive addresses and scan for active ones beyond current index
   useEffect(() => {
     if (!sphere) return;
-    try {
-      const count = currentAddressIndex + 1;
-      const derived = sphere.deriveAddresses(count);
-      setAddresses(derived.map((addr) => ({
-        index: addr.index,
-        l1Address: addr.address,
-        nametag: addr.index === currentAddressIndex ? (sphere.identity?.nametag ?? undefined) : undefined,
-      })));
+    let cancelled = false;
 
-      // Load nametags for all addresses asynchronously
-      sphere.getNametagsByIndex(count - 1).then((nametagMap: Map<number, string>) => {
-        setAddresses(prev => prev.map(addr => ({
-          ...addr,
-          nametag: nametagMap.get(addr.index) ?? addr.nametag,
-        })));
-      }).catch(() => { /* ignore */ });
-    } catch (e) {
-      console.error("[L1WalletModal] Failed to derive addresses:", e);
+    async function discoverAddresses() {
+      try {
+        const minCount = currentAddressIndex + 1;
+        const derived = sphere!.deriveAddresses(minCount);
+        const result: DerivedAddr[] = derived.map((addr) => ({
+          index: addr.index,
+          l1Address: addr.address,
+          nametag: addr.index === currentAddressIndex ? (sphere!.identity?.nametag ?? undefined) : undefined,
+        }));
+
+        if (cancelled) return;
+        setAddresses(result);
+
+        // Resolve nametags for non-current addresses via Nostr
+        for (const addr of result) {
+          if (addr.index === currentAddressIndex || cancelled) continue;
+          try {
+            const info = await sphere!.resolve(addr.l1Address);
+            if (cancelled) return;
+            if (info?.nametag) {
+              setAddresses(prev => prev.map(a =>
+                a.index === addr.index ? { ...a, nametag: info.nametag } : a
+              ));
+            }
+          } catch { /* ignore */ }
+        }
+
+        // Scan forward: check if next address has identity binding
+        let nextIndex = minCount;
+        const maxScan = nextIndex + 10;
+        while (nextIndex < maxScan && !cancelled) {
+          try {
+            const nextAddr = sphere!.deriveAddress(nextIndex);
+            const info = await sphere!.resolve(nextAddr.address);
+            if (cancelled) return;
+            if (!info) break;
+
+            setAddresses(prev => [...prev, {
+              index: nextIndex,
+              l1Address: nextAddr.address,
+              nametag: info.nametag ?? undefined,
+            }]);
+            nextIndex++;
+          } catch {
+            break;
+          }
+        }
+      } catch (e) {
+        console.error("[L1WalletModal] Failed to derive addresses:", e);
+      }
     }
+
+    discoverAddresses();
+    return () => { cancelled = true; };
   }, [sphere, currentAddressIndex]);
 
   // Reset view when modal opens
