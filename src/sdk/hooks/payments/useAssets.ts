@@ -1,15 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useSphereContext } from '../core/useSphere';
 import { SPHERE_KEYS } from '../../queryKeys';
-
-export interface Asset {
-  coinId: string;
-  symbol: string;
-  name: string;
-  totalAmount: string;
-  decimals: number;
-  tokenCount: number;
-}
+import type { Asset } from '../..';
 
 export interface UseAssetsReturn {
   assets: Asset[];
@@ -23,18 +15,9 @@ export function useAssets(): UseAssetsReturn {
 
   const query = useQuery({
     queryKey: SPHERE_KEYS.payments.assets.list,
-    queryFn: (): Asset[] => {
+    queryFn: async (): Promise<Asset[]> => {
       if (!sphere) return [];
-      // getBalance() with no args returns all coin balances
-      const balances = sphere.payments.getBalance();
-      return balances.map((b) => ({
-        coinId: b.coinId,
-        symbol: b.symbol,
-        name: b.symbol,
-        totalAmount: b.totalAmount,
-        decimals: b.decimals,
-        tokenCount: b.tokenCount,
-      }));
+      return await sphere.payments.getAssets();
     },
     enabled: !!sphere,
     staleTime: 30_000,
