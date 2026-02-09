@@ -24,7 +24,7 @@ interface AddressSelectorProps {
 
 export function AddressSelector({ currentNametag, compact = true, addressFormat = 'direct' }: AddressSelectorProps) {
   const [showDropdown, setShowDropdown] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<'nametag' | 'address' | false>(false);
   const [isSwitching, setIsSwitching] = useState(false);
 
   // Nametag modal state
@@ -34,7 +34,7 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
   const [nametagAvailability, setNametagAvailability] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
   const nametagInputRef = useRef<HTMLInputElement>(null);
 
-  const { sphere, providers, resolveNametag } = useSphereContext();
+  const { sphere, resolveNametag } = useSphereContext();
   const { l1Address, nametag, directAddress } = useIdentity();
   const queryClient = useQueryClient();
 
@@ -95,12 +95,23 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
     if (!tagToCopy) return;
     try {
       await navigator.clipboard.writeText(`@${tagToCopy}`);
-      setCopied(true);
+      setCopied('nametag');
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy nametag:', err);
     }
   }, [currentNametag, nametag]);
+
+  const handleCopyDirectAddress = useCallback(async () => {
+    if (!directAddress) return;
+    try {
+      await navigator.clipboard.writeText(directAddress);
+      setCopied('address');
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy direct address:', err);
+    }
+  }, [directAddress]);
 
   const handleSelectAddress = useCallback(async (index: number) => {
     if (!sphere || isSwitching || index === currentAddressIndex) {
@@ -131,7 +142,7 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
 
   // Step 2a: Create address WITH nametag
   const handleCreateWithNametag = useCallback(async () => {
-    if (!sphere || !providers || isSwitching) return;
+    if (!sphere || isSwitching) return;
     const cleanTag = newNametag.trim().replace(/^@/, '');
     if (!cleanTag) return;
 
@@ -147,23 +158,10 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
         return;
       }
 
-      // Workaround for SDK race condition: switchToAddress() calls
-      // transport.setIdentity() which triggers an async reconnect that isn't
-      // awaited, then its internal syncIdentityWithTransport() fails silently.
-      // Fix: disconnect → switchToAddress (identity binding fails, caught) →
-      // manually reconnect → registerNametag on a clean connection.
-      if (providers.transport.isConnected()) {
-        await providers.transport.disconnect();
-      }
-
       const nextIndex = addresses.length > 0
         ? Math.max(...addresses.map(a => a.index)) + 1
         : 1;
-      await sphere.switchToAddress(nextIndex);
-
-      // Reconnect transport with the new identity set by switchToAddress
-      await providers.transport.connect();
-      await sphere.registerNametag(cleanTag);
+      await sphere.switchToAddress(nextIndex, { nametag: cleanTag });
       setShowNametagModal(false);
       refreshAfterSwitch();
     } catch (e) {
@@ -173,7 +171,7 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
     } finally {
       setIsSwitching(false);
     }
-  }, [sphere, providers, isSwitching, newNametag, addresses, resolveNametag, refreshAfterSwitch]);
+  }, [sphere, isSwitching, newNametag, addresses, resolveNametag, refreshAfterSwitch]);
 
   // Step 2b: Create address WITHOUT nametag (skip)
   const handleCreateWithoutNametag = useCallback(async () => {
@@ -374,10 +372,26 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
               className="p-1 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded transition-colors"
               title="Copy nametag"
             >
-              {copied ? (
+              {copied === 'nametag' ? (
                 <Check className="w-3 h-3 text-emerald-500" />
               ) : (
                 <Copy className="w-3 h-3 text-neutral-500" />
+              )}
+            </motion.button>
+          )}
+
+          {directAddress && (
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={handleCopyDirectAddress}
+              className="p-1 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded transition-colors"
+              title={`Copy direct address: ${directAddress}`}
+            >
+              {copied === 'address' ? (
+                <Check className="w-3 h-3 text-emerald-500" />
+              ) : (
+                <Copy className="w-3 h-3 text-neutral-400" />
               )}
             </motion.button>
           )}
