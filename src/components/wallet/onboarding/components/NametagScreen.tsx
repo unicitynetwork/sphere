@@ -2,7 +2,7 @@
  * NametagScreen - Unicity ID creation screen
  */
 import { motion } from "framer-motion";
-import { ShieldCheck, ArrowRight } from "lucide-react";
+import { ShieldCheck, ArrowRight, ArrowLeft } from "lucide-react";
 
 interface NametagScreenProps {
   nametagInput: string;
@@ -11,6 +11,7 @@ interface NametagScreenProps {
   onNametagChange: (value: string) => void;
   onSubmit: () => void;
   onSkip?: () => void;
+  onBack?: () => void;
 }
 
 export function NametagScreen({
@@ -20,6 +21,7 @@ export function NametagScreen({
   onNametagChange,
   onSubmit,
   onSkip,
+  onBack,
 }: NametagScreenProps) {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.toLowerCase();
@@ -63,7 +65,7 @@ export function NametagScreen({
         transition={{ delay: 0.1 }}
         className="text-xl md:text-2xl font-black text-neutral-900 dark:text-white mb-2 md:mb-3 tracking-tight"
       >
-        Wallet Created!
+        Choose Unicity ID
       </motion.h2>
 
       <motion.p
@@ -72,7 +74,7 @@ export function NametagScreen({
         transition={{ delay: 0.2 }}
         className="text-neutral-500 dark:text-neutral-400 text-xs md:text-sm mb-5 md:mb-6 mx-auto leading-relaxed"
       >
-        Now, choose a unique{" "}
+        Choose a unique{" "}
         <span className="text-orange-500 dark:text-orange-400 font-bold">
           Unicity ID
         </span>{" "}
@@ -130,6 +132,21 @@ export function NametagScreen({
           className="w-full mt-3 py-2.5 text-xs md:text-sm text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors disabled:opacity-50"
         >
           Skip for now
+        </motion.button>
+      )}
+
+      {/* Back Button */}
+      {onBack && (
+        <motion.button
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.6 }}
+          onClick={onBack}
+          disabled={isBusy}
+          className="w-full mt-2 py-2.5 text-xs md:text-sm text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          Back
         </motion.button>
       )}
 

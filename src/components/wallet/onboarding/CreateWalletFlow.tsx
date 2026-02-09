@@ -123,6 +123,7 @@ export function CreateWalletFlow() {
             onNametagChange={setNametagInput}
             onSubmit={handleMintNametag}
             onSkip={handleSkipNametag}
+            onBack={goToStart}
           />
         )}
 

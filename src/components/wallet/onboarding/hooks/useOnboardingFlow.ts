@@ -121,22 +121,11 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setError(null);
   }, []);
 
-  // Action: Create new wallet keys
+  // Action: Go to nametag step (wallet is NOT created yet)
   const handleCreateKeys = useCallback(async () => {
-    if (isBusy) return;
-    setIsBusy(true);
     setError(null);
-    try {
-      const mnemonic = await createWallet();
-      setGeneratedMnemonic(mnemonic);
-      setStep("nametag");
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Failed to generate keys";
-      setError(message);
-    } finally {
-      setIsBusy(false);
-    }
-  }, [isBusy, createWallet]);
+    setStep("nametag");
+  }, []);
 
   // Action: Restore wallet from mnemonic
   const handleRestoreWallet = useCallback(async () => {
@@ -173,53 +162,62 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     }
   }, [seedWords, importWallet, sphere]);
 
-  // Action: Mint nametag
+  // Action: Create wallet WITH nametag
   const handleMintNametag = useCallback(async () => {
-    if (!nametagInput.trim() || !sphere) return;
+    if (!nametagInput.trim()) return;
 
     setIsBusy(true);
     setError(null);
-    setIsProcessingComplete(false);
 
     try {
       const cleanTag = nametagInput.trim().replace("@", "");
 
-      // Check availability
-      const available = await sphere.isNametagAvailable(cleanTag);
-      if (!available) {
-        setError(`${cleanTag} already exists.`);
-        setIsBusy(false);
-        return;
-      }
-
       setStep("processing");
+      setProcessingStatus("Creating wallet and minting Unicity ID...");
 
-      // Register nametag (SDK handles minting + Nostr broadcast)
-      setProcessingStatus("Minting Unicity ID on blockchain...");
-      await sphere.registerNametag(cleanTag);
+      // Create wallet with nametag — SDK handles minting + Nostr broadcast
+      const mnemonic = await createWallet({ nametag: cleanTag });
+      setGeneratedMnemonic(mnemonic);
 
       // Record activity
       recordActivity("wallet_created", { isPublic: false });
 
-      setProcessingStatus("Setup complete!");
-      setIsProcessingComplete(true);
+      // WalletGate will transition to main app automatically
+      // since walletExists becomes true
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Minting failed";
-      console.error("Nametag minting failed:", e);
+      const message = e instanceof Error ? e.message : "Failed to create wallet";
+      console.error("Wallet creation with nametag failed:", e);
       setError(message);
       setStep("nametag");
     } finally {
       setIsBusy(false);
     }
-  }, [nametagInput, sphere]);
+  }, [nametagInput, createWallet]);
 
-  // Action: Skip nametag registration — go straight to completion
+  // Action: Skip nametag — create wallet without nametag
   const handleSkipNametag = useCallback(async () => {
-    recordActivity("wallet_created", { isPublic: false });
-    setStep("processing");
-    setProcessingStatus("Setup complete!");
-    setIsProcessingComplete(true);
-  }, []);
+    setIsBusy(true);
+    setError(null);
+
+    try {
+      setStep("processing");
+      setProcessingStatus("Creating wallet...");
+
+      const mnemonic = await createWallet();
+      setGeneratedMnemonic(mnemonic);
+
+      recordActivity("wallet_created", { isPublic: false });
+
+      // WalletGate will transition to main app automatically
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to create wallet";
+      console.error("Wallet creation failed:", e);
+      setError(message);
+      setStep("nametag");
+    } finally {
+      setIsBusy(false);
+    }
+  }, [createWallet]);
 
   // Action: Complete onboarding (called when user clicks "Let's Go")
   const handleCompleteOnboarding = useCallback(async () => {
