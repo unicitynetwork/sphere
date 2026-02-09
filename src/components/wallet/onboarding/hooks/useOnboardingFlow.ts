@@ -2,12 +2,13 @@
  * useOnboardingFlow - Manages onboarding flow state and navigation
  * Simplified version using sphere-sdk
  */
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSphereContext } from "../../../../sdk/hooks/core/useSphere";
 import { SPHERE_KEYS } from "../../../../sdk/queryKeys";
 import { recordActivity } from "../../../../services/ActivityService";
 import type { DerivedAddressInfo } from "../components/AddressSelectionScreen";
+import type { NametagAvailability } from "../components/NametagScreen";
 
 export type OnboardingStep =
   | "start"
@@ -47,6 +48,7 @@ export interface UseOnboardingFlowReturn {
   // Nametag state
   nametagInput: string;
   setNametagInput: (value: string) => void;
+  nametagAvailability: NametagAvailability;
   processingStatus: string;
   isProcessingComplete: boolean;
   handleCompleteOnboarding: () => Promise<void>;
@@ -77,7 +79,7 @@ export interface UseOnboardingFlowReturn {
 
 export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const queryClient = useQueryClient();
-  const { sphere, createWallet, importWallet } = useSphereContext();
+  const { sphere, createWallet, resolveNametag, importWallet } = useSphereContext();
 
   // Step management — start at "nametag" if wallet exists but no nametag yet
   const [step, setStep] = useState<OnboardingStep>(
@@ -99,8 +101,30 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
   // Nametag state
   const [nametagInput, setNametagInput] = useState("");
+  const [nametagAvailability, setNametagAvailability] = useState<NametagAvailability>('idle');
   const [processingStatus, setProcessingStatus] = useState("");
   const [isProcessingComplete, setIsProcessingComplete] = useState(false);
+
+  // Debounced nametag availability check
+  useEffect(() => {
+    const cleanTag = nametagInput.trim().replace(/^@/, '');
+    if (!cleanTag || cleanTag.length < 2) {
+      setNametagAvailability('idle');
+      return;
+    }
+
+    setNametagAvailability('checking');
+    const timer = setTimeout(async () => {
+      try {
+        const existing = await resolveNametag(cleanTag);
+        setNametagAvailability(existing ? 'taken' : 'available');
+      } catch {
+        setNametagAvailability('idle');
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [nametagInput, resolveNametag]);
 
   // Address selection state
   const [derivedAddresses, setDerivedAddresses] = useState<DerivedAddressInfo[]>([]);
@@ -163,36 +187,45 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   }, [seedWords, importWallet, sphere]);
 
   // Action: Create wallet WITH nametag
+  // Flow: check nametag via transport → createWallet({ nametag })
   const handleMintNametag = useCallback(async () => {
     if (!nametagInput.trim()) return;
 
     setIsBusy(true);
     setError(null);
 
+    const cleanTag = nametagInput.trim().replace("@", "");
+
+    setStep("processing");
+    setProcessingStatus("Checking Unicity ID availability...");
+
     try {
-      const cleanTag = nametagInput.trim().replace("@", "");
+      // Step 1: Check nametag availability via Nostr (no wallet needed)
+      const existing = await resolveNametag(cleanTag);
+      if (existing) {
+        setError(`@${cleanTag} is already taken`);
+        setStep("nametag");
+        setIsBusy(false);
+        return;
+      }
 
-      setStep("processing");
-      setProcessingStatus("Creating wallet and minting Unicity ID...");
-
-      // Create wallet with nametag — SDK handles minting + Nostr broadcast
+      // Step 2: Available — create wallet with nametag
+      setProcessingStatus("Creating wallet and registering Unicity ID...");
       const mnemonic = await createWallet({ nametag: cleanTag });
       setGeneratedMnemonic(mnemonic);
 
-      // Record activity
       recordActivity("wallet_created", { isPublic: false });
 
       // WalletGate will transition to main app automatically
-      // since walletExists becomes true
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Failed to create wallet";
+      const message = e instanceof Error ? e.message : "Failed to register Unicity ID";
       console.error("Wallet creation with nametag failed:", e);
       setError(message);
       setStep("nametag");
     } finally {
       setIsBusy(false);
     }
-  }, [nametagInput, createWallet]);
+  }, [nametagInput, resolveNametag, createWallet]);
 
   // Action: Skip nametag — create wallet without nametag
   const handleSkipNametag = useCallback(async () => {
@@ -353,6 +386,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     // Nametag state
     nametagInput,
     setNametagInput,
+    nametagAvailability,
     processingStatus,
     isProcessingComplete,
     handleCompleteOnboarding,

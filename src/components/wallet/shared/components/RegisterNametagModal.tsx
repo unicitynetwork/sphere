@@ -1,9 +1,11 @@
-import { useState, useCallback } from 'react';
-import { X, Loader2, ArrowRight, Tag } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { X, Loader2, ArrowRight, Tag, CheckCircle2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSphereContext } from '../../../../sdk/hooks/core/useSphere';
 import { SPHERE_KEYS } from '../../../../sdk/queryKeys';
+
+type NametagAvailability = 'idle' | 'checking' | 'available' | 'taken';
 
 interface RegisterNametagModalProps {
   isOpen: boolean;
@@ -15,9 +17,41 @@ export function RegisterNametagModal({ isOpen, onClose }: RegisterNametagModalPr
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [availability, setAvailability] = useState<NametagAvailability>('idle');
 
-  const { sphere } = useSphereContext();
+  const { sphere, resolveNametag } = useSphereContext();
   const queryClient = useQueryClient();
+
+  // Debounced nametag availability check
+  useEffect(() => {
+    const cleanTag = nametagInput.trim().replace(/^@/, '');
+    if (!cleanTag || cleanTag.length < 2) {
+      setAvailability('idle');
+      return;
+    }
+
+    setAvailability('checking');
+    const timer = setTimeout(async () => {
+      try {
+        const existing = await resolveNametag(cleanTag);
+        setAvailability(existing ? 'taken' : 'available');
+      } catch {
+        setAvailability('idle');
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [nametagInput, resolveNametag]);
+
+  // Reset state when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setNametagInput('');
+      setError(null);
+      setAvailability('idle');
+      setSuccess(false);
+    }
+  }, [isOpen]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.toLowerCase();
@@ -26,6 +60,8 @@ export function RegisterNametagModal({ isOpen, onClose }: RegisterNametagModalPr
       setError(null);
     }
   };
+
+  const canSubmit = nametagInput.trim().length >= 2 && !isBusy && availability !== 'taken' && availability !== 'checking';
 
   const handleSubmit = useCallback(async () => {
     if (!nametagInput.trim() || !sphere || isBusy) return;
@@ -36,9 +72,11 @@ export function RegisterNametagModal({ isOpen, onClose }: RegisterNametagModalPr
     try {
       const cleanTag = nametagInput.trim().replace('@', '');
 
-      const available = await sphere.isNametagAvailable(cleanTag);
-      if (!available) {
-        setError(`${cleanTag} already exists.`);
+      // Double-check availability (debounced check may be stale)
+      const existing = await resolveNametag(cleanTag);
+      if (existing) {
+        setError(`@${cleanTag} is already taken`);
+        setAvailability('taken');
         setIsBusy(false);
         return;
       }
@@ -60,10 +98,10 @@ export function RegisterNametagModal({ isOpen, onClose }: RegisterNametagModalPr
     } finally {
       setIsBusy(false);
     }
-  }, [nametagInput, sphere, isBusy, queryClient, onClose]);
+  }, [nametagInput, sphere, isBusy, resolveNametag, queryClient, onClose]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && nametagInput && !isBusy) {
+    if (e.key === 'Enter' && canSubmit) {
       handleSubmit();
     }
   };
@@ -115,8 +153,13 @@ export function RegisterNametagModal({ isOpen, onClose }: RegisterNametagModalPr
                 ) : (
                   <>
                     <div className="relative group">
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500 group-focus-within:text-orange-500 dark:group-focus-within:text-orange-400 transition-colors z-10 text-sm font-medium">
-                        @unicity
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 z-10">
+                        {availability === 'checking' && <Loader2 className="w-3.5 h-3.5 text-neutral-400 animate-spin" />}
+                        {availability === 'available' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
+                        {availability === 'taken' && <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
+                        <span className="text-neutral-400 dark:text-neutral-500 group-focus-within:text-orange-500 dark:group-focus-within:text-orange-400 transition-colors text-sm font-medium">
+                          @unicity
+                        </span>
                       </div>
                       <input
                         type="text"
@@ -125,13 +168,33 @@ export function RegisterNametagModal({ isOpen, onClose }: RegisterNametagModalPr
                         onKeyDown={handleKeyDown}
                         placeholder="id"
                         autoFocus
-                        className="w-full bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 rounded-xl py-3 pl-4 pr-24 text-sm text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-orange-500 focus:bg-white dark:focus:bg-neutral-800 transition-all"
+                        className={`w-full bg-neutral-100 dark:bg-neutral-800/50 border-2 rounded-xl py-3 pl-4 pr-28 text-sm text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:bg-white dark:focus:bg-neutral-800 transition-all ${
+                          availability === 'taken'
+                            ? 'border-red-400 dark:border-red-500/50 focus:border-red-500'
+                            : availability === 'available'
+                              ? 'border-emerald-400 dark:border-emerald-500/50 focus:border-emerald-500'
+                              : 'border-neutral-200 dark:border-neutral-700/50 focus:border-orange-500'
+                        }`}
                       />
+                    </div>
+
+                    {/* Availability status — fixed height to prevent layout shift */}
+                    <div className="h-4 -mt-2">
+                      {availability === 'taken' && !error && (
+                        <p className="text-red-500 dark:text-red-400 text-xs">
+                          @{nametagInput} is already taken
+                        </p>
+                      )}
+                      {availability === 'available' && (
+                        <p className="text-emerald-500 dark:text-emerald-400 text-xs">
+                          @{nametagInput} is available
+                        </p>
+                      )}
                     </div>
 
                     <button
                       onClick={handleSubmit}
-                      disabled={!nametagInput || isBusy}
+                      disabled={!canSubmit}
                       className="w-full py-3 px-4 rounded-xl bg-linear-to-r from-orange-500 to-orange-600 text-white text-sm font-bold shadow-lg shadow-orange-500/20 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:from-orange-400 hover:to-orange-500 transition-all"
                     >
                       {isBusy ? (

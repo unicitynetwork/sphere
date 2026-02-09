@@ -162,7 +162,7 @@ export function MainWalletView({
       <div className="px-3 sm:px-4 lg:px-6 mb-2 sm:mb-3">
         <div className="flex items-center gap-1.5 sm:gap-2">
           <div className="flex-1 bg-neutral-100 dark:bg-neutral-800 px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg border border-neutral-200 dark:border-neutral-700">
-            <AddressSelector compact={false} />
+            <AddressSelector compact={false} addressFormat="l1" />
           </div>
 
           <button

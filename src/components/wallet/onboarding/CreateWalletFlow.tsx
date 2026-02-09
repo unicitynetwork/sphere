@@ -36,6 +36,7 @@ export function CreateWalletFlow() {
     // Nametag state
     nametagInput,
     setNametagInput,
+    nametagAvailability,
     processingStatus,
     isProcessingComplete,
     handleCompleteOnboarding,
@@ -120,6 +121,7 @@ export function CreateWalletFlow() {
             nametagInput={nametagInput}
             isBusy={isBusy}
             error={error}
+            availability={nametagAvailability}
             onNametagChange={setNametagInput}
             onSubmit={handleMintNametag}
             onSkip={handleSkipNametag}

@@ -44,6 +44,15 @@ export function SphereProvider({
           ...browserProviders,
         });
         setSphere(instance);
+      } else {
+        // Pre-connect transport for nametag lookups during onboarding
+        const transport = browserProviders.transport;
+        await transport.connect();
+        transport.setIdentity({
+          privateKey: '0000000000000000000000000000000000000000000000000000000000000001',
+          chainPubkey: '000000000000000000000000000000000000000000000000000000000000000000',
+          l1Address: '',
+        });
       }
     } catch (err) {
       console.error('[SphereProvider] Initialization failed:', err);
@@ -66,20 +75,62 @@ export function SphereProvider({
     async (options?: CreateWalletOptions) => {
       if (!providers) throw new Error('Providers not initialized');
 
-      const { sphere: instance, generatedMnemonic } = await Sphere.init({
-        ...providers,
-        autoGenerate: true,
-        nametag: options?.nametag,
-      });
-
-      setSphere(instance);
-      setWalletExists(true);
-
-      if (!generatedMnemonic) {
-        throw new Error('Failed to generate mnemonic');
+      // Disconnect transport so Sphere.init can reconnect with the real identity.
+      // Without this, setIdentity() triggers an async reconnect that isn't awaited,
+      // causing "NostrTransportProvider not connected" during nametag registration.
+      if (providers.transport.isConnected()) {
+        await providers.transport.disconnect();
       }
 
-      return generatedMnemonic;
+      try {
+        const { sphere: instance, generatedMnemonic } = await Sphere.init({
+          ...providers,
+          autoGenerate: true,
+          nametag: options?.nametag,
+        });
+
+        setSphere(instance);
+        setWalletExists(true);
+
+        if (!generatedMnemonic) {
+          throw new Error('Failed to generate mnemonic');
+        }
+
+        return generatedMnemonic;
+      } catch (err) {
+        // If nametag was taken or any other error during init,
+        // wallet data may already be persisted — clean it up
+        await Sphere.clear({
+          storage: providers.storage,
+          tokenStorage: providers.tokenStorage,
+        });
+        setSphere(null);
+        setWalletExists(false);
+        throw err;
+      }
+    },
+    [providers],
+  );
+
+  const resolveNametag = useCallback(
+    async (nametag: string) => {
+      if (!providers) throw new Error('Providers not initialized');
+
+      const transport = providers.transport;
+
+      // Connect transport if not already connected (needed before wallet exists)
+      if (!transport.isConnected()) {
+        await transport.connect();
+        // Set dummy identity for read-only queries (resolveNametagInfo only queries, never signs)
+        transport.setIdentity({
+          privateKey: '0000000000000000000000000000000000000000000000000000000000000001',
+          chainPubkey: '000000000000000000000000000000000000000000000000000000000000000000',
+          l1Address: '',
+        });
+      }
+
+      const info = await transport.resolveNametagInfo?.(nametag);
+      return info ?? null;
     },
     [providers],
   );
@@ -87,6 +138,11 @@ export function SphereProvider({
   const importWallet = useCallback(
     async (mnemonic: string, options?: ImportWalletOptions) => {
       if (!providers) throw new Error('Providers not initialized');
+
+      // Disconnect transport so Sphere.init can reconnect with the real identity.
+      if (providers.transport.isConnected()) {
+        await providers.transport.disconnect();
+      }
 
       // Clear existing wallet first
       await Sphere.clear({
@@ -127,6 +183,7 @@ export function SphereProvider({
     isInitialized: !!sphere,
     walletExists,
     error,
+    resolveNametag,
     createWallet,
     importWallet,
     deleteWallet,

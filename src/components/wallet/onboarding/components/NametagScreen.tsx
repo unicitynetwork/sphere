@@ -2,12 +2,15 @@
  * NametagScreen - Unicity ID creation screen
  */
 import { motion } from "framer-motion";
-import { ShieldCheck, ArrowRight, ArrowLeft } from "lucide-react";
+import { ShieldCheck, ArrowRight, ArrowLeft, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+
+export type NametagAvailability = 'idle' | 'checking' | 'available' | 'taken';
 
 interface NametagScreenProps {
   nametagInput: string;
   isBusy: boolean;
   error: string | null;
+  availability: NametagAvailability;
   onNametagChange: (value: string) => void;
   onSubmit: () => void;
   onSkip?: () => void;
@@ -18,6 +21,7 @@ export function NametagScreen({
   nametagInput,
   isBusy,
   error,
+  availability,
   onNametagChange,
   onSubmit,
   onSkip,
@@ -31,8 +35,10 @@ export function NametagScreen({
     }
   };
 
+  const canSubmit = nametagInput && !isBusy && availability !== 'taken' && availability !== 'checking';
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && nametagInput && !isBusy) {
+    if (e.key === "Enter" && canSubmit) {
       onSubmit();
     }
   };
@@ -88,8 +94,13 @@ export function NametagScreen({
         transition={{ delay: 0.3 }}
         className="relative mb-4 md:mb-5 group"
       >
-        <div className="absolute right-3 md:right-4 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500 group-focus-within:text-orange-500 dark:group-focus-within:text-orange-400 transition-colors z-10 text-xs md:text-sm font-medium">
-          @unicity
+        <div className="absolute right-3 md:right-4 top-1/2 -translate-y-1/2 flex items-center gap-1.5 z-10">
+          {availability === 'checking' && <Loader2 className="w-3.5 h-3.5 text-neutral-400 animate-spin" />}
+          {availability === 'available' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
+          {availability === 'taken' && <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
+          <span className="text-neutral-400 dark:text-neutral-500 group-focus-within:text-orange-500 dark:group-focus-within:text-orange-400 transition-colors text-xs md:text-sm font-medium">
+            @unicity
+          </span>
         </div>
         <input
           type="text"
@@ -97,11 +108,31 @@ export function NametagScreen({
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           placeholder="id"
-          className="w-full bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 rounded-xl py-3 md:py-3.5 pl-3 md:pl-4 pr-24 md:pr-28 text-sm md:text-base text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-orange-500 focus:bg-white dark:focus:bg-neutral-800 transition-all backdrop-blur-sm"
+          className={`w-full bg-neutral-100 dark:bg-neutral-800/50 border-2 rounded-xl py-3 md:py-3.5 pl-3 md:pl-4 pr-28 md:pr-32 text-sm md:text-base text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:bg-white dark:focus:bg-neutral-800 transition-all backdrop-blur-sm ${
+            availability === 'taken'
+              ? 'border-red-400 dark:border-red-500/50 focus:border-red-500'
+              : availability === 'available'
+                ? 'border-emerald-400 dark:border-emerald-500/50 focus:border-emerald-500'
+                : 'border-neutral-200 dark:border-neutral-700/50 focus:border-orange-500'
+          }`}
           autoFocus
         />
         <div className="absolute inset-0 rounded-xl bg-linear-to-r from-orange-500/0 via-orange-500/5 to-purple-500/0 opacity-0 group-focus-within:opacity-100 transition-opacity pointer-events-none" />
       </motion.div>
+
+      {/* Availability status — fixed height to prevent layout shift */}
+      <div className="h-5 -mt-2 mb-1">
+        {availability === 'taken' && !error && (
+          <p className="text-red-500 dark:text-red-400 text-xs">
+            @{nametagInput} is already taken
+          </p>
+        )}
+        {availability === 'available' && (
+          <p className="text-emerald-500 dark:text-emerald-400 text-xs">
+            @{nametagInput} is available
+          </p>
+        )}
+      </div>
 
       {/* Continue Button */}
       <motion.button
@@ -109,7 +140,7 @@ export function NametagScreen({
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.4 }}
         onClick={onSubmit}
-        disabled={!nametagInput || isBusy}
+        disabled={!canSubmit}
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
         className="relative w-full py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-linear-to-r from-orange-500 to-orange-600 text-white text-sm md:text-base font-bold shadow-xl shadow-orange-500/30 flex items-center justify-center gap-2 md:gap-3 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 overflow-hidden group"
