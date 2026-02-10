@@ -321,8 +321,11 @@ export function L3WalletView({
   // Handle logout
   const handleLogout = async () => {
     try {
+      // Navigate first — deleteWallet() sets walletExists=false which causes
+      // WalletGate to render OnboardingScreen, unmounting this component.
+      // If we navigate after, the call is lost because the component is gone.
+      navigate('/', { replace: true });
       await deleteWallet();
-      navigate('/');
     } catch (err) {
       console.error('Failed to logout:', err);
     }
