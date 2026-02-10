@@ -1,4 +1,4 @@
-import { Plus, ArrowUpRight, ArrowDownUp, Sparkles, Loader2, Coins, Layers, CheckCircle, XCircle, Eye, EyeOff } from 'lucide-react';
+import { Plus, ArrowUpRight, ArrowDownUp, Sparkles, Loader2, Coins, Layers, CheckCircle, XCircle, Eye, EyeOff, Wifi } from 'lucide-react';
 import { AnimatePresence, motion, useMotionValue, useTransform, animate } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
 import { AggregatedAsset, Token as LegacyToken } from '../data/model';
@@ -98,6 +98,47 @@ function BalanceDisplay({
   );
 }
 
+// Inline status line showing current wallet activity
+function WalletStatusLine({
+  isLoadingAssets,
+  isLoadingL1,
+  pendingCount,
+}: {
+  isLoadingAssets: boolean;
+  isLoadingL1: boolean;
+  pendingCount: number;
+}) {
+  const items: { label: string; spinning?: boolean }[] = [];
+
+  if (isLoadingAssets) items.push({ label: 'Loading assets', spinning: true });
+  if (isLoadingL1) items.push({ label: 'Loading L1 balance', spinning: true });
+  if (pendingCount > 0) items.push({ label: `${pendingCount} pending transfer${pendingCount > 1 ? 's' : ''}` });
+
+  if (items.length === 0) return null;
+
+  // Show the first (most relevant) status item
+  const current = items[0];
+
+  return (
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={current.label}
+        initial={{ opacity: 0, y: -4 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 4 }}
+        className="flex items-center justify-center gap-1.5 text-xs text-neutral-400 dark:text-neutral-500"
+      >
+        {current.spinning ? (
+          <Loader2 className="w-3 h-3 animate-spin" />
+        ) : (
+          <Wifi className="w-3 h-3" />
+        )}
+        <span>{current.label}...</span>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 interface L3WalletViewProps {
   showBalances: boolean;
   setShowBalances: (value: boolean) => void;
@@ -127,8 +168,8 @@ export function L3WalletView({
   // SDK hooks
   const { identity, nametag, isLoading: isLoadingIdentity } = useIdentity();
   const { assets: sdkAssets, isLoading: isLoadingAssets } = useAssets();
-  const { tokens: sdkTokens } = useTokens();
-  const { balance: l1BalanceData } = useL1Balance();
+  const { tokens: sdkTokens, pendingTokens } = useTokens();
+  const { balance: l1BalanceData, isLoading: isLoadingL1 } = useL1Balance();
   const { sphere, deleteWallet } = useSphereContext();
 
   // Convert SDK assets to AggregatedAsset instances for UI components
@@ -364,6 +405,11 @@ export function L3WalletView({
             showBalances={showBalances}
             onToggle={handleToggleBalances}
             isLoading={isLoadingAssets && totalValue === 0}
+          />
+          <WalletStatusLine
+            isLoadingAssets={isLoadingAssets}
+            isLoadingL1={isLoadingL1}
+            pendingCount={pendingTokens.length}
           />
         </div>
 
