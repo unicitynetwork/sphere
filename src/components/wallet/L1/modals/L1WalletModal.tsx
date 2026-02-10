@@ -77,65 +77,20 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     all: BigInt(l1BalanceData.total),
   } : { vested: 0n, unvested: 0n, all: 0n };
 
-  // Derive addresses and scan for active ones beyond current index
+  // Load tracked addresses from SDK (these are the addresses selected during import/scan)
   useEffect(() => {
     if (!sphere) return;
-    let cancelled = false;
 
-    async function discoverAddresses() {
-      try {
-        const minCount = currentAddressIndex + 1;
-        const derived = sphere!.deriveAddresses(minCount);
-        const result: DerivedAddr[] = derived.map((addr) => ({
-          index: addr.index,
-          l1Address: addr.address,
-          nametag: addr.index === currentAddressIndex ? (sphere!.identity?.nametag ?? undefined) : undefined,
-        }));
-
-        if (cancelled) return;
-        setAddresses(result);
-
-        // Resolve nametags for non-current addresses via Nostr
-        for (const addr of result) {
-          if (addr.index === currentAddressIndex || cancelled) continue;
-          try {
-            const info = await sphere!.resolve(addr.l1Address);
-            if (cancelled) return;
-            if (info?.nametag) {
-              setAddresses(prev => prev.map(a =>
-                a.index === addr.index ? { ...a, nametag: info.nametag } : a
-              ));
-            }
-          } catch { /* ignore */ }
-        }
-
-        // Scan forward: check if next address has identity binding
-        let nextIndex = minCount;
-        const maxScan = nextIndex + 10;
-        while (nextIndex < maxScan && !cancelled) {
-          try {
-            const nextAddr = sphere!.deriveAddress(nextIndex);
-            const info = await sphere!.resolve(nextAddr.address);
-            if (cancelled) return;
-            if (!info) break;
-
-            setAddresses(prev => [...prev, {
-              index: nextIndex,
-              l1Address: nextAddr.address,
-              nametag: info.nametag ?? undefined,
-            }]);
-            nextIndex++;
-          } catch {
-            break;
-          }
-        }
-      } catch (e) {
-        console.error("[L1WalletModal] Failed to derive addresses:", e);
-      }
+    try {
+      const tracked = sphere.getActiveAddresses();
+      setAddresses(tracked.map((addr) => ({
+        index: addr.index,
+        l1Address: addr.l1Address,
+        nametag: addr.nametag,
+      })));
+    } catch (e) {
+      console.error("[L1WalletModal] Failed to load addresses:", e);
     }
-
-    discoverAddresses();
-    return () => { cancelled = true; };
   }, [sphere, currentAddressIndex]);
 
   // Reset view when modal opens
@@ -171,17 +126,28 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     }
   }, [sphere, isSwitching, currentAddressIndex, queryClient]);
 
-  const handleDeriveNew = useCallback(() => {
+  const handleDeriveNew = useCallback(async () => {
     if (!sphere) return;
     setShowDropdown(false);
     try {
-      const nextIndex = addresses.length;
-      const newAddr = sphere.deriveAddress(nextIndex);
-      setAddresses(prev => [...prev, { index: newAddr.index, l1Address: newAddr.address }]);
+      // Find the next untracked index
+      const maxIndex = addresses.reduce((max, a) => Math.max(max, a.index), -1);
+      const nextIndex = maxIndex + 1;
+
+      // Track the new address via SDK (persists it)
+      await sphere.trackScannedAddresses([{ index: nextIndex, hidden: false }]);
+
+      // Reload tracked addresses from SDK
+      const tracked = sphere.getActiveAddresses();
+      setAddresses(tracked.map((addr) => ({
+        index: addr.index,
+        l1Address: addr.l1Address,
+        nametag: addr.nametag,
+      })));
     } catch (e) {
       console.error("[L1WalletModal] Failed to derive new address:", e);
     }
-  }, [sphere, addresses.length]);
+  }, [sphere, addresses]);
 
   const handleSend = useCallback(async (destination: string, amount: string) => {
     const amountAlpha = Number(amount);
@@ -201,7 +167,9 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
 
   const formatBalance = (bal: number) => bal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 8 });
 
-  const sortedAddresses = useMemo(() => [...addresses].sort((a, b) => a.index - b.index), [addresses]);
+  const sortedAddresses = useMemo(() => {
+    return [...addresses].sort((a, b) => a.index - b.index);
+  }, [addresses]);
 
   return (
     <BaseModal isOpen={isOpen} onClose={onClose} size="lg" showOrbs={false} className="max-h-[92%]">
@@ -344,7 +312,7 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
                           const isSelected = addr.index === currentAddressIndex;
                           return (
                             <button
-                              key={addr.index}
+                              key={addr.l1Address}
                               onClick={() => handleSelectAddress(addr.index)}
                               disabled={isSwitching}
                               className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 ${isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""}`}

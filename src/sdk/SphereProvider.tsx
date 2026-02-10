@@ -54,6 +54,7 @@ export function SphereProvider({
       if (exists) {
         const { sphere: instance } = await Sphere.init({
           ...browserProviders,
+          l1: {},
         });
         setSphere(instance);
       } else {
@@ -99,6 +100,7 @@ export function SphereProvider({
           ...providers,
           autoGenerate: true,
           nametag: options?.nametag,
+          l1: {},
         });
 
         setSphere(instance);
@@ -166,6 +168,7 @@ export function SphereProvider({
         ...providers,
         mnemonic,
         nametag: options?.nametag,
+        l1: {},
       });
 
       setSphere(instance);
@@ -199,6 +202,7 @@ export function SphereProvider({
           transport: providers.transport,
           oracle: providers.oracle,
           tokenStorage: providers.tokenStorage,
+          l1: {},
         });
 
         // Don't setSphere here — the onboarding flow calls finalizeWallet(sphere)
@@ -245,7 +249,11 @@ export function SphereProvider({
     queryClient.clear();
     setSphere(null);
     setWalletExists(false);
-  }, [sphere, providers, queryClient]);
+
+    // Re-create fresh providers so the next import/create has clean state
+    // (destroy disconnects transport/storage; without this, re-import hangs)
+    await initialize();
+  }, [sphere, providers, queryClient, initialize]);
 
   const finalizeWallet = useCallback((importedSphere?: Sphere) => {
     if (importedSphere) {
