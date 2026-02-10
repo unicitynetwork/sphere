@@ -10,6 +10,9 @@ import {
   StartScreen,
   RestoreScreen,
   RestoreMethodScreen,
+  ImportFileScreen,
+  PasswordPromptScreen,
+  ScanningScreen,
   AddressSelectionScreen,
   NametagScreen,
   ProcessingScreen,
@@ -32,6 +35,14 @@ export function CreateWalletFlow() {
     // Mnemonic restore state
     seedWords,
     setSeedWords,
+
+    // File import state
+    selectedFile,
+    scanCount,
+    needsScanning,
+    isDragging,
+    scanProgress,
+    showScanModal,
 
     // Nametag state
     nametagInput,
@@ -57,6 +68,17 @@ export function CreateWalletFlow() {
     handleSkipNametag,
     handleDeriveNewAddress,
     handleContinueWithAddress,
+
+    // File import actions
+    handleFileSelect,
+    handleClearFile,
+    handleScanCountChange,
+    handleFileImport,
+    handlePasswordSubmit,
+    handleCancelScan,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
 
     // Wallet context
     identity,
@@ -84,7 +106,7 @@ export function CreateWalletFlow() {
             isBusy={isBusy}
             error={error}
             onSelectMnemonic={() => setStep("restore")}
-            onSelectFile={() => setStep("restore")}
+            onSelectFile={() => setStep("importFile")}
             onBack={goToStart}
           />
         )}
@@ -97,6 +119,35 @@ export function CreateWalletFlow() {
             onSeedWordsChange={setSeedWords}
             onRestore={handleRestoreWallet}
             onBack={() => setStep("restoreMethod")}
+          />
+        )}
+
+        {step === "importFile" && (
+          <ImportFileScreen
+            selectedFile={selectedFile}
+            scanCount={scanCount}
+            needsScanning={needsScanning}
+            isDragging={isDragging}
+            isBusy={isBusy}
+            error={error}
+            onFileSelect={handleFileSelect}
+            onClearFile={handleClearFile}
+            onScanCountChange={handleScanCountChange}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onImport={handleFileImport}
+            onBack={() => setStep("restoreMethod")}
+          />
+        )}
+
+        {step === "passwordPrompt" && (
+          <PasswordPromptScreen
+            fileName={selectedFile?.name || ""}
+            isBusy={isBusy}
+            error={error}
+            onSubmit={handlePasswordSubmit}
+            onBack={() => setStep("importFile")}
           />
         )}
 
@@ -137,6 +188,13 @@ export function CreateWalletFlow() {
           />
         )}
       </AnimatePresence>
+
+      {/* Scan modal rendered outside AnimatePresence to avoid step-transition issues */}
+      <ScanningScreen
+        open={showScanModal}
+        progress={scanProgress}
+        onCancel={handleCancelScan}
+      />
     </div>
   );
 }

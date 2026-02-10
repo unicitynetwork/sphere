@@ -2,7 +2,6 @@ export type {
   Identity,
   FullIdentity,
   Token,
-  TokenBalance,
   TokenStatus,
   TransferRequest,
   TransferResult,

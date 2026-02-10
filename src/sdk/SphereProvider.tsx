@@ -12,7 +12,13 @@ import {
 } from '@unicitylabs/sphere-sdk/impl/browser';
 import type { NetworkType } from '@unicitylabs/sphere-sdk';
 import { SphereContext } from './SphereContext';
-import type { SphereContextValue, CreateWalletOptions, ImportWalletOptions } from './SphereContext';
+import type {
+  SphereContextValue,
+  CreateWalletOptions,
+  ImportWalletOptions,
+  ImportFromFileOptions,
+  ImportFromFileResult,
+} from './SphereContext';
 import { clearAllSphereData } from '../config/storageKeys';
 
 interface SphereProviderProps {
@@ -168,6 +174,62 @@ export function SphereProvider({
     [providers],
   );
 
+  const importFromFile = useCallback(
+    async (options: ImportFromFileOptions): Promise<ImportFromFileResult> => {
+      if (!providers) throw new Error('Providers not initialized');
+
+      // Disconnect transport so Sphere can reconnect with the real identity
+      if (providers.transport.isConnected()) {
+        await providers.transport.disconnect();
+      }
+
+      // Ensure storage is connected (it may have been disconnected by a
+      // previous import → Sphere.clear() → destroy() cycle)
+      if (!providers.storage.isConnected()) {
+        await providers.storage.connect();
+      }
+
+      try {
+        const result = await Sphere.importFromLegacyFile({
+          fileContent: options.fileContent,
+          fileName: options.fileName,
+          password: options.password,
+          nametag: options.nametag,
+          storage: providers.storage,
+          transport: providers.transport,
+          oracle: providers.oracle,
+          tokenStorage: providers.tokenStorage,
+        });
+
+        // Don't setSphere here — the onboarding flow calls finalizeWallet(sphere)
+        // after scanning / address selection / nametag are done.
+        // Setting sphere eagerly would change the context and cause premature
+        // re-renders that can reset the onboarding step state.
+
+        return {
+          success: result.success,
+          sphere: result.sphere,
+          mnemonic: result.mnemonic,
+          needsPassword: result.needsPassword,
+          error: result.error,
+        };
+      } catch (err) {
+        // Clean up on failure
+        await Sphere.clear({
+          storage: providers.storage,
+          tokenStorage: providers.tokenStorage,
+        });
+        setSphere(null);
+        setWalletExists(false);
+        return {
+          success: false,
+          error: err instanceof Error ? err.message : 'Import failed',
+        };
+      }
+    },
+    [providers],
+  );
+
   const deleteWallet = useCallback(async () => {
     // Clear SDK storage before destroying (destroy disconnects providers)
     if (providers) {
@@ -185,6 +247,13 @@ export function SphereProvider({
     setWalletExists(false);
   }, [sphere, providers, queryClient]);
 
+  const finalizeWallet = useCallback((importedSphere?: Sphere) => {
+    if (importedSphere) {
+      setSphere(importedSphere);
+    }
+    setWalletExists(true);
+  }, []);
+
   const value: SphereContextValue = {
     sphere,
     providers,
@@ -195,6 +264,8 @@ export function SphereProvider({
     resolveNametag,
     createWallet,
     importWallet,
+    importFromFile,
+    finalizeWallet,
     deleteWallet,
     reinitialize: initialize,
   };
