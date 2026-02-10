@@ -249,11 +249,20 @@ export function SphereProvider({
     queryClient.clear();
     setSphere(null);
     setWalletExists(false);
+    setError(null);
 
-    // Re-create fresh providers so the next import/create has clean state
-    // (destroy disconnects transport/storage; without this, re-import hangs)
-    await initialize();
-  }, [sphere, providers, queryClient, initialize]);
+    // Create fresh providers WITHOUT connecting transport.
+    // Don't call initialize() here — it pre-connects transport with a dummy
+    // identity which races with the real connection inside Sphere.import/init,
+    // causing the subsequent import to hang. The SDK handles the full
+    // connection lifecycle (connect, setIdentity, subscribe) internally.
+    // resolveNametag() also connects transport on demand when needed.
+    const freshProviders = createBrowserProviders({
+      network,
+      price: { platform: 'coingecko', baseUrl: '/coingecko' },
+    });
+    setProviders(freshProviders);
+  }, [sphere, providers, queryClient, network]);
 
   const finalizeWallet = useCallback((importedSphere?: Sphere) => {
     if (importedSphere) {
