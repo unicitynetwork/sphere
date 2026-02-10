@@ -9,6 +9,7 @@ import type { ScanAddressProgress, LegacyFileType } from "@unicitylabs/sphere-sd
 import { useSphereContext } from "../../../../sdk/hooks/core/useSphere";
 import { SPHERE_KEYS } from "../../../../sdk/queryKeys";
 import { recordActivity } from "../../../../services/ActivityService";
+import { addrKey } from "../components/addrKey";
 import type { DerivedAddressInfo } from "../components/AddressSelectionScreen";
 import type { NametagAvailability } from "../components/NametagScreen";
 
@@ -54,14 +55,9 @@ export interface UseOnboardingFlowReturn {
   isProcessingComplete: boolean;
   handleCompleteOnboarding: () => Promise<void>;
 
-  // Address selection state
+  // Address selection state (multi-select)
   derivedAddresses: DerivedAddressInfo[];
-  selectedAddressPath: string | null;
-  showAddressDropdown: boolean;
-  isCheckingIpns: boolean;
-  ipnsFetchingNametag: boolean;
-  setSelectedAddressPath: (path: string | null) => void;
-  setShowAddressDropdown: (show: boolean) => void;
+  selectedKeys: Set<string>;
 
   // Actions
   handleCreateKeys: () => Promise<void>;
@@ -71,6 +67,11 @@ export interface UseOnboardingFlowReturn {
   handleDeriveNewAddress: () => Promise<void>;
   handleContinueWithAddress: () => Promise<void>;
   goToAddressSelection: (skipIpnsCheck?: boolean) => Promise<void>;
+
+  // Multi-select actions
+  handleToggleSelect: (key: string) => void;
+  handleSelectAll: () => void;
+  handleDeselectAll: () => void;
 
   // File import actions
   handleFileSelect: (file: File) => Promise<void>;
@@ -149,10 +150,9 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     return () => clearTimeout(timer);
   }, [nametagInput, resolveNametag]);
 
-  // Address selection state
+  // Address selection state (multi-select, using composite keys to distinguish receive vs change)
   const [derivedAddresses, setDerivedAddresses] = useState<DerivedAddressInfo[]>([]);
-  const [selectedAddressPath, setSelectedAddressPath] = useState<string | null>(null);
-  const [showAddressDropdown, setShowAddressDropdown] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
 
   // Generated mnemonic (from create flow)
   const [generatedMnemonic, setGeneratedMnemonic] = useState<string | null>(null);
@@ -284,13 +284,14 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
         if (cancelled) return;
 
-        // Convert scan results to DerivedAddressInfo
+        // Convert scan results to DerivedAddressInfo (with nametag data)
         const addresses: DerivedAddressInfo[] = result.addresses.map((a) => ({
           index: a.index,
           l1Address: a.address,
           l3Address: '',
           path: a.path,
-          hasNametag: false,
+          hasNametag: !!a.nametag,
+          existingNametag: a.nametag,
           isChange: a.isChange,
           l1Balance: a.balance,
           balanceLoading: false,
@@ -313,9 +314,14 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
           });
         }
 
+        // Initialize multi-select: all non-change addresses selected
+        const initial = new Set(
+          addresses.filter(a => !a.isChange).map(a => addrKey(a.index, false))
+        );
+        setSelectedKeys(initial);
+
         setShowScanModal(false);
         setDerivedAddresses(addresses);
-        setSelectedAddressPath(addresses[0]?.path || null);
         setStep("addressSelection");
       } catch (e) {
         if (cancelled) return;
@@ -324,7 +330,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         if (controller.signal.aborted) {
           // User cancelled — go to address selection with default address
           const addr0 = importedSphere.deriveAddress(0, false);
-          setDerivedAddresses([{
+          const fallback: DerivedAddressInfo[] = [{
             index: 0,
             l1Address: addr0.address,
             l3Address: '',
@@ -334,8 +340,9 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
             l1Balance: 0,
             balanceLoading: false,
             ipnsLoading: false,
-          }]);
-          setSelectedAddressPath(addr0.path);
+          }];
+          setDerivedAddresses(fallback);
+          setSelectedKeys(new Set(["0"]));
           setStep("addressSelection");
         } else {
           setError(e instanceof Error ? e.message : "Scan failed");
@@ -646,7 +653,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         const results: DerivedAddressInfo[] = addresses.map((addr, i) => ({
           index: i,
           l1Address: addr.address,
-          l3Address: '', // Populated on selection
+          l3Address: '',
           path: addr.path,
           hasNametag: false,
           ipnsLoading: false,
@@ -654,7 +661,9 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         }));
 
         setDerivedAddresses(results);
-        setSelectedAddressPath(results[0]?.path || null);
+        setSelectedKeys(new Set(
+          results.filter(a => !a.isChange).map(a => addrKey(a.index, false))
+        ));
         setStep("addressSelection");
       } catch (e) {
         const message = e instanceof Error ? e.message : "Failed to derive addresses";
@@ -666,26 +675,34 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     [sphere]
   );
 
-  // Action: Continue with selected address
+  // Action: Continue with selected addresses (multi-select)
   const handleContinueWithAddress = useCallback(async () => {
     const activeSphere = importedSphereRef.current ?? sphere;
-    if (!activeSphere) return;
+    if (!activeSphere || selectedKeys.size === 0) return;
     setIsBusy(true);
     setError(null);
 
     try {
-      const selectedAddress = derivedAddresses.find(
-        (a) => a.path === selectedAddressPath
-      ) || derivedAddresses[0];
+      // Bulk track non-change addresses with visibility (SDK only tracks receive addresses)
+      const entries = derivedAddresses
+        .filter(a => !a.isChange)
+        .map(a => ({
+          index: a.index,
+          hidden: !selectedKeys.has(addrKey(a.index, false)),
+          nametag: a.existingNametag,
+        }));
+      await activeSphere.trackScannedAddresses(entries);
 
-      if (!selectedAddress) {
-        throw new Error("No address selected");
+      // Auto-select active address: first selected with nametag, or first selected
+      const selectedAddrs = derivedAddresses.filter(
+        a => !a.isChange && selectedKeys.has(addrKey(a.index, false))
+      );
+      const activeAddr = selectedAddrs.find(a => a.hasNametag) ?? selectedAddrs[0];
+      if (activeAddr) {
+        await activeSphere.switchToAddress(activeAddr.index);
       }
 
-      // Switch SDK to selected address
-      await activeSphere.switchToAddress(selectedAddress.index);
-
-      // Check if this address already has a nametag
+      // Route based on nametag
       if (activeSphere.identity?.nametag) {
         setStep("processing");
         setProcessingStatus("Setup complete!");
@@ -699,7 +716,31 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     } finally {
       setIsBusy(false);
     }
-  }, [derivedAddresses, selectedAddressPath, sphere]);
+  }, [derivedAddresses, selectedKeys, sphere]);
+
+  // ---- Multi-select handlers ----
+
+  const handleToggleSelect = useCallback((key: string) => {
+    setSelectedKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    setSelectedKeys(new Set(
+      derivedAddresses.filter(a => !a.isChange).map(a => addrKey(a.index, false))
+    ));
+  }, [derivedAddresses]);
+
+  const handleDeselectAll = useCallback(() => {
+    setSelectedKeys(new Set());
+  }, []);
 
   return {
     // Step management
@@ -733,14 +774,9 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     isProcessingComplete,
     handleCompleteOnboarding,
 
-    // Address selection state
+    // Address selection state (multi-select)
     derivedAddresses,
-    selectedAddressPath,
-    showAddressDropdown,
-    isCheckingIpns: false,
-    ipnsFetchingNametag: false,
-    setSelectedAddressPath,
-    setShowAddressDropdown,
+    selectedKeys,
 
     // Actions
     handleCreateKeys,
@@ -750,6 +786,11 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     handleDeriveNewAddress,
     handleContinueWithAddress,
     goToAddressSelection,
+
+    // Multi-select actions
+    handleToggleSelect,
+    handleSelectAll,
+    handleDeselectAll,
 
     // File import actions
     handleFileSelect,

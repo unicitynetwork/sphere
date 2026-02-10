@@ -86,6 +86,16 @@ export function ScanningScreen({
                   {foundCount}
                 </span>
               </div>
+              {(progress?.nametagsFoundCount ?? 0) > 0 && (
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-sm text-neutral-500 dark:text-neutral-400">
+                    With Unicity IDs
+                  </span>
+                  <span className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                    {progress!.nametagsFoundCount}
+                  </span>
+                </div>
+              )}
               {progress?.currentAddress && (
                 <div className="mt-2 text-xs text-neutral-400 dark:text-neutral-500 font-mono truncate">
                   {progress.currentAddress}

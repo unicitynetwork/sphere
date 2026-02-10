@@ -52,14 +52,14 @@ export function CreateWalletFlow() {
     isProcessingComplete,
     handleCompleteOnboarding,
 
-    // Address selection state
+    // Address selection state (multi-select)
     derivedAddresses,
-    selectedAddressPath,
-    showAddressDropdown,
-    isCheckingIpns,
-    ipnsFetchingNametag,
-    setSelectedAddressPath,
-    setShowAddressDropdown,
+    selectedKeys,
+
+    // Multi-select actions
+    handleToggleSelect,
+    handleSelectAll,
+    handleDeselectAll,
 
     // Actions
     handleCreateKeys,
@@ -93,7 +93,7 @@ export function CreateWalletFlow() {
             identity={identity}
             nametag={nametag}
             isBusy={isBusy}
-            ipnsFetchingNametag={ipnsFetchingNametag}
+            ipnsFetchingNametag={false}
             error={error}
             onCreateWallet={handleCreateKeys}
             onContinueSetup={() => setStep("nametag")}
@@ -154,13 +154,12 @@ export function CreateWalletFlow() {
         {step === "addressSelection" && (
           <AddressSelectionScreen
             derivedAddresses={derivedAddresses}
-            selectedAddressPath={selectedAddressPath}
-            showAddressDropdown={showAddressDropdown}
-            isCheckingIpns={isCheckingIpns}
+            selectedKeys={selectedKeys}
             isBusy={isBusy}
             error={error}
-            onSelectAddress={setSelectedAddressPath}
-            onToggleDropdown={() => setShowAddressDropdown(!showAddressDropdown)}
+            onToggleSelect={handleToggleSelect}
+            onSelectAll={handleSelectAll}
+            onDeselectAll={handleDeselectAll}
             onDeriveNewAddress={handleDeriveNewAddress}
             onContinue={handleContinueWithAddress}
             onBack={goToStart}
