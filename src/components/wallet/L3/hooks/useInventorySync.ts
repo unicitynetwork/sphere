@@ -6,7 +6,6 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { inventorySync, type SyncParams } from '../services/InventorySyncService';
 import type { SyncResult, SyncMode, CircuitBreakerState } from '../types/SyncTypes';
 import { IdentityManager } from '../services/IdentityManager';
@@ -44,7 +43,6 @@ interface SyncStateEvent {
  * @returns Sync state and control functions
  */
 export function useInventorySync() {
-  const queryClient = useQueryClient();
   const identityManager = IdentityManager.getInstance(SESSION_KEY);
 
   const [syncState, setSyncState] = useState<SyncState>({
@@ -169,7 +167,7 @@ export function useInventorySync() {
       emitSyncState({ isSyncing: false, currentStep: 0, mode });
       return null;
     }
-  }, [identityManager, queryClient, emitSyncState]);
+  }, [identityManager, emitSyncState]);
 
   /**
    * Trigger NORMAL mode sync (full validation)

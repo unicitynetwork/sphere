@@ -240,9 +240,14 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
                         </span>
                       </div>
                       <div className="flex items-center justify-between mt-0.5">
-                        <span className="text-xs font-mono text-neutral-500 truncate mr-2">
+                        <a
+                          href={`https://www.unicity.network/tx/${tx.txid}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs font-mono text-blue-500 dark:text-blue-400 hover:text-blue-300 truncate mr-2"
+                        >
                           {tx.txid.slice(0, 12)}...{tx.txid.slice(-6)}
-                        </span>
+                        </a>
                         <span className="text-xs text-neutral-400 shrink-0">
                           {tx.confirmations > 0 ? `${tx.confirmations} conf` : "unconfirmed"}
                         </span>
@@ -410,6 +415,7 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
         selectedAddress={selectedAddress}
         onClose={() => setShowSendModal(false)}
         onSend={handleSend}
+        vestingBalances={vestingBalances}
       />
 
       <MessageModal

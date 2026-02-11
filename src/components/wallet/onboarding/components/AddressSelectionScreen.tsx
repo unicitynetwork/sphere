@@ -120,7 +120,7 @@ export function AddressSelectionScreen({
       </div>
 
       {/* Address List */}
-      <div className="max-h-[320px] overflow-y-auto rounded-xl border border-neutral-200 dark:border-neutral-700 mb-4">
+      <div className="max-h-80 overflow-y-auto rounded-xl border border-neutral-200 dark:border-neutral-700 mb-4">
         {derivedAddresses.length === 0 ? (
           <div className="py-8 flex items-center justify-center gap-3">
             <Loader2 className="w-5 h-5 animate-spin text-purple-500" />
