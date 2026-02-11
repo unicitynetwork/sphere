@@ -13,29 +13,23 @@ export function useSphereEvents(): void {
   useEffect(() => {
     if (!sphere) return;
 
-    const handleIncomingTransfer = () => {
+    const invalidatePayments = () => {
       queryClient.invalidateQueries({
         queryKey: SPHERE_KEYS.payments.tokens.all,
       });
       queryClient.invalidateQueries({
         queryKey: SPHERE_KEYS.payments.balance.all,
-      });
-      queryClient.invalidateQueries({
-        queryKey: SPHERE_KEYS.payments.transactions.all,
       });
       queryClient.invalidateQueries({
         queryKey: SPHERE_KEYS.payments.assets.all,
       });
+      queryClient.invalidateQueries({
+        queryKey: SPHERE_KEYS.payments.transactions.all,
+      });
     };
 
-    const handleTransferConfirmed = () => {
-      queryClient.invalidateQueries({
-        queryKey: SPHERE_KEYS.payments.tokens.all,
-      });
-      queryClient.invalidateQueries({
-        queryKey: SPHERE_KEYS.payments.balance.all,
-      });
-    };
+    const handleIncomingTransfer = invalidatePayments;
+    const handleTransferConfirmed = invalidatePayments;
 
     const handleNametagChange = () => {
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.all });
@@ -47,17 +41,7 @@ export function useSphereEvents(): void {
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.l1.all });
     };
 
-    const handleSyncCompleted = () => {
-      queryClient.invalidateQueries({
-        queryKey: SPHERE_KEYS.payments.tokens.all,
-      });
-      queryClient.invalidateQueries({
-        queryKey: SPHERE_KEYS.payments.balance.all,
-      });
-      queryClient.invalidateQueries({
-        queryKey: SPHERE_KEYS.payments.assets.all,
-      });
-    };
+    const handleSyncCompleted = invalidatePayments;
 
     // Bridge incoming SDK DMs to ChatRepository and fire custom event
     const handleDmReceived = (dm: DirectMessage) => {

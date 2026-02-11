@@ -13,12 +13,16 @@ interface AssetRowProps {
   isNew?: boolean;
 }
 
-// Custom comparison: allow re-render when amount changes (for number animation)
+// Custom comparison: allow re-render when amount or price changes (for number animation)
 function areAssetPropsEqual(prev: AssetRowProps, next: AssetRowProps): boolean {
   return (
     prev.asset.coinId === next.asset.coinId &&
     prev.asset.symbol === next.asset.symbol &&
+    prev.asset.totalAmount === next.asset.totalAmount &&
+    prev.asset.tokenCount === next.asset.tokenCount &&
+    prev.asset.priceUsd === next.asset.priceUsd &&
     prev.asset.change24h === next.asset.change24h &&
+    prev.asset.iconUrl === next.asset.iconUrl &&
     prev.showBalances === next.showBalances &&
     prev.layer === next.layer &&
     prev.isNew === next.isNew &&

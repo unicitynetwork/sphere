@@ -342,8 +342,8 @@ export const useWallet = () => {
   const pricesQuery = useQuery({
     queryKey: KEYS.PRICES,
     queryFn: ApiService.fetchPrices,
-    refetchInterval: 60000,
-    staleTime: 30000, // Consider data fresh for 30 seconds
+    refetchInterval: 5 * 60_000, // 5 min — SDK handles primary price updates
+    staleTime: 60_000,
   });
 
   const tokensQuery = useQuery({

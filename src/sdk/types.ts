@@ -18,4 +18,5 @@ export type {
   IncomingPaymentRequest,
   PaymentRequest,
   Asset,
+  TransactionHistoryEntry,
 } from '@unicitylabs/sphere-sdk';

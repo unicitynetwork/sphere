@@ -18,10 +18,7 @@ export type { UseAssetsReturn } from './payments/useAssets';
 export { useTransfer } from './payments/useTransfer';
 export type { UseTransferReturn, TransferParams } from './payments/useTransfer';
 export { useTransactionHistory } from './payments/useTransactionHistory';
-export type {
-  UseTransactionHistoryReturn,
-  Transaction,
-} from './payments/useTransactionHistory';
+export type { UseTransactionHistoryReturn } from './payments/useTransactionHistory';
 
 // L1
 export { useL1Balance } from './l1/useL1Balance';

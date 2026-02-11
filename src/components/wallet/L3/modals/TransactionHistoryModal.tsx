@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { ArrowUpRight, ArrowDownLeft, Loader2, Clock } from 'lucide-react';
-import { useTransactionHistory } from '../hooks/useTransactionHistory';
+import { useTransactionHistory } from '../../../../sdk';
 import { RegistryService } from '../services/RegistryService';
 import { useMemo } from 'react';
 import { BaseModal, ModalHeader, EmptyState } from '../../ui';
@@ -35,6 +35,7 @@ export function TransactionHistoryModal({ isOpen, onClose }: TransactionHistoryM
       return {
         ...entry,
         formattedAmount,
+        iconUrl: def ? registryService.getIconUrl(def) : null,
         date: new Date(entry.timestamp).toLocaleDateString('en-US', {
           month: 'short',
           day: 'numeric',

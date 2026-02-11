@@ -21,6 +21,7 @@ export function useAssets(): UseAssetsReturn {
     },
     enabled: !!sphere,
     staleTime: 30_000,
+    structuralSharing: false,
   });
 
   const assets = query.data ?? [];
