@@ -186,12 +186,6 @@ export function SphereProvider({
         await providers.transport.disconnect();
       }
 
-      // Ensure storage is connected (it may have been disconnected by a
-      // previous import → Sphere.clear() → destroy() cycle)
-      if (!providers.storage.isConnected()) {
-        await providers.storage.connect();
-      }
-
       try {
         const result = await Sphere.importFromLegacyFile({
           fileContent: options.fileContent,
