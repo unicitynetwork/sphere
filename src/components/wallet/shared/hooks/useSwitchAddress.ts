@@ -14,7 +14,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { WalletRepository } from '../../../../repositories/WalletRepository';
 import { IdentityManager } from '../../L3/services/IdentityManager';
 import { IpfsStorageService } from '../../L3/services/IpfsStorageService';
-import { KEYS } from '../../L3/hooks/useWallet';
+import { QUERY_KEYS as KEYS } from '../../../../config/queryKeys';
 import { L1_KEYS } from '../../L1/hooks/useL1Wallet';
 import { STORAGE_KEYS } from '../../../../config/storageKeys';
 

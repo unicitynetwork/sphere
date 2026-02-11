@@ -2,10 +2,10 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Loader2, User, CheckCircle, Coins } from 'lucide-react';
-import { useAssets, useTransfer } from '../../../../sdk';
+import type { Asset } from '@unicitylabs/sphere-sdk';
+import { toSmallestUnit } from '@unicitylabs/sphere-sdk';
+import { useAssets, useTransfer, formatAmount } from '../../../../sdk';
 import { useSphereContext } from '../../../../sdk/hooks/core/useSphere';
-import { AggregatedAsset } from '../data/model';
-import { CurrencyUtils } from '../utils/currency';
 import { BaseModal, ModalHeader, Button } from '../../ui';
 
 type Step = 'recipient' | 'asset' | 'amount' | 'confirm' | 'processing' | 'success';
@@ -20,17 +20,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
   const { transfer, isLoading: isTransferring } = useTransfer();
   const { sphere } = useSphereContext();
 
-  // Convert SDK assets to AggregatedAsset instances for display
-  const assets = sdkAssets.map(a => new AggregatedAsset({
-    coinId: a.coinId,
-    symbol: a.symbol,
-    name: a.name,
-    totalAmount: a.totalAmount,
-    decimals: a.decimals,
-    tokenCount: a.tokenCount,
-    priceUsd: 1.0,
-    priceEur: 0.92,
-  }));
+  const assets = sdkAssets;
 
   // State
   const [step, setStep] = useState<Step>('recipient');
@@ -38,7 +28,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
   const [isCheckingRecipient, setIsCheckingRecipient] = useState(false);
   const [recipientError, setRecipientError] = useState<string | null>(null);
 
-  const [selectedAsset, setSelectedAsset] = useState<AggregatedAsset | null>(null);
+  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [amountInput, setAmountInput] = useState('');
 
   // Nametag validation - same as in NametagScreen
@@ -97,7 +87,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
   // STEP 3: Go to confirm
   const handleAmountNext = () => {
     if (!selectedAsset || !amountInput) return;
-    const targetAmount = CurrencyUtils.toSmallestUnit(amountInput, selectedAsset.decimals);
+    const targetAmount = toSmallestUnit(amountInput, selectedAsset.decimals);
     if (targetAmount <= 0n) return;
     setStep('confirm');
   };
@@ -110,7 +100,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
     setRecipientError(null);
 
     try {
-      const amount = CurrencyUtils.toSmallestUnit(amountInput, selectedAsset.decimals).toString();
+      const amount = toSmallestUnit(amountInput, selectedAsset.decimals).toString();
       await transfer({
         coinId: selectedAsset.coinId,
         amount,
@@ -187,7 +177,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
                   <img src={asset.iconUrl || ''} className="w-8 h-8 rounded-full" alt="" />
                   <div className="flex-1">
                     <div className="text-neutral-900 dark:text-white font-medium">{asset.symbol}</div>
-                    <div className="text-xs text-neutral-500 dark:text-neutral-400">{asset.getFormattedAmount()} available</div>
+                    <div className="text-xs text-neutral-500 dark:text-neutral-400">{formatAmount(asset.totalAmount, asset.decimals)} available</div>
                   </div>
                   <ArrowRight className="w-4 h-4 text-neutral-400 dark:text-neutral-600" />
                 </button>
@@ -202,7 +192,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
                 <div className="flex justify-between text-sm mb-2">
                   <span className="text-neutral-500 dark:text-neutral-400">Amount</span>
                   <span className="text-neutral-500 dark:text-neutral-400">
-                    Available: <span className="text-neutral-900 dark:text-white">{selectedAsset.getFormattedAmount()}</span>
+                    Available: <span className="text-neutral-900 dark:text-white">{formatAmount(selectedAsset.totalAmount, selectedAsset.decimals)}</span>
                   </span>
                 </div>
                 <div className="relative">
@@ -215,7 +205,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
                     placeholder="0.00"
                   />
                   <button
-                    onClick={() => setAmountInput(selectedAsset.getFormattedAmount())}
+                    onClick={() => setAmountInput(formatAmount(selectedAsset.totalAmount, selectedAsset.decimals))}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-neutral-200 dark:bg-neutral-800 text-orange-500 dark:text-orange-400 px-2 py-1 rounded hover:bg-neutral-300 dark:hover:bg-neutral-700"
                   >
                     MAX

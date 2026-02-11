@@ -2,9 +2,9 @@
 import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowDownUp, Loader2, TrendingUp, CheckCircle, ArrowDown } from 'lucide-react';
-import { useWallet } from '../hooks/useWallet';
-import { AggregatedAsset } from '../data/model';
-import { CurrencyUtils } from '../utils/currency';
+import { useIdentity, useAssets, useTransfer } from '../../../../sdk';
+import type { Asset } from '@unicitylabs/sphere-sdk';
+import { toSmallestUnit, toHumanReadable } from '@unicitylabs/sphere-sdk';
 import { FaucetService } from '../services/FaucetService';
 import { RegistryService } from '../services/RegistryService';
 import { ApiService } from '../services/api';
@@ -12,23 +12,30 @@ import { BaseModal, ModalHeader, Button } from '../../ui';
 
 type Step = 'swap' | 'processing' | 'success';
 
+/** Format asset amount from smallest unit to human-readable */
+function formatAssetAmount(asset: Asset): string {
+  return toHumanReadable(asset.totalAmount, asset.decimals);
+}
+
 interface SwapModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
 export function SwapModal({ isOpen, onClose }: SwapModalProps) {
-  const { assets, sendAmount, nametag } = useWallet();
+  const { nametag } = useIdentity();
+  const { assets } = useAssets();
+  const { transfer } = useTransfer();
 
   // State
   const [step, setStep] = useState<Step>('swap');
-  const [fromAsset, setFromAsset] = useState<AggregatedAsset | null>(null);
-  const [toAsset, setToAsset] = useState<AggregatedAsset | null>(null);
+  const [fromAsset, setFromAsset] = useState<Asset | null>(null);
+  const [toAsset, setToAsset] = useState<Asset | null>(null);
   const [fromAmount, setFromAmount] = useState('');
   const [showFromDropdown, setShowFromDropdown] = useState(false);
   const [showToDropdown, setShowToDropdown] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [allSwappableAssets, setAllSwappableAssets] = useState<AggregatedAsset[]>([]);
+  const [allSwappableAssets, setAllSwappableAssets] = useState<Asset[]>([]);
 
   // Load all available swappable coins from registry
   useEffect(() => {
@@ -47,25 +54,27 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
         def.assetKind === 'fungible' && SUPPORTED_SWAP_COINS.includes(def.name.toLowerCase())
       );
 
-      const swappableAssets = fungibleDefs.map(def => {
+      const swappableAssets: Asset[] = fungibleDefs.map(def => {
         const symbol = def.symbol || def.name.toUpperCase();
         const priceKey = def.name.toLowerCase()
 
         const priceData = prices[priceKey];
         const iconUrl = registryService.getIconUrl(def);
 
-        return new AggregatedAsset({
+        return {
           coinId: def.id,
           symbol: symbol,
           name: def.name,
-          totalAmount: '0', // No balance - just for display in "To" dropdown
+          totalAmount: '0',
           decimals: def.decimals || 0,
           tokenCount: 0,
-          iconUrl: iconUrl,
-          priceUsd: priceData?.priceUsd || 1.0,
-          priceEur: priceData?.priceEur || 0.92,
-          change24h: priceData?.change24h || 0,
-        });
+          iconUrl: iconUrl ?? undefined,
+          priceUsd: priceData?.priceUsd ?? 1.0,
+          priceEur: priceData?.priceEur ?? 0.92,
+          change24h: priceData?.change24h ?? 0,
+          fiatValueUsd: null,
+          fiatValueEur: null,
+        };
       });
 
       setAllSwappableAssets(swappableAssets);
@@ -79,7 +88,7 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
   // Get user's balance for a specific coin (from their owned assets)
   const getUserBalance = (coinId: string): string => {
     const userAsset = assets.find(a => a.coinId === coinId);
-    return userAsset ? userAsset.getFormattedAmount() : '0';
+    return userAsset ? formatAssetAmount(userAsset) : '0';
   };
 
   // Calculate exchange rate and output amount
@@ -89,8 +98,8 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
     }
 
     const fromAmountNum = parseFloat(fromAmount);
-    const fromPrice = fromAsset.priceUsd;
-    const toPrice = toAsset.priceUsd;
+    const fromPrice = fromAsset.priceUsd ?? 0;
+    const toPrice = toAsset.priceUsd ?? 0;
 
     if (toPrice === 0) return null;
 
@@ -128,10 +137,10 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
 
     try {
       // Step 1: Send tokens to 'swap' nametag
-      const fromAmountSmallestUnit = CurrencyUtils.toSmallestUnit(fromAmount, fromAsset.decimals);
+      const fromAmountSmallestUnit = toSmallestUnit(fromAmount, fromAsset.decimals);
 
-      await sendAmount({
-        recipientNametag: 'swap',
+      await transfer({
+        recipient: 'swap',
         amount: fromAmountSmallestUnit.toString(),
         coinId: fromAsset.coinId
       });
@@ -184,7 +193,7 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
     if (!fromAsset || !fromAmount) return false;
     const amount = parseFloat(fromAmount);
     if (isNaN(amount) || amount <= 0) return false;
-    const maxAmount = parseFloat(fromAsset.getFormattedAmount());
+    const maxAmount = parseFloat(formatAssetAmount(fromAsset));
     return amount <= maxAmount;
   }, [fromAsset, fromAmount]);
 
@@ -217,7 +226,7 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
                   <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">From</span>
                   {fromAsset && (
                     <span className="text-xs text-neutral-500 dark:text-neutral-400 truncate ml-2">
-                      Balance: <span className="text-neutral-900 dark:text-white">{fromAsset.getFormattedAmount()}</span>
+                      Balance: <span className="text-neutral-900 dark:text-white">{formatAssetAmount(fromAsset)}</span>
                     </span>
                   )}
                 </div>
@@ -257,7 +266,7 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
                               <img src={asset.iconUrl || ''} className="w-6 h-6 rounded-full" alt="" />
                               <div className="flex-1 min-w-0">
                                 <div className="text-neutral-900 dark:text-white font-medium text-sm truncate">{asset.symbol}</div>
-                                <div className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{asset.getFormattedAmount()}</div>
+                                <div className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{formatAssetAmount(asset)}</div>
                               </div>
                             </button>
                           ))}
@@ -278,7 +287,7 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
 
                   {fromAsset && fromAmount && (
                     <div className="mt-2 text-right text-xs text-neutral-500 dark:text-neutral-400">
-                      ≈ ${(parseFloat(fromAmount) * fromAsset.priceUsd).toFixed(2)}
+                      ≈ ${(parseFloat(fromAmount) * (fromAsset.priceUsd ?? 0)).toFixed(2)}
                     </div>
                   )}
                 </div>

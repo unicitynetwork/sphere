@@ -25,7 +25,7 @@ import { subscribeBlocks } from "../sdk/network";
 import { loadWalletFromUnifiedKeyManager, getUnifiedKeyManager } from "../sdk/unifiedWalletBridge";
 import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
 import { dispatchWalletUpdated } from "../../L3/services/InventorySyncService";
-import { KEYS as L3_KEYS } from "../../L3/hooks/useWallet";
+import { QUERY_KEYS as L3_KEYS } from "../../../../config/queryKeys";
 import { STORAGE_KEYS } from "../../../../config/storageKeys";
 
 // Query keys for L1 wallet

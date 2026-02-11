@@ -1,7 +1,7 @@
 import { Plus, ArrowUpRight, ArrowDownUp, Sparkles, Loader2, Coins, Layers, CheckCircle, XCircle, Eye, EyeOff, Wifi } from 'lucide-react';
 import { AnimatePresence, motion, useMotionValue, useTransform, animate } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
-import { AggregatedAsset, Token as LegacyToken } from '../data/model';
+import { Token as LegacyToken } from '../data/model';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useIdentity, useAssets, useTokens, useL1Balance } from '../../../../sdk';
@@ -172,19 +172,7 @@ export function L3WalletView({
   const { balance: l1BalanceData, isLoading: isLoadingL1 } = useL1Balance();
   const { sphere, deleteWallet } = useSphereContext();
 
-  // Convert SDK assets to AggregatedAsset instances for UI components
-  const assets = useMemo(() => sdkAssets.map(a => new AggregatedAsset({
-    coinId: a.coinId,
-    symbol: a.symbol,
-    name: a.name,
-    totalAmount: a.totalAmount,
-    decimals: a.decimals,
-    tokenCount: a.tokenCount,
-    iconUrl: a.iconUrl ?? null,
-    priceUsd: a.priceUsd ?? 0,
-    priceEur: a.priceEur ?? 0,
-    change24h: a.change24h ?? 0,
-  })), [sdkAssets]);
+  const assets = sdkAssets;
 
   // Convert SDK tokens to legacy Token instances for TokenRow component
   const tokens = useMemo(() =>
@@ -271,24 +259,28 @@ export function L3WalletView({
   // Create L1 ALPHA asset
   const l1AlphaAsset = useMemo(() => {
     const satoshis = BigInt(Math.round(l1Balance * 100000000));
-    return new AggregatedAsset({
+    const totalAmount = satoshis.toString();
+    const fiatValue = l1Balance * 1.0; // priceUsd = 1.0
+    return {
       coinId: 'l1-alpha',
       symbol: 'ALPHA',
       name: 'Unicity Alphanet',
-      totalAmount: satoshis.toString(),
+      totalAmount,
       decimals: 8,
       tokenCount: 1,
-      iconUrl: null,
+      iconUrl: undefined,
       priceUsd: 1.0,
       priceEur: 0.92,
       change24h: 0,
-    });
+      fiatValueUsd: fiatValue,
+      fiatValueEur: fiatValue * 0.92,
+    } satisfies import('@unicitylabs/sphere-sdk').Asset;
   }, [l1Balance]);
 
   const totalValue = useMemo(() => {
     // Sum up L3 asset values (using SDK-provided fiat values for accuracy)
     const l3Value = sdkAssets.reduce((sum, asset) => sum + (asset.fiatValueUsd ?? 0), 0);
-    const l1Value = l1AlphaAsset.getTotalFiatValue('USD');
+    const l1Value = l1AlphaAsset.fiatValueUsd ?? 0;
     return l3Value + l1Value;
   }, [sdkAssets, l1AlphaAsset]);
 

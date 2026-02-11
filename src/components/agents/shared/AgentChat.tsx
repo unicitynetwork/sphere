@@ -4,7 +4,7 @@ import { Plus, X, PanelLeftClose, Search, Trash2, Clock, MessageSquare, Activity
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../../config/activities';
 import { useAgentChat, type ChatMessage } from '../../../hooks/useAgentChat';
-import { useWallet } from '../../wallet/L3/hooks/useWallet';
+import { useIdentity } from '../../../sdk';
 import { useUIState } from '../../../hooks/useUIState';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatHeader, ChatBubble, ChatInput, QuickActions } from './index';
@@ -139,8 +139,8 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
   const lastSavedMessagesRef = useRef<string>('');
   const isMountedRef = useRef(true);
 
-  // Get nametag from wallet for user identification
-  const { nametag } = useWallet();
+  // Get nametag from SDK identity
+  const { nametag } = useIdentity();
 
   // Chat history hook - bound to nametag so each user has their own history
   const {

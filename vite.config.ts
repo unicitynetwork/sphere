@@ -33,16 +33,6 @@ export default defineConfig(({ mode }) => {
       }),
     ],
     base: env.BASE_PATH || '/',
-    resolve: {
-      alias: [
-        // Resolve sphere-sdk from source (TypeScript) to avoid pre-built dist issues
-        { find: /^@unicitylabs\/sphere-sdk$/, replacement: path.resolve(__dirname, '../sphere-sdk/index.ts') },
-        { find: /^@unicitylabs\/sphere-sdk\/(.+)/, replacement: path.resolve(__dirname, '../sphere-sdk/$1') },
-        // Ensure vite-plugin-node-polyfills shims resolve from sphere's node_modules
-        // (needed because SDK source files are outside this project tree)
-        { find: /^vite-plugin-node-polyfills\/shims\/(.+)/, replacement: path.resolve(__dirname, 'node_modules/vite-plugin-node-polyfills/shims/$1') },
-      ],
-    },
     server: {
       // Enable HTTPS if certificates are available
       https: sslEnabled ? {
