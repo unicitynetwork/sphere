@@ -551,7 +551,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         const mnemonic = await createWallet({ nametag: cleanTag });
         setGeneratedMnemonic(mnemonic);
         recordActivity("wallet_created", { isPublic: false });
-        // WalletGate will transition to main app automatically
+        // WalletPanel will switch from onboarding to wallet UI automatically
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to register Unicity ID";
@@ -582,7 +582,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         const mnemonic = await createWallet();
         setGeneratedMnemonic(mnemonic);
         recordActivity("wallet_created", { isPublic: false });
-        // WalletGate will transition to main app automatically
+        // WalletPanel will switch from onboarding to wallet UI automatically
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to create wallet";
@@ -596,7 +596,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
   // Action: Complete onboarding (called when user clicks "Let's Go")
   const handleCompleteOnboarding = useCallback(async () => {
-    // Mark wallet as existing so WalletGate transitions to main app.
+    // Mark wallet as existing so WalletPanel switches from onboarding to wallet UI.
     // For create flows walletExists is already true — this is a no-op for sphere.
     // For import flows this sets the sphere in context + walletExists = true.
     finalizeWallet(importedSphereRef.current ?? undefined);

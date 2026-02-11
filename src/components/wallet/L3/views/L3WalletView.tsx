@@ -360,15 +360,17 @@ export function L3WalletView({
   };
 
   // Handle logout
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const handleLogout = async () => {
     try {
-      // Navigate first — deleteWallet() sets walletExists=false which causes
-      // WalletGate to render OnboardingScreen, unmounting this component.
-      // If we navigate after, the call is lost because the component is gone.
-      navigate('/', { replace: true });
+      setIsLoggingOut(true);
+      // Await full cleanup before navigating so IntroPage sees clean state
+      // (WELCOME_ACCEPTED cleared, walletExists=false).
       await deleteWallet();
+      navigate('/', { replace: true });
     } catch (err) {
       console.error('Failed to logout:', err);
+      setIsLoggingOut(false);
     }
   };
 
@@ -621,6 +623,7 @@ export function L3WalletView({
         onClose={() => setIsLogoutConfirmOpen(false)}
         onBackupAndLogout={handleBackupAndLogout}
         onLogoutWithoutBackup={handleLogout}
+        isLoggingOut={isLoggingOut}
       />
 
       <SaveWalletModal

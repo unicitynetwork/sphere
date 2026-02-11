@@ -306,7 +306,7 @@ export function useL1Wallet(selectedAddressProp?: string) {
       dispatchWalletUpdated();
     },
     onSuccess: () => {
-      // Set identity to null immediately - this triggers WalletGate to show onboarding
+      // Set identity to null immediately - this triggers WalletPanel to show onboarding
       queryClient.setQueryData(L3_KEYS.IDENTITY, null);
       queryClient.setQueryData(L3_KEYS.NAMETAG, null);
 

@@ -14,6 +14,7 @@ import { AIChat } from '../components/agents/AIChat';
 import { SellAnythingChat } from '../components/agents/SellAnythingChat';
 import { PokemonChat } from '../components/agents/PokemonChat';
 import { WalletPanel } from '../components/wallet/WalletPanel';
+import { WalletRequiredBlocker } from '../components/agents/WalletRequiredBlocker';
 import { agents, getAgentConfig } from '../config/activities';
 
 const DEFAULT_VISIBLE_AGENTS = 7;
@@ -358,7 +359,9 @@ export function AgentPage() {
         className="lg:hidden flex-1 min-h-0 flex overflow-x-auto snap-x snap-mandatory scrollbar-hide py-1"
       >
         <div className="w-full shrink-0 snap-center h-full">
-          {renderChatComponent()}
+          <WalletRequiredBlocker agentId={agentId!} onOpenWallet={() => scrollToPanel('wallet')}>
+            {renderChatComponent()}
+          </WalletRequiredBlocker>
         </div>
         <div className="w-full shrink-0 snap-center h-full">
           <WalletPanel />
@@ -368,7 +371,9 @@ export function AgentPage() {
       {/* Desktop grid layout */}
       <div className="hidden lg:grid lg:grid-cols-3 lg:gap-8 lg:flex-1 lg:min-h-[650px] lg:py-2">
         <div className="lg:col-span-2 h-full min-h-0">
-          {renderChatComponent()}
+          <WalletRequiredBlocker agentId={agentId!}>
+            {renderChatComponent()}
+          </WalletRequiredBlocker>
         </div>
         <div className="h-full min-h-0">
           <WalletPanel />

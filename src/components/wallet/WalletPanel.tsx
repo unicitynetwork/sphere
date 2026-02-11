@@ -1,13 +1,16 @@
-import { Wallet, Clock, Bell, MoreVertical, Tag } from 'lucide-react';
+import { Wallet, Clock, Bell, MoreVertical, Tag, Loader2 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { L3WalletView } from './L3/views/L3WalletView';
-import { useIdentity } from '../../sdk';
+import { useIdentity, useWalletStatus } from '../../sdk';
 import { useIncomingPaymentRequests } from './L3/hooks/useIncomingPaymentRequests';
 import { useUIState } from '../../hooks/useUIState';
 import { L1WalletModal } from './L1/modals/L1WalletModal';
 import { RegisterNametagModal } from './shared/components/RegisterNametagModal';
 import { AddressSelector } from './shared/components';
+import { CreateWalletFlow } from './onboarding/CreateWalletFlow';
+
+const PANEL_SHELL = "bg-white/60 dark:bg-neutral-900/90 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden h-full relative lg:shadow-xl dark:lg:shadow-2xl flex flex-col transition-all duration-500 theme-transition";
 
 export function WalletPanel() {
   const [showBalances, setShowBalances] = useState(true);
@@ -16,6 +19,7 @@ export function WalletPanel() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isL1WalletOpen, setIsL1WalletOpen] = useState(false);
   const [isNametagModalOpen, setIsNametagModalOpen] = useState(false);
+  const { isLoading: isWalletLoading, walletExists } = useWalletStatus();
   const { identity, nametag, isLoading: isLoadingIdentity } = useIdentity();
   const { pendingCount, requests } = useIncomingPaymentRequests();
   const { setFullscreen } = useUIState();
@@ -45,13 +49,43 @@ export function WalletPanel() {
     prevPendingCountRef.current = pendingCount;
   }, [pendingCount, requests.length, setFullscreen]);
 
-  // Don't render wallet panel if not authenticated
+  // Wallet system still initializing
+  if (isWalletLoading) {
+    return (
+      <div className={PANEL_SHELL}>
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 className="w-6 h-6 text-orange-500 animate-spin" />
+        </div>
+      </div>
+    );
+  }
+
+  // No wallet — show onboarding flow inside the panel
+  if (!walletExists) {
+    return (
+      <div className={PANEL_SHELL}>
+        <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full blur-3xl bg-orange-500/5 dark:bg-orange-500/10" />
+        <div className="absolute -bottom-20 -left-20 w-80 h-80 rounded-full blur-3xl bg-purple-500/5 dark:bg-purple-500/10" />
+        <div className="flex-1 relative overflow-y-auto">
+          <CreateWalletFlow />
+        </div>
+      </div>
+    );
+  }
+
+  // Wallet exists but identity still loading
   if (isLoadingIdentity || !identity) {
-    return null;
+    return (
+      <div className={PANEL_SHELL}>
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 className="w-6 h-6 text-orange-500 animate-spin" />
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="bg-white/60 dark:bg-neutral-900/90 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden h-full relative lg:shadow-xl dark:lg:shadow-2xl flex flex-col transition-all duration-500 theme-transition">
+    <div className={PANEL_SHELL}>
 
       {/* Background Gradients - Orange theme */}
       <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full blur-3xl bg-orange-500/5 dark:bg-orange-500/10" />
