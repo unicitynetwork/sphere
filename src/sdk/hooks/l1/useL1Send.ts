@@ -15,8 +15,20 @@ export interface L1SendResult {
   fee: string;
 }
 
+export interface L1FeeEstimate {
+  fee: string;
+  feeRate: number;
+}
+
+export interface L1ResolvedAddress {
+  address: string;
+  nametag?: string;
+}
+
 export interface UseL1SendReturn {
   send: (params: L1SendParams) => Promise<L1SendResult>;
+  estimateFee: (to: string, amountSats: string) => Promise<L1FeeEstimate>;
+  resolveAddress: (destination: string) => Promise<L1ResolvedAddress>;
   isLoading: boolean;
   error: Error | null;
   lastResult: L1SendResult | null;
@@ -70,5 +82,33 @@ export function useL1Send(): UseL1SendReturn {
     [sphere, queryClient],
   );
 
-  return { send, isLoading, error, lastResult };
+  const estimateFee = useCallback(
+    async (to: string, amountSats: string): Promise<L1FeeEstimate> => {
+      if (!sphere) throw new Error('Wallet not initialized');
+      const l1 = sphere.payments.l1;
+      if (!l1) throw new Error('L1 not available');
+      return l1.estimateFee(to, amountSats);
+    },
+    [sphere],
+  );
+
+  const resolveAddress = useCallback(
+    async (destination: string): Promise<L1ResolvedAddress> => {
+      if (!sphere) throw new Error('Wallet not initialized');
+      const l1 = sphere.payments.l1;
+      if (!l1) throw new Error('L1 not available');
+
+      const isNametag = destination.startsWith('@') ||
+        (!destination.startsWith('alpha1') && !destination.startsWith('alphat1'));
+
+      const address = await l1.resolveL1Address(destination);
+      return {
+        address,
+        nametag: isNametag ? destination.replace(/^@/, '') : undefined,
+      };
+    },
+    [sphere],
+  );
+
+  return { send, estimateFee, resolveAddress, isLoading, error, lastResult };
 }

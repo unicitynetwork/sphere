@@ -61,7 +61,7 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
   const { sphere } = useSphereContext();
   const { l1Address, nametag } = useIdentity();
   const { balance: l1BalanceData, isLoading: isLoadingBalance } = useL1Balance();
-  const { send: l1Send } = useL1Send();
+  const { send: l1Send, estimateFee, resolveAddress } = useL1Send();
   const { transactions, isLoading: isLoadingTx } = useL1Transactions();
   const queryClient = useQueryClient();
 
@@ -416,6 +416,8 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
         onClose={() => setShowSendModal(false)}
         onSend={handleSend}
         vestingBalances={vestingBalances}
+        onEstimateFee={estimateFee}
+        onResolveAddress={resolveAddress}
       />
 
       <MessageModal
