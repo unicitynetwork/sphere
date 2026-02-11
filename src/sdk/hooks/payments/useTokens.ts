@@ -24,7 +24,8 @@ export function useTokens(): UseTokensReturn {
       return sphere.payments.getTokens();
     },
     enabled: !!sphere,
-    staleTime: Infinity,
+    staleTime: 30_000,
+    structuralSharing: false,
   });
 
   const tokens = query.data ?? [];

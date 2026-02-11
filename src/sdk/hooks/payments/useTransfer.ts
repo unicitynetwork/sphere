@@ -41,19 +41,23 @@ export function useTransfer(): UseTransferReturn {
 
         setLastResult(result);
 
-        // Invalidate related queries
-        queryClient.invalidateQueries({
-          queryKey: SPHERE_KEYS.payments.tokens.all,
-        });
-        queryClient.invalidateQueries({
-          queryKey: SPHERE_KEYS.payments.balance.all,
-        });
-        queryClient.invalidateQueries({
-          queryKey: SPHERE_KEYS.payments.assets.all,
-        });
-        queryClient.invalidateQueries({
-          queryKey: SPHERE_KEYS.payments.transactions.all,
-        });
+        // Force refetch all payment queries with fresh data.
+        // Use refetchQueries (not invalidateQueries) to guarantee a new fetch
+        // even if a previous refetch from the transfer:confirmed event is in-flight.
+        await Promise.all([
+          queryClient.refetchQueries({
+            queryKey: SPHERE_KEYS.payments.tokens.all,
+          }),
+          queryClient.refetchQueries({
+            queryKey: SPHERE_KEYS.payments.balance.all,
+          }),
+          queryClient.refetchQueries({
+            queryKey: SPHERE_KEYS.payments.assets.all,
+          }),
+          queryClient.refetchQueries({
+            queryKey: SPHERE_KEYS.payments.transactions.all,
+          }),
+        ]);
 
         return result;
       } catch (err) {

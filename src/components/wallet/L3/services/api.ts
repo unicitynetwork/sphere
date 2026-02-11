@@ -2,7 +2,12 @@ import axios from "axios";
 
 const REGISTRY_URL =
   "https://raw.githubusercontent.com/unicitynetwork/unicity-ids/refs/heads/main/unicity-ids.testnet.json";
-const COINGECKO_URL = "https://api.coingecko.com/api/v3/simple/price";
+// Use Vite proxy to avoid CORS and reduce direct CoinGecko rate-limit hits
+const COINGECKO_URL = "/coingecko/simple/price";
+
+// In-memory cache to deduplicate concurrent/rapid calls (e.g. SwapModal + useWallet)
+let _priceCache: { data: Record<string, CryptoPriceData>; ts: number } | null = null;
+const PRICE_CACHE_TTL_MS = 5 * 60_000; // 5 minutes
 
 const DEFAULT_PRICES: Record<string, CryptoPriceData> = {
   bitcoin: {
@@ -72,6 +77,11 @@ interface CoinGeckoResponse {
 
 export const ApiService = {
   fetchPrices: async (): Promise<Record<string, CryptoPriceData>> => {
+    // Return cached result if still fresh
+    if (_priceCache && Date.now() - _priceCache.ts < PRICE_CACHE_TTL_MS) {
+      return _priceCache.data;
+    }
+
     try {
       const response = await axios.get<CoinGeckoResponse>(COINGECKO_URL, {
         params: {
@@ -96,10 +106,12 @@ export const ApiService = {
         };
       });
 
-      return { ...DEFAULT_PRICES, ...prices };
+      const result = { ...DEFAULT_PRICES, ...prices };
+      _priceCache = { data: result, ts: Date.now() };
+      return result;
     } catch (error) {
       console.warn("API: Failed to fetch prices (using defaults)", error);
-      return DEFAULT_PRICES;
+      return _priceCache?.data ?? DEFAULT_PRICES;
     }
   },
 

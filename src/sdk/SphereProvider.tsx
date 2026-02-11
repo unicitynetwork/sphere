@@ -44,7 +44,7 @@ export function SphereProvider({
 
       const browserProviders = createBrowserProviders({
         network,
-        price: { platform: 'coingecko', baseUrl: '/coingecko' },
+        price: { platform: 'coingecko', baseUrl: '/coingecko', cacheTtlMs: 5 * 60_000 },
       });
       setProviders(browserProviders);
 
