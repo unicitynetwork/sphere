@@ -1,5 +1,6 @@
 import { Loader2 } from "lucide-react";
-import type { VestingBalances } from "../sdk/types";
+import type { L1 } from "@unicitylabs/sphere-sdk";
+type VestingBalances = L1.VestingBalances;
 
 interface VestingDisplayProps {
   showBalances?: boolean;

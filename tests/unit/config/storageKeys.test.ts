@@ -38,9 +38,9 @@ describe("STORAGE_KEYS", () => {
     expect(STORAGE_KEYS.WELCOME_ACCEPTED).toBe("sphere_welcome_accepted");
   });
 
-  it("should contain expected Nostr keys", () => {
-    expect(STORAGE_KEYS.NOSTR_LAST_SYNC).toBe("sphere_nostr_last_sync");
-    expect(STORAGE_KEYS.NOSTR_PROCESSED_EVENTS).toBe("sphere_nostr_processed_events");
+  it("should contain expected dev keys", () => {
+    expect(STORAGE_KEYS.DEV_AGGREGATOR_URL).toBe("sphere_dev_aggregator_url");
+    expect(STORAGE_KEYS.DEV_SKIP_TRUST_BASE).toBe("sphere_dev_skip_trust_base");
   });
 });
 
@@ -92,68 +92,6 @@ describe("STORAGE_KEY_GENERATORS", () => {
     });
   });
 
-  describe("ipfsVersion", () => {
-    it("should generate correct key format", () => {
-      const ipnsName = "k51qzi5uqu5d...";
-      const key = STORAGE_KEY_GENERATORS.ipfsVersion(ipnsName);
-
-      expect(key).toBe("sphere_ipfs_version_k51qzi5uqu5d...");
-    });
-  });
-
-  describe("ipfsLastCid", () => {
-    it("should generate correct key format", () => {
-      const ipnsName = "k51qzi5uqu5d...";
-      const key = STORAGE_KEY_GENERATORS.ipfsLastCid(ipnsName);
-
-      expect(key).toBe("sphere_ipfs_last_cid_k51qzi5uqu5d...");
-    });
-  });
-
-  describe("ipfsPendingIpns", () => {
-    it("should generate correct key format", () => {
-      const ipnsName = "k51test";
-      const key = STORAGE_KEY_GENERATORS.ipfsPendingIpns(ipnsName);
-
-      expect(key).toBe("sphere_ipfs_pending_ipns_k51test");
-    });
-  });
-
-  describe("ipfsLastSeq", () => {
-    it("should generate correct key format", () => {
-      const ipnsName = "k51test";
-      const key = STORAGE_KEY_GENERATORS.ipfsLastSeq(ipnsName);
-
-      expect(key).toBe("sphere_ipfs_last_seq_k51test");
-    });
-  });
-
-  describe("ipfsChatVersion", () => {
-    it("should generate correct key format", () => {
-      const ipnsName = "k51chat";
-      const key = STORAGE_KEY_GENERATORS.ipfsChatVersion(ipnsName);
-
-      expect(key).toBe("sphere_ipfs_chat_version_k51chat");
-    });
-  });
-
-  describe("ipfsChatCid", () => {
-    it("should generate correct key format", () => {
-      const ipnsName = "k51chat";
-      const key = STORAGE_KEY_GENERATORS.ipfsChatCid(ipnsName);
-
-      expect(key).toBe("sphere_ipfs_chat_cid_k51chat");
-    });
-  });
-
-  describe("ipfsChatSeq", () => {
-    it("should generate correct key format", () => {
-      const ipnsName = "k51chat";
-      const key = STORAGE_KEY_GENERATORS.ipfsChatSeq(ipnsName);
-
-      expect(key).toBe("sphere_ipfs_chat_seq_k51chat");
-    });
-  });
 });
 
 // ==========================================
@@ -288,42 +226,6 @@ describe("Key consistency", () => {
   it("should have matching AGENT_CHAT_MESSAGES prefix and generator", () => {
     const generatedKey = STORAGE_KEY_GENERATORS.agentChatMessages("session1");
     expect(generatedKey.startsWith(STORAGE_KEY_PREFIXES.AGENT_CHAT_MESSAGES)).toBe(true);
-  });
-
-  it("should have matching IPFS prefixes and generators", () => {
-    const ipnsName = "k51test";
-
-    expect(
-      STORAGE_KEY_GENERATORS.ipfsVersion(ipnsName).startsWith(STORAGE_KEY_PREFIXES.IPFS_VERSION)
-    ).toBe(true);
-
-    expect(
-      STORAGE_KEY_GENERATORS.ipfsLastCid(ipnsName).startsWith(STORAGE_KEY_PREFIXES.IPFS_LAST_CID)
-    ).toBe(true);
-
-    expect(
-      STORAGE_KEY_GENERATORS.ipfsPendingIpns(ipnsName).startsWith(STORAGE_KEY_PREFIXES.IPFS_PENDING_IPNS)
-    ).toBe(true);
-
-    expect(
-      STORAGE_KEY_GENERATORS.ipfsLastSeq(ipnsName).startsWith(STORAGE_KEY_PREFIXES.IPFS_LAST_SEQ)
-    ).toBe(true);
-  });
-
-  it("should have matching IPFS chat prefixes and generators", () => {
-    const ipnsName = "k51chat";
-
-    expect(
-      STORAGE_KEY_GENERATORS.ipfsChatVersion(ipnsName).startsWith(STORAGE_KEY_PREFIXES.IPFS_CHAT_VERSION)
-    ).toBe(true);
-
-    expect(
-      STORAGE_KEY_GENERATORS.ipfsChatCid(ipnsName).startsWith(STORAGE_KEY_PREFIXES.IPFS_CHAT_CID)
-    ).toBe(true);
-
-    expect(
-      STORAGE_KEY_GENERATORS.ipfsChatSeq(ipnsName).startsWith(STORAGE_KEY_PREFIXES.IPFS_CHAT_SEQ)
-    ).toBe(true);
   });
 
   it("should have matching AGENT_MEMORY prefix and generator", () => {

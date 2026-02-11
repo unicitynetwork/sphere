@@ -3,7 +3,8 @@
  * Similar to L1's useConnectionStatus but simplified for onboarding needs
  */
 import { useState, useEffect, useCallback, useRef } from "react";
-import { connect, isWebSocketConnected, disconnect } from "../../L1/sdk/network";
+import { L1 } from "@unicitylabs/sphere-sdk";
+const { connect, isWebSocketConnected, disconnect } = L1;
 
 export type ConnectionState =
   | "disconnected"

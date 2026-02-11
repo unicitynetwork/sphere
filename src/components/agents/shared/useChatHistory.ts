@@ -7,12 +7,10 @@
  * - Search through history
  * - Event-based updates
  * - Per-user history (bound to nametag)
- * - IPFS sync for cross-device access (via TanStack Query)
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { chatHistoryRepository, type ChatSession } from './ChatHistoryRepository';
-import { useChatHistorySync, type SyncState } from './useChatHistorySync';
 import type { ChatMessage } from '../../../hooks/useAgentChat';
 
 interface UseChatHistoryOptions {
@@ -41,10 +39,6 @@ interface UseChatHistoryReturn {
   // State
   isLoading: boolean;
   justDeleted: boolean;
-
-  // IPFS sync status (TanStack Query based)
-  syncState: SyncState;
-  syncImmediately: () => Promise<unknown>;
 }
 
 export function useChatHistory({
@@ -59,12 +53,6 @@ export function useChatHistory({
 
   const currentSessionRef = useRef<ChatSession | null>(null);
   const userIdRef = useRef<string | undefined>(userId);
-
-  // TanStack Query based IPFS sync
-  const { syncState, syncImmediately } = useChatHistorySync({
-    userId,
-    enabled: enabled && !!userId,
-  });
 
   // Keep refs in sync with current session
   useEffect(() => {
@@ -182,7 +170,7 @@ export function useChatHistory({
       });
     }
 
-    // Save all messages (this triggers IPFS sync via event)
+    // Save all messages
     chatHistoryRepository.saveMessages(session.id, validMessages);
 
     // Update local session state
@@ -211,7 +199,5 @@ export function useChatHistory({
     searchSessions,
     isLoading,
     justDeleted,
-    syncState,
-    syncImmediately,
   };
 }

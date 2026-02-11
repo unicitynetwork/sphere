@@ -14,7 +14,6 @@ import {
   GroupVisibility,
 } from '../data/groupModels';
 import { GROUP_CHAT_CONFIG } from '../../../config/groupChat.config';
-import { Buffer } from 'buffer';
 import { showToast } from '../../ui/toast-utils';
 
 /**

@@ -49,12 +49,6 @@ mixpanel.init('19d06212425213a4eeb34337016d0186', {
   api_host: 'https://api-eu.mixpanel.com',
 })
 
-// Register dev tools in development mode only
-if (import.meta.env.DEV) {
-  import('./utils/devTools').then(({ registerDevTools }) => {
-    registerDevTools();
-  });
-}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -1,13 +1,10 @@
 /**
  * CreateAddressModal - Modal for creating new wallet addresses
  *
- * Multi-step modal that allows users to create additional addresses
- * without leaving the main app (no page reload).
- *
  * Steps:
- * 1. Deriving - Generate new L1/L3 address
+ * 1. Deriving - Generate new address via SDK
  * 2. Nametag Input - User enters desired nametag
- * 3. Processing - Mint nametag, sync to IPFS
+ * 3. Creating - Mint nametag on blockchain (atomic via SDK)
  * 4. Complete - Show success
  */
 import { useState, useEffect } from 'react';
@@ -97,14 +94,14 @@ export function CreateAddressModal({ isOpen, onClose, existingAddress }: CreateA
 
   const handleClose = () => {
     // Don't allow closing during critical steps
-    if (['minting', 'syncing_ipfs'].includes(state.step)) {
+    if (state.step === 'creating') {
       return;
     }
     onClose();
   };
 
-  const isProcessing = ['deriving', 'checking_availability', 'minting', 'syncing_ipfs', 'verifying_ipns'].includes(state.step);
-  const canClose = !['minting', 'syncing_ipfs', 'verifying_ipns'].includes(state.step);
+  const isProcessing = ['deriving', 'checking_availability', 'creating'].includes(state.step);
+  const canClose = state.step !== 'creating';
 
   return (
     <AnimatePresence>
@@ -249,7 +246,7 @@ function StepNametagInput({
   onKeyDown,
   onSubmit,
 }: {
-  newAddress: { l1Address: string; l3Address: string; path: string; index: number };
+  newAddress: { l1Address: string; path: string; index: number };
   nametagInput: string;
   isCheckingAvailability: boolean;
   availabilityError: string | null;
@@ -352,22 +349,15 @@ function StepProcessing({ step, progress }: { step: CreateAddressStep; progress:
     switch (step) {
       case 'checking_availability':
         return { title: 'Checking Availability', subtitle: 'Verifying name is unique...' };
-      case 'minting':
-        return { title: 'Minting Unicity ID', subtitle: progress || 'Creating on blockchain...' };
-      case 'syncing_ipfs':
-        return { title: 'Syncing to IPFS', subtitle: progress || 'Backing up to decentralized storage...' };
-      case 'verifying_ipns':
-        return { title: 'Verifying IPNS', subtitle: progress || 'Confirming availability...' };
+      case 'creating':
+        return { title: 'Creating Unicity ID', subtitle: progress || 'Minting on blockchain...' };
       default:
         return { title: 'Processing', subtitle: progress || 'Please wait...' };
     }
   };
 
   const info = getStepInfo();
-  const isCritical = ['minting', 'syncing_ipfs', 'verifying_ipns'].includes(step);
-  const isMinting = step === 'minting';
-  const isSyncing = step === 'syncing_ipfs';
-  const isVerifying = step === 'verifying_ipns';
+  const isCritical = step === 'creating';
 
   return (
     <motion.div
@@ -420,13 +410,6 @@ function StepProcessing({ step, progress }: { step: CreateAddressStep; progress:
         <span className="text-left text-sm font-medium">{info.subtitle}</span>
       </motion.div>
 
-      {/* Step indicators */}
-      <div className="flex items-center justify-center gap-2 mt-3">
-        <div className={`w-2 h-2 rounded-full transition-colors ${isMinting ? "bg-orange-500" : isSyncing || isVerifying ? "bg-emerald-500" : "bg-neutral-300 dark:bg-neutral-600"}`} />
-        <div className={`w-2 h-2 rounded-full transition-colors ${isSyncing ? "bg-orange-500" : isVerifying ? "bg-emerald-500" : "bg-neutral-300 dark:bg-neutral-600"}`} />
-        <div className={`w-2 h-2 rounded-full transition-colors ${isVerifying ? "bg-orange-500" : "bg-neutral-300 dark:bg-neutral-600"}`} />
-      </div>
-
       {/* Warning for critical steps */}
       {isCritical && (
         <motion.div
@@ -438,11 +421,6 @@ function StepProcessing({ step, progress }: { step: CreateAddressStep; progress:
           <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">
             Don't close this window
           </p>
-          {isVerifying && (
-            <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
-              Verifying IPFS storage (up to 60 seconds)...
-            </p>
-          )}
         </motion.div>
       )}
     </motion.div>

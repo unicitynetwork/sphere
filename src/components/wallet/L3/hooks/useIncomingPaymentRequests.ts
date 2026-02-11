@@ -1,7 +1,28 @@
 import { useState, useEffect, useCallback } from 'react';
-import { type IncomingPaymentRequest, PaymentRequestStatus } from '../data/model/';
 import { useSphereContext } from '../../../../sdk/hooks/core/useSphere';
 import type { IncomingPaymentRequest as SDKPaymentRequest } from '@unicitylabs/sphere-sdk';
+
+export const PaymentRequestStatus = {
+    PENDING: 'PENDING',
+    ACCEPTED: 'ACCEPTED',
+    REJECTED: 'REJECTED',
+    PAID: 'PAID'
+} as const;
+
+export type PaymentRequestStatus = typeof PaymentRequestStatus[keyof typeof PaymentRequestStatus];
+
+export interface IncomingPaymentRequest {
+    id: string;
+    senderPubkey: string;
+    amount: bigint;
+    coinId: string;
+    symbol: string;
+    message?: string;
+    recipientNametag: string;
+    requestId: string;
+    timestamp: number;
+    status: PaymentRequestStatus;
+}
 
 /** Bridge SDK payment request to legacy IncomingPaymentRequest model */
 function bridgeRequest(sdk: SDKPaymentRequest): IncomingPaymentRequest {

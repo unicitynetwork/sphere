@@ -1,8 +1,8 @@
 import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
-import { Token } from '../../L3/data/model';
+import type { Token } from '@unicitylabs/sphere-sdk';
+import { TokenRegistry } from '@unicitylabs/sphere-sdk';
 import { Box, Copy, CheckCircle2 } from 'lucide-react';
 import { useState, memo, useEffect } from 'react';
-import { RegistryService } from '../../L3/services/RegistryService';
 
 interface TokenRowProps {
   token: Token;
@@ -27,8 +27,8 @@ function parseTokenAmount(amount: string | undefined, coinId: string | undefined
   try {
     if (!amount || !coinId) return 0;
     const amountFloat = parseFloat(amount);
-    const registryService = RegistryService.getInstance();
-    const def = registryService.getCoinDefinition(coinId);
+    const registry = TokenRegistry.getInstance();
+    const def = registry.getDefinition(coinId);
     const decimals = def?.decimals ?? 6;
     const divisor = Math.pow(10, decimals);
     return amountFloat / divisor;
@@ -41,8 +41,8 @@ function parseTokenAmount(amount: string | undefined, coinId: string | undefined
 function formatTokenAmount(value: number, coinId: string | undefined): string {
   try {
     if (!coinId) return value.toString();
-    const registryService = RegistryService.getInstance();
-    const def = registryService.getCoinDefinition(coinId);
+    const registry = TokenRegistry.getInstance();
+    const def = registry.getDefinition(coinId);
     const decimals = def?.decimals ?? 6;
     return new Intl.NumberFormat('en-US', {
       maximumFractionDigits: Math.min(decimals, 6)
@@ -127,7 +127,7 @@ export const TokenRow = memo(function TokenRow({ token, delay, isNew = true }: T
           Token
         </span>
         <span className="text-[10px] text-neutral-400 dark:text-neutral-600">
-          {new Date(token.timestamp).toLocaleDateString()}
+          {new Date(token.createdAt).toLocaleDateString()}
         </span>
       </div>
     </div>

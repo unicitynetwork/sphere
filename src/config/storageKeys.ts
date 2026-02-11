@@ -93,16 +93,6 @@ export const STORAGE_KEYS = {
   WALLET_MAIN: 'sphere_wallet_main',
 
   // ============================================================================
-  // TOKEN OPERATIONS (Outbox)
-  // ============================================================================
-
-  // Pending token transfers
-  OUTBOX: 'sphere_outbox',
-
-  // Token split groups for pending transfers
-  OUTBOX_SPLIT_GROUPS: 'sphere_outbox_split_groups',
-
-  // ============================================================================
   // CHAT (User-to-User DMs)
   // ============================================================================
 
@@ -155,42 +145,6 @@ export const STORAGE_KEYS = {
   AGENT_CHAT_TOMBSTONES: 'sphere_agent_chat_tombstones',
 
   // ============================================================================
-  // BACKUP & SYNC
-  // ============================================================================
-
-  // Token backup timestamp
-  TOKEN_BACKUP_TIMESTAMP: 'sphere_token_backup_timestamp',
-
-  // Spent token state cache (persisted SPENT results)
-  SPENT_TOKEN_CACHE: 'sphere_spent_token_cache',
-
-  // Last successful IPFS sync timestamp
-  LAST_IPFS_SYNC_SUCCESS: 'sphere_last_ipfs_sync_success',
-
-  // Encrypted token backup (AES-256-GCM, Base64)
-  ENCRYPTED_TOKEN_BACKUP: 'sphere_encrypted_token_backup',
-
-  // ============================================================================
-  // REGISTRY CACHE
-  // ============================================================================
-
-  // Unicity IDs cache (from GitHub)
-  UNICITY_IDS_CACHE: 'sphere_unicity_ids_cache',
-
-  // Unicity IDs cache timestamp
-  UNICITY_IDS_TIMESTAMP: 'sphere_unicity_ids_timestamp',
-
-  // ============================================================================
-  // NOSTR SERVICE
-  // ============================================================================
-
-  // Last Nostr sync timestamp
-  NOSTR_LAST_SYNC: 'sphere_nostr_last_sync',
-
-  // Processed Nostr event IDs
-  NOSTR_PROCESSED_EVENTS: 'sphere_nostr_processed_events',
-
-  // ============================================================================
   // DEV SETTINGS
   // ============================================================================
 
@@ -221,29 +175,6 @@ export const STORAGE_KEY_GENERATORS = {
   agentChatMessages: (sessionId: string) =>
     `sphere_agent_chat_messages:${sessionId}` as const,
 
-  // IPFS version tracking: `sphere_ipfs_version_${ipnsName}`
-  ipfsVersion: (ipnsName: string) => `sphere_ipfs_version_${ipnsName}` as const,
-
-  // IPFS last CID: `sphere_ipfs_last_cid_${ipnsName}`
-  ipfsLastCid: (ipnsName: string) => `sphere_ipfs_last_cid_${ipnsName}` as const,
-
-  // IPFS pending IPNS: `sphere_ipfs_pending_ipns_${ipnsName}`
-  ipfsPendingIpns: (ipnsName: string) => `sphere_ipfs_pending_ipns_${ipnsName}` as const,
-
-  // IPFS last sequence: `sphere_ipfs_last_seq_${ipnsName}`
-  ipfsLastSeq: (ipnsName: string) => `sphere_ipfs_last_seq_${ipnsName}` as const,
-
-  // IPFS chat version: `sphere_ipfs_chat_version_${ipnsName}`
-  ipfsChatVersion: (ipnsName: string) => `sphere_ipfs_chat_version_${ipnsName}` as const,
-
-  // IPFS chat CID: `sphere_ipfs_chat_cid_${ipnsName}`
-  ipfsChatCid: (ipnsName: string) => `sphere_ipfs_chat_cid_${ipnsName}` as const,
-
-  // IPFS chat sequence: `sphere_ipfs_chat_seq_${ipnsName}`
-  ipfsChatSeq: (ipnsName: string) => `sphere_ipfs_chat_seq_${ipnsName}` as const,
-
-  // Token list hash for spent check optimization: `sphere_token_hash_${address}`
-  tokenListHash: (address: string) => `sphere_token_hash_${address}` as const,
 } as const;
 
 // ============================================================================
@@ -267,29 +198,6 @@ export const STORAGE_KEY_PREFIXES = {
   // Agent chat messages prefix
   AGENT_CHAT_MESSAGES: 'sphere_agent_chat_messages:',
 
-  // IPFS version prefix
-  IPFS_VERSION: 'sphere_ipfs_version_',
-
-  // IPFS CID prefix
-  IPFS_LAST_CID: 'sphere_ipfs_last_cid_',
-
-  // IPFS pending IPNS prefix
-  IPFS_PENDING_IPNS: 'sphere_ipfs_pending_ipns_',
-
-  // IPFS sequence prefix
-  IPFS_LAST_SEQ: 'sphere_ipfs_last_seq_',
-
-  // IPNS sequence number prefix
-  IPNS_SEQ: 'sphere_ipns_seq_',
-
-  // IPFS chat version prefix
-  IPFS_CHAT_VERSION: 'sphere_ipfs_chat_version_',
-
-  // IPFS chat CID prefix
-  IPFS_CHAT_CID: 'sphere_ipfs_chat_cid_',
-
-  // IPFS chat sequence prefix
-  IPFS_CHAT_SEQ: 'sphere_ipfs_chat_seq_',
 } as const;
 
 // ============================================================================

@@ -5,9 +5,9 @@ import { ArrowDownUp, Loader2, TrendingUp, CheckCircle, ArrowDown } from 'lucide
 import { useIdentity, useAssets, useTransfer } from '../../../../sdk';
 import type { Asset } from '@unicitylabs/sphere-sdk';
 import { toSmallestUnit, toHumanReadable } from '@unicitylabs/sphere-sdk';
-import { FaucetService } from '../services/FaucetService';
-import { RegistryService } from '../services/RegistryService';
-import { ApiService } from '../services/api';
+import { TokenRegistry } from '@unicitylabs/sphere-sdk';
+import { FaucetService } from '../../../../services/FaucetService';
+import { useSphereContext } from '../../../../sdk/hooks/core/useSphere';
 import { BaseModal, ModalHeader, Button } from '../../ui';
 
 type Step = 'swap' | 'processing' | 'success';
@@ -26,6 +26,7 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
   const { nametag } = useIdentity();
   const { assets } = useAssets();
   const { transfer } = useTransfer();
+  const { providers } = useSphereContext();
 
   // State
   const [step, setStep] = useState<Step>('swap');
@@ -40,11 +41,8 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
   // Load all available swappable coins from registry
   useEffect(() => {
     const loadSwappableCoins = async () => {
-      const registryService = RegistryService.getInstance();
-      await registryService.ensureInitialized();
-      const prices = await ApiService.fetchPrices();
-
-      const definitions = registryService.getAllDefinitions();
+      const registry = TokenRegistry.getInstance();
+      const definitions = registry.getAllDefinitions();
 
       // Only include coins supported by the faucet for swapping
       const SUPPORTED_SWAP_COINS = ['bitcoin', 'ethereum', 'solana', 'unicity', 'tether', 'usd-coin', 'unicity-usd'];
@@ -54,12 +52,21 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
         def.assetKind === 'fungible' && SUPPORTED_SWAP_COINS.includes(def.name.toLowerCase())
       );
 
+      // Fetch prices from SDK price provider if available
+      const tokenNames = fungibleDefs.map(def => def.name.toLowerCase());
+      let pricesMap = new Map<string, { priceUsd: number; priceEur?: number; change24h?: number }>();
+      if (providers?.price) {
+        try {
+          pricesMap = await providers.price.getPrices(tokenNames);
+        } catch (e) {
+          console.warn('Failed to fetch prices:', e);
+        }
+      }
+
       const swappableAssets: Asset[] = fungibleDefs.map(def => {
         const symbol = def.symbol || def.name.toUpperCase();
-        const priceKey = def.name.toLowerCase()
-
-        const priceData = prices[priceKey];
-        const iconUrl = registryService.getIconUrl(def);
+        const priceData = pricesMap.get(def.name.toLowerCase());
+        const iconUrl = registry.getIconUrl(def.id);
 
         return {
           coinId: def.id,
