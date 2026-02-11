@@ -33,7 +33,7 @@ export function useBalance(coinId?: string): UseBalanceReturn {
         return assets.length > 0 ? assets[0] : null;
       } else {
         // Get total portfolio value - not returning an asset, just the value
-        return await sphere.payments.getBalance();
+        return await sphere.payments.getFiatBalance();
       }
     },
     enabled: !!sphere,
