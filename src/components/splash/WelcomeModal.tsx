@@ -51,7 +51,7 @@ export function WelcomeModal({ show, onAccept }: WelcomeModalProps) {
             <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-32 bg-orange-500/10 blur-3xl pointer-events-none" />
 
             {/* Content */}
-            <div className="relative p-6 md:p-8">
+            <div className="relative p-6 md:p-8 max-h-[85vh] overflow-y-auto">
               {/* Header */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
