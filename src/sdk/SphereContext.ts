@@ -17,7 +17,7 @@ export interface SphereContextValue {
   importWallet: (
     mnemonic: string,
     options?: ImportWalletOptions,
-  ) => Promise<void>;
+  ) => Promise<Sphere>;
   importFromFile: (options: ImportFromFileOptions) => Promise<ImportFromFileResult>;
   /** Mark wallet as existing — call after import flow completes (scanning, address selection, etc.).
    *  Optionally accepts a Sphere instance to set in context (for import flows where sphere

@@ -133,11 +133,18 @@ export function SphereProvider({
 
       const transport = providers.transport;
 
-      // Connect transport if not already connected (needed before wallet exists)
+      // Connect transport if not already connected (needed before wallet exists).
+      // Retry once on failure — relay may need a moment after page load.
       if (!transport.isConnected()) {
-        await transport.connect();
+        try {
+          await transport.connect();
+        } catch {
+          // Wait briefly and retry once
+          await new Promise(r => setTimeout(r, 1000));
+          await transport.connect();
+        }
         // Set dummy identity for read-only queries (resolveNametagInfo only queries, never signs)
-        transport.setIdentity({
+        await transport.setIdentity({
           privateKey: '0000000000000000000000000000000000000000000000000000000000000001',
           chainPubkey: '000000000000000000000000000000000000000000000000000000000000000000',
           l1Address: '',
@@ -151,19 +158,13 @@ export function SphereProvider({
   );
 
   const importWallet = useCallback(
-    async (mnemonic: string, options?: ImportWalletOptions) => {
+    async (mnemonic: string, options?: ImportWalletOptions): Promise<Sphere> => {
       if (!providers) throw new Error('Providers not initialized');
 
       // Disconnect transport so Sphere.init can reconnect with the real identity.
       if (providers.transport.isConnected()) {
         await providers.transport.disconnect();
       }
-
-      // Clear existing wallet first
-      await Sphere.clear({
-        storage: providers.storage,
-        tokenStorage: providers.tokenStorage,
-      });
 
       const { sphere: instance } = await Sphere.init({
         ...providers,
@@ -174,6 +175,7 @@ export function SphereProvider({
 
       setSphere(instance);
       setWalletExists(true);
+      return instance;
     },
     [providers],
   );
@@ -230,15 +232,13 @@ export function SphereProvider({
   );
 
   const deleteWallet = useCallback(async () => {
-    // Clear SDK storage before destroying (destroy disconnects providers)
+    // Sphere.clear() already calls Sphere.instance.destroy() internally,
+    // so no need for a separate sphere.destroy() call.
     if (providers) {
       await Sphere.clear({
         storage: providers.storage,
         tokenStorage: providers.tokenStorage,
       });
-    }
-    if (sphere) {
-      await sphere.destroy();
     }
     clearAllSphereData();
     queryClient.clear();
@@ -247,18 +247,15 @@ export function SphereProvider({
     setError(null);
 
     // Create fresh providers WITHOUT connecting transport.
-    // Don't call initialize() here — it pre-connects transport with a dummy
-    // identity which races with the real connection inside Sphere.import/init,
-    // causing the subsequent import to hang. The SDK handles the full
-    // connection lifecycle (connect, setIdentity, subscribe) internally.
-    // resolveNametag() also connects transport on demand when needed.
+    // The SDK handles the full connection lifecycle (connect, setIdentity,
+    // subscribe) internally. resolveNametag() also connects on demand.
     const freshProviders = createBrowserProviders({
       network,
       price: { platform: 'coingecko', baseUrl: '/coingecko', cacheTtlMs: 5 * 60_000 },
       groupChat: true,
     });
     setProviders(freshProviders);
-  }, [sphere, providers, queryClient, network]);
+  }, [providers, queryClient, network]);
 
   const finalizeWallet = useCallback((importedSphere?: Sphere) => {
     if (importedSphere) {
