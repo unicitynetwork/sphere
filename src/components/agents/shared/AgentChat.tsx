@@ -589,7 +589,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
                         initial={{ opacity: 0, y: -5 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -5 }}
-                        className="absolute top-full left-0 mt-1 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg overflow-hidden z-10 min-w-[160px]"
+                        className="absolute top-full left-0 mt-1 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg overflow-hidden z-10 min-w-40"
                       >
                         <button
                           onClick={() => {
@@ -784,7 +784,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-60 p-4"
               onClick={() => setShowDeleteConfirm(null)}
             >
               <motion.div
@@ -826,7 +826,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-60 p-4"
               onClick={() => setShowClearAllConfirm(false)}
             >
               <motion.div
@@ -1008,7 +1008,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
       {/* Additional custom content - render as portal with higher z-index when fullscreen */}
       {isFullscreen
         ? createPortal(
-            <div className="fixed inset-0 z-[100000] pointer-events-none [&>*]:pointer-events-auto">{additionalContent}</div>,
+            <div className="fixed inset-0 z-100000 pointer-events-none *:pointer-events-auto">{additionalContent}</div>,
             document.body
           )
         : additionalContent}
