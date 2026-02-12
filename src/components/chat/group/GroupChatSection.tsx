@@ -2,10 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Hash, Menu, PanelLeft, ChevronDown, Users, Maximize2, Minimize2, X, Reply } from 'lucide-react';
-import { GroupMessage } from '../data/groupModels';
+import type { GroupMessageData } from '@unicitylabs/sphere-sdk';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useGroupChat } from '../hooks/useGroupChat';
-import { useServices } from '../../../contexts/useServices';
 import { useUIState } from '../../../hooks/useUIState';
 import { GroupList } from './GroupList';
 import { GroupMessageList } from './GroupMessageList';
@@ -15,6 +14,7 @@ import { MemberListModal } from './MemberListModal';
 import { CreateGroupModal } from './CreateGroupModal';
 import { agents } from '../../../config/activities';
 import { setMentionClickHandler } from '../../../utils/mentionHandler';
+import { getGroupDisplayName, getMessageSenderDisplayName } from '../utils/groupChatHelpers';
 import type { ChatModeChangeHandler } from '../../../types';
 
 interface GroupChatSectionProps {
@@ -44,8 +44,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     totalUnreadCount,
     isConnected,
     // Moderation
-    isCurrentUserAdmin,
-    isCurrentUserModerator,
+    canModerateSelectedGroup,
     deleteMessage,
     kickUser,
     isDeleting,
@@ -53,8 +52,6 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     // Members
     members,
     isLoadingMembers,
-    // Nametag resolution
-    resolveMemberNametags,
     // Admin actions (relay admin only)
     isRelayAdmin,
     createGroup,
@@ -63,6 +60,9 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     isCreatingGroup,
     isDeletingGroup,
     isCreatingInvite,
+    // Identity
+    myPubkey,
+    isAdminOfGroup,
   } = useGroupChat();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -72,7 +72,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
   const [showAgentPicker, setShowAgentPicker] = useState(false);
   const [showMemberList, setShowMemberList] = useState(false);
   const [inviteLinkFromUrl, setInviteLinkFromUrl] = useState<string | null>(null);
-  const [replyingTo, setReplyingTo] = useState<GroupMessage | null>(null);
+  const [replyingTo, setReplyingTo] = useState<GroupMessageData | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -103,15 +103,6 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
       });
     }
   }, [searchParams, setSearchParams]);
-
-  // Get my pubkey for message display
-  const { groupChatService } = useServices();
-  const myPubkey = groupChatService?.getMyPublicKey() || null;
-
-  // Check if current user is admin of a specific group
-  const isAdminOfGroup = (groupId: string): boolean => {
-    return groupChatService?.isCurrentUserAdmin(groupId) || false;
-  };
 
   // Close picker when clicking outside
   useEffect(() => {
@@ -169,22 +160,13 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     }
   };
 
-  const handleReplyToMessage = (message: GroupMessage) => {
+  const handleReplyToMessage = (message: GroupMessageData) => {
     setReplyingTo(message);
     inputRef.current?.focus();
   };
 
   const cancelReply = () => {
     setReplyingTo(null);
-  };
-
-  const handleJoinGroup = async (groupId: string, inviteCode?: string): Promise<boolean> => {
-    // joinGroup now auto-selects the group after successful join
-    return joinGroup(groupId, inviteCode);
-  };
-
-  const handleLeaveGroup = async (groupId: string) => {
-    await leaveGroup(groupId);
   };
 
   // Chat content (shared between normal and fullscreen modes)
@@ -202,7 +184,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
           selectGroup(group);
           setSidebarOpen(false);
         }}
-        onLeave={handleLeaveGroup}
+        onLeave={leaveGroup}
         onJoinGroup={() => setShowJoinGroup(true)}
         onCreateGroup={() => setShowCreateGroup(true)}
         searchQuery={searchQuery}
@@ -312,7 +294,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
                   </motion.div>
                   <div>
                     <h3 className="text-neutral-900 dark:text-white font-medium">
-                      {selectedGroup.getDisplayName()}
+                      {getGroupDisplayName(selectedGroup)}
                     </h3>
                     {selectedGroup.memberCount !== undefined && (
                       <button
@@ -379,7 +361,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
             messages={messages}
             isLoading={isLoadingMessages}
             myPubkey={myPubkey}
-            canDeleteMessages={isCurrentUserModerator}
+            canDeleteMessages={canModerateSelectedGroup}
             onDeleteMessage={deleteMessage}
             isDeletingMessage={isDeleting}
             onReplyToMessage={handleReplyToMessage}
@@ -424,7 +406,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
                     <Reply className="w-4 h-4 text-blue-500 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="text-xs text-blue-500 font-medium">
-                        Replying to {replyingTo.getSenderDisplayName()}
+                        Replying to {getMessageSenderDisplayName(replyingTo)}
                       </div>
                       <div className="text-sm text-neutral-500 dark:text-neutral-400 truncate">
                         {replyingTo.content.slice(0, 100)}{replyingTo.content.length > 100 ? '...' : ''}
@@ -446,7 +428,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
               onChange={setMessageInput}
               onSend={handleSend}
               isSending={isSending}
-              placeholder={`Message #${selectedGroup.getDisplayName()}...`}
+              placeholder={`Message #${getGroupDisplayName(selectedGroup)}...`}
             />
           </div>
         )}
@@ -462,7 +444,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
         availableGroups={availableGroups}
         isLoading={isLoadingAvailable}
         onRefresh={refreshAvailableGroups}
-        onJoin={handleJoinGroup}
+        onJoin={joinGroup}
         initialInviteLink={inviteLinkFromUrl || undefined}
       />
 
@@ -472,11 +454,10 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
         onClose={() => setShowMemberList(false)}
         members={members}
         isLoading={isLoadingMembers}
-        isCurrentUserAdmin={isCurrentUserAdmin}
+        canModerate={canModerateSelectedGroup}
         myPubkey={myPubkey}
         onKickUser={kickUser}
         isKicking={isKicking}
-        onResolveMemberNametags={resolveMemberNametags}
       />
 
       {/* Create Group Modal */}

@@ -1,20 +1,21 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Trash2, Loader2, Reply, CornerDownRight } from 'lucide-react';
-import { GroupMessage } from '../data/groupModels';
+import type { GroupMessageData } from '@unicitylabs/sphere-sdk';
 import { MarkdownContent } from '../../../utils/markdown';
 import { getMentionClickHandler } from '../../../utils/mentionHandler';
 import { getColorFromPubkey } from '../utils/avatarColors';
+import { getMessageSenderDisplayName, getMessageSenderAvatar, getMessageFormattedTime } from '../utils/groupChatHelpers';
 
 interface GroupMessageBubbleProps {
-  message: GroupMessage;
+  message: GroupMessageData;
   isOwnMessage: boolean;
   delay?: number;
   canDelete?: boolean;
   onDelete?: (messageId: string) => Promise<boolean>;
   isDeleting?: boolean;
-  onReply?: (message: GroupMessage) => void;
-  replyToMessage?: GroupMessage | null;
+  onReply?: (message: GroupMessageData) => void;
+  replyToMessage?: GroupMessageData | null;
 }
 
 export function GroupMessageBubble({
@@ -33,11 +34,8 @@ export function GroupMessageBubble({
 
   const handleNametagClick = () => {
     const handler = getMentionClickHandler();
-    if (handler) {
-      // Get nametag from message (convert display name to nametag format)
-      const displayName = message.getSenderDisplayName();
-      const nametag = displayName.toLowerCase().replace(/\s+/g, '-');
-      handler(nametag);
+    if (handler && message.senderNametag) {
+      handler(message.senderNametag.replace('@', ''));
     }
   };
 
@@ -46,7 +44,7 @@ export function GroupMessageBubble({
   };
 
   const handleConfirmDelete = async () => {
-    if (onDelete) {
+    if (onDelete && message.id) {
       await onDelete(message.id);
     }
     setShowDeleteConfirm(false);
@@ -69,7 +67,7 @@ export function GroupMessageBubble({
       <div
         className={`shrink-0 w-8 h-8 rounded-lg bg-linear-to-br ${senderColor.gradient} text-white text-xs font-medium flex items-center justify-center shadow-md`}
       >
-        {message.getSenderAvatar()}
+        {getMessageSenderAvatar(message)}
       </div>
 
       {/* Message Content */}
@@ -83,7 +81,7 @@ export function GroupMessageBubble({
               : senderColor.text
           }`}
         >
-          {message.getSenderDisplayName()}
+          {getMessageSenderDisplayName(message)}
         </button>
 
         {/* Reply-to preview */}
@@ -91,7 +89,7 @@ export function GroupMessageBubble({
           <div className={`flex items-start gap-2 mb-1 text-xs ${isOwnMessage ? 'flex-row-reverse' : ''}`}>
             <CornerDownRight className="w-3 h-3 text-neutral-400 shrink-0 mt-0.5" />
             <div className="px-2 py-1 rounded-lg bg-neutral-200/50 dark:bg-neutral-700/50 text-neutral-500 dark:text-neutral-400 max-w-[200px] truncate">
-              <span className="font-medium">{replyToMessage.getSenderDisplayName()}: </span>
+              <span className="font-medium">{getMessageSenderDisplayName(replyToMessage)}: </span>
               {replyToMessage.content.slice(0, 50)}{replyToMessage.content.length > 50 ? '...' : ''}
             </div>
           </div>
@@ -186,7 +184,7 @@ export function GroupMessageBubble({
 
         {/* Timestamp */}
         <span className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 px-1">
-          {message.getFormattedTime()}
+          {getMessageFormattedTime(message)}
         </span>
       </div>
     </motion.div>

@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { GroupChatRepository } from '../data/GroupChatRepository';
-import { Group, GroupMessage, GroupMember } from '../data/groupModels';
+import type { GroupData, GroupMessageData, GroupMemberData, CreateGroupOptions } from '@unicitylabs/sphere-sdk';
+import { GroupVisibility } from '@unicitylabs/sphere-sdk';
 import { useServices } from '../../../contexts/useServices';
+import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
 import { STORAGE_KEYS } from '../../../config/storageKeys';
+import { getGroupDisplayName } from '../utils/groupChatHelpers';
 
 const QUERY_KEYS = {
   GROUPS: ['groupChat', 'groups'],
@@ -14,32 +16,28 @@ const QUERY_KEYS = {
   RELAY_ADMIN: ['groupChat', 'relayAdmin'],
 };
 
-const groupRepository = GroupChatRepository.getInstance();
-
-import type { CreateGroupOptions } from '../services/GroupChatService';
-
 export interface UseGroupChatReturn {
   // Groups
-  groups: Group[];
+  groups: GroupData[];
   isLoadingGroups: boolean;
-  selectedGroup: Group | null;
-  selectGroup: (group: Group | null) => void;
+  selectedGroup: GroupData | null;
+  selectGroup: (group: GroupData | null) => Promise<void>;
   joinGroup: (groupId: string, inviteCode?: string) => Promise<boolean>;
   leaveGroup: (groupId: string) => Promise<boolean>;
 
   // Discovery
-  availableGroups: Group[];
+  availableGroups: GroupData[];
   isLoadingAvailable: boolean;
   refreshAvailableGroups: () => void;
 
   // Messages
-  messages: GroupMessage[];
+  messages: GroupMessageData[];
   isLoadingMessages: boolean;
   sendMessage: (content: string, replyToId?: string) => Promise<boolean>;
   isSending: boolean;
 
   // Members
-  members: GroupMember[];
+  members: GroupMemberData[];
   isLoadingMembers: boolean;
 
   // Input state
@@ -53,7 +51,7 @@ export interface UseGroupChatReturn {
   // Search/Filter
   searchQuery: string;
   setSearchQuery: (query: string) => void;
-  filteredGroups: Group[];
+  filteredGroups: GroupData[];
 
   // Connection
   isConnected: boolean;
@@ -61,108 +59,110 @@ export interface UseGroupChatReturn {
   // Moderation
   isCurrentUserAdmin: boolean;
   isCurrentUserModerator: boolean;
+  canModerateSelectedGroup: boolean;
   deleteMessage: (messageId: string) => Promise<boolean>;
   kickUser: (userPubkey: string, reason?: string) => Promise<boolean>;
   isDeleting: boolean;
   isKicking: boolean;
 
   // Nametag resolution
-  resolveMemberNametags: () => Promise<void>;
 
   // Admin actions (relay admin only)
   isRelayAdmin: boolean;
-  createGroup: (options: CreateGroupOptions) => Promise<Group | null>;
+  createGroup: (options: CreateGroupOptions) => Promise<GroupData | null>;
   deleteGroup: (groupId: string) => Promise<boolean>;
   createInvite: (groupId: string) => Promise<string | null>;
   isCreatingGroup: boolean;
   isDeletingGroup: boolean;
   isCreatingInvite: boolean;
+
+  // Identity
+  myPubkey: string | null;
+  isAdminOfGroup: (groupId: string) => boolean;
 }
 
 export const useGroupChat = (): UseGroupChatReturn => {
   const queryClient = useQueryClient();
-  const { groupChatService } = useServices();
-  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
+  const { groupChat, isGroupChatConnected } = useServices();
+  const { sphere } = useSphereContext();
+  const [selectedGroup, setSelectedGroup] = useState<GroupData | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [isConnected, setIsConnected] = useState(false);
 
-  // Initialize service connection
+  // Ref to avoid event subscription churn on group selection changes
+  const selectedGroupRef = useRef(selectedGroup);
+  selectedGroupRef.current = selectedGroup;
+
+  // Listen for SDK group chat events (stable — no selectedGroup dependency)
   useEffect(() => {
-    const initializeConnection = async () => {
-      if (groupChatService) {
-        await groupChatService.start();
-        setIsConnected(groupChatService.getConnectionStatus());
-      }
-    };
+    if (!sphere) return;
 
-    initializeConnection();
-  }, [groupChatService]);
-
-  // Listen for group chat updates
-  useEffect(() => {
-    const handleGroupChatUpdate = () => {
+    const handleUpdate = () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.GROUPS });
-      if (selectedGroup) {
+      const current = selectedGroupRef.current;
+      if (current) {
         queryClient.invalidateQueries({
-          queryKey: QUERY_KEYS.MESSAGES(selectedGroup.id),
+          queryKey: QUERY_KEYS.MESSAGES(current.id),
         });
       }
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
     };
 
-    const handleGroupMessageReceived = (event: CustomEvent<GroupMessage>) => {
-      const message = event.detail;
-      // If we're viewing this group, refetch messages and members (nametags may have updated)
-      if (selectedGroup && message.groupId === selectedGroup.id) {
+    const handleMessage = (message: GroupMessageData) => {
+      const current = selectedGroupRef.current;
+      // If we're viewing this group, refetch messages and members
+      if (current && message.groupId === current.id) {
         queryClient.invalidateQueries({
-          queryKey: QUERY_KEYS.MESSAGES(selectedGroup.id),
+          queryKey: QUERY_KEYS.MESSAGES(current.id),
         });
         queryClient.invalidateQueries({
-          queryKey: QUERY_KEYS.MEMBERS(selectedGroup.id),
+          queryKey: QUERY_KEYS.MEMBERS(current.id),
         });
         // Auto-mark as read since user is viewing
-        groupRepository.markGroupAsRead(selectedGroup.id);
+        groupChat?.markGroupAsRead(current.id);
       }
       // Always refetch groups for updated last message
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.GROUPS });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
     };
 
-    const handleGroupKicked = (event: CustomEvent<{ groupId: string }>) => {
-      const { groupId } = event.detail;
-      // If we're viewing the group we were kicked from, deselect it
-      if (selectedGroup && selectedGroup.id === groupId) {
+    const handleKicked = (data: { groupId: string }) => {
+      if (selectedGroupRef.current?.id === data.groupId) {
         setSelectedGroup(null);
       }
     };
 
-    const handleGroupDeleted = (event: CustomEvent<{ groupId: string }>) => {
-      const { groupId } = event.detail;
-      // If we're viewing the deleted group, deselect it
-      if (selectedGroup && selectedGroup.id === groupId) {
+    const handleGroupDeleted = (data: { groupId: string }) => {
+      if (selectedGroupRef.current?.id === data.groupId) {
         setSelectedGroup(null);
       }
     };
 
-    window.addEventListener('group-chat-updated', handleGroupChatUpdate);
-    window.addEventListener('group-message-received', handleGroupMessageReceived as EventListener);
-    window.addEventListener('group-kicked', handleGroupKicked as EventListener);
-    window.addEventListener('group-deleted', handleGroupDeleted as EventListener);
+    const unsubs = [
+      sphere.on('groupchat:updated', handleUpdate),
+      sphere.on('groupchat:message', handleMessage),
+      sphere.on('groupchat:kicked', handleKicked),
+      sphere.on('groupchat:group_deleted', handleGroupDeleted),
+    ];
 
     return () => {
-      window.removeEventListener('group-chat-updated', handleGroupChatUpdate);
-      window.removeEventListener('group-message-received', handleGroupMessageReceived as EventListener);
-      window.removeEventListener('group-kicked', handleGroupKicked as EventListener);
-      window.removeEventListener('group-deleted', handleGroupDeleted as EventListener);
+      unsubs.forEach((unsub) => unsub());
     };
-  }, [queryClient, selectedGroup]);
+  }, [sphere, queryClient, groupChat]);
 
   // Query joined groups
   const groupsQuery = useQuery({
     queryKey: QUERY_KEYS.GROUPS,
-    queryFn: () => groupRepository.getGroups(),
+    queryFn: () => {
+      if (!groupChat) return [];
+      const groups = groupChat.getGroups();
+      // Sort by last message time (descending)
+      return [...groups].sort(
+        (a, b) => (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0)
+      );
+    },
     staleTime: 30000,
+    enabled: !!groupChat,
   });
 
   // Restore selected group from localStorage when groups are loaded
@@ -182,21 +182,22 @@ export const useGroupChat = (): UseGroupChatReturn => {
   const availableGroupsQuery = useQuery({
     queryKey: QUERY_KEYS.AVAILABLE_GROUPS,
     queryFn: async () => {
-      if (!groupChatService) return [];
-      return groupChatService.fetchAvailableGroups();
+      if (!groupChat) return [];
+      return groupChat.fetchAvailableGroups();
     },
     staleTime: 60000,
-    enabled: !!groupChatService,
+    enabled: !!groupChat,
   });
 
   // Query messages for selected group
   const messagesQuery = useQuery({
     queryKey: QUERY_KEYS.MESSAGES(selectedGroup?.id || ''),
     queryFn: () => {
-      if (!selectedGroup) return [];
-      return groupRepository.getMessagesForGroup(selectedGroup.id);
+      if (!selectedGroup || !groupChat) return [];
+      const messages = groupChat.getMessages(selectedGroup.id);
+      return [...messages].sort((a, b) => a.timestamp - b.timestamp);
     },
-    enabled: !!selectedGroup,
+    enabled: !!selectedGroup && !!groupChat,
     staleTime: 10000,
   });
 
@@ -204,41 +205,42 @@ export const useGroupChat = (): UseGroupChatReturn => {
   const membersQuery = useQuery({
     queryKey: QUERY_KEYS.MEMBERS(selectedGroup?.id || ''),
     queryFn: () => {
-      if (!selectedGroup) return [];
-      return groupRepository.getMembersForGroup(selectedGroup.id);
+      if (!selectedGroup || !groupChat) return [];
+      const members = groupChat.getMembers(selectedGroup.id);
+      return [...members].sort((a, b) => a.joinedAt - b.joinedAt);
     },
-    enabled: !!selectedGroup,
+    enabled: !!selectedGroup && !!groupChat,
     staleTime: 60000,
   });
 
   // Query total unread count
   const unreadCountQuery = useQuery({
     queryKey: QUERY_KEYS.UNREAD_COUNT,
-    queryFn: () => groupRepository.getTotalUnreadCount(),
+    queryFn: () => groupChat?.getTotalUnreadCount() ?? 0,
     staleTime: 30000,
+    enabled: !!groupChat,
   });
 
   // Query relay admin status
   const relayAdminQuery = useQuery({
     queryKey: QUERY_KEYS.RELAY_ADMIN,
     queryFn: async () => {
-      if (!groupChatService) return false;
-      return groupChatService.isCurrentUserRelayAdmin();
+      if (!groupChat) return false;
+      return groupChat.isCurrentUserRelayAdmin();
     },
-    staleTime: 300000, // Cache for 5 minutes
-    enabled: !!groupChatService && isConnected,
+    staleTime: 300000,
+    enabled: !!groupChat && isGroupChatConnected,
   });
 
   // Join group mutation
   const joinGroupMutation = useMutation({
     mutationFn: async ({ groupId, inviteCode }: { groupId: string; inviteCode?: string }) => {
-      if (!groupChatService) throw new Error('Group chat service not available');
-      return groupChatService.joinGroup(groupId, inviteCode);
+      if (!groupChat) throw new Error('Group chat not available');
+      return groupChat.joinGroup(groupId, inviteCode);
     },
     onSuccess: (_, { groupId }) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.GROUPS });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.AVAILABLE_GROUPS });
-      // Invalidate messages for the joined group so history is loaded
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.MESSAGES(groupId) });
     },
   });
@@ -246,8 +248,8 @@ export const useGroupChat = (): UseGroupChatReturn => {
   // Leave group mutation
   const leaveGroupMutation = useMutation({
     mutationFn: async (groupId: string) => {
-      if (!groupChatService) throw new Error('Group chat service not available');
-      return groupChatService.leaveGroup(groupId);
+      if (!groupChat) throw new Error('Group chat not available');
+      return groupChat.leaveGroup(groupId);
     },
     onSuccess: (_, groupId) => {
       if (selectedGroup?.id === groupId) {
@@ -262,9 +264,9 @@ export const useGroupChat = (): UseGroupChatReturn => {
   const sendMessageMutation = useMutation({
     mutationFn: async ({ content, replyToId }: { content: string; replyToId?: string }) => {
       if (!selectedGroup) throw new Error('No group selected');
-      if (!groupChatService) throw new Error('Group chat service not available');
+      if (!groupChat) throw new Error('Group chat not available');
 
-      const message = await groupChatService.sendMessage(selectedGroup.id, content, replyToId);
+      const message = await groupChat.sendMessage(selectedGroup.id, content, replyToId);
       return !!message;
     },
     onSuccess: () => {
@@ -278,25 +280,24 @@ export const useGroupChat = (): UseGroupChatReturn => {
 
   // Select group
   const selectGroup = useCallback(
-    async (group: Group | null) => {
+    async (group: GroupData | null) => {
       setSelectedGroup(group);
-      // Persist selected group ID
       if (group) {
         localStorage.setItem(STORAGE_KEYS.CHAT_SELECTED_GROUP, group.id);
-        groupRepository.markGroupAsRead(group.id);
+        groupChat?.markGroupAsRead(group.id);
         queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
 
-        // Fetch messages from relay if none exist locally (handles new joins)
-        const localMessages = groupRepository.getMessagesForGroup(group.id);
-        if (localMessages.length === 0 && groupChatService) {
-          await groupChatService.fetchMessages(group.id);
+        // Fetch messages from relay if none exist locally
+        const localMessages = groupChat?.getMessages(group.id) ?? [];
+        if (localMessages.length === 0 && groupChat) {
+          await groupChat.fetchMessages(group.id);
           queryClient.invalidateQueries({ queryKey: QUERY_KEYS.MESSAGES(group.id) });
         }
       } else {
         localStorage.removeItem(STORAGE_KEYS.CHAT_SELECTED_GROUP);
       }
     },
-    [queryClient, groupChatService]
+    [queryClient, groupChat]
   );
 
   // Join group
@@ -304,19 +305,17 @@ export const useGroupChat = (): UseGroupChatReturn => {
     async (groupId: string, inviteCode?: string): Promise<boolean> => {
       const success = await joinGroupMutation.mutateAsync({ groupId, inviteCode });
       if (success) {
-        // Auto-select the joined group (it's now in the repository)
-        const joinedGroup = groupRepository.getGroup(groupId);
+        const joinedGroup = groupChat?.getGroup(groupId);
         if (joinedGroup) {
-          // Use setSelectedGroup directly to avoid async selectGroup overhead
           setSelectedGroup(joinedGroup);
           localStorage.setItem(STORAGE_KEYS.CHAT_SELECTED_GROUP, joinedGroup.id);
-          groupRepository.markGroupAsRead(joinedGroup.id);
+          groupChat?.markGroupAsRead(joinedGroup.id);
           queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
         }
       }
       return success;
     },
-    [joinGroupMutation, queryClient]
+    [joinGroupMutation, queryClient, groupChat]
   );
 
   // Leave group
@@ -339,10 +338,10 @@ export const useGroupChat = (): UseGroupChatReturn => {
   // Mark as read
   const markAsRead = useCallback(
     (groupId: string) => {
-      groupRepository.markGroupAsRead(groupId);
+      groupChat?.markGroupAsRead(groupId);
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
     },
-    [queryClient]
+    [queryClient, groupChat]
   );
 
   // Refresh available groups
@@ -358,32 +357,44 @@ export const useGroupChat = (): UseGroupChatReturn => {
     const query = searchQuery.toLowerCase();
     return groups.filter(
       (g) =>
-        g.getDisplayName().toLowerCase().includes(query) ||
+        getGroupDisplayName(g).toLowerCase().includes(query) ||
         g.description?.toLowerCase().includes(query) ||
-        g.lastMessageText.toLowerCase().includes(query)
+        (g.lastMessageText ?? '').toLowerCase().includes(query)
     );
   }, [groupsQuery.data, searchQuery]);
 
   // Moderation: Check if current user is admin/moderator
-  // membersQuery.data is included to re-compute when members change (service reads from repository)
   const isCurrentUserAdmin = useMemo(() => {
-    if (!selectedGroup || !groupChatService) return false;
-    return groupChatService.isCurrentUserAdmin(selectedGroup.id);
+    if (!selectedGroup || !groupChat) return false;
+    return groupChat.isCurrentUserAdmin(selectedGroup.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedGroup, groupChatService, membersQuery.data]);
+  }, [selectedGroup, groupChat, membersQuery.data]);
 
   const isCurrentUserModerator = useMemo(() => {
-    if (!selectedGroup || !groupChatService) return false;
-    return groupChatService.isCurrentUserModerator(selectedGroup.id);
+    if (!selectedGroup || !groupChat) return false;
+    return groupChat.isCurrentUserModerator(selectedGroup.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedGroup, groupChatService, membersQuery.data]);
+  }, [selectedGroup, groupChat, membersQuery.data]);
+
+  // Combined moderation check: group admin/moderator OR relay admin on public groups
+  const canModerateSelectedGroup = useMemo(() => {
+    if (!selectedGroup || !groupChat) return false;
+    if (groupChat.isCurrentUserAdmin(selectedGroup.id) || groupChat.isCurrentUserModerator(selectedGroup.id)) {
+      return true;
+    }
+    if (relayAdminQuery.data && selectedGroup.visibility === GroupVisibility.PUBLIC) {
+      return true;
+    }
+    return false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGroup, groupChat, membersQuery.data, relayAdminQuery.data]);
 
   // Delete message mutation
   const deleteMessageMutation = useMutation({
     mutationFn: async (messageId: string) => {
       if (!selectedGroup) throw new Error('No group selected');
-      if (!groupChatService) throw new Error('Group chat service not available');
-      return groupChatService.deleteMessage(selectedGroup.id, messageId);
+      if (!groupChat) throw new Error('Group chat not available');
+      return groupChat.deleteMessage(selectedGroup.id, messageId);
     },
     onSuccess: () => {
       if (selectedGroup) {
@@ -398,8 +409,8 @@ export const useGroupChat = (): UseGroupChatReturn => {
   const kickUserMutation = useMutation({
     mutationFn: async ({ userPubkey, reason }: { userPubkey: string; reason?: string }) => {
       if (!selectedGroup) throw new Error('No group selected');
-      if (!groupChatService) throw new Error('Group chat service not available');
-      return groupChatService.kickUser(selectedGroup.id, userPubkey, reason);
+      if (!groupChat) throw new Error('Group chat not available');
+      return groupChat.kickUser(selectedGroup.id, userPubkey, reason);
     },
     onSuccess: () => {
       if (selectedGroup) {
@@ -426,19 +437,11 @@ export const useGroupChat = (): UseGroupChatReturn => {
     [kickUserMutation]
   );
 
-  // Resolve member nametags
-  const resolveMemberNametags = useCallback(async () => {
-    if (!selectedGroup || !groupChatService) return;
-    await groupChatService.resolveMemberNametags();
-    // Invalidate members query to refresh the UI
-    queryClient.invalidateQueries({ queryKey: QUERY_KEYS.MEMBERS(selectedGroup.id) });
-  }, [selectedGroup, groupChatService, queryClient]);
-
   // Create group mutation (admin)
   const createGroupMutation = useMutation({
     mutationFn: async (options: CreateGroupOptions) => {
-      if (!groupChatService) throw new Error('Group chat service not available');
-      return groupChatService.createGroup(options);
+      if (!groupChat) throw new Error('Group chat not available');
+      return groupChat.createGroup(options);
     },
     onSuccess: (group) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.GROUPS });
@@ -452,8 +455,8 @@ export const useGroupChat = (): UseGroupChatReturn => {
   // Delete group mutation (admin)
   const deleteGroupMutation = useMutation({
     mutationFn: async (groupId: string) => {
-      if (!groupChatService) throw new Error('Group chat service not available');
-      return groupChatService.deleteGroup(groupId);
+      if (!groupChat) throw new Error('Group chat not available');
+      return groupChat.deleteGroup(groupId);
     },
     onSuccess: (_, groupId) => {
       if (selectedGroup?.id === groupId) {
@@ -467,14 +470,14 @@ export const useGroupChat = (): UseGroupChatReturn => {
   // Create invite mutation (admin)
   const createInviteMutation = useMutation({
     mutationFn: async (groupId: string) => {
-      if (!groupChatService) throw new Error('Group chat service not available');
-      return groupChatService.createInvite(groupId);
+      if (!groupChat) throw new Error('Group chat not available');
+      return groupChat.createInvite(groupId);
     },
   });
 
   // Create group
   const createGroup = useCallback(
-    async (options: CreateGroupOptions): Promise<Group | null> => {
+    async (options: CreateGroupOptions): Promise<GroupData | null> => {
       return createGroupMutation.mutateAsync(options);
     },
     [createGroupMutation]
@@ -494,6 +497,16 @@ export const useGroupChat = (): UseGroupChatReturn => {
       return createInviteMutation.mutateAsync(groupId);
     },
     [createInviteMutation]
+  );
+
+  // Identity helpers
+  const myPubkey = useMemo(() => groupChat?.getMyPublicKey() ?? null, [groupChat]);
+
+  const isAdminOfGroup = useCallback(
+    (groupId: string): boolean => {
+      return groupChat?.isCurrentUserAdmin(groupId) ?? false;
+    },
+    [groupChat]
   );
 
   return {
@@ -534,18 +547,16 @@ export const useGroupChat = (): UseGroupChatReturn => {
     filteredGroups,
 
     // Connection
-    isConnected,
+    isConnected: isGroupChatConnected,
 
     // Moderation
     isCurrentUserAdmin,
     isCurrentUserModerator,
+    canModerateSelectedGroup,
     deleteMessage,
     kickUser,
     isDeleting: deleteMessageMutation.isPending,
     isKicking: kickUserMutation.isPending,
-
-    // Nametag resolution
-    resolveMemberNametags,
 
     // Admin actions (relay admin only)
     isRelayAdmin: relayAdminQuery.data || false,
@@ -555,5 +566,9 @@ export const useGroupChat = (): UseGroupChatReturn => {
     isCreatingGroup: createGroupMutation.isPending,
     isDeletingGroup: deleteGroupMutation.isPending,
     isCreatingInvite: createInviteMutation.isPending,
+
+    // Identity
+    myPubkey,
+    isAdminOfGroup,
   };
 };
