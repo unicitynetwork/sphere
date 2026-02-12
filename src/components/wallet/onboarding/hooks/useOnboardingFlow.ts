@@ -129,7 +129,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const [processingStatus, setProcessingStatus] = useState("");
   const [isProcessingComplete, setIsProcessingComplete] = useState(false);
 
-  // Debounced nametag availability check
+  // Debounced nametag availability check with retry on transport failure
   useEffect(() => {
     const cleanTag = nametagInput.trim().replace(/^@/, '');
     if (!cleanTag || cleanTag.length < 2) {
@@ -137,17 +137,36 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       return;
     }
 
+    let cancelled = false;
     setNametagAvailability('checking');
+
     const timer = setTimeout(async () => {
-      try {
-        const existing = await resolveNametag(cleanTag);
-        setNametagAvailability(existing ? 'taken' : 'available');
-      } catch {
+      const maxAttempts = 2;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        if (cancelled) return;
+        try {
+          const existing = await resolveNametag(cleanTag);
+          if (!cancelled) {
+            setNametagAvailability(existing ? 'taken' : 'available');
+          }
+          return;
+        } catch {
+          if (attempt < maxAttempts) {
+            // Wait before retry — transport may still be connecting
+            await new Promise(r => setTimeout(r, 1500));
+          }
+        }
+      }
+      // All attempts failed
+      if (!cancelled) {
         setNametagAvailability('idle');
       }
     }, 500);
 
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [nametagInput, resolveNametag]);
 
   // Address selection state (multi-select, using composite keys to distinguish receive vs change)
@@ -495,12 +514,15 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
     try {
       const mnemonic = words.join(" ");
-      await importWallet(mnemonic);
+      const instance = await importWallet(mnemonic);
+
+      // Store in ref so handleMintNametag / handleSkipNametag can access it
+      // (setSphere is async — React state isn't updated until next render)
+      importedSphereRef.current = instance;
 
       // SDK recovers nametag from Nostr during import.
-      // If nametag was recovered, go straight to completion.
-      // Otherwise, go to nametag step.
-      if (sphere?.identity?.nametag) {
+      // Use the returned instance directly (not context `sphere` which is stale).
+      if (instance.identity?.nametag) {
         setStep("processing");
         setProcessingStatus("Setup complete!");
         setIsProcessingComplete(true);
@@ -513,7 +535,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     } finally {
       setIsBusy(false);
     }
-  }, [seedWords, importWallet, sphere]);
+  }, [seedWords, importWallet]);
 
   // Action: Create wallet WITH nametag (or register nametag on imported wallet)
   const handleMintNametag = useCallback(async () => {
