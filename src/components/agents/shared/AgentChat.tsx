@@ -1,17 +1,16 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, X, PanelLeftClose, Search, Trash2, Clock, MessageSquare, Activity, ChevronDown, Cloud, Check, Loader2, AlertCircle } from 'lucide-react';
+import { Plus, X, PanelLeftClose, Search, Trash2, Clock, MessageSquare, Activity, ChevronDown, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../../config/activities';
 import { useAgentChat, type ChatMessage } from '../../../hooks/useAgentChat';
-import { useWallet } from '../../wallet/L3/hooks/useWallet';
+import { useIdentity } from '../../../sdk';
 import { useUIState } from '../../../hooks/useUIState';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatHeader, ChatBubble, ChatInput, QuickActions } from './index';
 import { useChatHistory } from './useChatHistory';
 import { useUrlSession } from './useUrlSession';
 import { useMentionNavigation } from '../../../hooks/useMentionNavigation';
-import type { SyncState } from './useChatHistorySync';
 
 // Generic sidebar item (for custom agent-specific items like bets, purchases, orders)
 export interface SidebarItem {
@@ -139,8 +138,8 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
   const lastSavedMessagesRef = useRef<string>('');
   const isMountedRef = useRef(true);
 
-  // Get nametag from wallet for user identification
-  const { nametag } = useWallet();
+  // Get nametag from SDK identity
+  const { nametag } = useIdentity();
 
   // Chat history hook - bound to nametag so each user has their own history
   const {
@@ -153,8 +152,6 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     showDeleteSuccess,
     saveCurrentMessages,
     searchSessions,
-    syncState,
-    syncImmediately,
     justDeleted,
   } = useChatHistory({
     agentId: agent.id,
@@ -489,31 +486,14 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
       handleNewChat();
     }
 
-    // Wait for IPFS sync then show success
-    try {
-      await syncImmediately();
-      if (isMountedRef.current) {
-        showDeleteSuccess();
-      }
-    } catch (error) {
-      console.error('Failed to sync after deleting session:', error);
-    }
+    showDeleteSuccess();
   };
 
-  const handleClearAllHistory = async () => {
+  const handleClearAllHistory = () => {
     clearAllHistory();
     setShowClearAllConfirm(false);
     handleNewChat();
-
-    // Sync in background, show success after completion
-    try {
-      await syncImmediately();
-      if (isMountedRef.current) {
-        showDeleteSuccess();
-      }
-    } catch (error) {
-      console.error('Failed to sync after clearing history:', error);
-    }
+    showDeleteSuccess();
   };
 
   const getActionLabel = (cardData: TCardData): string => {
@@ -538,85 +518,8 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     return new Date(timestamp).toLocaleDateString();
   };
 
-  // Get sync display info based on detailed step from IPFS service
-  const getSyncDisplayInfo = (state: SyncState): { label: string; icon: ReactNode; color: string } => {
-    // Use detailed step for more granular status
-    switch (state.currentStep) {
-      case 'initializing':
-        return {
-          label: 'Initializing...',
-          icon: <Loader2 className="w-3 h-3 animate-spin" />,
-          color: 'text-blue-500'
-        };
-      case 'resolving-ipns':
-        return {
-          label: 'Looking up...',
-          icon: <Cloud className="w-3 h-3" />,
-          color: 'text-blue-500'
-        };
-      case 'fetching-content':
-        return {
-          label: 'Downloading...',
-          icon: <Cloud className="w-3 h-3 animate-pulse" />,
-          color: 'text-blue-500'
-        };
-      case 'importing-data':
-        return {
-          label: 'Importing...',
-          icon: <Loader2 className="w-3 h-3 animate-spin" />,
-          color: 'text-blue-500'
-        };
-      case 'building-data':
-        return {
-          label: 'Preparing...',
-          icon: <Loader2 className="w-3 h-3 animate-spin" />,
-          color: 'text-amber-500'
-        };
-      case 'uploading':
-        return {
-          label: 'Uploading...',
-          icon: <Cloud className="w-3 h-3 animate-pulse" />,
-          color: 'text-amber-500'
-        };
-      case 'publishing-ipns':
-        return {
-          label: 'Publishing...',
-          icon: <Cloud className="w-3 h-3 animate-pulse" />,
-          color: 'text-amber-500'
-        };
-      case 'complete':
-        return {
-          label: 'Synced',
-          icon: <Check className="w-3 h-3" />,
-          color: 'text-green-500'
-        };
-      case 'error':
-        return {
-          label: 'Sync error',
-          icon: <AlertCircle className="w-3 h-3" />,
-          color: 'text-red-500'
-        };
-      case 'idle':
-      default:
-        // Check TanStack Query states for additional context
-        if (state.isError) {
-          return {
-            label: 'Sync error',
-            icon: <AlertCircle className="w-3 h-3" />,
-            color: 'text-red-500'
-          };
-        }
-        return {
-          label: 'Synced',
-          icon: <Check className="w-3 h-3" />,
-          color: 'text-neutral-400'
-        };
-    }
-  };
-
-  // Render sync status indicator (always visible)
+  // Render status indicator (deletion success feedback)
   const renderSyncIndicator = () => {
-    // Show success message after deletion
     if (justDeleted) {
       return (
         <div className="flex items-center gap-1.5 text-xs text-green-500 px-2 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800/50">
@@ -625,15 +528,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
         </div>
       );
     }
-
-    const { label, icon, color } = getSyncDisplayInfo(syncState);
-
-    return (
-      <div className={`flex items-center gap-1.5 text-xs ${color} px-2 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800/50`}>
-        {icon}
-        <span>{syncState.stepProgress || label}</span>
-      </div>
-    );
+    return null;
   };
 
   // Render left sidebar with tabs (history and activity)
@@ -694,7 +589,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
                         initial={{ opacity: 0, y: -5 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -5 }}
-                        className="absolute top-full left-0 mt-1 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg overflow-hidden z-10 min-w-[160px]"
+                        className="absolute top-full left-0 mt-1 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg overflow-hidden z-10 min-w-40"
                       >
                         <button
                           onClick={() => {
@@ -889,7 +784,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-60 p-4"
               onClick={() => setShowDeleteConfirm(null)}
             >
               <motion.div
@@ -931,7 +826,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-60 p-4"
               onClick={() => setShowClearAllConfirm(false)}
             >
               <motion.div
@@ -1113,7 +1008,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
       {/* Additional custom content - render as portal with higher z-index when fullscreen */}
       {isFullscreen
         ? createPortal(
-            <div className="fixed inset-0 z-[100000] pointer-events-none [&>*]:pointer-events-auto">{additionalContent}</div>,
+            <div className="fixed inset-0 z-100000 pointer-events-none *:pointer-events-auto">{additionalContent}</div>,
             document.body
           )
         : additionalContent}

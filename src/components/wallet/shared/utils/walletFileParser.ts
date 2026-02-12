@@ -3,9 +3,16 @@
  * Provides helpers for parsing and validating wallet file formats
  */
 
-import { isJSONWalletFormat } from "../../L1/sdk";
-
 export type WalletFileType = "dat" | "json" | "txt" | "mnemonic" | "unknown";
+
+function isJSONWalletFormat(content: string): boolean {
+  try {
+    const json = JSON.parse(content);
+    return json.version === "1.0" && (json.masterPrivateKey || json.encrypted);
+  } catch {
+    return false;
+  }
+}
 
 export interface ParsedWalletInfo {
   fileType: WalletFileType;

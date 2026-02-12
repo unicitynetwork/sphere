@@ -27,6 +27,9 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       nodePolyfills({
         protocolImports: true,
+        globals: {
+          Buffer: 'build',
+        },
       }),
     ],
     base: env.BASE_PATH || '/',
@@ -55,16 +58,19 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
           rewrite: (path) => path.replace(/^\/dev-rpc/, ''),
+        },
+        '/coingecko': {
+          target: 'https://api.coingecko.com/api/v3',
+          changeOrigin: true,
+          secure: true,
+          rewrite: (path) => path.replace(/^\/coingecko/, ''),
         }
       }
     },
     // Pre-bundle heavy CJS dependencies to speed up dev server cold start
-    // Note: ESM packages like @unicitylabs/* and helia/* don't need pre-bundling
     optimizeDeps: {
       include: [
-        'buffer',
         'elliptic',
-        'bip39',
         'crypto-js',
         'framer-motion',
         'react',

@@ -4,8 +4,9 @@ import { motion } from 'framer-motion';
 import { X, Minus, Maximize2, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { ChatRepository } from '../data/ChatRepository';
-import type { ChatConversation, ChatMessage } from '../data/models';
-import { useServices } from '../../../contexts/useServices';
+import { ChatMessage, MessageStatus, MessageType } from '../data/models';
+import type { ChatConversation } from '../data/models';
+import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
 import { useMiniChatStore } from './miniChatStore';
 import { MiniChatInput } from './MiniChatInput';
 import { MarkdownContent } from '../../../utils/markdown';
@@ -26,7 +27,7 @@ interface MiniChatWindowProps {
 export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { nostrService } = useServices();
+  const { sphere } = useSphereContext();
   const { closeWindow, minimizeWindow } = useMiniChatStore();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -62,12 +63,27 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
 
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {
-      const message = await nostrService.sendDirectMessage(
+      if (!sphere) throw new Error('Wallet not initialized');
+      const dm = await sphere.communications.sendDM(
         conversation.participantPubkey,
         content,
-        conversation.participantNametag
       );
-      return !!message;
+
+      // Save sent message to ChatRepository for local persistence
+      const chatMessage = new ChatMessage({
+        id: dm.id,
+        conversationId: conversation.id,
+        content: dm.content,
+        timestamp: dm.timestamp,
+        isFromMe: true,
+        status: MessageStatus.SENT,
+        type: MessageType.TEXT,
+        senderPubkey: dm.senderPubkey,
+        senderNametag: dm.senderNametag ?? undefined,
+      });
+      chatRepository.saveMessage(chatMessage);
+
+      return true;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chat', 'messages', conversation.id] });

@@ -1,46 +1,27 @@
 /**
  * useOnboardingFlow - Manages onboarding flow state and navigation
+ * Simplified version using sphere-sdk
  */
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useWallet, KEYS } from "../../L3/hooks/useWallet";
-import { UnifiedKeyManager } from "../../shared/services/UnifiedKeyManager";
-import {
-  setImportInProgress,
-  clearImportInProgress,
-} from "../../L3/services/InventorySyncService";
-import { IdentityManager } from "../../L3/services/IdentityManager";
-import { fetchNametagFromIpns } from "../../L3/services/IpnsNametagFetcher";
-import { IpfsStorageService } from "../../L3/services/IpfsStorageService";
+import { Sphere } from "@unicitylabs/sphere-sdk";
+import type { ScanAddressProgress, LegacyFileType } from "@unicitylabs/sphere-sdk";
+import { useSphereContext } from "../../../../sdk/hooks/core/useSphere";
+import { SPHERE_KEYS } from "../../../../sdk/queryKeys";
 import { recordActivity } from "../../../../services/ActivityService";
-import {
-  checkNametagForAddress,
-  hasTokensForAddress,
-  setNametagForAddress,
-  getNametagForAddress,
-  getInvalidatedNametagsForAddress,
-} from "../../L3/services/InventorySyncService";
-import {
-  saveWalletToStorage,
-  loadWalletFromStorage,
-  getBalance,
-  type Wallet as L1Wallet,
-} from "../../L1/sdk";
+import { addrKey } from "../components/addrKey";
 import type { DerivedAddressInfo } from "../components/AddressSelectionScreen";
-import { STORAGE_KEYS } from "../../../../config/storageKeys";
+import type { NametagAvailability } from "../components/NametagScreen";
 
 export type OnboardingStep =
   | "start"
   | "restoreMethod"
   | "restore"
   | "importFile"
+  | "passwordPrompt"
   | "addressSelection"
   | "nametag"
   | "processing";
-
-// Session key (same as useWallet.ts)
-const SESSION_KEY = "user-pin-1234";
-const identityManager = IdentityManager.getInstance(SESSION_KEY);
 
 export interface UseOnboardingFlowReturn {
   // Step management
@@ -63,54 +44,62 @@ export interface UseOnboardingFlowReturn {
   scanCount: number;
   needsScanning: boolean;
   isDragging: boolean;
-  setSelectedFile: (file: File | null) => void;
-  setScanCount: (count: number) => void;
-  setNeedsScanning: (needs: boolean) => void;
-  setIsDragging: (dragging: boolean) => void;
+  scanProgress: ScanAddressProgress | null;
+  showScanModal: boolean;
 
   // Nametag state
   nametagInput: string;
   setNametagInput: (value: string) => void;
+  nametagAvailability: NametagAvailability;
   processingStatus: string;
   isProcessingComplete: boolean;
   handleCompleteOnboarding: () => Promise<void>;
 
-  // Address selection state
+  // Address selection state (multi-select)
   derivedAddresses: DerivedAddressInfo[];
-  selectedAddressPath: string | null;
-  showAddressDropdown: boolean;
-  isCheckingIpns: boolean;
-  ipnsFetchingNametag: boolean;
-  setSelectedAddressPath: (path: string | null) => void;
-  setShowAddressDropdown: (show: boolean) => void;
+  selectedKeys: Set<string>;
 
   // Actions
   handleCreateKeys: () => Promise<void>;
   handleRestoreWallet: () => Promise<void>;
   handleMintNametag: () => Promise<void>;
+  handleSkipNametag: () => Promise<void>;
   handleDeriveNewAddress: () => Promise<void>;
   handleContinueWithAddress: () => Promise<void>;
   goToAddressSelection: (skipIpnsCheck?: boolean) => Promise<void>;
 
-  // Wallet context
+  // Multi-select actions
+  handleToggleSelect: (key: string) => void;
+  handleSelectAll: () => void;
+  handleDeselectAll: () => void;
+
+  // File import actions
+  handleFileSelect: (file: File) => Promise<void>;
+  handleClearFile: () => void;
+  handleScanCountChange: (count: number) => void;
+  handleFileImport: () => Promise<void>;
+  handlePasswordSubmit: (password: string) => Promise<void>;
+  handleCancelScan: () => void;
+  handleDragOver: (e: React.DragEvent) => void;
+  handleDragLeave: (e: React.DragEvent) => void;
+  handleDrop: (e: React.DragEvent) => void;
+
+  // Wallet context (kept for component compatibility)
   identity: { address: string; privateKey: string } | null | undefined;
   nametag: string | null | undefined;
-  getUnifiedKeyManager: () => UnifiedKeyManager;
+  generatedMnemonic: string | null;
 }
 
 export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const queryClient = useQueryClient();
-  const {
-    identity,
-    nametag,
-    createWallet,
-    mintNametag,
-    getUnifiedKeyManager,
-    checkNametagAvailability,
-  } = useWallet();
+  const { sphere, createWallet, resolveNametag, importWallet, importFromFile, finalizeWallet, walletExists } = useSphereContext();
 
-  // Step management
-  const [step, setStep] = useState<OnboardingStep>("start");
+  // Step management — start at "nametag" only if wallet is fully finalized but missing nametag
+  // (e.g. page refresh after wallet creation without nametag).
+  // During import flow, walletExists is false (deferred to finalizeWallet) so we always start at "start".
+  const [step, setStep] = useState<OnboardingStep>(
+    sphere && walletExists && !sphere.identity?.nametag ? "nametag" : "start"
+  );
 
   // Common state
   const [isBusy, setIsBusy] = useState(false);
@@ -124,347 +113,372 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const [scanCount, setScanCount] = useState(10);
   const [needsScanning, setNeedsScanning] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
+  const [fileContent, setFileContent] = useState<string | Uint8Array | null>(null);
+  const [detectedFileType, setDetectedFileType] = useState<LegacyFileType>('unknown');
+  const [isEncrypted, setIsEncrypted] = useState(false);
+  const [scanProgress, setScanProgress] = useState<ScanAddressProgress | null>(null);
+  const [showScanModal, setShowScanModal] = useState(false);
+  const scanAbortRef = useRef<AbortController | null>(null);
+  // Holds the imported Sphere instance during the import flow.
+  // NOT set in SphereProvider context until finalizeWallet() to avoid premature re-renders.
+  const importedSphereRef = useRef<Sphere | null>(null);
 
   // Nametag state
   const [nametagInput, setNametagInput] = useState("");
+  const [nametagAvailability, setNametagAvailability] = useState<NametagAvailability>('idle');
   const [processingStatus, setProcessingStatus] = useState("");
   const [isProcessingComplete, setIsProcessingComplete] = useState(false);
 
-  // Address selection state
-  const [derivedAddresses, setDerivedAddresses] = useState<DerivedAddressInfo[]>([]);
-  const [selectedAddressPath, setSelectedAddressPath] = useState<string | null>(null);
-  const [showAddressDropdown, setShowAddressDropdown] = useState(false);
-  const [isCheckingIpns, setIsCheckingIpns] = useState(false);
-  const [firstFoundNametagPath, setFirstFoundNametagPath] = useState<string | null>(null);
-  const [autoDeriveDuringIpnsCheck, setAutoDeriveDuringIpnsCheck] = useState(true);
-  const [ipnsFetchingNametag, setIpnsFetchingNametag] = useState(false);
-  const [ipnsCheckCompleted, setIpnsCheckCompleted] = useState(false);
-
-  // Effect: Fetch nametag from IPNS when identity exists but nametag doesn't
-  // CRITICAL FIX: Added ipnsCheckCompleted to prevent infinite loop.
-  // Without this, when no nametag is found, setting ipnsFetchingNametag=false
-  // would trigger the effect again, causing an infinite loop of IPNS checks.
+  // Debounced nametag availability check
   useEffect(() => {
-    if (step !== "start" || !identity || nametag || ipnsFetchingNametag || ipnsCheckCompleted) return;
-
-    const fetchNametag = async () => {
-      setIpnsFetchingNametag(true);
-      console.log("🔍 [Complete Setup] Checking IPNS for existing nametag...");
-
-      try {
-        const result = await fetchNametagFromIpns(identity.privateKey);
-
-        if (result.nametag && result.nametagData) {
-          console.log(`🔍 [Complete Setup] Found nametag: ${result.nametag}`);
-
-          // CRITICAL: Check if this nametag was invalidated (e.g., owned by someone else on Nostr)
-          // If so, DO NOT restore it - user must create a new nametag
-          const invalidatedNametags = getInvalidatedNametagsForAddress(identity.address);
-          const isInvalidated = invalidatedNametags.some(inv => inv.name === result.nametag);
-
-          if (isInvalidated) {
-            console.warn(`🚫 [Complete Setup] Nametag "${result.nametag}" was invalidated - NOT restoring from IPNS`);
-            setIpnsFetchingNametag(false);
-            return;
-          }
-
-          try {
-            setNametagForAddress(identity.address, {
-              name: result.nametagData.name,
-              token: result.nametagData.token,
-              timestamp: result.nametagData.timestamp || Date.now(),
-              format: result.nametagData.format || "TXF",
-              version: "1.0",
-            });
-
-            console.log("✅ [Complete Setup] Nametag found and saved, proceeding to wallet...");
-            window.location.reload();
-          } catch (validationError) {
-            // Token data from IPFS is corrupted - skip saving, continue without nametag
-            console.warn(`⚠️ [Complete Setup] Nametag "${result.nametag}" has corrupted token data - skipping save:`,
-              validationError instanceof Error ? validationError.message : validationError
-            );
-            setIpnsFetchingNametag(false);
-            setIpnsCheckCompleted(true);
-          }
-        } else {
-          console.log("🔍 [Complete Setup] No nametag found in IPNS - user can create new nametag");
-          setIpnsFetchingNametag(false);
-          setIpnsCheckCompleted(true);
-        }
-      } catch (error) {
-        console.warn("🔍 [Complete Setup] IPNS fetch error:", error);
-        setIpnsFetchingNametag(false);
-        setIpnsCheckCompleted(true);
-      }
-    };
-
-    fetchNametag();
-  }, [step, identity, nametag, ipnsFetchingNametag, ipnsCheckCompleted]);
-
-  // Internal helper to derive next address
-  const deriveNextAddressInternal = useCallback(async () => {
-    const nextIndex = derivedAddresses.length;
-    const keyManager = getUnifiedKeyManager();
-    const basePath = keyManager.getBasePath();
-    const path = `${basePath}/0/${nextIndex}`;
-    const derived = keyManager.deriveAddressFromPath(path);
-    const l3Identity = await identityManager.deriveIdentityFromPath(path);
-    const existingNametag = checkNametagForAddress(l3Identity.address);
-    const hasLocalNametag = !!existingNametag;
-
-    setDerivedAddresses((prev) => [
-      ...prev,
-      {
-        index: nextIndex,
-        l1Address: derived.l1Address,
-        l3Address: l3Identity.address,
-        path: path,
-        hasNametag: hasLocalNametag,
-        existingNametag: existingNametag?.name,
-        privateKey: hasLocalNametag ? undefined : l3Identity.privateKey,
-        ipnsLoading: !hasLocalNametag,
-        balanceLoading: true, // Always check balance for gap limit
-      },
-    ]);
-  }, [derivedAddresses.length, getUnifiedKeyManager]);
-
-  // Effect: Fetch nametags from IPNS and L1 balance sequentially
-  useEffect(() => {
-    if (step !== "addressSelection" || derivedAddresses.length === 0 || isCheckingIpns) return;
-
-    // Find next address that needs checking (either IPNS or balance)
-    const nextToCheck = derivedAddresses.find(
-      (addr) => (addr.ipnsLoading && addr.privateKey) || addr.balanceLoading
-    );
-
-    if (!nextToCheck) {
-      console.log("🔍 All current addresses checked");
+    const cleanTag = nametagInput.trim().replace(/^@/, '');
+    if (!cleanTag || cleanTag.length < 2) {
+      setNametagAvailability('idle');
       return;
     }
 
-    const fetchAndMaybeDerive = async () => {
-      setIsCheckingIpns(true);
-      const addr = nextToCheck;
-      const chainLabel = addr.isChange ? "change" : "external";
-      console.log(`🔍 Checking ${chainLabel} #${addr.index} (path: ${addr.path})...`);
-
-      let foundNametag: string | undefined;
-      let nametagData: DerivedAddressInfo["nametagData"];
-      let ipnsName: string | undefined;
-      let ipnsError: string | undefined;
-      let l1Balance = 0;
-
-      // Fetch IPNS nametag if needed
-      if (addr.ipnsLoading && addr.privateKey) {
-        try {
-          const result = await fetchNametagFromIpns(addr.privateKey);
-          console.log(`🔍 IPNS result for ${chainLabel} (path: ${addr.path}): ${result.nametag || "none"} (via ${result.source})`);
-          foundNametag = result.nametag || undefined;
-          nametagData = result.nametagData;
-          ipnsName = result.ipnsName;
-          ipnsError = result.error;
-        } catch (error: unknown) {
-          const message = error instanceof Error ? error.message : "Unknown error";
-          console.warn(`🔍 IPNS fetch error for ${chainLabel} (path: ${addr.path}):`, message);
-          ipnsError = message;
-        }
-      } else if (addr.existingNametag) {
-        foundNametag = addr.existingNametag;
+    setNametagAvailability('checking');
+    const timer = setTimeout(async () => {
+      try {
+        const existing = await resolveNametag(cleanTag);
+        setNametagAvailability(existing ? 'taken' : 'available');
+      } catch {
+        setNametagAvailability('idle');
       }
+    }, 500);
 
-      // Fetch L1 balance
-      if (addr.balanceLoading) {
-        try {
-          l1Balance = await getBalance(addr.l1Address);
-          console.log(`💰 L1 balance for ${chainLabel} #${addr.index}: ${l1Balance} ALPHA`);
-        } catch (error) {
-          console.warn(`💰 Balance fetch error for ${chainLabel} #${addr.index}:`, error);
-          l1Balance = 0;
-        }
-      } else {
-        l1Balance = addr.l1Balance ?? 0;
-      }
+    return () => clearTimeout(timer);
+  }, [nametagInput, resolveNametag]);
 
-      // Update address with results
-      setDerivedAddresses((prev) =>
-        prev.map((a) =>
-          a.path === addr.path
-            ? {
-                ...a,
-                ipnsName,
-                hasNametag: !!foundNametag,
-                existingNametag: foundNametag,
-                nametagData,
-                ipnsLoading: false,
-                ipnsError,
-                privateKey: undefined,
-                l1Balance,
-                balanceLoading: false,
-              }
-            : a
-        )
-      );
+  // Address selection state (multi-select, using composite keys to distinguish receive vs change)
+  const [derivedAddresses, setDerivedAddresses] = useState<DerivedAddressInfo[]>([]);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
 
-      // Auto-select first found nametag
-      if (foundNametag && !firstFoundNametagPath) {
-        console.log(`✅ Found FIRST nametag "${foundNametag}" at ${chainLabel} #${addr.index}, auto-selecting`);
-        setFirstFoundNametagPath(addr.path);
-        setSelectedAddressPath(addr.path);
-      } else if (foundNametag) {
-        console.log(`✅ Found another nametag "${foundNametag}" at ${chainLabel} #${addr.index}`);
-      }
-
-      setIsCheckingIpns(false);
-
-      // Gap limit logic: continue deriving if address has nametag OR L1 balance OR L3 tokens
-      // Stop deriving if address has NO activity at all (gap detected)
-      const hasL3Tokens = hasTokensForAddress(addr.l3Address);
-      const hasActivity = !!foundNametag || l1Balance > 0 || hasL3Tokens;
-
-      if (autoDeriveDuringIpnsCheck && hasActivity && derivedAddresses.length < 20) {
-        console.log(`🔍 Address has activity (nametag: ${!!foundNametag}, L1: ${l1Balance}, L3: ${hasL3Tokens}), deriving next (#${derivedAddresses.length})...`);
-        await deriveNextAddressInternal();
-      } else if (!hasActivity) {
-        console.log(`🔍 Gap detected at ${chainLabel} #${addr.index} (no nametag, no L1 balance, no L3 tokens). Stopping auto-derive.`);
-      }
-    };
-
-    fetchAndMaybeDerive();
-  }, [step, derivedAddresses, isCheckingIpns, firstFoundNametagPath, autoDeriveDuringIpnsCheck, deriveNextAddressInternal]);
-
-  // Helper: derive addresses and check for existing nametags
-  const deriveAndCheckAddresses = useCallback(
-    async (count: number): Promise<DerivedAddressInfo[]> => {
-      const keyManager = getUnifiedKeyManager();
-      const basePath = keyManager.getBasePath();
-      const results: DerivedAddressInfo[] = [];
-
-      for (let i = 0; i < count; i++) {
-        const path = `${basePath}/0/${i}`;
-        const derived = keyManager.deriveAddressFromPath(path);
-        const l3Identity = await identityManager.deriveIdentityFromPath(path);
-        const existingNametag = checkNametagForAddress(l3Identity.address);
-        const hasLocalNametag = !!existingNametag;
-
-        results.push({
-          index: i,
-          l1Address: derived.l1Address,
-          l3Address: l3Identity.address,
-          path: path,
-          hasNametag: hasLocalNametag,
-          existingNametag: existingNametag?.name,
-          privateKey: hasLocalNametag ? undefined : l3Identity.privateKey,
-          ipnsLoading: !hasLocalNametag,
-          balanceLoading: true, // Always check balance for gap limit
-        });
-      }
-
-      return results;
-    },
-    [getUnifiedKeyManager]
-  );
+  // Generated mnemonic (from create flow)
+  const [generatedMnemonic, setGeneratedMnemonic] = useState<string | null>(null);
 
   // Go back to start screen
   const goToStart = useCallback(() => {
     setStep("start");
     setSeedWords(Array(12).fill(""));
     setSelectedFile(null);
+    setFileContent(null);
+    setDetectedFileType('unknown');
+    setIsEncrypted(false);
     setScanCount(10);
     setNeedsScanning(true);
     setIsDragging(false);
+    setScanProgress(null);
+    setShowScanModal(false);
+    scanAbortRef.current?.abort();
+    scanAbortRef.current = null;
+    importedSphereRef.current = null;
     setError(null);
   }, []);
 
-  // Helper: Verify nametag is available via IPNS with retry
-  const verifyNametagInIpnsWithRetry = async (
-    privateKey: string,
-    expectedNametag: string,
-    timeoutMs: number = 30000
-  ): Promise<boolean> => {
-    const startTime = Date.now();
-    const retryInterval = 3000;
+  // ---- File import handlers ----
 
-    while (Date.now() - startTime < timeoutMs) {
-      try {
-        console.log(`🔄 IPNS verification attempt for "${expectedNametag}"...`);
-        const result = await fetchNametagFromIpns(privateKey);
-        if (result.nametag === expectedNametag) {
-          return true;
-        }
-        console.log(`🔄 IPNS returned "${result.nametag || "null"}", expected "${expectedNametag}"`);
-      } catch (error) {
-        console.log("🔄 IPNS verification attempt failed, retrying...", error);
-      }
+  const handleFileSelect = useCallback(async (file: File) => {
+    setSelectedFile(file);
+    setError(null);
 
-      const remainingTime = timeoutMs - (Date.now() - startTime);
-      if (remainingTime > retryInterval) {
-        await new Promise((resolve) => setTimeout(resolve, retryInterval));
-      }
+    // Read file content
+    let content: string | Uint8Array;
+    if (file.name.endsWith('.dat')) {
+      const buffer = await file.arrayBuffer();
+      content = new Uint8Array(buffer);
+    } else {
+      content = await file.text();
     }
+    setFileContent(content);
 
-    return false;
-  };
+    // Detect file type and encryption
+    const fileType = Sphere.detectLegacyFileType(file.name, content);
+    setDetectedFileType(fileType);
+    const encrypted = Sphere.isLegacyFileEncrypted(file.name, content);
+    setIsEncrypted(encrypted);
 
-  // Action: Create new wallet keys
-  const handleCreateKeys = useCallback(async () => {
-    if (isBusy) return;
+    // Determine if scanning is needed based on file type and content
+    if (fileType === 'dat' || fileType === 'txt') {
+      setNeedsScanning(true);
+    } else if (fileType === 'json' && typeof content === 'string') {
+      // JSON with BIP32 keys and no mnemonic needs scanning
+      try {
+        const json = JSON.parse(content);
+        const hasBip32 = !!(json.wallet?.chainCode || json.chainCode || json.derivationMode === 'bip32');
+        const hasMnemonic = !!json.mnemonic;
+        setNeedsScanning(hasBip32 && !hasMnemonic);
+      } catch {
+        setNeedsScanning(false);
+      }
+    } else {
+      setNeedsScanning(false);
+    }
+  }, []);
 
-    // Mark onboarding flag BEFORE clearAll - it will be preserved
-    localStorage.setItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS, 'true');
-    console.log('🎯 Onboarding flag set - starting wallet creation');
+  const handleClearFile = useCallback(() => {
+    setSelectedFile(null);
+    setFileContent(null);
+    setDetectedFileType('unknown');
+    setIsEncrypted(false);
+    setNeedsScanning(true);
+    setError(null);
+  }, []);
+
+  const handleScanCountChange = useCallback((count: number) => {
+    setScanCount(count);
+  }, []);
+
+  // Route after successful import: open scan modal or go to nametag.
+  // Uses detectedFileType (from handleFileSelect) and wallet info to decide.
+  // Always stores the sphere in importedSphereRef — it is NOT in context yet.
+  const routeAfterImport = useCallback((importedSphere: Sphere) => {
+    importedSphereRef.current = importedSphere;
+
+    const walletInfo = importedSphere.getWalletInfo();
+    const isMnemonic = detectedFileType === 'mnemonic' || walletInfo.hasMnemonic;
+
+    // Scan BIP32 wallets that weren't imported from mnemonic
+    const shouldScan = !isMnemonic && (
+      detectedFileType === 'dat' ||
+      detectedFileType === 'txt' ||
+      (detectedFileType === 'json' && walletInfo.hasChainCode)
+    );
+
+    if (shouldScan) {
+      // BIP32 wallet — open scan modal. useEffect below will start scanning.
+      setScanProgress(null);
+      setShowScanModal(true);
+    } else if (importedSphere.identity?.nametag) {
+      setStep("processing");
+      setProcessingStatus("Setup complete!");
+      setIsProcessingComplete(true);
+    } else {
+      setStep("nametag");
+    }
+  }, [detectedFileType]);
+
+  // Effect: run blockchain scan when scan modal opens.
+  // Decoupled from import callback to avoid React re-render interference.
+  // Uses a `cancelled` flag so that StrictMode's cleanup-then-remount cycle
+  // doesn't cause the first invocation's catch to clobber state.
+  useEffect(() => {
+    if (!showScanModal || !importedSphereRef.current) return;
+
+    let cancelled = false;
+    const importedSphere = importedSphereRef.current;
+    const controller = new AbortController();
+    scanAbortRef.current = controller;
+
+    (async () => {
+      try {
+        const result = await importedSphere.scanAddresses({
+          maxAddresses: scanCount,
+          gapLimit: 20,
+          includeChange: true,
+          signal: controller.signal,
+          onProgress: (progress) => {
+            if (!cancelled) setScanProgress(progress);
+          },
+        });
+
+        if (cancelled) return;
+
+        // Convert scan results to DerivedAddressInfo (with nametag data)
+        const addresses: DerivedAddressInfo[] = result.addresses.map((a) => ({
+          index: a.index,
+          l1Address: a.address,
+          l3Address: '',
+          path: a.path,
+          hasNametag: !!a.nametag,
+          existingNametag: a.nametag,
+          isChange: a.isChange,
+          l1Balance: a.balance,
+          balanceLoading: false,
+          ipnsLoading: false,
+        }));
+
+        // Always include address 0 if not found in scan
+        if (!addresses.some((a) => a.index === 0 && !a.isChange)) {
+          const addr0 = importedSphere.deriveAddress(0, false);
+          addresses.unshift({
+            index: 0,
+            l1Address: addr0.address,
+            l3Address: '',
+            path: addr0.path,
+            hasNametag: false,
+            isChange: false,
+            l1Balance: 0,
+            balanceLoading: false,
+            ipnsLoading: false,
+          });
+        }
+
+        // Initialize multi-select: all non-change addresses selected
+        const initial = new Set(
+          addresses.filter(a => !a.isChange).map(a => addrKey(a.index, false))
+        );
+        setSelectedKeys(initial);
+
+        setShowScanModal(false);
+        setDerivedAddresses(addresses);
+        setStep("addressSelection");
+      } catch (e) {
+        if (cancelled) return;
+
+        setShowScanModal(false);
+        if (controller.signal.aborted) {
+          // User cancelled — go to address selection with default address
+          const addr0 = importedSphere.deriveAddress(0, false);
+          const fallback: DerivedAddressInfo[] = [{
+            index: 0,
+            l1Address: addr0.address,
+            l3Address: '',
+            path: addr0.path,
+            hasNametag: false,
+            isChange: false,
+            l1Balance: 0,
+            balanceLoading: false,
+            ipnsLoading: false,
+          }];
+          setDerivedAddresses(fallback);
+          setSelectedKeys(new Set(["0"]));
+          setStep("addressSelection");
+        } else {
+          setError(e instanceof Error ? e.message : "Scan failed");
+          setStep("importFile");
+        }
+      } finally {
+        if (!cancelled) {
+          scanAbortRef.current = null;
+          // Do NOT clear importedSphereRef here — post-scan handlers
+          // (handleContinueWithAddress, handleDeriveNewAddress, etc.) still need it.
+          // It's cleared in handleCompleteOnboarding / goToStart.
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showScanModal]);
+
+  const handleFileImport = useCallback(async () => {
+    if (!fileContent || !selectedFile) return;
+
+    // Encrypted file → password prompt
+    if (isEncrypted) {
+      setStep("passwordPrompt");
+      return;
+    }
 
     setIsBusy(true);
     setError(null);
+
     try {
-      // Mark that we're in an active wallet creation flow
-      // This allows wallet creation even though credentials will exist after generateNewIdentity()
-      // (because generateNewIdentity saves mnemonic BEFORE wallet creation)
-      setImportInProgress();
+      const result = await importFromFile({
+        fileContent,
+        fileName: selectedFile.name,
+      });
 
-      // Pass false to preserve onboarding flags during cleanup
-      UnifiedKeyManager.clearAll(false);
-      await createWallet();
+      if (!result.success) {
+        if (result.needsPassword) {
+          setIsEncrypted(true);
+          setStep("passwordPrompt");
+          return;
+        }
+        setError(result.error || "Import failed");
+        return;
+      }
 
-      // Save L1 wallet to storage (same as import flow)
-      const keyManager = getUnifiedKeyManager();
-      const basePath = keyManager.getBasePath();
-      const defaultPath = `${basePath}/0/0`;
-      const derived = keyManager.deriveAddressFromPath(defaultPath);
+      if (result.mnemonic) {
+        setGeneratedMnemonic(result.mnemonic);
+      }
 
-      const l1Wallet: L1Wallet = {
-        masterPrivateKey: keyManager.getMasterKeyHex() || "",
-        chainCode: keyManager.getChainCodeHex() || undefined,
-        addresses: [{
-          index: 0,
-          address: derived.l1Address,
-          privateKey: derived.privateKey,
-          publicKey: derived.publicKey,
-          path: defaultPath,
-          isChange: false,
-          createdAt: new Date().toISOString(),
-        }],
-        isBIP32: keyManager.getDerivationMode() === "bip32",
-      };
-      saveWalletToStorage("main", l1Wallet);
-      console.log("💾 Saved L1 wallet for new wallet");
+      recordActivity("wallet_created", { isPublic: false });
 
-      setStep("nametag");
-
-      // Clear import flag - wallet creation complete
-      clearImportInProgress();
+      if (result.sphere) {
+        routeAfterImport(result.sphere);
+      } else {
+        setStep("nametag");
+      }
     } catch (e) {
-      // Clear import flag on error
-      clearImportInProgress();
-      // Clear onboarding flag on error
-      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
-      console.log('🎯 Onboarding flag cleared after wallet creation error');
-      const message = e instanceof Error ? e.message : "Failed to generate keys";
-      setError(message);
+      setError(e instanceof Error ? e.message : "Import failed");
     } finally {
       setIsBusy(false);
     }
-  }, [isBusy, createWallet, getUnifiedKeyManager]);
+  }, [fileContent, selectedFile, isEncrypted, importFromFile, routeAfterImport]);
+
+  const handlePasswordSubmit = useCallback(async (password: string) => {
+    if (!fileContent || !selectedFile) return;
+
+    setIsBusy(true);
+    setError(null);
+
+    try {
+      const result = await importFromFile({
+        fileContent,
+        fileName: selectedFile.name,
+        password,
+      });
+
+      if (!result.success) {
+        if (result.needsPassword) {
+          setError("Incorrect password. Please try again.");
+          return;
+        }
+        setError(result.error || "Decryption failed");
+        return;
+      }
+
+      if (result.mnemonic) {
+        setGeneratedMnemonic(result.mnemonic);
+      }
+
+      recordActivity("wallet_created", { isPublic: false });
+
+      if (result.sphere) {
+        routeAfterImport(result.sphere);
+      } else {
+        setStep("nametag");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Decryption failed");
+    } finally {
+      setIsBusy(false);
+    }
+  }, [fileContent, selectedFile, importFromFile, routeAfterImport]);
+
+  const handleCancelScan = useCallback(() => {
+    scanAbortRef.current?.abort();
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      await handleFileSelect(file);
+    }
+  }, [handleFileSelect]);
+
+  // Action: Go to nametag step (wallet is NOT created yet)
+  const handleCreateKeys = useCallback(async () => {
+    setError(null);
+    setStep("nametag");
+  }, []);
 
   // Action: Restore wallet from mnemonic
   const handleRestoreWallet = useCallback(async () => {
@@ -476,203 +490,147 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       return;
     }
 
-    // Mark onboarding flag BEFORE clearAll - it will be preserved
-    localStorage.setItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS, 'true');
-    console.log('🎯 Onboarding flag set for wallet restore');
-
     setIsBusy(true);
     setError(null);
 
     try {
-      // Mark that we're in an active import flow
-      // This allows wallet creation even though credentials exist
-      setImportInProgress();
-
-      // Pass false to preserve onboarding flags during cleanup
-      UnifiedKeyManager.clearAll(false);
       const mnemonic = words.join(" ");
-      const keyManager = getUnifiedKeyManager();
-      await keyManager.createFromMnemonic(mnemonic);
+      await importWallet(mnemonic);
 
-      // Go to address selection
-      await goToAddressSelection();
+      // SDK recovers nametag from Nostr during import.
+      // If nametag was recovered, go straight to completion.
+      // Otherwise, go to nametag step.
+      if (sphere?.identity?.nametag) {
+        setStep("processing");
+        setProcessingStatus("Setup complete!");
+        setIsProcessingComplete(true);
+      } else {
+        setStep("nametag");
+      }
     } catch (e) {
-      // Clear import flag on error
-      clearImportInProgress();
-      // Clear onboarding flag on error
-      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
-      console.log('🎯 Onboarding flag cleared after restore error');
       const message = e instanceof Error ? e.message : "Invalid recovery phrase";
       setError(message);
-      setIsBusy(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seedWords, getUnifiedKeyManager]);
-
-  // Action: Mint nametag
-  const handleMintNametag = useCallback(async () => {
-    if (!nametagInput.trim()) return;
-
-    // Check if onboarding is in progress
-    const onboardingFlag = localStorage.getItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
-    if (onboardingFlag !== 'true') {
-      localStorage.setItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS, 'true');
-      console.log('🎯 Onboarding flag set for nametag minting');
-    }
-
-    // Add beforeunload handler to warn user about closing during sync
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = 'Your wallet is being set up. Are you sure you want to leave?';
-      return e.returnValue;
-    };
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-
-    setIsBusy(true);
-    setError(null);
-    setIsProcessingComplete(false);
-
-    try {
-      const cleanTag = nametagInput.trim().replace("@", "");
-
-      const isNametagAvailable = await checkNametagAvailability(cleanTag);
-      if (!isNametagAvailable) {
-        setError(`${cleanTag} already exists.`);
-        setIsBusy(false);
-        window.removeEventListener("beforeunload", handleBeforeUnload);
-        return;
-      }
-
-      setStep("processing");
-
-      // Step 1: Mint nametag
-      setProcessingStatus("Minting Unicity ID on blockchain...");
-      await mintNametag(cleanTag);
-      console.log("✅ Nametag minted and saved to localStorage");
-
-      // Step 2: Sync to IPFS
-      setProcessingStatus("Syncing to IPFS storage...");
-      try {
-        const ipfsService = IpfsStorageService.getInstance(identityManager);
-        await ipfsService.syncNow();
-        console.log("✅ IPFS sync completed");
-      } catch (syncError) {
-        console.warn("⚠️ IPFS sync failed, continuing anyway:", syncError);
-      }
-
-      // Step 3: Verify in IPNS
-      setProcessingStatus("Verifying IPFS availability...");
-      const currentIdentity = await identityManager.getCurrentIdentity();
-      const verified = currentIdentity
-        ? await verifyNametagInIpnsWithRetry(currentIdentity.privateKey, cleanTag, 30000)
-        : false;
-
-      if (!verified) {
-        console.warn("⚠️ IPNS verification timed out after 30s, proceeding anyway");
-      } else {
-        console.log(`✅ Verified nametag "${cleanTag}" available via IPNS`);
-      }
-
-      // Step 4: Record wallet creation activity
-      console.log("🏷️ Step 4: Recording wallet creation activity...");
-      recordActivity("wallet_created", { isPublic: false });
-
-      // Remove beforeunload handler - sync is complete
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-
-      // Step 5: Mark processing as complete and wait for user to click "Let's Go"
-      console.log("🏷️ Step 5: All steps completed, waiting for user confirmation...");
-      setProcessingStatus("Setup complete!");
-      setIsProcessingComplete(true);
-
-      // Mark onboarding as complete (but not yet finished - user needs to click Let's Go)
-      localStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETE, 'true');
-
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Minting failed";
-      console.error("❌ Nametag minting failed:", e);
-      setError(message);
-      setStep("nametag");
-
-      // Remove beforeunload handler on error
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-
-      // Clear onboarding flags on error
-      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
-      localStorage.removeItem(STORAGE_KEYS.ONBOARDING_COMPLETE);
     } finally {
       setIsBusy(false);
     }
-  }, [nametagInput, checkNametagAvailability, mintNametag]);
+  }, [seedWords, importWallet, sphere]);
+
+  // Action: Create wallet WITH nametag (or register nametag on imported wallet)
+  const handleMintNametag = useCallback(async () => {
+    if (!nametagInput.trim()) return;
+
+    setIsBusy(true);
+    setError(null);
+
+    const cleanTag = nametagInput.trim().replace("@", "");
+
+    setStep("processing");
+    setProcessingStatus("Checking Unicity ID availability...");
+
+    try {
+      // Step 1: Check nametag availability via Nostr (no wallet needed)
+      const existing = await resolveNametag(cleanTag);
+      if (existing) {
+        setError(`@${cleanTag} is already taken`);
+        setStep("nametag");
+        setIsBusy(false);
+        return;
+      }
+
+      const activeSphere = importedSphereRef.current ?? sphere;
+      if (activeSphere) {
+        // Import flow — wallet already exists (in ref), just register nametag
+        setProcessingStatus("Registering Unicity ID...");
+        await activeSphere.registerNametag(cleanTag);
+        recordActivity("wallet_created", { isPublic: false });
+        setProcessingStatus("Setup complete!");
+        setIsProcessingComplete(true);
+      } else {
+        // Create flow — create wallet with nametag
+        setProcessingStatus("Creating wallet and registering Unicity ID...");
+        const mnemonic = await createWallet({ nametag: cleanTag });
+        setGeneratedMnemonic(mnemonic);
+        recordActivity("wallet_created", { isPublic: false });
+        // WalletPanel will switch from onboarding to wallet UI automatically
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to register Unicity ID";
+      console.error("Wallet creation with nametag failed:", e);
+      setError(message);
+      setStep("nametag");
+    } finally {
+      setIsBusy(false);
+    }
+  }, [nametagInput, resolveNametag, createWallet, sphere]);
+
+  // Action: Skip nametag — create wallet without nametag (or finalize imported wallet)
+  const handleSkipNametag = useCallback(async () => {
+    setIsBusy(true);
+    setError(null);
+
+    try {
+      setStep("processing");
+
+      if (importedSphereRef.current ?? sphere) {
+        // Import flow — wallet already exists (in ref), just finalize
+        setProcessingStatus("Setup complete!");
+        setIsProcessingComplete(true);
+        recordActivity("wallet_created", { isPublic: false });
+      } else {
+        // Create flow — create wallet without nametag
+        setProcessingStatus("Creating wallet...");
+        const mnemonic = await createWallet();
+        setGeneratedMnemonic(mnemonic);
+        recordActivity("wallet_created", { isPublic: false });
+        // WalletPanel will switch from onboarding to wallet UI automatically
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to create wallet";
+      console.error("Wallet creation failed:", e);
+      setError(message);
+      setStep("nametag");
+    } finally {
+      setIsBusy(false);
+    }
+  }, [createWallet, sphere]);
 
   // Action: Complete onboarding (called when user clicks "Let's Go")
   const handleCompleteOnboarding = useCallback(async () => {
-    console.log("🎉 User clicked Let's Go - completing onboarding...");
+    // Mark wallet as existing so WalletPanel switches from onboarding to wallet UI.
+    // For create flows walletExists is already true — this is a no-op for sphere.
+    // For import flows this sets the sphere in context + walletExists = true.
+    finalizeWallet(importedSphereRef.current ?? undefined);
+    importedSphereRef.current = null;
 
-    // Pre-populate TanStack Query cache with identity and nametag data
-    // This prevents the delay when WalletPanel loads after onboarding
-    try {
-      const currentIdentity = await identityManager.getCurrentIdentity();
-      if (currentIdentity) {
-        // Set identity in cache (query key: ["wallet", "identity"])
-        queryClient.setQueryData(KEYS.IDENTITY, currentIdentity);
-        console.log("📦 Pre-populated identity cache");
+    // Invalidate all queries to refresh with new identity
+    queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.all });
+    queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.payments.all });
 
-        // Get nametag from localStorage and set in cache
-        const nametagData = getNametagForAddress(currentIdentity.address);
-        if (nametagData?.name) {
-          // Query key: ["wallet", "nametag", address]
-          queryClient.setQueryData([...KEYS.NAMETAG, currentIdentity.address], nametagData.name);
-          console.log(`📦 Pre-populated nametag cache: @${nametagData.name}`);
-        }
-      }
-    } catch (err) {
-      console.warn("⚠️ Failed to pre-populate query cache:", err);
-      // Continue anyway - queries will fetch data normally
-    }
-
-    // Mark user as authenticated (permanent flag - survives logout with fullCleanup=false)
-    localStorage.setItem(STORAGE_KEYS.AUTHENTICATED, 'true');
-
-    // Clear onboarding in-progress flag
-    localStorage.removeItem(STORAGE_KEYS.ONBOARDING_IN_PROGRESS);
-
-    // Signal wallet creation - this triggers Nostr service initialization
+    // Signal wallet creation for legacy listeners
     window.dispatchEvent(new Event("wallet-loaded"));
-    // Trigger UI updates
     window.dispatchEvent(new Event("wallet-updated"));
 
-    // Reset to start - this will trigger navigation away from onboarding
-    // because identity and nametag now exist
     setStep("start");
-  }, [queryClient]);
+  }, [queryClient, finalizeWallet]);
 
-  // Action: Derive new address
+  // Action: Derive new address (for address selection screen)
   const handleDeriveNewAddress = useCallback(async () => {
+    const activeSphere = importedSphereRef.current ?? sphere;
+    if (!activeSphere) return;
     setIsBusy(true);
     try {
       const nextIndex = derivedAddresses.length;
-      const keyManager = getUnifiedKeyManager();
-      const basePath = keyManager.getBasePath();
-      const path = `${basePath}/0/${nextIndex}`;
-      const derived = keyManager.deriveAddressFromPath(path);
-      const l3Identity = await identityManager.deriveIdentityFromPath(path);
-      const existingNametag = checkNametagForAddress(l3Identity.address);
-      const hasLocalNametag = !!existingNametag;
-
-      setDerivedAddresses([
-        ...derivedAddresses,
+      const addr = activeSphere.deriveAddress(nextIndex);
+      setDerivedAddresses((prev) => [
+        ...prev,
         {
           index: nextIndex,
-          l1Address: derived.l1Address,
-          l3Address: l3Identity.address,
-          path: path,
-          hasNametag: hasLocalNametag,
-          existingNametag: existingNametag?.name,
-          privateKey: hasLocalNametag ? undefined : l3Identity.privateKey,
-          ipnsLoading: !hasLocalNametag,
-          balanceLoading: true, // Check balance for gap limit
+          l1Address: addr.address,
+          l3Address: '', // Will be populated after switching
+          path: addr.path,
+          hasNametag: false,
+          ipnsLoading: false,
+          balanceLoading: false,
         },
       ]);
     } catch (e) {
@@ -681,80 +639,31 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     } finally {
       setIsBusy(false);
     }
-  }, [derivedAddresses, getUnifiedKeyManager]);
+  }, [derivedAddresses, sphere]);
 
   // Action: Go to address selection
   const goToAddressSelection = useCallback(
-    async (skipIpnsCheck: boolean = false) => {
+    async () => {
+      const activeSphere = importedSphereRef.current ?? sphere;
+      if (!activeSphere) return;
       setIsBusy(true);
       setError(null);
       try {
-        const l1Wallet = loadWalletFromStorage("main");
+        const addresses = activeSphere.deriveAddresses(3);
+        const results: DerivedAddressInfo[] = addresses.map((addr, i) => ({
+          index: i,
+          l1Address: addr.address,
+          l3Address: '',
+          path: addr.path,
+          hasNametag: false,
+          ipnsLoading: false,
+          balanceLoading: false,
+        }));
 
-        if (l1Wallet && l1Wallet.addresses && l1Wallet.addresses.length > 0) {
-          const allAddresses = l1Wallet.addresses;
-          const changeCount = allAddresses.filter((addr) => addr.isChange).length;
-          console.log(`📋 Loading ${allAddresses.length} addresses from L1 wallet storage (${allAddresses.length - changeCount} external, ${changeCount} change)`);
-          const results: DerivedAddressInfo[] = [];
-
-          const keyManager = getUnifiedKeyManager();
-          console.log(`🔍 [goToAddressSelection] UnifiedKeyManager state:`, {
-            basePath: keyManager.getBasePath(),
-            isInitialized: keyManager.isInitialized(),
-            masterKeyPrefix: keyManager.getMasterKeyHex()?.slice(0, 16) || "unknown",
-          });
-
-          for (const addr of allAddresses) {
-            if (!addr.path) {
-              console.warn(`⚠️ Address ${addr.address.slice(0, 20)}... has no path, skipping`);
-              continue;
-            }
-
-            const l3Identity = await identityManager.deriveIdentityFromPath(addr.path);
-            const existingNametag = checkNametagForAddress(l3Identity.address);
-
-            const isChange = addr.isChange ?? false;
-            const chainLabel = isChange ? "change" : "external";
-            console.log(`🔍 Address (path: ${addr.path}, ${chainLabel}): L1=${addr.address.slice(0, 20)}... L3=${l3Identity.address.slice(0, 20)}... hasNametag=${!!existingNametag}`);
-
-            const enableIpnsFetching = !existingNametag;
-
-            results.push({
-              index: addr.index,
-              l1Address: addr.address,
-              l3Address: l3Identity.address,
-              path: addr.path,
-              hasNametag: !!existingNametag,
-              existingNametag: existingNametag?.name,
-              isChange,
-              fromL1Wallet: true,
-              privateKey: enableIpnsFetching ? l3Identity.privateKey : undefined,
-              ipnsLoading: enableIpnsFetching,
-              balanceLoading: true, // Check balance for gap limit
-            });
-          }
-
-          // Sort: external first, then change
-          results.sort((a, b) => {
-            const aIsChange = a.isChange ? 1 : 0;
-            const bIsChange = b.isChange ? 1 : 0;
-            if (aIsChange !== bIsChange) return aIsChange - bIsChange;
-            return a.index - b.index;
-          });
-
-          setDerivedAddresses(results);
-          setSelectedAddressPath(results[0]?.path || null);
-        } else {
-          console.log("📋 No L1 wallet addresses found, deriving from UnifiedKeyManager");
-          const addresses = await deriveAndCheckAddresses(1);
-          setDerivedAddresses(addresses);
-          setSelectedAddressPath(addresses[0]?.path || null);
-        }
-
-        setIsCheckingIpns(false);
-        setFirstFoundNametagPath(null);
-        setAutoDeriveDuringIpnsCheck(!skipIpnsCheck);
-
+        setDerivedAddresses(results);
+        setSelectedKeys(new Set(
+          results.filter(a => !a.isChange).map(a => addrKey(a.index, false))
+        ));
         setStep("addressSelection");
       } catch (e) {
         const message = e instanceof Error ? e.message : "Failed to derive addresses";
@@ -763,90 +672,41 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         setIsBusy(false);
       }
     },
-    [getUnifiedKeyManager, deriveAndCheckAddresses]
+    [sphere]
   );
 
-  // Action: Continue with selected address
+  // Action: Continue with selected addresses (multi-select)
   const handleContinueWithAddress = useCallback(async () => {
+    const activeSphere = importedSphereRef.current ?? sphere;
+    if (!activeSphere || selectedKeys.size === 0) return;
     setIsBusy(true);
     setError(null);
 
     try {
-      const visibleAddresses = derivedAddresses.filter((a) => !a.ipnsLoading || a.fromL1Wallet);
-      const selectedAddress = visibleAddresses.find((a) => a.path === selectedAddressPath) || visibleAddresses[0];
+      // Bulk track non-change addresses with visibility (SDK only tracks receive addresses)
+      const entries = derivedAddresses
+        .filter(a => !a.isChange)
+        .map(a => ({
+          index: a.index,
+          hidden: !selectedKeys.has(addrKey(a.index, false)),
+          nametag: a.existingNametag,
+        }));
+      await activeSphere.trackScannedAddresses(entries);
 
-      if (!selectedAddress) {
-        throw new Error("No address selected");
+      // Auto-select active address: first selected with nametag, or first selected
+      const selectedAddrs = derivedAddresses.filter(
+        a => !a.isChange && selectedKeys.has(addrKey(a.index, false))
+      );
+      const activeAddr = selectedAddrs.find(a => a.hasNametag) ?? selectedAddrs[0];
+      if (activeAddr) {
+        await activeSphere.switchToAddress(activeAddr.index);
       }
 
-      identityManager.setSelectedAddressPath(selectedAddress.path);
-
-      const keyManager = getUnifiedKeyManager();
-
-      console.log("📋 All derived addresses:", derivedAddresses.map((a) => ({
-        index: a.index,
-        path: a.path,
-        hasNametag: a.hasNametag,
-        nametag: a.existingNametag,
-        hasNametagData: !!a.nametagData,
-      })));
-
-      const addressesToSave = derivedAddresses
-        .filter((addr) => addr.hasNametag || addr.path === selectedAddress.path)
-        .map((addr) => {
-          const derived = keyManager.deriveAddressFromPath(addr.path);
-          return {
-            index: addr.index,
-            address: derived.l1Address,
-            privateKey: derived.privateKey,
-            publicKey: derived.publicKey,
-            path: addr.path,
-            isChange: addr.isChange,
-            createdAt: new Date().toISOString(),
-          };
-        });
-
-      console.log(`💾 Addresses to save: ${addressesToSave.length}`);
-
-      const l1Wallet: L1Wallet = {
-        masterPrivateKey: keyManager.getMasterKeyHex() || "",
-        chainCode: keyManager.getChainCodeHex() || undefined,
-        addresses: addressesToSave,
-        isBIP32: keyManager.getDerivationMode() === "bip32",
-      };
-      saveWalletToStorage("main", l1Wallet);
-      console.log(`💾 Saved L1 wallet with ${addressesToSave.length} addresses`);
-
-      await IpfsStorageService.resetInstance();
-
-      // Save nametags from IPNS (skip corrupted tokens gracefully)
-      for (const addr of derivedAddresses) {
-        if (addr.hasNametag && addr.nametagData && addr.l3Address) {
-          console.log(`💾 Saving nametag for ${addr.l3Address.slice(0, 20)}...`);
-          try {
-            setNametagForAddress(addr.l3Address, {
-              name: addr.nametagData.name,
-              token: addr.nametagData.token,
-              timestamp: addr.nametagData.timestamp || Date.now(),
-              format: addr.nametagData.format || "TXF",
-              version: "1.0",
-            });
-            console.log(`💾 Saved IPNS-fetched nametag "${addr.nametagData.name}" for address ${addr.l3Address.slice(0, 20)}...`);
-          } catch (validationError) {
-            // Token data from IPFS is corrupted/invalid - skip saving but don't break flow
-            // The user can still use the address, they'll just need to re-mint the nametag
-            console.warn(`⚠️ Skipping corrupted nametag "${addr.nametagData.name}" for ${addr.l3Address.slice(0, 20)}... - token validation failed:`,
-              validationError instanceof Error ? validationError.message : validationError
-            );
-            // Mark this address as NOT having a valid nametag since we couldn't save it
-            addr.hasNametag = false;
-          }
-        }
-      }
-
-      if (selectedAddress.hasNametag) {
-        console.log("✅ Address has existing nametag, proceeding to main app");
-        window.location.reload();
+      // Route based on nametag
+      if (activeSphere.identity?.nametag) {
+        setStep("processing");
+        setProcessingStatus("Setup complete!");
+        setIsProcessingComplete(true);
       } else {
         setStep("nametag");
       }
@@ -854,11 +714,33 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       const message = e instanceof Error ? e.message : "Failed to select address";
       setError(message);
     } finally {
-      // Clear import flag - import is complete (success or failure)
-      clearImportInProgress();
       setIsBusy(false);
     }
-  }, [derivedAddresses, selectedAddressPath, getUnifiedKeyManager]);
+  }, [derivedAddresses, selectedKeys, sphere]);
+
+  // ---- Multi-select handlers ----
+
+  const handleToggleSelect = useCallback((key: string) => {
+    setSelectedKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    setSelectedKeys(new Set(
+      derivedAddresses.filter(a => !a.isChange).map(a => addrKey(a.index, false))
+    ));
+  }, [derivedAddresses]);
+
+  const handleDeselectAll = useCallback(() => {
+    setSelectedKeys(new Set());
+  }, []);
 
   return {
     // Step management
@@ -881,38 +763,52 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     scanCount,
     needsScanning,
     isDragging,
-    setSelectedFile,
-    setScanCount,
-    setNeedsScanning,
-    setIsDragging,
+    scanProgress,
+    showScanModal,
 
     // Nametag state
     nametagInput,
     setNametagInput,
+    nametagAvailability,
     processingStatus,
     isProcessingComplete,
     handleCompleteOnboarding,
 
-    // Address selection state
+    // Address selection state (multi-select)
     derivedAddresses,
-    selectedAddressPath,
-    showAddressDropdown,
-    isCheckingIpns,
-    ipnsFetchingNametag,
-    setSelectedAddressPath,
-    setShowAddressDropdown,
+    selectedKeys,
 
     // Actions
     handleCreateKeys,
     handleRestoreWallet,
     handleMintNametag,
+    handleSkipNametag,
     handleDeriveNewAddress,
     handleContinueWithAddress,
     goToAddressSelection,
 
+    // Multi-select actions
+    handleToggleSelect,
+    handleSelectAll,
+    handleDeselectAll,
+
+    // File import actions
+    handleFileSelect,
+    handleClearFile,
+    handleScanCountChange,
+    handleFileImport,
+    handlePasswordSubmit,
+    handleCancelScan,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+
     // Wallet context
-    identity,
-    nametag,
-    getUnifiedKeyManager,
+    identity: sphere?.identity ? {
+      address: sphere.identity.directAddress ?? '',
+      privateKey: '', // Not exposed by SDK public API
+    } : null,
+    nametag: sphere?.identity?.nametag ?? null,
+    generatedMnemonic,
   };
 }

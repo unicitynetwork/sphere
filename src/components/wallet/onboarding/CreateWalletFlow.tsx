@@ -4,11 +4,6 @@
  */
 import { AnimatePresence } from "framer-motion";
 import { useOnboardingFlow } from "./hooks/useOnboardingFlow";
-import { useWalletImport } from "./hooks/useWalletImport";
-import { useOnboardingConnectionStatus } from "./hooks/useOnboardingConnectionStatus";
-import { WalletScanModal } from "../L1/components/modals/WalletScanModal";
-import { LoadPasswordModal } from "../L1/components/modals/LoadPasswordModal";
-import { ConnectionStatus } from "../L1/components/ConnectionStatus";
 
 // Import screen components
 import {
@@ -16,6 +11,8 @@ import {
   RestoreScreen,
   RestoreMethodScreen,
   ImportFileScreen,
+  PasswordPromptScreen,
+  ScanningScreen,
   AddressSelectionScreen,
   NametagScreen,
   ProcessingScreen,
@@ -24,9 +21,6 @@ import {
 export type { OnboardingStep } from "./hooks/useOnboardingFlow";
 
 export function CreateWalletFlow() {
-  // L1 connection status hook
-  const connection = useOnboardingConnectionStatus();
-
   // Main onboarding flow hook
   const {
     // Step management
@@ -37,66 +31,59 @@ export function CreateWalletFlow() {
     // State
     isBusy,
     error,
-    setError,
-    setIsBusy,
 
     // Mnemonic restore state
     seedWords,
     setSeedWords,
 
+    // File import state
+    selectedFile,
+    scanCount,
+    needsScanning,
+    isDragging,
+    scanProgress,
+    showScanModal,
+
     // Nametag state
     nametagInput,
     setNametagInput,
+    nametagAvailability,
     processingStatus,
     isProcessingComplete,
     handleCompleteOnboarding,
 
-    // Address selection state
+    // Address selection state (multi-select)
     derivedAddresses,
-    selectedAddressPath,
-    showAddressDropdown,
-    isCheckingIpns,
-    ipnsFetchingNametag,
-    setSelectedAddressPath,
-    setShowAddressDropdown,
+    selectedKeys,
+
+    // Multi-select actions
+    handleToggleSelect,
+    handleSelectAll,
+    handleDeselectAll,
 
     // Actions
     handleCreateKeys,
     handleRestoreWallet,
     handleMintNametag,
+    handleSkipNametag,
     handleDeriveNewAddress,
     handleContinueWithAddress,
-    goToAddressSelection,
+
+    // File import actions
+    handleFileSelect,
+    handleClearFile,
+    handleScanCountChange,
+    handleFileImport,
+    handlePasswordSubmit,
+    handleCancelScan,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
 
     // Wallet context
     identity,
     nametag,
-    getUnifiedKeyManager,
   } = useOnboardingFlow();
-
-  // File import hook
-  const walletImport = useWalletImport({
-    getUnifiedKeyManager,
-    goToAddressSelection,
-    setError,
-    setIsBusy,
-  });
-
-  // Show connection status immediately on start screen if not connected
-  // L1 connection is needed for wallet operations (scanning, balance checks, etc.)
-  if (!connection.isConnected && step === "start") {
-    return (
-      <div className="flex flex-col items-center justify-center p-4 md:p-8 text-center relative">
-        <ConnectionStatus
-          state={connection.state}
-          message={connection.message}
-          error={connection.error}
-          onRetry={connection.manualConnect}
-          onCancel={connection.cancelConnect}
-        />
-      </div>
-    );
-  }
 
   return (
     <div className="flex flex-col items-center justify-center p-4 md:p-8 text-center relative">
@@ -106,7 +93,7 @@ export function CreateWalletFlow() {
             identity={identity}
             nametag={nametag}
             isBusy={isBusy}
-            ipnsFetchingNametag={ipnsFetchingNametag}
+            ipnsFetchingNametag={false}
             error={error}
             onCreateWallet={handleCreateKeys}
             onContinueSetup={() => setStep("nametag")}
@@ -137,36 +124,42 @@ export function CreateWalletFlow() {
 
         {step === "importFile" && (
           <ImportFileScreen
-            selectedFile={walletImport.selectedFile}
-            scanCount={walletImport.scanCount}
-            needsScanning={walletImport.needsScanning}
-            isDragging={walletImport.isDragging}
+            selectedFile={selectedFile}
+            scanCount={scanCount}
+            needsScanning={needsScanning}
+            isDragging={isDragging}
             isBusy={isBusy}
             error={error}
-            onFileSelect={walletImport.handleFileSelect}
-            onClearFile={() => walletImport.setSelectedFile(null)}
-            onScanCountChange={walletImport.setScanCount}
-            onDragOver={walletImport.handleDragOver}
-            onDragLeave={walletImport.handleDragLeave}
-            onDrop={walletImport.handleDrop}
-            onImport={walletImport.handleConfirmImport}
-            onBack={() => {
-              walletImport.setSelectedFile(null);
-              setStep("restoreMethod");
-            }}
+            onFileSelect={handleFileSelect}
+            onClearFile={handleClearFile}
+            onScanCountChange={handleScanCountChange}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onImport={handleFileImport}
+            onBack={() => setStep("restoreMethod")}
+          />
+        )}
+
+        {step === "passwordPrompt" && (
+          <PasswordPromptScreen
+            fileName={selectedFile?.name || ""}
+            isBusy={isBusy}
+            error={error}
+            onSubmit={handlePasswordSubmit}
+            onBack={() => setStep("importFile")}
           />
         )}
 
         {step === "addressSelection" && (
           <AddressSelectionScreen
             derivedAddresses={derivedAddresses}
-            selectedAddressPath={selectedAddressPath}
-            showAddressDropdown={showAddressDropdown}
-            isCheckingIpns={isCheckingIpns}
+            selectedKeys={selectedKeys}
             isBusy={isBusy}
             error={error}
-            onSelectAddress={setSelectedAddressPath}
-            onToggleDropdown={() => setShowAddressDropdown(!showAddressDropdown)}
+            onToggleSelect={handleToggleSelect}
+            onSelectAll={handleSelectAll}
+            onDeselectAll={handleDeselectAll}
             onDeriveNewAddress={handleDeriveNewAddress}
             onContinue={handleContinueWithAddress}
             onBack={goToStart}
@@ -178,8 +171,11 @@ export function CreateWalletFlow() {
             nametagInput={nametagInput}
             isBusy={isBusy}
             error={error}
+            availability={nametagAvailability}
             onNametagChange={setNametagInput}
             onSubmit={handleMintNametag}
+            onSkip={handleSkipNametag}
+            onBack={goToStart}
           />
         )}
 
@@ -192,24 +188,11 @@ export function CreateWalletFlow() {
         )}
       </AnimatePresence>
 
-      {/* Password Modal for encrypted files */}
-      <LoadPasswordModal
-        show={walletImport.showLoadPasswordModal}
-        onConfirm={walletImport.onConfirmLoadWithPassword}
-        onCancel={() => {
-          walletImport.setShowLoadPasswordModal(false);
-          walletImport.setSelectedFile(null);
-        }}
-      />
-
-      {/* Wallet Scan Modal for .dat and BIP32 .txt files */}
-      <WalletScanModal
-        show={walletImport.showScanModal}
-        wallet={walletImport.pendingWallet}
-        initialScanCount={walletImport.initialScanCount}
-        onSelectAddress={walletImport.onSelectScannedAddress}
-        onSelectAll={walletImport.onSelectAllScannedAddresses}
-        onCancel={walletImport.onCancelScan}
+      {/* Scan modal rendered outside AnimatePresence to avoid step-transition issues */}
+      <ScanningScreen
+        open={showScanModal}
+        progress={scanProgress}
+        onCancel={handleCancelScan}
       />
     </div>
   );

@@ -1,10 +1,10 @@
 import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
-import { AggregatedAsset } from '../../L3/data/model';
+import type { Asset } from '@unicitylabs/sphere-sdk';
 import { Box } from 'lucide-react';
 import { memo, useEffect } from 'react';
 
 interface AssetRowProps {
-  asset: AggregatedAsset;
+  asset: Asset;
   showBalances: boolean;
   delay: number;
   onClick?: () => void;
@@ -13,12 +13,16 @@ interface AssetRowProps {
   isNew?: boolean;
 }
 
-// Custom comparison: allow re-render when amount changes (for number animation)
+// Custom comparison: allow re-render when amount or price changes (for number animation)
 function areAssetPropsEqual(prev: AssetRowProps, next: AssetRowProps): boolean {
   return (
     prev.asset.coinId === next.asset.coinId &&
     prev.asset.symbol === next.asset.symbol &&
+    prev.asset.totalAmount === next.asset.totalAmount &&
+    prev.asset.tokenCount === next.asset.tokenCount &&
+    prev.asset.priceUsd === next.asset.priceUsd &&
     prev.asset.change24h === next.asset.change24h &&
+    prev.asset.iconUrl === next.asset.iconUrl &&
     prev.showBalances === next.showBalances &&
     prev.layer === next.layer &&
     prev.isNew === next.isNew &&
@@ -80,10 +84,11 @@ function AnimatedAmount({ value, symbol, decimals, showBalances }: {
 }
 
 export const AssetRow = memo(function AssetRow({ asset, showBalances, delay, onClick, layer, isNew = true }: AssetRowProps) {
-  const changeColor = asset.change24h >= 0 ? 'text-emerald-500 dark:text-emerald-400' : 'text-red-500 dark:text-red-400';
-  const changeSign = asset.change24h >= 0 ? '+' : '';
+  const change24h = asset.change24h ?? 0;
+  const changeColor = change24h >= 0 ? 'text-emerald-500 dark:text-emerald-400' : 'text-red-500 dark:text-red-400';
+  const changeSign = change24h >= 0 ? '+' : '';
 
-  const fiatValue = asset.getTotalFiatValue("USD");
+  const fiatValue = asset.fiatValueUsd ?? 0;
   const numericAmount = Number(asset.totalAmount) / Math.pow(10, asset.decimals);
 
   const className = `p-3 rounded-xl transition-all group border border-transparent hover:border-neutral-200/50 dark:hover:border-white/5 ${onClick ? 'cursor-pointer hover:translate-x-1' : ''}`;
@@ -135,7 +140,7 @@ export const AssetRow = memo(function AssetRow({ asset, showBalances, delay, onC
           <AnimatedFiatValue value={fiatValue} showBalances={showBalances} />
         </div>
         <div className={`text-xs ${changeColor} flex justify-end items-center`}>
-          {changeSign}{asset.change24h.toFixed(2)}%
+          {changeSign}{change24h.toFixed(2)}%
         </div>
       </div>
     </div>

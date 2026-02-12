@@ -1,11 +1,11 @@
 import { motion } from 'framer-motion';
 import { ArrowUpRight, ArrowDownLeft, Loader2, Clock } from 'lucide-react';
-import { useTransactionHistory } from '../hooks/useTransactionHistory';
-import { RegistryService } from '../services/RegistryService';
+import { useTransactionHistory } from '../../../../sdk';
+import { TokenRegistry } from '@unicitylabs/sphere-sdk';
 import { useMemo } from 'react';
 import { BaseModal, ModalHeader, EmptyState } from '../../ui';
 
-const registryService = RegistryService.getInstance();
+const registry = TokenRegistry.getInstance();
 
 interface TransactionHistoryModalProps {
   isOpen: boolean;
@@ -17,7 +17,7 @@ export function TransactionHistoryModal({ isOpen, onClose }: TransactionHistoryM
 
   const formattedHistory = useMemo(() => {
     return history.map(entry => {
-      const def = registryService.getCoinDefinition(entry.coinId);
+      const def = registry.getDefinition(entry.coinId);
       const decimals = def?.decimals || 0;
 
       // Convert amount from smallest unit to human readable
@@ -35,6 +35,7 @@ export function TransactionHistoryModal({ isOpen, onClose }: TransactionHistoryM
       return {
         ...entry,
         formattedAmount,
+        iconUrl: def ? registry.getIconUrl(entry.coinId) : null,
         date: new Date(entry.timestamp).toLocaleDateString('en-US', {
           month: 'short',
           day: 'numeric',

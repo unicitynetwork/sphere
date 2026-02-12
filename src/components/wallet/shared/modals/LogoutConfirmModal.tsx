@@ -9,6 +9,7 @@ interface LogoutConfirmModalProps {
   onClose: () => void;
   onBackupAndLogout: () => void;
   onLogoutWithoutBackup: () => void;
+  isLoggingOut?: boolean;
 }
 
 export function LogoutConfirmModal({
@@ -16,6 +17,7 @@ export function LogoutConfirmModal({
   onClose,
   onBackupAndLogout,
   onLogoutWithoutBackup,
+  isLoggingOut = false,
 }: LogoutConfirmModalProps) {
   const { isAnySyncing, statusMessage } = useGlobalSyncStatus();
   const [showSyncWarning, setShowSyncWarning] = useState(false);
@@ -208,26 +210,35 @@ export function LogoutConfirmModal({
             </div>
 
             <div className="px-6 pb-6 pt-2 space-y-3">
-              <Button icon={Download} fullWidth onClick={onBackupAndLogout}>
-                Save Backup First
-              </Button>
+              {isLoggingOut ? (
+                <div className="flex flex-col items-center gap-3 py-4">
+                  <Loader2 className="w-6 h-6 text-orange-500 animate-spin" />
+                  <span className="text-sm text-neutral-500 dark:text-neutral-400">Logging out...</span>
+                </div>
+              ) : (
+                <>
+                  <Button icon={Download} fullWidth onClick={onBackupAndLogout}>
+                    Save Backup First
+                  </Button>
 
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleLogoutClick}
-                className="w-full flex items-center justify-center gap-2 py-3.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-500 dark:text-red-400 text-sm font-semibold rounded-xl transition-colors"
-              >
-                <LogOut className="w-4 h-4" />
-                Logout without backup
-              </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleLogoutClick}
+                    className="w-full flex items-center justify-center gap-2 py-3.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-500 dark:text-red-400 text-sm font-semibold rounded-xl transition-colors"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Logout without backup
+                  </motion.button>
 
-              <button
-                onClick={onClose}
-                className="w-full py-3 text-sm text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors"
-              >
-                Cancel
-              </button>
+                  <button
+                    onClick={onClose}
+                    className="w-full py-3 text-sm text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </>
+              )}
             </div>
           </motion.div>
         )}

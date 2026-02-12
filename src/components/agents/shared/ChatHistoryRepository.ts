@@ -4,18 +4,15 @@
  * Storage structure:
  * - Key: `sphere_agent_chat_sessions` - Array of all chat sessions metadata
  * - Key: `sphere_agent_chat_messages:${sessionId}` - Messages for each session
- * - Key: `sphere_agent_chat_tombstones` - Deleted session tombstones for IPFS sync
  *
  * Features:
  * - Automatic cleanup when storage limit is approached
  * - Session management (create, continue, delete)
  * - Search through chat history
  * - Per-user history (bound to nametag)
- * - IPFS sync for cross-device access
  */
 
 import type { ChatMessage } from '../../../hooks/useAgentChat';
-import { getChatHistoryIpfsService } from './ChatHistoryIpfsService';
 import { STORAGE_KEYS, STORAGE_KEY_GENERATORS } from '../../../config/storageKeys';
 
 // Maximum storage size (in bytes) before cleanup is triggered - ~4MB to leave room
@@ -157,15 +154,6 @@ export class ChatHistoryRepository {
       this.saveMessages(session.id, [initialMessage]);
     }
 
-    // Immediately sync session creation to IPFS (critical operation)
-    try {
-      getChatHistoryIpfsService().syncImmediately().catch(e => {
-        console.warn('[ChatHistory] Failed to sync session creation:', e);
-      });
-    } catch (e) {
-      console.warn('[ChatHistory] Failed to trigger IPFS sync:', e);
-    }
-
     this.notifyUpdate();
     return session;
   }
@@ -194,17 +182,6 @@ export class ChatHistoryRepository {
       localStorage.removeItem(this.getMessagesKey(sessionId));
     }
 
-    // Record tombstone and immediately sync to IPFS (critical operation)
-    try {
-      const ipfsService = getChatHistoryIpfsService();
-      ipfsService.recordSessionDeletion(sessionId);
-      ipfsService.syncImmediately().catch(e => {
-        console.warn('[ChatHistory] Failed to sync session deletion:', e);
-      });
-    } catch (e) {
-      console.warn('[ChatHistory] Failed to record IPFS tombstone:', e);
-    }
-
     this.notifyUpdate();
   }
 
@@ -224,19 +201,6 @@ export class ChatHistoryRepository {
       }
     });
 
-    // Record tombstones and immediately sync to IPFS (critical operation)
-    if (agentSessions.length > 0) {
-      try {
-        const ipfsService = getChatHistoryIpfsService();
-        ipfsService.recordBulkDeletion(agentSessions.map(s => s.id));
-        ipfsService.syncImmediately().catch(e => {
-          console.warn('[ChatHistory] Failed to sync bulk deletion:', e);
-        });
-      } catch (e) {
-        console.warn('[ChatHistory] Failed to record IPFS bulk tombstones:', e);
-      }
-    }
-
     this.saveSessions(otherSessions);
     this.notifyUpdate();
   }
@@ -251,33 +215,17 @@ export class ChatHistoryRepository {
       localStorage.removeItem(this.getMessagesKey(s.id));
     });
 
-    // Record tombstones and immediately sync to IPFS (critical operation)
-    if (sessions.length > 0) {
-      try {
-        const ipfsService = getChatHistoryIpfsService();
-        ipfsService.recordBulkDeletion(sessions.map(s => s.id));
-        ipfsService.syncImmediately().catch(e => {
-          console.warn('[ChatHistory] Failed to sync clear all:', e);
-        });
-      } catch (e) {
-        console.warn('[ChatHistory] Failed to record IPFS bulk tombstones:', e);
-      }
-    }
-
     // Clear sessions
     localStorage.removeItem(STORAGE_KEYS.AGENT_CHAT_SESSIONS);
     this.notifyUpdate();
   }
 
   /**
-   * Clear all chat history from localStorage WITHOUT syncing to IPFS
-   * Use this when deleting wallet - we only want to clear local data,
-   * not propagate deletion to other devices via IPFS
+   * Clear all chat history from localStorage.
+   * Use this when deleting wallet to clear local data.
    */
   clearAllLocalHistoryOnly(): void {
     if (!this.isLocalStorageAvailable()) return;
-
-    console.log('[ChatHistory] Clearing all local history (localStorage only, no IPFS sync)');
 
     const sessions = this.getAllSessions();
 
@@ -288,14 +236,6 @@ export class ChatHistoryRepository {
 
     // Clear sessions
     localStorage.removeItem(STORAGE_KEYS.AGENT_CHAT_SESSIONS);
-
-    // Also clear tombstones (since wallet is being deleted)
-    localStorage.removeItem(STORAGE_KEYS.AGENT_CHAT_TOMBSTONES);
-
-    // Note: We do NOT call getChatHistoryIpfsService().recordBulkDeletion()
-    // because this is a local-only operation (wallet deletion)
-
-    console.log(`[ChatHistory] Cleared ${sessions.length} sessions from localStorage (no IPFS sync)`);
 
     this.notifyUpdate();
   }
@@ -330,7 +270,7 @@ export class ChatHistoryRepository {
       this.cleanupOldSessions();
     }
 
-    // Trim to MAX_MESSAGES_PER_SESSION for localStorage (full history on IPFS)
+    // Trim to MAX_MESSAGES_PER_SESSION for localStorage
     const messagesToStore = messages.length > MAX_MESSAGES_PER_SESSION
       ? messages.slice(-MAX_MESSAGES_PER_SESSION)
       : messages;
@@ -350,14 +290,6 @@ export class ChatHistoryRepository {
         preview: lastMessage?.content.slice(0, 100) || '',
         messageCount: messages.length,
       });
-
-      // Trigger IPFS sync
-      try {
-        console.log(`💬 [Repository] Triggering IPFS sync after saving messages`);
-        getChatHistoryIpfsService().scheduleSync();
-      } catch (e) {
-        console.warn('[ChatHistory] Failed to schedule IPFS sync:', e);
-      }
     } catch (e) {
       if (e instanceof DOMException &&
           (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {

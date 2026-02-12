@@ -33,6 +33,8 @@ export interface AgentConfig {
   contentType?: ContentType;
   // Has sidebar (for orders/bets history)
   hasSidebar?: boolean;
+  // Whether this agent requires a wallet to function
+  requiresWallet?: boolean;
 }
 
 // All agents configuration
@@ -45,6 +47,7 @@ export const agents: AgentConfig[] = [
     category: 'Social',
     color: 'from-blue-500 to-cyan-500',
     type: 'chat',
+    requiresWallet: true,
   },
   {
     id: 'ai',
@@ -107,6 +110,7 @@ export const agents: AgentConfig[] = [
     category: 'Prediction',
     color: 'from-emerald-500 to-teal-500',
     type: 'ai-with-sidebar',
+    requiresWallet: true,
     greetingMessage: "Welcome to the P2P Prediction Marketplace! 🏟️ Right now I'm only able to help you make predictions on sports games. I can help you check odds, make a prediction and show you what your active predictions are. What are we looking at ? English Premier League ? IPL ? Let me know and we can have some fun.",
     backendActivityId: 'sports',
     quickActions: [
@@ -127,6 +131,7 @@ export const agents: AgentConfig[] = [
     category: 'Trading',
     color: 'from-orange-500 to-red-500',
     type: 'ai-with-sidebar',
+    requiresWallet: true,
     greetingMessage: "Welcome to OTC Madness! I'll help you navigate the world of over-the-counter crypto trading. Ready to post an offer or browse available deals?",
     backendActivityId: 'p2p',
     quickActions: [
@@ -163,6 +168,7 @@ export const agents: AgentConfig[] = [
     category: 'Trading',
     color: 'from-teal-500 to-cyan-500',
     type: 'simple-ai',
+    requiresWallet: true,
     greetingMessage: "Welcome to the P2P Marketplace! Tell me what you want to buy or sell and I'll help you find the best deals.",
     quickActions: [
       { label: 'Gold', message: 'Show me gold listings' },
@@ -179,6 +185,7 @@ export const agents: AgentConfig[] = [
     category: 'Entertainment',
     color: 'from-yellow-500 to-red-500',
     type: 'ai-with-sidebar',
+    requiresWallet: true,
     backendActivityId: 'pokemon',
     greetingMessage: "Welcome to the Pokémon Card marketplace! I can help you browse Pokémon cards, manage your cart, and complete purchases using Unicity tokens. You can also sell cards! Tell me your Unicity ID to get started, or ask me what cards are available.",
     placeholder: 'Search for cards, check cart, or ask about selling...',
@@ -196,4 +203,10 @@ export const agents: AgentConfig[] = [
 // Get agent by ID
 export function getAgentConfig(agentId: string): AgentConfig | undefined {
   return agents.find((a) => a.id === agentId);
+}
+
+// Check if an agent requires a wallet to function
+export function agentRequiresWallet(agentId: string): boolean {
+  const agent = getAgentConfig(agentId);
+  return agent?.requiresWallet ?? false;
 }

@@ -5,7 +5,6 @@ import {
   Event,
 } from '@unicitylabs/nostr-js-sdk';
 
-import { IdentityManager } from '../../wallet/L3/services/IdentityManager';
 import { GroupChatRepository } from '../data/GroupChatRepository';
 import {
   Group,
@@ -15,8 +14,6 @@ import {
   GroupVisibility,
 } from '../data/groupModels';
 import { GROUP_CHAT_CONFIG } from '../../../config/groupChat.config';
-import { Buffer } from 'buffer';
-import { NametagService } from '../../wallet/L3/services/NametagService';
 import { showToast } from '../../ui/toast-utils';
 
 /**
@@ -82,10 +79,16 @@ export interface CreateGroupOptions {
   visibility?: GroupVisibility;
 }
 
+/** Minimal identity provider interface for GroupChatService */
+export interface GroupChatIdentityProvider {
+  getCurrentIdentity(): Promise<{ privateKey: string; publicKey: string; address: string } | null>;
+  getNametag(): string | null;
+}
+
 export class GroupChatService {
   private static instance: GroupChatService;
   private client: NostrClient | null = null;
-  private identityManager: IdentityManager;
+  private identityProvider: GroupChatIdentityProvider;
   private repository: GroupChatRepository;
   private relayUrls: string[];
   private isConnected: boolean = false;
@@ -95,16 +98,16 @@ export class GroupChatService {
   private reconnectAttempts: number = 0;
   private pendingLeaves: Set<string> = new Set(); // Track voluntary leaves to suppress "kicked" toast
 
-  private constructor(identityManager: IdentityManager, relayUrls?: string[]) {
-    this.identityManager = identityManager;
+  private constructor(identityProvider: GroupChatIdentityProvider, relayUrls?: string[]) {
+    this.identityProvider = identityProvider;
     this.relayUrls = relayUrls || GROUP_CHAT_CONFIG.RELAYS;
     this.repository = GroupChatRepository.getInstance();
   }
 
-  static getInstance(identityManager?: IdentityManager, relayUrls?: string[]): GroupChatService {
+  static getInstance(identityProvider?: GroupChatIdentityProvider, relayUrls?: string[]): GroupChatService {
     if (!GroupChatService.instance) {
-      const manager = identityManager || IdentityManager.getInstance();
-      GroupChatService.instance = new GroupChatService(manager, relayUrls);
+      if (!identityProvider) throw new Error('GroupChatService requires identityProvider on first call');
+      GroupChatService.instance = new GroupChatService(identityProvider, relayUrls);
     }
     return GroupChatService.instance;
   }
@@ -160,7 +163,7 @@ export class GroupChatService {
     const primaryRelay = this.relayUrls[0];
     this.repository.checkAndClearOnRelayChange(primaryRelay);
 
-    const identity = await this.identityManager.getCurrentIdentity();
+    const identity = await this.identityProvider.getCurrentIdentity();
     if (!identity) throw new Error('No identity found for group chat');
 
     const secretKey = Buffer.from(identity.privateKey, 'hex');
@@ -1019,7 +1022,7 @@ export class GroupChatService {
     }
 
     try {
-      const identity = await this.identityManager.getCurrentIdentity();
+      const identity = await this.identityProvider.getCurrentIdentity();
       if (!identity) throw new Error('No identity for sending group message');
 
       // Get sender's nametag to include in message
@@ -1654,8 +1657,7 @@ export class GroupChatService {
   }
 
   async getMyNametag(): Promise<string | null> {
-    const nametagService = NametagService.getInstance(this.identityManager);
-    return nametagService.getActiveNametag();
+    return this.identityProvider.getNametag();
   }
 
   getRelayUrls(): string[] {

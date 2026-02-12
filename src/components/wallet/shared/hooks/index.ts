@@ -5,5 +5,3 @@ export type {
   UseCreateAddressReturn,
 } from "./useCreateAddress";
 
-export { useSwitchAddress } from "./useSwitchAddress";
-export type { UseSwitchAddressReturn } from "./useSwitchAddress";

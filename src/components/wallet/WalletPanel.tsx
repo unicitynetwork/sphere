@@ -1,14 +1,16 @@
-import { Wallet, Clock, Bell, MoreVertical, Cloud, CloudOff, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Wallet, Clock, Bell, MoreVertical, Tag, Loader2 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { L3WalletView } from './L3/views/L3WalletView';
-import { useWallet } from './L3/hooks/useWallet';
+import { useIdentity, useWalletStatus } from '../../sdk';
 import { useIncomingPaymentRequests } from './L3/hooks/useIncomingPaymentRequests';
 import { useUIState } from '../../hooks/useUIState';
 import { L1WalletModal } from './L1/modals/L1WalletModal';
+import { RegisterNametagModal } from './shared/components/RegisterNametagModal';
 import { AddressSelector } from './shared/components';
-import { useInventorySync } from './L3/hooks/useInventorySync';
-import { useIpfsStorage } from './L3/hooks/useIpfsStorage';
+import { CreateWalletFlow } from './onboarding/CreateWalletFlow';
+
+const PANEL_SHELL = "bg-white/60 dark:bg-neutral-900/90 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden h-full relative lg:shadow-xl dark:lg:shadow-2xl flex flex-col transition-all duration-500 theme-transition";
 
 export function WalletPanel() {
   const [showBalances, setShowBalances] = useState(true);
@@ -16,17 +18,11 @@ export function WalletPanel() {
   const [isRequestsOpen, setIsRequestsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isL1WalletOpen, setIsL1WalletOpen] = useState(false);
-  const { identity, nametag, isLoadingIdentity, isValidatingTokens } = useWallet();
+  const [isNametagModalOpen, setIsNametagModalOpen] = useState(false);
+  const { isLoading: isWalletLoading, walletExists } = useWalletStatus();
+  const { identity, nametag, isLoading: isLoadingIdentity } = useIdentity();
   const { pendingCount, requests } = useIncomingPaymentRequests();
   const { setFullscreen } = useUIState();
-  const { isSyncing: isIpfsSyncing, isEnabled: isIpfsEnabled } = useIpfsStorage();
-  const {
-    isSyncing: isInventorySyncing,
-    mode: syncMode,
-  } = useInventorySync();
-
-  // Combined syncing state
-  const isSyncing = isIpfsSyncing || isInventorySyncing;
 
   // Track previous pending count to detect new requests
   const prevPendingCountRef = useRef<number | null>(null);
@@ -34,13 +30,6 @@ export function WalletPanel() {
 
   // Auto-open PaymentRequestsModal when new pending request arrives
   useEffect(() => {
-    console.log('🔔 WalletPanel useEffect:', {
-      pendingCount,
-      requestsLength: requests.length,
-      prevCount: prevPendingCountRef.current,
-      isInitialized: isInitializedRef.current
-    });
-
     // Skip the very first render - wait for initial data load
     if (!isInitializedRef.current) {
       // Initialize after first real data arrives
@@ -53,7 +42,6 @@ export function WalletPanel() {
 
     // Only open if pending count increased (new request arrived)
     if (prevPendingCountRef.current !== null && pendingCount > prevPendingCountRef.current) {
-      console.log('💰 New payment request detected, opening modal...');
       // Exit fullscreen so the modal is visible
       setFullscreen(false);
       setIsRequestsOpen(true);
@@ -61,13 +49,43 @@ export function WalletPanel() {
     prevPendingCountRef.current = pendingCount;
   }, [pendingCount, requests.length, setFullscreen]);
 
-  // Don't render wallet panel if not authenticated - WalletGate handles onboarding
-  if (isLoadingIdentity || !identity || !nametag) {
-    return null;
+  // Wallet system still initializing
+  if (isWalletLoading) {
+    return (
+      <div className={PANEL_SHELL}>
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 className="w-6 h-6 text-orange-500 animate-spin" />
+        </div>
+      </div>
+    );
+  }
+
+  // No wallet — show onboarding flow inside the panel
+  if (!walletExists) {
+    return (
+      <div className={PANEL_SHELL}>
+        <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full blur-3xl bg-orange-500/5 dark:bg-orange-500/10" />
+        <div className="absolute -bottom-20 -left-20 w-80 h-80 rounded-full blur-3xl bg-purple-500/5 dark:bg-purple-500/10" />
+        <div className="flex-1 relative overflow-y-auto">
+          <CreateWalletFlow />
+        </div>
+      </div>
+    );
+  }
+
+  // Wallet exists but identity still loading
+  if (isLoadingIdentity || !identity) {
+    return (
+      <div className={PANEL_SHELL}>
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 className="w-6 h-6 text-orange-500 animate-spin" />
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="bg-white/60 dark:bg-neutral-900/90 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden h-full relative lg:shadow-xl dark:lg:shadow-2xl flex flex-col transition-all duration-500 theme-transition">
+    <div className={PANEL_SHELL}>
 
       {/* Background Gradients - Orange theme */}
       <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full blur-3xl bg-orange-500/5 dark:bg-orange-500/10" />
@@ -90,30 +108,19 @@ export function WalletPanel() {
             <div className="flex flex-col">
               <div className="flex items-center gap-2">
                 <span className="text-sm sm:text-base text-neutral-900 dark:text-white font-medium tracking-wide">Wallet</span>
-                {isIpfsEnabled && (
-                  <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
-                    isSyncing
-                      ? 'bg-yellow-500/15 text-yellow-600 dark:text-yellow-400'
-                      : isValidatingTokens
-                        ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
-                        : syncMode === 'LOCAL'
-                          ? 'bg-orange-500/15 text-orange-600 dark:text-orange-400'
-                          : 'bg-green-500/15 text-green-600 dark:text-green-400'
-                  }`}>
-                    {isSyncing ? (
-                      <RefreshCw className="w-3 h-3 animate-spin" />
-                    ) : isValidatingTokens ? (
-                      <ShieldCheck className="w-3 h-3 animate-pulse" />
-                    ) : syncMode === 'LOCAL' ? (
-                      <CloudOff className="w-3 h-3" />
-                    ) : (
-                      <Cloud className="w-3 h-3" />
-                    )}
-                    {isSyncing ? 'Syncing' : isValidatingTokens ? 'Verifying' : syncMode === 'LOCAL' ? 'Offline' : 'Synced'}
-                  </span>
+                {!nametag && (
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setIsNametagModalOpen(true)}
+                    className="flex items-center gap-1 px-2 py-0.5 text-[10px] sm:text-xs bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-lg transition-colors border border-orange-500/20"
+                  >
+                    <Tag className="w-3 h-3" />
+                    <span>Register ID</span>
+                  </motion.button>
                 )}
               </div>
-              <AddressSelector currentNametag={nametag} compact />
+              <AddressSelector currentNametag={nametag ?? undefined} compact />
             </div>
           </div>
 
@@ -176,6 +183,12 @@ export function WalletPanel() {
         isOpen={isL1WalletOpen}
         onClose={() => setIsL1WalletOpen(false)}
         showBalances={showBalances}
+      />
+
+      {/* Register Nametag Modal */}
+      <RegisterNametagModal
+        isOpen={isNametagModalOpen}
+        onClose={() => setIsNametagModalOpen(false)}
       />
     </div>
   );

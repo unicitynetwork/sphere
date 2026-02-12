@@ -5,17 +5,7 @@ import { STORAGE_KEYS, STORAGE_KEY_GENERATORS } from "../../../../../src/config/
 // Mock Setup
 // ==========================================
 
-// Mock ChatHistoryIpfsService before importing ChatHistoryRepository
-vi.mock("../../../../../src/components/agents/shared/ChatHistoryIpfsService", () => ({
-  getChatHistoryIpfsService: vi.fn(() => ({
-    syncImmediately: vi.fn().mockResolvedValue({ success: true }),
-    scheduleSync: vi.fn(),
-    recordSessionDeletion: vi.fn(),
-    recordBulkDeletion: vi.fn(),
-  })),
-}));
-
-// Import after mocking
+// Import
 import {
   ChatHistoryRepository,
   chatHistoryRepository,
@@ -361,15 +351,15 @@ describe("ChatHistoryRepository", () => {
   });
 
   describe("clearAllLocalHistoryOnly", () => {
-    it("should clear sessions without IPFS sync", () => {
+    it("should clear sessions and messages", () => {
       const sessions: ChatSession[] = [createMockSession("session-1")];
       localStorageMock[STORAGE_KEYS.AGENT_CHAT_SESSIONS] = JSON.stringify(sessions);
-      localStorageMock[STORAGE_KEYS.AGENT_CHAT_TOMBSTONES] = JSON.stringify({});
+      localStorageMock[STORAGE_KEY_GENERATORS.agentChatMessages("session-1")] = JSON.stringify([]);
 
       repository.clearAllLocalHistoryOnly();
 
       expect(localStorageMock[STORAGE_KEYS.AGENT_CHAT_SESSIONS]).toBeUndefined();
-      expect(localStorageMock[STORAGE_KEYS.AGENT_CHAT_TOMBSTONES]).toBeUndefined();
+      expect(localStorageMock[STORAGE_KEY_GENERATORS.agentChatMessages("session-1")]).toBeUndefined();
     });
   });
 

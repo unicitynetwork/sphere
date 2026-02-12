@@ -4,5 +4,4 @@ export { LoadPasswordModal } from "./LoadPasswordModal";
 export { DeleteConfirmationModal } from "./DeleteConfirmationModal";
 export { TransactionConfirmationModal } from "./TransactionConfirmationModal";
 export { BridgeModal } from "./BridgeModal";
-export { WalletScanModal } from "./WalletScanModal";
 export { SendModal } from "./SendModal";

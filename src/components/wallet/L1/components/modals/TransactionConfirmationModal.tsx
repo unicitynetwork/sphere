@@ -1,5 +1,6 @@
 import { Loader2 } from "lucide-react";
-import type { TransactionPlan } from "../../sdk";
+import type { L1 } from "@unicitylabs/sphere-sdk";
+type TransactionPlan = L1.TransactionPlan;
 
 interface TransactionConfirmationModalProps {
   show: boolean;

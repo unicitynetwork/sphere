@@ -6,6 +6,7 @@ import { HashRouter } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './lib/queryClient'
 import { ThemeInitializer } from './components/theme'
+import { SphereProvider } from './sdk/SphereProvider'
 import { ServicesProvider } from './contexts/ServicesProvider'
 import { ToastContainer } from './components/ui/Toast'
 import mixpanel from 'mixpanel-browser'
@@ -48,24 +49,20 @@ mixpanel.init('19d06212425213a4eeb34337016d0186', {
   api_host: 'https://api-eu.mixpanel.com',
 })
 
-// Register dev tools in development mode only
-if (import.meta.env.DEV) {
-  import('./utils/devTools').then(({ registerDevTools }) => {
-    registerDevTools();
-  });
-}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <ServicesProvider>
-        <ThemeInitializer>
-          <HashRouter>
-            <App />
-          </HashRouter>
-          <ToastContainer />
-        </ThemeInitializer>
-      </ServicesProvider>
+      <SphereProvider network="testnet">
+        <ServicesProvider>
+          <ThemeInitializer>
+            <HashRouter>
+              <App />
+            </HashRouter>
+            <ToastContainer />
+          </ThemeInitializer>
+        </ServicesProvider>
+      </SphereProvider>
     </QueryClientProvider>
   </StrictMode>,
 )
