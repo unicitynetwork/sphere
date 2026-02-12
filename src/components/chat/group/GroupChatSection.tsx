@@ -44,8 +44,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     totalUnreadCount,
     isConnected,
     // Moderation
-    isCurrentUserAdmin,
-    isCurrentUserModerator,
+    canModerateSelectedGroup,
     deleteMessage,
     kickUser,
     isDeleting,
@@ -362,7 +361,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
             messages={messages}
             isLoading={isLoadingMessages}
             myPubkey={myPubkey}
-            canDeleteMessages={isCurrentUserModerator}
+            canDeleteMessages={canModerateSelectedGroup}
             onDeleteMessage={deleteMessage}
             isDeletingMessage={isDeleting}
             onReplyToMessage={handleReplyToMessage}
@@ -455,7 +454,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
         onClose={() => setShowMemberList(false)}
         members={members}
         isLoading={isLoadingMembers}
-        isCurrentUserAdmin={isCurrentUserAdmin}
+        canModerate={canModerateSelectedGroup}
         myPubkey={myPubkey}
         onKickUser={kickUser}
         isKicking={isKicking}

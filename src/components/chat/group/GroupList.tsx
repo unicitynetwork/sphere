@@ -91,18 +91,16 @@ export function GroupList({
               )}
             </div>
             <div className="flex items-center gap-2">
-              {/* Create group button - only for relay admins */}
-              {isRelayAdmin && (
-                <motion.button
-                  onClick={onCreateGroup}
-                  className="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
-                  title="Create group"
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                >
-                  <Hash className="w-4 h-4" />
-                </motion.button>
-              )}
+              {/* Create group button - available to all users */}
+              <motion.button
+                onClick={onCreateGroup}
+                className="p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
+                title="Create group"
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                <Hash className="w-4 h-4" />
+              </motion.button>
               {/* Join group button */}
               <motion.button
                 onClick={onJoinGroup}

@@ -11,7 +11,7 @@ interface MemberListModalProps {
   onClose: () => void;
   members: GroupMemberData[];
   isLoading: boolean;
-  isCurrentUserAdmin: boolean;
+  canModerate: boolean;
   myPubkey: string | null;
   onKickUser?: (userPubkey: string, reason?: string) => Promise<boolean>;
   isKicking?: boolean;
@@ -22,7 +22,7 @@ export function MemberListModal({
   onClose,
   members,
   isLoading,
-  isCurrentUserAdmin,
+  canModerate,
   myPubkey,
   onKickUser,
   isKicking = false,
@@ -135,7 +135,7 @@ export function MemberListModal({
                 <div className="space-y-2">
                   {sortedMembers.map((member) => {
                     const isMe = member.pubkey === myPubkey;
-                    const canKick = isCurrentUserAdmin && !isMe && member.role !== GroupRole.ADMIN;
+                    const canKick = canModerate && !isMe && member.role !== GroupRole.ADMIN;
                     const isBeingKicked = kickingPubkey === member.pubkey;
                     const showConfirm = showKickConfirm === member.pubkey;
 
@@ -230,11 +230,11 @@ export function MemberListModal({
             </div>
 
             {/* Footer with admin info */}
-            {isCurrentUserAdmin && (
+            {canModerate && (
               <div className="shrink-0 p-4 border-t border-neutral-200 dark:border-neutral-800 bg-amber-50 dark:bg-amber-900/20">
                 <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4" />
-                  You are an admin. Click the kick icon to remove members.
+                  You can moderate this group. Click the kick icon to remove members.
                 </p>
               </div>
             )}

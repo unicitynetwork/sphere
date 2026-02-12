@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { GroupData, GroupMessageData, GroupMemberData, CreateGroupOptions } from '@unicitylabs/sphere-sdk';
+import { GroupVisibility } from '@unicitylabs/sphere-sdk';
 import { useServices } from '../../../contexts/useServices';
 import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
 import { STORAGE_KEYS } from '../../../config/storageKeys';
@@ -58,6 +59,7 @@ export interface UseGroupChatReturn {
   // Moderation
   isCurrentUserAdmin: boolean;
   isCurrentUserModerator: boolean;
+  canModerateSelectedGroup: boolean;
   deleteMessage: (messageId: string) => Promise<boolean>;
   kickUser: (userPubkey: string, reason?: string) => Promise<boolean>;
   isDeleting: boolean;
@@ -374,6 +376,19 @@ export const useGroupChat = (): UseGroupChatReturn => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedGroup, groupChat, membersQuery.data]);
 
+  // Combined moderation check: group admin/moderator OR relay admin on public groups
+  const canModerateSelectedGroup = useMemo(() => {
+    if (!selectedGroup || !groupChat) return false;
+    if (groupChat.isCurrentUserAdmin(selectedGroup.id) || groupChat.isCurrentUserModerator(selectedGroup.id)) {
+      return true;
+    }
+    if (relayAdminQuery.data && selectedGroup.visibility === GroupVisibility.PUBLIC) {
+      return true;
+    }
+    return false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGroup, groupChat, membersQuery.data, relayAdminQuery.data]);
+
   // Delete message mutation
   const deleteMessageMutation = useMutation({
     mutationFn: async (messageId: string) => {
@@ -537,6 +552,7 @@ export const useGroupChat = (): UseGroupChatReturn => {
     // Moderation
     isCurrentUserAdmin,
     isCurrentUserModerator,
+    canModerateSelectedGroup,
     deleteMessage,
     kickUser,
     isDeleting: deleteMessageMutation.isPending,

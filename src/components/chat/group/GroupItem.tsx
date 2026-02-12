@@ -141,8 +141,8 @@ export function GroupItem({
                     Copy Invite Link
                   </button>
                 )}
-                {/* Admin: Delete Group - only for relay admins */}
-                {isRelayAdmin && onDeleteGroup && (
+                {/* Delete Group: relay admins for public groups, group admins for any */}
+                {(isAdmin || (isRelayAdmin && group.visibility === GroupVisibility.PUBLIC)) && onDeleteGroup && (
                   <button
                     onClick={async (e) => {
                       e.stopPropagation();
