@@ -1,5 +1,7 @@
-import { Settings, Layers, Download, LogOut } from 'lucide-react';
+import { useState } from 'react';
+import { Settings, Layers, Download, LogOut, Key } from 'lucide-react';
 import { BaseModal, ModalHeader, MenuButton } from '../../ui';
+import { LookupModal } from './LookupModal';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -18,45 +20,63 @@ export function SettingsModal({
   onLogout,
   l1Balance,
 }: SettingsModalProps) {
+  const [isLookupOpen, setIsLookupOpen] = useState(false);
+
   return (
-    <BaseModal isOpen={isOpen} onClose={onClose} size="sm" showOrbs={false}>
-      <ModalHeader title="Settings" icon={Settings} iconVariant="neutral" onClose={onClose} />
+    <>
+      <BaseModal isOpen={isOpen} onClose={onClose} size="sm" showOrbs={false}>
+        <ModalHeader title="Settings" icon={Settings} iconVariant="neutral" onClose={onClose} />
 
-      {/* Menu Items */}
-      <div className="p-4 space-y-2">
-        <MenuButton
-          icon={Layers}
-          color="blue"
-          label="L1 Wallet"
-          subtitle={l1Balance ? `${l1Balance} ALPHA` : undefined}
-          onClick={() => {
-            onClose();
-            onOpenL1Wallet();
-          }}
-        />
+        <div className="p-4 space-y-2">
+          <MenuButton
+            icon={Layers}
+            color="blue"
+            label="L1 Wallet"
+            subtitle={l1Balance ? `${l1Balance} ALPHA` : undefined}
+            onClick={() => {
+              onClose();
+              onOpenL1Wallet();
+            }}
+          />
 
-        <MenuButton
-          icon={Download}
-          color="green"
-          label="Backup Wallet"
-          showChevron={false}
-          onClick={() => {
-            onClose();
-            onBackupWallet();
-          }}
-        />
+          <MenuButton
+            icon={Key}
+            color="neutral"
+            label="My Public Keys"
+            onClick={() => {
+              onClose();
+              setIsLookupOpen(true);
+            }}
+          />
 
-        <MenuButton
-          icon={LogOut}
-          color="red"
-          label="Logout"
-          danger
-          onClick={() => {
-            onClose();
-            onLogout();
-          }}
-        />
-      </div>
-    </BaseModal>
+          <MenuButton
+            icon={Download}
+            color="green"
+            label="Backup Wallet"
+            showChevron={false}
+            onClick={() => {
+              onClose();
+              onBackupWallet();
+            }}
+          />
+
+          <MenuButton
+            icon={LogOut}
+            color="red"
+            label="Logout"
+            danger
+            onClick={() => {
+              onClose();
+              onLogout();
+            }}
+          />
+        </div>
+      </BaseModal>
+
+      <LookupModal
+        isOpen={isLookupOpen}
+        onClose={() => setIsLookupOpen(false)}
+      />
+    </>
   );
 }

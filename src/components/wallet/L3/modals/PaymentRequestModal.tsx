@@ -1,6 +1,5 @@
 import { Check, Sparkles, Trash2, Loader2, XIcon, ArrowRight, Clock, Receipt, AlertCircle } from 'lucide-react';
-import { useIncomingPaymentRequests } from '../hooks/useIncomingPaymentRequests';
-import { type IncomingPaymentRequest, PaymentRequestStatus } from '../data/model';
+import { useIncomingPaymentRequests, type IncomingPaymentRequest, PaymentRequestStatus } from '../hooks/useIncomingPaymentRequests';
 import { useTransfer } from '../../../../sdk';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useState } from 'react';

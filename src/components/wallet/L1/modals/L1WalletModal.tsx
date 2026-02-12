@@ -115,6 +115,11 @@ export function L1WalletModal({ isOpen, onClose, showBalances }: L1WalletModalPr
     setIsSwitching(true);
     try {
       await sphere.switchToAddress(index);
+      // Remove cached data so stale values from the previous address aren't shown
+      queryClient.removeQueries({ queryKey: SPHERE_KEYS.identity.all });
+      queryClient.removeQueries({ queryKey: SPHERE_KEYS.l1.all });
+      queryClient.removeQueries({ queryKey: SPHERE_KEYS.payments.all });
+      // Re-fetch fresh data for the new address
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.all });
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.l1.all });
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.payments.all });

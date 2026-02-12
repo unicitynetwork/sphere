@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
-import { vestingState } from "../sdk/vestingState";
-import type { VestingMode, VestingBalances } from "../sdk/types";
+import { L1 } from "@unicitylabs/sphere-sdk";
+const { vestingState } = L1;
+type VestingMode = L1.VestingMode;
+type VestingBalances = L1.VestingBalances;
 
 // Skeleton shimmer component
 function BalanceSkeleton() {

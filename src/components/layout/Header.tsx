@@ -5,7 +5,12 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { isMock } from '../../hooks/useAgentChat';
 import { ThemeToggle } from '../theme';
 import { STORAGE_KEYS } from '../../config/storageKeys';
-import { devReset } from '../../utils/devTools';
+
+function devReset(): void {
+  localStorage.removeItem(STORAGE_KEYS.DEV_AGGREGATOR_URL);
+  localStorage.removeItem(STORAGE_KEYS.DEV_SKIP_TRUST_BASE);
+  window.dispatchEvent(new Event("dev-config-changed"));
+}
 import logoUrl from '/Union.svg';
 
 const DiscordIcon = ({ className }: { className?: string }) => (

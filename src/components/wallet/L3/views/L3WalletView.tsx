@@ -1,7 +1,6 @@
 import { Plus, ArrowUpRight, ArrowDownUp, Sparkles, Loader2, Coins, Layers, CheckCircle, XCircle, Eye, EyeOff, Wifi } from 'lucide-react';
 import { AnimatePresence, motion, useMotionValue, useTransform, animate } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
-import { Token as LegacyToken } from '../data/model';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useIdentity, useAssets, useTokens, useL1Balance } from '../../../../sdk';
@@ -11,38 +10,13 @@ import { TokenRow } from '../../shared/components';
 import { SendModal } from '../modals/SendModal';
 import { SwapModal } from '../modals/SwapModal';
 import { PaymentRequestsModal } from '../modals/PaymentRequestModal';
-import { FaucetService } from '../services/FaucetService';
+import { FaucetService } from '../../../../services/FaucetService';
 import { SeedPhraseModal } from '../modals/SeedPhraseModal';
 import { TransactionHistoryModal } from '../modals/TransactionHistoryModal';
 import { SettingsModal } from '../modals/SettingsModal';
 import { BackupWalletModal, LogoutConfirmModal } from '../../shared/modals';
 import { SaveWalletModal } from '../../L1/components/modals';
-import type { Token as SdkToken } from '@unicitylabs/sphere-sdk';
-
 type Tab = 'assets' | 'tokens';
-
-/**
- * Bridge SDK Token to legacy Token class for TokenRow component.
- * Maps SDK fields to legacy model expectations.
- */
-function sdkTokenToLegacy(token: SdkToken): LegacyToken {
-  return new LegacyToken({
-    id: token.id,
-    name: token.name,
-    type: token.symbol,
-    timestamp: token.createdAt,
-    amount: token.amount,
-    coinId: token.coinId,
-    symbol: token.symbol,
-    iconUrl: token.iconUrl,
-    status: token.status === 'confirmed' ? 'CONFIRMED'
-      : token.status === 'pending' ? 'PENDING'
-      : token.status === 'submitted' ? 'SUBMITTED'
-      : token.status === 'spent' ? 'TRANSFERRED'
-      : 'CONFIRMED',
-    sizeBytes: token.sdkData?.length ?? 0,
-  });
-}
 
 // Animated balance display with smooth number transitions
 function BalanceDisplay({
@@ -174,11 +148,7 @@ export function L3WalletView({
 
   const assets = sdkAssets;
 
-  // Convert SDK tokens to legacy Token instances for TokenRow component
-  const tokens = useMemo(() =>
-    sdkTokens.map(sdkTokenToLegacy),
-    [sdkTokens]
-  );
+  const tokens = sdkTokens;
 
   // L1 balance as a number (ALPHA units)
   const l1Balance = useMemo(() => {
@@ -207,7 +177,7 @@ export function L3WalletView({
     }
 
     const newIds = new Set<string>();
-    tokens.filter(t => t.type !== 'Nametag').forEach(token => {
+    tokens.filter(t => t.coinId !== 'NAMETAG').forEach(token => {
       if (!prevTokenIdsRef.current.has(token.id)) {
         newIds.add(token.id);
       }
@@ -235,7 +205,7 @@ export function L3WalletView({
 
   // Update previous snapshots after render (for next comparison)
   useEffect(() => {
-    const currentIds = new Set(tokens.filter(t => t.type !== 'Nametag').map(t => t.id));
+    const currentIds = new Set(tokens.filter(t => t.coinId !== 'NAMETAG').map(t => t.id));
     prevTokenIdsRef.current = currentIds;
     isFirstLoadRef.current = false;
   }, [tokens]);
@@ -379,8 +349,13 @@ export function L3WalletView({
 
   if (isLoadingIdentity) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex flex-col items-center justify-center h-full gap-3">
         <Loader2 className="animate-spin text-neutral-400 dark:text-neutral-600" />
+        <WalletStatusLine
+          isLoadingAssets={isLoadingAssets}
+          isLoadingL1={isLoadingL1}
+          pendingCount={0}
+        />
       </div>
     );
   }
@@ -560,12 +535,12 @@ export function L3WalletView({
               {/* TOKENS VIEW - no container animation, only item animations */}
               {activeTab === 'tokens' && (
                 <div className="space-y-2">
-                  {tokens.filter(t => t.type !== 'Nametag').length === 0 ? (
+                  {tokens.filter(t => t.coinId !== 'NAMETAG').length === 0 ? (
                     <EmptyState text="No individual tokens found." />
                   ) : (
                     tokens
-                      .filter(t => t.type !== 'Nametag')
-                      .sort((a, b) => b.timestamp - a.timestamp)
+                      .filter(t => t.coinId !== 'NAMETAG')
+                      .sort((a, b) => b.createdAt - a.createdAt)
                       .map((token, index) => (
                         <TokenRow
                           key={token.id}

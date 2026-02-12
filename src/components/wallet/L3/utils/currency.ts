@@ -1,4 +1,4 @@
-import { RegistryService } from "../services/RegistryService";
+import { TokenRegistry } from "@unicitylabs/sphere-sdk";
 
 export const CurrencyUtils = {
     toSmallestUnit: (amount: string, decimals: number): bigint => {
@@ -30,8 +30,8 @@ export const AmountFormatUtils = {
         if(amount === undefined || coinId === undefined) return "";
         const amountFloat = parseFloat(amount);
     
-        const registryService = RegistryService.getInstance();
-        const def = registryService.getCoinDefinition(coinId);
+        const registry = TokenRegistry.getInstance();
+        const def = registry.getDefinition(coinId);
     
         const decimals = def?.decimals ?? 6;
         const divisor = Math.pow(10, decimals);

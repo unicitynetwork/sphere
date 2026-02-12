@@ -83,6 +83,11 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
   const displayNametag = currentNametag || nametag;
 
   const refreshAfterSwitch = useCallback(() => {
+    // Remove cached data so stale values from the previous address aren't shown
+    queryClient.removeQueries({ queryKey: SPHERE_KEYS.identity.all });
+    queryClient.removeQueries({ queryKey: SPHERE_KEYS.payments.all });
+    queryClient.removeQueries({ queryKey: SPHERE_KEYS.l1.all });
+    // Re-fetch fresh data for the new address
     queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.all });
     queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.payments.all });
     queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.l1.all });
