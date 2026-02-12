@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Hash, Lock, Globe, Loader2 } from 'lucide-react';
-import { GroupVisibility } from '../data/groupModels';
-import type { CreateGroupOptions } from '../services/GroupChatService';
+import { GroupVisibility } from '@unicitylabs/sphere-sdk';
+import type { CreateGroupOptions } from '@unicitylabs/sphere-sdk';
 
 interface CreateGroupModalProps {
   isOpen: boolean;

@@ -45,6 +45,7 @@ export function SphereProvider({
       const browserProviders = createBrowserProviders({
         network,
         price: { platform: 'coingecko', baseUrl: '/coingecko', cacheTtlMs: 5 * 60_000 },
+        groupChat: true,
       });
       setProviders(browserProviders);
 
@@ -253,7 +254,8 @@ export function SphereProvider({
     // resolveNametag() also connects transport on demand when needed.
     const freshProviders = createBrowserProviders({
       network,
-      price: { platform: 'coingecko', baseUrl: '/coingecko' },
+      price: { platform: 'coingecko', baseUrl: '/coingecko', cacheTtlMs: 5 * 60_000 },
+      groupChat: true,
     });
     setProviders(freshProviders);
   }, [sphere, providers, queryClient, network]);

@@ -1,17 +1,18 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
-import { GroupMessage } from '../data/groupModels';
+import type { GroupMessageData } from '@unicitylabs/sphere-sdk';
 import { GroupMessageBubble } from './GroupMessageBubble';
+import { getMessageFormattedDate } from '../utils/groupChatHelpers';
 
 interface GroupMessageListProps {
-  messages: GroupMessage[];
+  messages: GroupMessageData[];
   isLoading: boolean;
   myPubkey: string | null;
   canDeleteMessages?: boolean;
   onDeleteMessage?: (messageId: string) => Promise<boolean>;
   isDeletingMessage?: boolean;
-  onReplyToMessage?: (message: GroupMessage) => void;
+  onReplyToMessage?: (message: GroupMessageData) => void;
 }
 
 export function GroupMessageList({
@@ -24,7 +25,7 @@ export function GroupMessageList({
   onReplyToMessage,
 }: GroupMessageListProps) {
   // Create a map for quick lookup of messages by ID (for reply-to)
-  const messagesById = new Map(messages.map((m) => [m.id, m]));
+  const messagesById = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when messages change
@@ -35,11 +36,11 @@ export function GroupMessageList({
   }, [messages]);
 
   // Group messages by date
-  const groupedMessages: { date: string; messages: GroupMessage[] }[] = [];
+  const groupedMessages: { date: string; messages: GroupMessageData[] }[] = [];
   let currentDate = '';
 
   messages.forEach((message) => {
-    const messageDate = message.getFormattedDate();
+    const messageDate = getMessageFormattedDate(message);
     if (messageDate !== currentDate) {
       currentDate = messageDate;
       groupedMessages.push({ date: messageDate, messages: [] });
@@ -77,7 +78,7 @@ export function GroupMessageList({
           {/* Messages */}
           {group.messages.map((message, messageIndex) => (
             <GroupMessageBubble
-              key={message.id}
+              key={message.id ?? `${message.timestamp}-${message.senderPubkey}`}
               message={message}
               isOwnMessage={message.senderPubkey === myPubkey}
               delay={groupIndex === groupedMessages.length - 1 ? messageIndex * 0.05 : 0}

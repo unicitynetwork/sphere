@@ -1,19 +1,20 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Shield, ShieldCheck, User, UserMinus, Loader2 } from 'lucide-react';
-import { GroupMember, GroupRole } from '../data/groupModels';
+import type { GroupMemberData } from '@unicitylabs/sphere-sdk';
+import { GroupRole } from '@unicitylabs/sphere-sdk';
+import { getMemberAvatar } from '../utils/groupChatHelpers';
 
 interface MemberListModalProps {
   isOpen: boolean;
   onClose: () => void;
-  members: GroupMember[];
+  members: GroupMemberData[];
   isLoading: boolean;
   isCurrentUserAdmin: boolean;
   myPubkey: string | null;
   onKickUser?: (userPubkey: string, reason?: string) => Promise<boolean>;
   isKicking?: boolean;
-  onResolveMemberNametags?: () => Promise<void>;
 }
 
 export function MemberListModal({
@@ -25,22 +26,9 @@ export function MemberListModal({
   myPubkey,
   onKickUser,
   isKicking = false,
-  onResolveMemberNametags,
 }: MemberListModalProps) {
   const [kickingPubkey, setKickingPubkey] = useState<string | null>(null);
   const [showKickConfirm, setShowKickConfirm] = useState<string | null>(null);
-  const [isResolvingNametags, setIsResolvingNametags] = useState(false);
-
-  // Resolve missing nametags when modal opens
-  useEffect(() => {
-    if (isOpen && onResolveMemberNametags && members.length > 0) {
-      const membersWithoutNametag = members.filter((m) => !m.nametag);
-      if (membersWithoutNametag.length > 0) {
-        setIsResolvingNametags(true);
-        onResolveMemberNametags().finally(() => setIsResolvingNametags(false));
-      }
-    }
-  }, [isOpen, onResolveMemberNametags, members]);
 
   const handleKickClick = (pubkey: string) => {
     setShowKickConfirm(pubkey);
@@ -62,7 +50,7 @@ export function MemberListModal({
     setShowKickConfirm(null);
   };
 
-  const getRoleIcon = (role: GroupRole) => {
+  const getRoleIcon = (role: typeof GroupRole[keyof typeof GroupRole]) => {
     switch (role) {
       case GroupRole.ADMIN:
         return <ShieldCheck className="w-4 h-4 text-amber-500" />;
@@ -73,7 +61,7 @@ export function MemberListModal({
     }
   };
 
-  const getRoleBadge = (role: GroupRole) => {
+  const getRoleBadge = (role: typeof GroupRole[keyof typeof GroupRole]) => {
     switch (role) {
       case GroupRole.ADMIN:
         return (
@@ -124,12 +112,6 @@ export function MemberListModal({
                 <h2 className="text-lg font-semibold text-neutral-900 dark:text-white">
                   Members ({members.length})
                 </h2>
-                {isResolvingNametags && (
-                  <span className="text-xs text-neutral-500 dark:text-neutral-400 flex items-center gap-1">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    Resolving IDs...
-                  </span>
-                )}
               </div>
               <button
                 onClick={onClose}
@@ -166,7 +148,7 @@ export function MemberListModal({
                       >
                         {/* Avatar */}
                         <div className="shrink-0 w-10 h-10 rounded-lg bg-linear-to-br from-blue-500 to-purple-600 text-white text-sm font-medium flex items-center justify-center">
-                          {member.getAvatar()}
+                          {getMemberAvatar(member)}
                         </div>
 
                         {/* Info */}

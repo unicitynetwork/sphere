@@ -1,13 +1,13 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, X, PanelLeftClose, Sparkles, Hash, User } from 'lucide-react';
-import { Group } from '../data/groupModels';
+import type { GroupData } from '@unicitylabs/sphere-sdk';
 import { GroupItem } from './GroupItem';
 import type { ChatModeChangeHandler } from '../../../types';
 
 interface GroupListProps {
-  groups: Group[];
-  selectedGroup: Group | null;
-  onSelect: (group: Group) => void;
+  groups: GroupData[];
+  selectedGroup: GroupData | null;
+  onSelect: (group: GroupData) => void;
   onLeave: (groupId: string) => void;
   onJoinGroup: () => void;
   onCreateGroup: () => void;
