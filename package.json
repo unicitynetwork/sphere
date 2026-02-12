@@ -31,7 +31,7 @@
     "mixpanel-browser": "^2.72.0",
     "qr-code-styling": "^1.9.2",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1",
+    "react-dom": "^19.2.4",
     "react-router-dom": "^7.9.6",
     "uuid": "^13.0.0",
     "webcrypto-liner": "^1.4.3",

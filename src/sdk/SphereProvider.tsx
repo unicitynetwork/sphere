@@ -239,7 +239,7 @@ export function SphereProvider({
     if (sphere) {
       await sphere.destroy();
     }
-    clearAllSphereData(true);
+    clearAllSphereData();
     queryClient.clear();
     setSphere(null);
     setWalletExists(false);

@@ -9,7 +9,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSphereContext } from '../../../../sdk/hooks/core/useSphere';
-import { QUERY_KEYS as KEYS } from '../../../../config/queryKeys';
 import { SPHERE_KEYS } from '../../../../sdk/queryKeys';
 
 export type CreateAddressStep =
@@ -180,9 +179,9 @@ export function useCreateAddress(): UseCreateAddressReturn {
       window.dispatchEvent(new Event("wallet-updated"));
 
       // Invalidate queries to refresh UI
-      await queryClient.invalidateQueries({ queryKey: KEYS.IDENTITY });
-      await queryClient.invalidateQueries({ queryKey: KEYS.NAMETAG });
-      await queryClient.invalidateQueries({ queryKey: KEYS.TOKENS });
+      await queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.all });
+      await queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.nametag });
+      await queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.payments.tokens.all });
       await queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.l1.all });
 
     } catch (err) {

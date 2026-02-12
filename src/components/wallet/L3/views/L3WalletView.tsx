@@ -349,8 +349,13 @@ export function L3WalletView({
 
   if (isLoadingIdentity) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex flex-col items-center justify-center h-full gap-3">
         <Loader2 className="animate-spin text-neutral-400 dark:text-neutral-600" />
+        <WalletStatusLine
+          isLoadingAssets={isLoadingAssets}
+          isLoadingL1={isLoadingL1}
+          pendingCount={0}
+        />
       </div>
     );
   }
