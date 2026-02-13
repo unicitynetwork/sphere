@@ -105,10 +105,19 @@ export function useCreateAddress(): UseCreateAddressReturn {
         : 0;
 
       // Switch to the new address (derives internally if needed)
-      await sphere.switchToAddress(nextIndex);
+      // Timeout guards against SDK hanging on Nostr publish when relay is not connected
+      try {
+        await Promise.race([
+          sphere.switchToAddress(nextIndex),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+        ]);
+      } catch (e) {
+        if (!(e instanceof Error && e.message === 'timeout')) throw e;
+      }
       const derived = sphere.deriveAddress(nextIndex);
 
-      // SDK's switchToAddress now recovers nametag from network automatically
+      // Check if SDK recovered a nametag during the switch.
+      // After timeout, sphere.identity is already set to the NEW address.
       if (sphere.identity?.nametag) {
         setState(prev => ({
           ...prev,
