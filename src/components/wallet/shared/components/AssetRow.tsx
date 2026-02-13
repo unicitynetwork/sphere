@@ -120,7 +120,7 @@ export const AssetRow = memo(function AssetRow({ asset, showBalances, delay, onC
                 {layer}
               </span>
             )}
-            <div className="text-xs text-neutral-500 truncate max-w-[100px]">
+            <div className="text-xs text-neutral-500 truncate max-w-25">
               {asset.name}
             </div>
           </div>

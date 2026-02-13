@@ -39,7 +39,7 @@ export function ScanningScreen({
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
             transition={{ duration: 0.2 }}
-            className="w-full max-w-[360px] bg-white dark:bg-neutral-900 rounded-2xl p-5 shadow-2xl"
+            className="w-full max-w-90 bg-white dark:bg-neutral-900 rounded-2xl p-5 shadow-2xl"
           >
             {/* Icon */}
             <motion.div

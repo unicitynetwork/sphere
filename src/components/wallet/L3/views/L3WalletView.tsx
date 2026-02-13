@@ -492,7 +492,7 @@ export function L3WalletView({
           </div>
         </div>
 
-        <div className="relative min-h-[200px]">
+        <div className="relative min-h-50">
           {isLoadingAssets ? (
             <div className="py-10 text-center">
               <Loader2 className="w-6 h-6 text-orange-500 animate-spin mx-auto" />

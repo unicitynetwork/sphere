@@ -19,7 +19,7 @@ export function ProcessingScreen({ status, isComplete = false, onComplete }: Pro
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.1 }}
-      className="relative z-10 text-center w-full max-w-[360px]"
+      className="relative z-10 text-center w-full max-w-90"
     >
       {/* Animated Loading Spinner or Success Icon */}
       <div className="relative mx-auto w-22 h-22 mb-6">

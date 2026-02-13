@@ -41,7 +41,7 @@ export function StartScreen({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ duration: 0.1 }}
-      className="relative z-10 w-full max-w-[360px]"
+      className="relative z-10 w-full max-w-90"
     >
       {/* Icon with glow effect */}
       <motion.div
