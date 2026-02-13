@@ -137,15 +137,43 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
     }
   }, [sphere, isSwitching, currentAddressIndex, refreshAfterSwitch]);
 
-  // Step 1: "New" button opens the nametag modal
-  const handleNewClick = useCallback(() => {
-    setShowDropdown(false);
-    setNewNametag('');
-    setNametagError(null);
-    setShowNametagModal(true);
-  }, []);
+  // Step 1: Create new address, then check if nametag already exists (local + network)
+  const handleNewClick = useCallback(async () => {
+    if (!sphere || isSwitching) return;
 
-  // Step 2a: Create address WITH nametag
+    // Keep dropdown open to show "Switching..." indicator
+    setIsSwitching(true);
+
+    try {
+      const nextIndex = addresses.length > 0
+        ? Math.max(...addresses.map(a => a.index)) + 1
+        : 1;
+
+      // Create and switch to the new address
+      await sphere.switchToAddress(nextIndex);
+      refreshAfterSwitch();
+
+      // SDK's switchToAddress now recovers nametag from network automatically
+      if (sphere.identity?.nametag) {
+        setShowDropdown(false);
+        return;
+      }
+
+      setShowDropdown(false);
+
+      // No nametag found — prompt user
+      setNewNametag('');
+      setNametagError(null);
+      setShowNametagModal(true);
+    } catch (e) {
+      console.error('[AddressSelector] Failed to create new address:', e);
+      setShowDropdown(false);
+    } finally {
+      setIsSwitching(false);
+    }
+  }, [sphere, isSwitching, addresses, refreshAfterSwitch]);
+
+  // Step 2a: Register nametag on the current address (already created in handleNewClick)
   const handleCreateWithNametag = useCallback(async () => {
     if (!sphere || isSwitching) return;
     const cleanTag = newNametag.trim().replace(/^@/, '');
@@ -163,43 +191,23 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
         return;
       }
 
-      const nextIndex = addresses.length > 0
-        ? Math.max(...addresses.map(a => a.index)) + 1
-        : 1;
-      await sphere.switchToAddress(nextIndex, { nametag: cleanTag });
+      // Register nametag on the current address
+      await sphere.registerNametag(cleanTag);
       setShowNametagModal(false);
       refreshAfterSwitch();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to create address';
-      console.error('[AddressSelector] Failed to create address with nametag:', e);
+      const msg = e instanceof Error ? e.message : 'Failed to register nametag';
+      console.error('[AddressSelector] Failed to register nametag:', e);
       setNametagError(msg);
     } finally {
       setIsSwitching(false);
     }
-  }, [sphere, isSwitching, newNametag, addresses, resolveNametag, refreshAfterSwitch]);
+  }, [sphere, isSwitching, newNametag, resolveNametag, refreshAfterSwitch]);
 
-  // Step 2b: Create address WITHOUT nametag (skip)
-  const handleCreateWithoutNametag = useCallback(async () => {
-    if (!sphere || isSwitching) return;
-
-    setIsSwitching(true);
-    setNametagError(null);
-
-    try {
-      const nextIndex = addresses.length > 0
-        ? Math.max(...addresses.map(a => a.index)) + 1
-        : 1;
-      await sphere.switchToAddress(nextIndex);
-      setShowNametagModal(false);
-      refreshAfterSwitch();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to create address';
-      console.error('[AddressSelector] Failed to create address:', e);
-      setNametagError(msg);
-    } finally {
-      setIsSwitching(false);
-    }
-  }, [sphere, isSwitching, addresses, refreshAfterSwitch]);
+  // Step 2b: Skip nametag (address already created in handleNewClick)
+  const handleCreateWithoutNametag = useCallback(() => {
+    setShowNametagModal(false);
+  }, []);
 
   const sortedAddresses = useMemo(() => {
     return [...addresses].sort((a, b) => a.index - b.index);
@@ -256,7 +264,7 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
 
               {/* Description */}
               <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">
-                Choose a Unicity ID for this address, or skip to create without one.
+                Choose a Unicity ID for this address, or skip for now.
               </p>
 
               {/* Nametag input */}
