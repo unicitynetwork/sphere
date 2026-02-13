@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Hash, Lock, Users, RefreshCw, Loader2, Link } from 'lucide-react';
-import { Group, GroupVisibility } from '../data/groupModels';
+import type { GroupData } from '@unicitylabs/sphere-sdk';
+import { GroupVisibility } from '@unicitylabs/sphere-sdk';
 
 type TabType = 'browse' | 'invite';
 
 interface JoinGroupModalProps {
   isOpen: boolean;
   onClose: () => void;
-  availableGroups: Group[];
+  availableGroups: GroupData[];
   isLoading: boolean;
   onRefresh: () => void;
   onJoin: (groupId: string, inviteCode?: string) => Promise<boolean>;

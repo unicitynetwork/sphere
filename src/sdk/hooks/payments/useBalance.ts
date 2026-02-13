@@ -28,12 +28,14 @@ export function useBalance(coinId?: string): UseBalanceReturn {
       if (!sphere) return null;
 
       if (coinId) {
-        // Get specific asset
+        // Get specific asset with price data
         const assets = await sphere.payments.getAssets(coinId);
         return assets.length > 0 ? assets[0] : null;
       } else {
-        // Get total portfolio value - not returning an asset, just the value
-        return await sphere.payments.getBalance();
+        // Get all assets and sum fiat values for total portfolio value
+        const assets = await sphere.payments.getAssets();
+        const totalUsd = assets.reduce((sum, a) => sum + (a.fiatValueUsd ?? 0), 0);
+        return totalUsd;
       }
     },
     enabled: !!sphere,

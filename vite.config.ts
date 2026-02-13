@@ -67,6 +67,14 @@ export default defineConfig(({ mode }) => {
         }
       }
     },
+    // Ensure polyfill shims resolve correctly for symlinked file: dependencies
+    resolve: {
+      alias: {
+        'vite-plugin-node-polyfills/shims/buffer': path.resolve(__dirname, 'node_modules/vite-plugin-node-polyfills/shims/buffer'),
+        'vite-plugin-node-polyfills/shims/process': path.resolve(__dirname, 'node_modules/vite-plugin-node-polyfills/shims/process'),
+        'vite-plugin-node-polyfills/shims/global': path.resolve(__dirname, 'node_modules/vite-plugin-node-polyfills/shims/global'),
+      },
+    },
     // Pre-bundle heavy CJS dependencies to speed up dev server cold start
     optimizeDeps: {
       include: [

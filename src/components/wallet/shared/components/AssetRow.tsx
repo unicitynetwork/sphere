@@ -1,5 +1,5 @@
 import { motion, useMotionValue, useTransform, animate } from 'framer-motion';
-import type { Asset } from '@unicitylabs/sphere-sdk';
+import { type Asset, TokenRegistry } from '@unicitylabs/sphere-sdk';
 import { Box } from 'lucide-react';
 import { memo, useEffect } from 'react';
 
@@ -97,9 +97,9 @@ export const AssetRow = memo(function AssetRow({ asset, showBalances, delay, onC
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-3">
         <div className="relative w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
-          {asset.iconUrl ? (
+          {(asset.iconUrl || TokenRegistry.getInstance().getIconUrl(asset.coinId)) ? (
             <img
-              src={asset.iconUrl}
+              src={asset.iconUrl || TokenRegistry.getInstance().getIconUrl(asset.coinId)!}
               alt={asset.symbol}
               className="w-full h-full object-cover"
             />

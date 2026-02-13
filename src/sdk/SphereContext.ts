@@ -17,7 +17,7 @@ export interface SphereContextValue {
   importWallet: (
     mnemonic: string,
     options?: ImportWalletOptions,
-  ) => Promise<void>;
+  ) => Promise<Sphere>;
   importFromFile: (options: ImportFromFileOptions) => Promise<ImportFromFileResult>;
   /** Mark wallet as existing — call after import flow completes (scanning, address selection, etc.).
    *  Optionally accepts a Sphere instance to set in context (for import flows where sphere
@@ -25,6 +25,11 @@ export interface SphereContextValue {
   finalizeWallet: (importedSphere?: Sphere) => void;
   deleteWallet: () => Promise<void>;
   reinitialize: () => Promise<void>;
+
+  /** Whether IPFS token sync is currently enabled */
+  ipfsEnabled: boolean;
+  /** Toggle IPFS sync on/off (persists to localStorage, triggers reinitialize) */
+  toggleIpfs: () => void;
 }
 
 export interface CreateWalletOptions {

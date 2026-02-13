@@ -1,11 +1,13 @@
 import { motion } from 'framer-motion';
 import { Hash, Lock, MoreVertical, LogOut, Trash2, Link, Loader2 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
-import { Group, GroupVisibility } from '../data/groupModels';
+import type { GroupData } from '@unicitylabs/sphere-sdk';
+import { GroupVisibility } from '@unicitylabs/sphere-sdk';
 import { showToast } from '../../ui/toast-utils';
+import { getGroupDisplayName, getGroupFormattedLastMessageTime } from '../utils/groupChatHelpers';
 
 interface GroupItemProps {
-  group: Group;
+  group: GroupData;
   isSelected: boolean;
   onClick: () => void;
   onLeave: () => void;
@@ -79,23 +81,23 @@ export function GroupItem({
                   : 'text-neutral-700 dark:text-neutral-200'
               }`}
             >
-              {group.getDisplayName()}
+              {getGroupDisplayName(group)}
             </span>
-            {group.unreadCount > 0 && (
+            {(group.unreadCount ?? 0) > 0 && (
               <span className="px-1.5 py-0.5 text-xs rounded-full bg-blue-500 text-white shrink-0">
-                {group.unreadCount > 99 ? '99+' : group.unreadCount}
+                {(group.unreadCount ?? 0) > 99 ? '99+' : group.unreadCount}
               </span>
             )}
           </div>
           <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">
-            {group.lastMessageText || group.description || 'No messages yet'}
+            {group.lastMessageText ?? group.description ?? 'No messages yet'}
           </p>
         </div>
 
         {/* Time & Menu */}
         <div className="flex flex-col items-end gap-1">
           <span className="text-xs text-neutral-400 dark:text-neutral-500">
-            {group.getFormattedLastMessageTime()}
+            {getGroupFormattedLastMessageTime(group)}
           </span>
           <div ref={menuRef} className="relative">
             <button
@@ -139,12 +141,12 @@ export function GroupItem({
                     Copy Invite Link
                   </button>
                 )}
-                {/* Admin: Delete Group - only for relay admins */}
-                {isRelayAdmin && onDeleteGroup && (
+                {/* Delete Group: relay admins for public groups, group admins for any */}
+                {(isAdmin || (isRelayAdmin && group.visibility === GroupVisibility.PUBLIC)) && onDeleteGroup && (
                   <button
                     onClick={async (e) => {
                       e.stopPropagation();
-                      if (confirm(`Are you sure you want to delete "${group.getDisplayName()}"? This cannot be undone.`)) {
+                      if (confirm(`Are you sure you want to delete "${getGroupDisplayName(group)}"? This cannot be undone.`)) {
                         await onDeleteGroup();
                       }
                       setShowMenu(false);

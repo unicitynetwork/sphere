@@ -24,13 +24,6 @@ export const STORAGE_KEYS = {
   CHAT_CONVERSATIONS: 'sphere_chat_conversations',
   CHAT_MESSAGES: 'sphere_chat_messages',
 
-  // Group Chat (NIP-29)
-  GROUP_CHAT_GROUPS: 'sphere_group_chat_groups',
-  GROUP_CHAT_MESSAGES: 'sphere_group_chat_messages',
-  GROUP_CHAT_MEMBERS: 'sphere_group_chat_members',
-  GROUP_CHAT_RELAY_URL: 'sphere_group_chat_relay_url',
-  GROUP_CHAT_PROCESSED_EVENTS: 'sphere_group_chat_processed_events',
-
   // Chat UI State
   CHAT_MODE: 'sphere_chat_mode',
   CHAT_SELECTED_GROUP: 'sphere_chat_selected_group',
@@ -38,6 +31,9 @@ export const STORAGE_KEYS = {
 
   // Agent Chat Sessions
   AGENT_CHAT_SESSIONS: 'sphere_agent_chat_sessions',
+
+  // IPFS
+  IPFS_ENABLED: 'sphere_ipfs_enabled',
 
   // Dev Settings
   DEV_AGGREGATOR_URL: 'sphere_dev_aggregator_url',
