@@ -42,7 +42,7 @@ export function IpfsSyncIndicator() {
     >
       <button
         onClick={toggleIpfs}
-        className="flex items-center gap-1.5 px-2 py-1.5 sm:px-2.5 sm:py-2 rounded-lg transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        className="flex items-center gap-1.5 px-2 py-1.5 sm:px-2.5 sm:py-2 rounded-lg transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
         title={ipfsEnabled ? 'Disable IPFS sync' : 'Enable IPFS sync'}
       >
         <AnimatePresence mode="wait">
