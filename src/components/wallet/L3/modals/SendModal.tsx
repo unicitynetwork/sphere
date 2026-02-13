@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Loader2, User, CheckCircle, Coins } from 'lucide-react';
+import { ArrowRight, Loader2, User, CheckCircle, Coins, Hash } from 'lucide-react';
 import type { Asset } from '@unicitylabs/sphere-sdk';
 import { toSmallestUnit } from '@unicitylabs/sphere-sdk';
 import { useAssets, useTransfer, formatAmount } from '../../../../sdk';
@@ -24,6 +24,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
 
   // State
   const [step, setStep] = useState<Step>('recipient');
+  const [recipientMode, setRecipientMode] = useState<'nametag' | 'direct'>('nametag');
   const [recipient, setRecipient] = useState('');
   const [isCheckingRecipient, setIsCheckingRecipient] = useState(false);
   const [recipientError, setRecipientError] = useState<string | null>(null);
@@ -31,18 +32,22 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [amountInput, setAmountInput] = useState('');
 
-  // Nametag validation - same as in NametagScreen
   const handleRecipientChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.toLowerCase();
-    // Allow valid nametag characters plus @ (which will be stripped on validation)
-    if (/^@?[a-z0-9_\-+.]*$/.test(value)) {
-      setRecipient(value);
+    if (recipientMode === 'nametag') {
+      const value = e.target.value.toLowerCase();
+      if (/^@?[a-z0-9_\-+.]*$/.test(value)) {
+        setRecipient(value);
+        setRecipientError(null);
+      }
+    } else {
+      setRecipient(e.target.value);
       setRecipientError(null);
     }
   };
 
   const reset = () => {
     setStep('recipient');
+    setRecipientMode('nametag');
     setRecipient('');
     setSelectedAsset(null);
     setAmountInput('');
@@ -61,21 +66,30 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
     setRecipientError(null);
 
     try {
-      const cleanTag = recipient.replace('@', '').replace('@unicity', '').trim();
-      const transport = sphere?.getTransport();
+      if (recipientMode === 'direct') {
+        const addr = recipient.trim();
+        if (!addr.startsWith('DIRECT://')) {
+          setRecipientError('Direct address must start with DIRECT://');
+          return;
+        }
+        setRecipient(addr);
+        setStep('asset');
+      } else {
+        const cleanTag = recipient.replace('@', '').replace('@unicity', '').trim();
+        const transport = sphere?.getTransport();
 
-      if (transport?.resolveNametag) {
-        const pubkey = await transport.resolveNametag(cleanTag);
-        if (pubkey) {
+        if (transport?.resolveNametag) {
+          const pubkey = await transport.resolveNametag(cleanTag);
+          if (pubkey) {
+            setRecipient(cleanTag);
+            setStep('asset');
+          } else {
+            setRecipientError(`User @${cleanTag} not found`);
+          }
+        } else {
           setRecipient(cleanTag);
           setStep('asset');
-        } else {
-          setRecipientError(`User @${cleanTag} not found`);
         }
-      } else {
-        // If transport not available, skip validation and let send() handle it
-        setRecipient(cleanTag);
-        setStep('asset');
       }
     } catch {
       setRecipientError("Network error");
@@ -130,27 +144,38 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
     <BaseModal isOpen={isOpen} onClose={handleClose} showOrbs={false}>
       <ModalHeader title={getTitle()} onClose={handleClose} />
 
-      <div className="p-6">
+      <div className="px-6 py-3 flex-1 flex flex-col justify-center overflow-y-auto">
         <AnimatePresence mode="wait">
 
           {/* 1. RECIPIENT */}
           {step === 'recipient' && (
             <motion.div key="rec" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <div className="mb-6">
-                <label className="text-sm text-neutral-500 dark:text-neutral-400 block mb-2">Unicity Nametag</label>
+                <label className="text-sm text-neutral-500 dark:text-neutral-400 block mb-2">
+                  {recipientMode === 'nametag' ? 'Unicity Nametag' : 'Direct Address'}
+                </label>
                 <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500">@</span>
+                  {recipientMode === 'nametag' && (
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500">@</span>
+                  )}
                   <input
                     autoFocus
                     value={recipient}
                     onChange={handleRecipientChange}
                     onKeyDown={(e) => e.key === 'Enter' && handleRecipientNext()}
-                    className="w-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-xl py-3 pl-8 pr-4 text-neutral-900 dark:text-white focus:border-orange-500 outline-none"
-                    placeholder="Unicity ID"
+                    className={`w-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-xl py-3 pr-4 text-neutral-900 dark:text-white focus:border-orange-500 outline-none ${recipientMode === 'nametag' ? 'pl-8' : 'pl-4 font-mono text-sm'}`}
+                    placeholder={recipientMode === 'nametag' ? 'Unicity ID' : 'DIRECT://...'}
                   />
                 </div>
                 {recipientError && <p className="text-red-500 text-sm mt-2">{recipientError}</p>}
+                <button
+                  onClick={() => { setRecipientMode(recipientMode === 'nametag' ? 'direct' : 'nametag'); setRecipient(''); setRecipientError(null); }}
+                  className="text-[11px] text-neutral-400 dark:text-neutral-500 hover:text-orange-500 dark:hover:text-orange-400 mt-2 transition-colors"
+                >
+                  {recipientMode === 'nametag' ? 'Use direct address instead' : 'Use nametag instead'}
+                </button>
               </div>
+
               <Button
                 onClick={handleRecipientNext}
                 disabled={!recipient || isCheckingRecipient}
@@ -186,7 +211,9 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
           )}
 
           {/* 3. AMOUNT */}
-          {step === 'amount' && selectedAsset && (
+          {step === 'amount' && selectedAsset && (() => {
+            const insufficientBalance = amountInput !== '' && toSmallestUnit(amountInput, selectedAsset.decimals) > BigInt(selectedAsset.totalAmount);
+            return (
             <motion.div key="amt" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <div className="mb-6">
                 <div className="flex justify-between text-sm mb-2">
@@ -198,10 +225,14 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
                 <div className="relative">
                   <input
                     autoFocus
-                    type="number"
+                    type="text"
+                    inputMode="decimal"
                     value={amountInput}
-                    onChange={(e) => setAmountInput(e.target.value)}
-                    className="w-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-xl py-3 px-4 text-neutral-900 dark:text-white text-2xl font-mono focus:border-orange-500 outline-none"
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === '' || /^\d*\.?\d*$/.test(v)) setAmountInput(v);
+                    }}
+                    className={`w-full bg-neutral-100 dark:bg-neutral-900 border rounded-xl py-3 px-4 text-neutral-900 dark:text-white text-2xl font-mono outline-none ${insufficientBalance ? 'border-red-500 focus:border-red-500' : 'border-neutral-200 dark:border-white/10 focus:border-orange-500'}`}
                     placeholder="0.00"
                   />
                   <button
@@ -211,17 +242,19 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
                     MAX
                   </button>
                 </div>
+                {insufficientBalance && <p className="text-red-500 text-sm mt-2">Insufficient balance</p>}
                 {recipientError && <p className="text-red-500 text-sm mt-2">{recipientError}</p>}
               </div>
               <Button
                 onClick={handleAmountNext}
-                disabled={!amountInput}
+                disabled={!amountInput || insufficientBalance}
                 fullWidth
               >
                 Review
               </Button>
             </motion.div>
-          )}
+            );
+          })()}
 
           {/* 4. CONFIRM */}
           {step === 'confirm' && selectedAsset && (
@@ -235,8 +268,14 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
                 </div>
 
                 <div className="flex items-center justify-center gap-2 text-sm bg-neutral-200 dark:bg-neutral-800/50 p-2 rounded-lg mx-auto max-w-max">
-                  <User className="w-4 h-4 text-neutral-500 dark:text-neutral-400" />
-                  <span className="text-neutral-700 dark:text-neutral-300">@{recipient}</span>
+                  {recipientMode === 'direct' ? (
+                    <Hash className="w-4 h-4 text-neutral-500 dark:text-neutral-400" />
+                  ) : (
+                    <User className="w-4 h-4 text-neutral-500 dark:text-neutral-400" />
+                  )}
+                  <span className={`text-neutral-700 dark:text-neutral-300 ${recipientMode === 'direct' ? 'font-mono text-xs break-all' : ''}`}>
+                    {recipientMode === 'direct' ? recipient : `@${recipient}`}
+                  </span>
                 </div>
               </div>
 
@@ -282,7 +321,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
               </div>
               <h3 className="text-neutral-900 dark:text-white font-bold text-2xl mb-2">Success!</h3>
               <p className="text-neutral-500 dark:text-neutral-400">
-                Successfully sent <b>{amountInput} {selectedAsset?.symbol}</b> to <b>@{recipient}</b>
+                Successfully sent <b>{amountInput} {selectedAsset?.symbol}</b> to <b>{recipientMode === 'direct' ? recipient : `@${recipient}`}</b>
               </p>
               <button onClick={handleClose} className="mt-8 px-8 py-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white transition-colors">
                 Close

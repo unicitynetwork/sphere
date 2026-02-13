@@ -38,30 +38,30 @@ export function ScanningScreen({
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
-            transition={{ duration: 0.3 }}
-            className="w-full max-w-[360px] md:max-w-[420px] bg-white dark:bg-neutral-900 rounded-2xl p-6 md:p-8 shadow-2xl"
+            transition={{ duration: 0.2 }}
+            className="w-full max-w-[360px] bg-white dark:bg-neutral-900 rounded-2xl p-5 shadow-2xl"
           >
             {/* Icon */}
             <motion.div
-              className="relative w-16 h-16 md:w-20 md:h-20 mx-auto mb-6"
+              className="relative w-14 h-14 mx-auto mb-5"
               animate={{ rotate: [0, 360] }}
               transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
             >
-              <div className="absolute inset-0 bg-cyan-500/30 rounded-2xl md:rounded-3xl blur-xl" />
-              <div className="relative w-full h-full rounded-2xl md:rounded-3xl bg-linear-to-br from-cyan-500 to-cyan-600 flex items-center justify-center shadow-2xl shadow-cyan-500/30">
-                <Search className="w-8 h-8 md:w-10 md:h-10 text-white" />
+              <div className="absolute inset-0 bg-cyan-500/30 rounded-2xl blur-xl" />
+              <div className="relative w-full h-full rounded-2xl bg-linear-to-br from-cyan-500 to-cyan-600 flex items-center justify-center shadow-xl shadow-cyan-500/25">
+                <Search className="w-7 h-7 text-white" />
               </div>
             </motion.div>
 
-            <h2 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white mb-2 md:mb-3 tracking-tight text-center">
+            <h2 className="text-xl font-bold text-neutral-900 dark:text-white mb-2 tracking-tight text-center">
               Scanning Blockchain
             </h2>
-            <p className="text-neutral-500 dark:text-neutral-400 text-xs md:text-sm mb-6 md:mb-8 mx-auto leading-relaxed text-center">
+            <p className="text-neutral-500 dark:text-neutral-400 text-xs mb-5 mx-auto leading-relaxed text-center">
               Searching for addresses with balance
             </p>
 
             {/* Progress Bar */}
-            <div className="mb-4">
+            <div className="mb-3">
               <div className="flex justify-between text-xs text-neutral-500 dark:text-neutral-400 mb-2">
                 <span>{scanned} / {total} addresses</span>
                 <span>{percentage}%</span>
@@ -77,27 +77,27 @@ export function ScanningScreen({
             </div>
 
             {/* Stats */}
-            <div className="p-4 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 rounded-xl mb-6">
+            <div className="p-3 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 rounded-xl mb-4">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-neutral-500 dark:text-neutral-400">
+                <span className="text-xs text-neutral-500 dark:text-neutral-400">
                   Addresses found
                 </span>
-                <span className="text-lg font-bold text-neutral-900 dark:text-white">
+                <span className="text-sm font-bold text-neutral-900 dark:text-white">
                   {foundCount}
                 </span>
               </div>
               {(progress?.nametagsFoundCount ?? 0) > 0 && (
                 <div className="flex items-center justify-between mt-2">
-                  <span className="text-sm text-neutral-500 dark:text-neutral-400">
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400">
                     With Unicity IDs
                   </span>
-                  <span className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                  <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
                     {progress!.nametagsFoundCount}
                   </span>
                 </div>
               )}
               {progress?.currentAddress && (
-                <div className="mt-2 text-xs text-neutral-400 dark:text-neutral-500 font-mono truncate">
+                <div className="mt-2 text-[10px] text-neutral-400 dark:text-neutral-500 font-mono truncate">
                   {progress.currentAddress}
                 </div>
               )}
@@ -108,9 +108,9 @@ export function ScanningScreen({
               onClick={onCancel}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="w-full py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 text-sm md:text-base font-bold border-2 border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
+              className="w-full py-3.5 px-5 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 text-sm font-bold border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
             >
-              <X className="w-4 h-4 md:w-5 md:h-5" />
+              <X className="w-4 h-4" />
               Skip Scanning
             </motion.button>
           </motion.div>

@@ -86,7 +86,7 @@ export function CreateWalletFlow() {
   } = useOnboardingFlow();
 
   return (
-    <div className="flex flex-col items-center justify-center p-4 md:p-8 text-center relative">
+    <div className="flex flex-col items-center justify-center h-full p-6 text-center relative">
       <AnimatePresence mode="wait">
         {step === "start" && (
           <StartScreen

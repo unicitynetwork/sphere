@@ -36,24 +36,24 @@ export function PasswordPromptScreen({
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
-      transition={{ duration: 0.3 }}
-      className="relative z-10 w-full max-w-[320px] md:max-w-[400px]"
+      transition={{ duration: 0.1 }}
+      className="relative z-10 w-full max-w-[360px]"
     >
       {/* Icon */}
       <motion.div
-        className="relative w-16 h-16 md:w-20 md:h-20 mx-auto mb-6"
+        className="relative w-18 h-18 mx-auto mb-6"
         whileHover={{ scale: 1.05 }}
       >
-        <div className="absolute inset-0 bg-amber-500/30 rounded-2xl md:rounded-3xl blur-xl" />
-        <div className="relative w-full h-full rounded-2xl md:rounded-3xl bg-linear-to-br from-amber-500 to-amber-600 flex items-center justify-center shadow-2xl shadow-amber-500/30">
-          <Lock className="w-8 h-8 md:w-10 md:h-10 text-white" />
+        <div className="absolute inset-0 bg-amber-500/30 rounded-2xl blur-xl" />
+        <div className="relative w-full h-full rounded-2xl bg-linear-to-br from-amber-500 to-amber-600 flex items-center justify-center shadow-xl shadow-amber-500/25">
+          <Lock className="w-9 h-9 text-white" />
         </div>
       </motion.div>
 
-      <h2 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white mb-2 md:mb-3 tracking-tight">
+      <h2 className="text-2xl font-bold text-neutral-900 dark:text-white mb-2 tracking-tight">
         Enter Password
       </h2>
-      <p className="text-neutral-500 dark:text-neutral-400 text-xs md:text-sm mb-6 md:mb-8 mx-auto leading-relaxed">
+      <p className="text-neutral-500 dark:text-neutral-400 text-sm mb-6 mx-auto leading-relaxed">
         The file{" "}
         <span className="font-medium text-neutral-700 dark:text-neutral-300">
           {fileName}
@@ -63,7 +63,7 @@ export function PasswordPromptScreen({
 
       <form onSubmit={handleSubmit}>
         {/* Password Input */}
-        <div className="relative mb-6">
+        <div className="relative mb-5">
           <input
             type={showPassword ? "text" : "password"}
             value={password}
@@ -71,7 +71,7 @@ export function PasswordPromptScreen({
             placeholder="Wallet password"
             autoFocus
             disabled={isBusy}
-            className="w-full px-4 py-3 md:py-3.5 bg-neutral-100 dark:bg-neutral-800/50 border-2 border-neutral-200 dark:border-neutral-700/50 rounded-xl text-sm md:text-base text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 pr-12 disabled:opacity-50"
+            className="w-full px-4 py-3 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700/50 rounded-xl text-sm text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 pr-12 disabled:opacity-50"
           />
           <button
             type="button"
@@ -79,9 +79,9 @@ export function PasswordPromptScreen({
             className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
           >
             {showPassword ? (
-              <EyeOff className="w-5 h-5" />
+              <EyeOff className="w-4 h-4" />
             ) : (
-              <Eye className="w-5 h-5" />
+              <Eye className="w-4 h-4" />
             )}
           </button>
         </div>
@@ -94,9 +94,9 @@ export function PasswordPromptScreen({
             disabled={isBusy}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            className="flex-1 py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 text-sm md:text-base font-bold border-2 border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
+            className="flex-1 py-3.5 px-5 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 text-sm font-bold border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
           >
-            <ArrowLeft className="w-4 h-4 md:w-5 md:h-5" />
+            <ArrowLeft className="w-4 h-4" />
             Back
           </motion.button>
 
@@ -105,19 +105,19 @@ export function PasswordPromptScreen({
             disabled={isBusy || !password.trim()}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            className="flex-2 relative py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-linear-to-r from-amber-500 to-amber-600 text-white text-sm md:text-base font-bold shadow-xl shadow-amber-500/30 flex items-center justify-center gap-2 md:gap-3 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden group"
+            className="flex-2 relative py-3.5 px-5 rounded-xl bg-linear-to-r from-amber-500 to-amber-600 text-white text-sm font-bold shadow-xl shadow-amber-500/25 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden group"
           >
             <div className="absolute inset-0 bg-linear-to-r from-amber-400 to-amber-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <span className="relative z-10 flex items-center gap-2 md:gap-3">
+            <span className="relative z-10 flex items-center gap-2">
               {isBusy ? (
                 <>
-                  <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin" />
                   Decrypting...
                 </>
               ) : (
                 <>
                   Unlock
-                  <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />
+                  <ArrowRight className="w-4 h-4" />
                 </>
               )}
             </span>
@@ -129,7 +129,7 @@ export function PasswordPromptScreen({
         <motion.p
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mt-3 md:mt-4 text-red-500 dark:text-red-400 text-xs md:text-sm bg-red-500/10 border border-red-500/20 p-2 md:p-3 rounded-lg"
+          className="mt-3 text-red-500 dark:text-red-400 text-xs bg-red-500/10 border border-red-500/20 p-2 rounded-lg"
         >
           {error}
         </motion.p>

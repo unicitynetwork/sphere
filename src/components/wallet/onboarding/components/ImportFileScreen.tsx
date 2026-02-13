@@ -51,24 +51,24 @@ export function ImportFileScreen({
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
-      transition={{ duration: 0.3 }}
-      className="relative z-10 w-full max-w-[320px] md:max-w-[400px]"
+      transition={{ duration: 0.1 }}
+      className="relative z-10 w-full max-w-[360px]"
     >
       {/* Icon */}
       <motion.div
-        className="relative w-16 h-16 md:w-20 md:h-20 mx-auto mb-6"
+        className="relative w-18 h-18 mx-auto mb-6"
         whileHover={{ scale: 1.05 }}
       >
-        <div className="absolute inset-0 bg-orange-500/30 rounded-2xl md:rounded-3xl blur-xl" />
-        <div className="relative w-full h-full rounded-2xl md:rounded-3xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-2xl shadow-orange-500/30">
-          <Upload className="w-8 h-8 md:w-10 md:h-10 text-white" />
+        <div className="absolute inset-0 bg-orange-500/30 rounded-2xl blur-xl" />
+        <div className="relative w-full h-full rounded-2xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-xl shadow-orange-500/25">
+          <Upload className="w-9 h-9 text-white" />
         </div>
       </motion.div>
 
-      <h2 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white mb-2 md:mb-3 tracking-tight">
+      <h2 className="text-2xl font-bold text-neutral-900 dark:text-white mb-2 tracking-tight">
         Import Wallet
       </h2>
-      <p className="text-neutral-500 dark:text-neutral-400 text-xs md:text-sm mb-6 md:mb-8 mx-auto leading-relaxed">
+      <p className="text-neutral-500 dark:text-neutral-400 text-sm mb-6 mx-auto leading-relaxed">
         Select a wallet file to import
       </p>
 
@@ -79,21 +79,21 @@ export function ImportFileScreen({
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
             onDrop={onDrop}
-            className={`w-full border-2 border-dashed rounded-xl p-8 md:p-10 text-center transition-colors mb-6 ${
+            className={`w-full border-2 border-dashed rounded-xl p-6 text-center transition-colors mb-5 ${
               isDragging
                 ? "border-orange-500 bg-orange-500/10"
                 : "border-neutral-300 dark:border-neutral-600 hover:border-orange-400 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
             }`}
           >
             <Upload
-              className={`w-12 h-12 md:w-14 md:h-14 mx-auto mb-4 ${
+              className={`w-10 h-10 mx-auto mb-3 ${
                 isDragging ? "text-orange-500" : "text-neutral-400"
               }`}
             />
-            <p className="text-sm md:text-base text-neutral-700 dark:text-neutral-300 font-medium mb-2">
+            <p className="text-sm text-neutral-700 dark:text-neutral-300 font-medium mb-1">
               Select wallet file
             </p>
-            <p className="text-xs md:text-sm text-neutral-400 dark:text-neutral-500 mb-3">
+            <p className="text-xs text-neutral-400 dark:text-neutral-500 mb-3">
               .json, .txt or .dat
             </p>
             <label className="inline-block cursor-pointer">
@@ -111,7 +111,7 @@ export function ImportFileScreen({
                 Choose File
               </span>
             </label>
-            <p className="text-[10px] md:text-xs text-neutral-400 dark:text-neutral-600 mt-3 hidden sm:block">
+            <p className="text-[10px] text-neutral-400 dark:text-neutral-600 mt-3 hidden sm:block">
               or drag & drop here
             </p>
           </div>
@@ -119,15 +119,15 @@ export function ImportFileScreen({
       ) : (
         <>
           {/* Selected File Display */}
-          <div className="p-4 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 rounded-xl mb-4">
+          <div className="p-3 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 rounded-xl mb-3">
             <div className="flex items-center gap-3">
               {selectedFile.name.endsWith(".json") ? (
-                <FileJson className="w-6 h-6 text-orange-500 shrink-0" />
+                <FileJson className="w-5 h-5 text-orange-500 shrink-0" />
               ) : (
-                <FileText className="w-6 h-6 text-orange-500 shrink-0" />
+                <FileText className="w-5 h-5 text-orange-500 shrink-0" />
               )}
               <div className="flex-1 min-w-0">
-                <p className="text-sm md:text-base text-neutral-900 dark:text-white font-medium truncate">
+                <p className="text-sm text-neutral-900 dark:text-white font-medium truncate">
                   {selectedFile.name}
                 </p>
                 <p className="text-xs text-neutral-500">
@@ -145,8 +145,8 @@ export function ImportFileScreen({
 
           {/* Scan Count (for BIP32/.dat files) */}
           {needsScanning ? (
-            <div className="p-4 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 rounded-xl mb-4">
-              <p className="text-xs md:text-sm text-neutral-700 dark:text-neutral-300 mb-2 font-medium">
+            <div className="p-3 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 rounded-xl mb-3">
+              <p className="text-xs text-neutral-700 dark:text-neutral-300 mb-2 font-medium">
                 How many addresses to scan?
               </p>
               <input
@@ -160,8 +160,8 @@ export function ImportFileScreen({
               />
             </div>
           ) : (
-            <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl mb-4">
-              <p className="text-xs md:text-sm text-emerald-700 dark:text-emerald-300 font-medium">
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl mb-3">
+              <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
                 Addresses will be imported from file
               </p>
             </div>
@@ -176,9 +176,9 @@ export function ImportFileScreen({
           disabled={isBusy}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
-          className="flex-1 py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 text-sm md:text-base font-bold border-2 border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
+          className="flex-1 py-3.5 px-5 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 text-sm font-bold border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
         >
-          <ArrowLeft className="w-4 h-4 md:w-5 md:h-5" />
+          <ArrowLeft className="w-4 h-4" />
           Back
         </motion.button>
 
@@ -188,19 +188,19 @@ export function ImportFileScreen({
             disabled={isBusy}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            className="flex-2 relative py-3 md:py-3.5 px-5 md:px-6 rounded-xl bg-linear-to-r from-orange-500 to-orange-600 text-white text-sm md:text-base font-bold shadow-xl shadow-orange-500/30 flex items-center justify-center gap-2 md:gap-3 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden group"
+            className="flex-2 relative py-3.5 px-5 rounded-xl bg-linear-to-r from-orange-500 to-orange-600 text-white text-sm font-bold shadow-xl shadow-orange-500/25 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden group"
           >
             <div className="absolute inset-0 bg-linear-to-r from-orange-400 to-orange-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <span className="relative z-10 flex items-center gap-2 md:gap-3">
+            <span className="relative z-10 flex items-center gap-2">
               {isBusy ? (
                 <>
-                  <Loader2 className="w-4 h-4 md:w-5 md:h-5 animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin" />
                   Importing...
                 </>
               ) : (
                 <>
                   Import
-                  <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />
+                  <ArrowRight className="w-4 h-4" />
                 </>
               )}
             </span>
@@ -212,7 +212,7 @@ export function ImportFileScreen({
         <motion.p
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mt-3 md:mt-4 text-red-500 dark:text-red-400 text-xs md:text-sm bg-red-500/10 border border-red-500/20 p-2 md:p-3 rounded-lg"
+          className="mt-3 text-red-500 dark:text-red-400 text-xs bg-red-500/10 border border-red-500/20 p-2 rounded-lg"
         >
           {error}
         </motion.p>
