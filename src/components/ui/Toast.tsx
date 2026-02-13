@@ -59,7 +59,7 @@ export function ToastContainer() {
   }, [addToast]);
 
   return (
-    <div className="fixed bottom-4 right-4 z-[100001] flex flex-col gap-2 pointer-events-none">
+    <div className="fixed bottom-4 right-4 z-100001 flex flex-col gap-2 pointer-events-none">
       <AnimatePresence>
         {toasts.map((toast) => (
           <motion.div
@@ -69,7 +69,7 @@ export function ToastContainer() {
             exit={{ opacity: 0, y: -20, scale: 0.95 }}
             className={`
               pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl
-              border shadow-lg backdrop-blur-sm text-white min-w-[280px] max-w-[400px]
+              border shadow-lg backdrop-blur-sm text-white min-w-70 max-w-100
               ${colors[toast.type]}
             `}
           >

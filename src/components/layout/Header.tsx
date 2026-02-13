@@ -89,7 +89,7 @@ export function Header() {
       {/* Animated gradient line on top */}
       <div className="absolute top-0 left-0 right-0 h-0.5 bg-linear-to-r from-transparent via-orange-500 to-transparent opacity-50" />
 
-      <div className="max-w-[1800px] mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-14 lg:h-14 flex items-stretch justify-between relative z-10">
+      <div className="max-w-450 mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-14 lg:h-14 flex items-stretch justify-between relative z-10">
         <div className="flex items-stretch gap-2 sm:gap-4 lg:gap-6">
           {/* Logo with enhanced effects - entire block is clickable */}
           <Link to="/agents/chat" className="flex items-center gap-2 sm:gap-4 lg:gap-6 group">

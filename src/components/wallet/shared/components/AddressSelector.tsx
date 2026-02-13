@@ -8,7 +8,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { TrackedAddress } from '@unicitylabs/sphere-sdk';
 
 /** Truncate long nametags: show first 6 chars + ... + last 3 chars */
-function truncateNametag(nametag: string, maxLength: number = 12): string {
+function truncateNametag(nametag: string, maxLength: number = 20): string {
   if (nametag.length <= maxLength) return nametag;
   return `${nametag.slice(0, 6)}...${nametag.slice(-3)}`;
 }
@@ -331,16 +331,15 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
     if ((displayNametag || directAddress) && compact) {
       return (
         <div className="flex items-center gap-1.5">
-          {displayNametag && (
+          {displayNametag ? (
             <span className="text-[10px] sm:text-xs text-neutral-500 font-medium" title={`@${displayNametag}`}>
               @{truncateNametag(displayNametag)}
             </span>
-          )}
-          {directAddress && (
+          ) : directAddress ? (
             <span className="text-[10px] sm:text-xs font-mono text-neutral-400">
               {directAddress.slice(0, 8)}...{directAddress.slice(-4)}
             </span>
-          )}
+          ) : null}
         </div>
       );
     }
@@ -356,20 +355,19 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
             onClick={() => setShowDropdown(prev => !prev)}
             className="flex items-center gap-1 text-[10px] sm:text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors"
           >
-            {displayNametag && (
+            {displayNametag ? (
               <span className="font-medium" title={`@${displayNametag}`}>@{truncateNametag(displayNametag)}</span>
-            )}
-            {directAddress ? (
-              <span className={`font-mono ${displayNametag ? 'text-neutral-400 dark:text-neutral-500' : ''}`}>
+            ) : directAddress ? (
+              <span className="font-mono">
                 {directAddress.slice(0, 8)}...{directAddress.slice(-4)}
               </span>
-            ) : !displayNametag ? (
+            ) : (
               <span className="font-mono text-neutral-400">...</span>
-            ) : null}
+            )}
             <ChevronDown className={`w-3 h-3 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
           </button>
 
-          {displayNametag && (
+          {displayNametag ? (
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
@@ -383,9 +381,7 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
                 <Copy className="w-3 h-3 text-neutral-500" />
               )}
             </motion.button>
-          )}
-
-          {directAddress && (
+          ) : directAddress ? (
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
@@ -399,7 +395,7 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
                 <Copy className="w-3 h-3 text-neutral-400" />
               )}
             </motion.button>
-          )}
+          ) : null}
         </div>
 
         <AnimatePresence>
@@ -417,7 +413,7 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -10, scale: 0.95 }}
                 transition={{ duration: 0.15 }}
-                className="absolute left-0 top-full mt-2 z-50 min-w-[280px] bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl overflow-hidden"
+                className="absolute left-0 top-full mt-2 z-50 min-w-70 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl overflow-hidden"
               >
                 <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2">
                   <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 flex items-center gap-1.5">
@@ -509,7 +505,7 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -10, scale: 0.95 }}
               transition={{ duration: 0.15 }}
-              className="absolute left-0 top-full mt-2 z-50 min-w-[300px] bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl overflow-hidden"
+              className="absolute left-0 top-full mt-2 z-50 min-w-75 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl overflow-hidden"
             >
               <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
                 <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">

@@ -149,6 +149,7 @@ export function L3WalletView({
   const assets = sdkAssets;
 
   const tokens = sdkTokens;
+  const sendableTokens = useMemo(() => tokens.filter(t => t.coinId !== 'NAMETAG'), [tokens]);
 
   // L1 balance as a number (ALPHA units)
   const l1Balance = useMemo(() => {
@@ -424,10 +425,11 @@ export function L3WalletView({
           </motion.button>
 
           <motion.button
-            whileHover={{ scale: 1.02, y: -2 }}
-            whileTap={{ scale: 0.98 }}
+            whileHover={{ scale: sendableTokens.length > 0 ? 1.02 : 1, y: sendableTokens.length > 0 ? -2 : 0 }}
+            whileTap={{ scale: sendableTokens.length > 0 ? 0.98 : 1 }}
             onClick={() => setIsSendModalOpen(true)}
-            className="relative px-3 py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2"
+            disabled={sendableTokens.length === 0}
+            className="relative px-3 py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ArrowUpRight className="w-4 h-4" />
             <span>Send</span>
@@ -494,7 +496,7 @@ export function L3WalletView({
           </div>
         </div>
 
-        <div className="relative min-h-[200px]">
+        <div className="relative min-h-50">
           {isLoadingAssets ? (
             <div className="py-10 text-center">
               <Loader2 className="w-6 h-6 text-orange-500 animate-spin mx-auto" />
