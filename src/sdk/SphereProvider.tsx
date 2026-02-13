@@ -12,6 +12,10 @@ import {
 } from '@unicitylabs/sphere-sdk/impl/browser';
 import type { NetworkType } from '@unicitylabs/sphere-sdk';
 import { SphereContext } from './SphereContext';
+
+const COINGECKO_BASE_URL = import.meta.env.DEV
+  ? '/coingecko'
+  : 'https://api.coingecko.com/api/v3';
 import type {
   SphereContextValue,
   CreateWalletOptions,
@@ -44,7 +48,7 @@ export function SphereProvider({
 
       const browserProviders = createBrowserProviders({
         network,
-        price: { platform: 'coingecko', baseUrl: '/coingecko', cacheTtlMs: 5 * 60_000 },
+        price: { platform: 'coingecko', baseUrl: COINGECKO_BASE_URL, cacheTtlMs: 5 * 60_000 },
       });
       setProviders(browserProviders);
 
@@ -253,7 +257,7 @@ export function SphereProvider({
     // resolveNametag() also connects transport on demand when needed.
     const freshProviders = createBrowserProviders({
       network,
-      price: { platform: 'coingecko', baseUrl: '/coingecko' },
+      price: { platform: 'coingecko', baseUrl: COINGECKO_BASE_URL },
     });
     setProviders(freshProviders);
   }, [sphere, providers, queryClient, network]);
