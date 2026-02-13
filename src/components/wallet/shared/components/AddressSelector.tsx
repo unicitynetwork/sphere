@@ -14,15 +14,13 @@ function truncateNametag(nametag: string, maxLength: number = 20): string {
 }
 
 interface AddressSelectorProps {
-  /** Current nametag to display when collapsed */
-  currentNametag?: string;
   /** Compact mode - just show nametag with small dropdown trigger */
   compact?: boolean;
   /** Which address format to display: 'direct' for DIRECT://, 'l1' for alpha1... */
   addressFormat?: 'direct' | 'l1';
 }
 
-export function AddressSelector({ currentNametag, compact = true, addressFormat = 'direct' }: AddressSelectorProps) {
+export function AddressSelector({ compact = true, addressFormat = 'direct' }: AddressSelectorProps) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [copied, setCopied] = useState<'nametag' | 'address' | false>(false);
   const [isSwitching, setIsSwitching] = useState(false);
@@ -80,23 +78,21 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
     return () => clearTimeout(timer);
   }, [newNametag, resolveNametag]);
 
-  const displayNametag = currentNametag || nametag;
+  const displayNametag = nametag;
 
   const refreshAfterSwitch = useCallback(() => {
-    // Remove cached data so stale values from the previous address aren't shown
-    queryClient.removeQueries({ queryKey: SPHERE_KEYS.identity.all });
-    queryClient.removeQueries({ queryKey: SPHERE_KEYS.payments.all });
-    queryClient.removeQueries({ queryKey: SPHERE_KEYS.l1.all });
-    // Re-fetch fresh data for the new address
-    queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.all });
-    queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.payments.all });
-    queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.l1.all });
+    // Reset queries: clears cached data AND triggers a refetch for active observers.
+    // Using resetQueries instead of removeQueries+invalidateQueries because
+    // invalidateQueries after removeQueries is a no-op (nothing left to invalidate).
+    queryClient.resetQueries({ queryKey: SPHERE_KEYS.identity.all });
+    queryClient.resetQueries({ queryKey: SPHERE_KEYS.payments.all });
+    queryClient.resetQueries({ queryKey: SPHERE_KEYS.l1.all });
     window.dispatchEvent(new Event('wallet-updated'));
     if (sphere) setAddresses(sphere.getActiveAddresses());
   }, [queryClient, sphere]);
 
   const handleCopyNametag = useCallback(async () => {
-    const tagToCopy = currentNametag || nametag;
+    const tagToCopy = nametag;
     if (!tagToCopy) return;
     try {
       await navigator.clipboard.writeText(`@${tagToCopy}`);
@@ -105,7 +101,7 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
     } catch (err) {
       console.error('Failed to copy nametag:', err);
     }
-  }, [currentNametag, nametag]);
+  }, [nametag]);
 
   const handleCopyDirectAddress = useCallback(async () => {
     if (!directAddress) return;
@@ -128,11 +124,17 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
     setIsSwitching(true);
 
     try {
-      await sphere.switchToAddress(index);
-      refreshAfterSwitch();
+      // Timeout guards against SDK hanging on Nostr publish when relay is not connected
+      await Promise.race([
+        sphere.switchToAddress(index),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+      ]);
     } catch (e) {
-      console.error('[AddressSelector] Failed to switch address:', e);
+      if (!(e instanceof Error && e.message === 'timeout')) {
+        console.error('[AddressSelector] Failed to switch address:', e);
+      }
     } finally {
+      refreshAfterSwitch();
       setIsSwitching(false);
     }
   }, [sphere, isSwitching, currentAddressIndex, refreshAfterSwitch]);
@@ -150,21 +152,20 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
         : 1;
 
       // Create and switch to the new address
-      await sphere.switchToAddress(nextIndex);
-      refreshAfterSwitch();
-
-      // SDK's switchToAddress now recovers nametag from network automatically
-      if (sphere.identity?.nametag) {
-        setShowDropdown(false);
-        return;
+      // Timeout guards against SDK hanging on Nostr publish when relay is not connected
+      try {
+        await Promise.race([
+          sphere.switchToAddress(nextIndex),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+        ]);
+      } catch (e) {
+        if (!(e instanceof Error && e.message === 'timeout')) throw e;
       }
-
+      refreshAfterSwitch();
       setShowDropdown(false);
-
-      // No nametag found — prompt user
-      setNewNametag('');
-      setNametagError(null);
-      setShowNametagModal(true);
+      // Nametag recovery happens async in the SDK background.
+      // If recovered, 'nametag:recovered' event updates UI via useSphereEvents.
+      // If not, user can click "Register ID" in the header.
     } catch (e) {
       console.error('[AddressSelector] Failed to create new address:', e);
       setShowDropdown(false);
@@ -444,7 +445,7 @@ export function AddressSelector({ currentNametag, compact = true, addressFormat 
                 <div className="max-h-64 overflow-y-auto custom-scrollbar">
                   {sortedAddresses.map((addr) => {
                     const isSelected = addr.index === currentAddressIndex;
-                    const addrNametag = isSelected ? displayNametag : addr.nametag;
+                    const addrNametag = addr.nametag;
 
                     return (
                       <button
