@@ -5,6 +5,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { isMock } from '../../hooks/useAgentChat';
 import { ThemeToggle } from '../theme';
 import { STORAGE_KEYS } from '../../config/storageKeys';
+import { IpfsSyncIndicator } from './IpfsSyncIndicator';
 
 function devReset(): void {
   localStorage.removeItem(STORAGE_KEYS.DEV_AGGREGATOR_URL);
@@ -78,10 +79,12 @@ export function Header() {
 
   return (
     <>
-    <header className={`border-b backdrop-blur-2xl sticky top-0 z-50 overflow-hidden w-screen border-neutral-200 dark:border-neutral-800/50 bg-white/80 ${isMinePage ? 'dark:bg-gray-950/90' : 'theme-transition dark:bg-neutral-900/80'}`}>
-      {/* Background decorative elements */}
-      <div className="absolute top-0 left-0 w-96 h-full bg-linear-to-r from-orange-500/5 dark:from-orange-500/10 to-transparent blur-3xl" />
-      <div className="absolute top-0 right-0 w-96 h-full bg-linear-to-l from-purple-500/5 dark:from-purple-500/10 to-transparent blur-3xl" />
+    <header className={`border-b backdrop-blur-2xl sticky top-0 z-50 w-screen border-neutral-200 dark:border-neutral-800/50 bg-white/80 ${isMinePage ? 'dark:bg-gray-950/90' : 'theme-transition dark:bg-neutral-900/80'}`}>
+      {/* Background decorative elements (clipped to header bounds) */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-0 left-0 w-96 h-full bg-linear-to-r from-orange-500/5 dark:from-orange-500/10 to-transparent blur-3xl" />
+        <div className="absolute top-0 right-0 w-96 h-full bg-linear-to-l from-purple-500/5 dark:from-purple-500/10 to-transparent blur-3xl" />
+      </div>
 
       {/* Animated gradient line on top */}
       <div className="absolute top-0 left-0 right-0 h-0.5 bg-linear-to-r from-transparent via-orange-500 to-transparent opacity-50" />
@@ -198,6 +201,9 @@ export function Header() {
         )}
 
         <div className="flex items-center gap-1 sm:gap-2 lg:gap-3">
+          {/* IPFS Sync Status */}
+          <IpfsSyncIndicator />
+
           {/* Social Links */}
           <motion.a
             href="https://github.com/unicitynetwork"

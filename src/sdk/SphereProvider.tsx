@@ -2,6 +2,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useRef,
   type ReactNode,
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -19,7 +20,28 @@ import type {
   ImportFromFileOptions,
   ImportFromFileResult,
 } from './SphereContext';
-import { clearAllSphereData } from '../config/storageKeys';
+import { clearAllSphereData, STORAGE_KEYS } from '../config/storageKeys';
+
+const IPFS_GATEWAYS = import.meta.env.VITE_IPFS_GATEWAYS
+  ? (import.meta.env.VITE_IPFS_GATEWAYS as string).split(',').map(s => s.trim())
+  : ['https://unicity-ipfs1.dyndns.org'];
+
+function isIpfsEnabled(): boolean {
+  const stored = localStorage.getItem(STORAGE_KEYS.IPFS_ENABLED);
+  return stored !== 'false'; // enabled by default
+}
+
+function getIpfsConfig() {
+  if (!isIpfsEnabled()) return {};
+  return {
+    tokenSync: {
+      ipfs: {
+        enabled: true,
+        gateways: IPFS_GATEWAYS,
+      },
+    },
+  };
+}
 
 interface SphereProviderProps {
   children: ReactNode;
@@ -36,9 +58,17 @@ export function SphereProvider({
   const [isLoading, setIsLoading] = useState(true);
   const [walletExists, setWalletExists] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [ipfsEnabled, setIpfsEnabled] = useState(isIpfsEnabled);
+  const sphereRef = useRef<Sphere | null>(null);
 
   const initialize = useCallback(async () => {
     try {
+      // Destroy previous instance to release IndexedDB connections
+      if (sphereRef.current) {
+        await sphereRef.current.destroy();
+        sphereRef.current = null;
+      }
+
       setIsLoading(true);
       setError(null);
 
@@ -46,6 +76,7 @@ export function SphereProvider({
         network,
         price: { platform: 'coingecko', baseUrl: '/coingecko', cacheTtlMs: 5 * 60_000 },
         groupChat: true,
+        ...getIpfsConfig(),
       });
       setProviders(browserProviders);
 
@@ -57,6 +88,11 @@ export function SphereProvider({
           ...browserProviders,
           l1: {},
         });
+        if (browserProviders.ipfsTokenStorage) {
+          await instance.addTokenStorageProvider(browserProviders.ipfsTokenStorage);
+          instance.sync().catch(err => console.warn('[SphereProvider] Initial IPFS sync failed:', err));
+        }
+        sphereRef.current = instance;
         setSphere(instance);
       } else {
         // Pre-connect transport for nametag lookups during onboarding
@@ -80,7 +116,8 @@ export function SphereProvider({
     initialize();
     return () => {
       // Cleanup on unmount
-      sphere?.destroy();
+      sphereRef.current?.destroy();
+      sphereRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialize]);
@@ -103,7 +140,12 @@ export function SphereProvider({
           nametag: options?.nametag,
           l1: {},
         });
+        if (providers.ipfsTokenStorage) {
+          await instance.addTokenStorageProvider(providers.ipfsTokenStorage);
+          instance.sync().catch(err => console.warn('[SphereProvider] Initial IPFS sync failed:', err));
+        }
 
+        sphereRef.current = instance;
         setSphere(instance);
         setWalletExists(true);
 
@@ -119,6 +161,7 @@ export function SphereProvider({
           storage: providers.storage,
           tokenStorage: providers.tokenStorage,
         });
+        sphereRef.current = null;
         setSphere(null);
         setWalletExists(false);
         throw err;
@@ -172,7 +215,12 @@ export function SphereProvider({
         nametag: options?.nametag,
         l1: {},
       });
+      if (providers.ipfsTokenStorage) {
+        await instance.addTokenStorageProvider(providers.ipfsTokenStorage);
+        instance.sync().catch(err => console.warn('[SphereProvider] Initial IPFS sync failed:', err));
+      }
 
+      sphereRef.current = instance;
       setSphere(instance);
       setWalletExists(true);
       return instance;
@@ -220,6 +268,7 @@ export function SphereProvider({
           storage: providers.storage,
           tokenStorage: providers.tokenStorage,
         });
+        sphereRef.current = null;
         setSphere(null);
         setWalletExists(false);
         return {
@@ -232,8 +281,12 @@ export function SphereProvider({
   );
 
   const deleteWallet = useCallback(async () => {
-    // Sphere.clear() already calls Sphere.instance.destroy() internally,
-    // so no need for a separate sphere.destroy() call.
+    // Destroy sphere first to release all IndexedDB connections,
+    // otherwise deleteDatabase() in Sphere.clear() may be blocked.
+    if (sphereRef.current) {
+      await sphereRef.current.destroy();
+      sphereRef.current = null;
+    }
     if (providers) {
       await Sphere.clear({
         storage: providers.storage,
@@ -253,16 +306,31 @@ export function SphereProvider({
       network,
       price: { platform: 'coingecko', baseUrl: '/coingecko', cacheTtlMs: 5 * 60_000 },
       groupChat: true,
+      ...getIpfsConfig(),
     });
     setProviders(freshProviders);
   }, [providers, queryClient, network]);
 
   const finalizeWallet = useCallback((importedSphere?: Sphere) => {
     if (importedSphere) {
+      if (providers?.ipfsTokenStorage) {
+        importedSphere.addTokenStorageProvider(providers.ipfsTokenStorage)
+          .then(() => importedSphere.sync())
+          .catch(err => console.warn('[SphereProvider] IPFS sync after import failed:', err));
+      }
+      sphereRef.current = importedSphere;
       setSphere(importedSphere);
     }
     setWalletExists(true);
-  }, []);
+  }, [providers]);
+
+  const toggleIpfs = useCallback(() => {
+    const next = !isIpfsEnabled();
+    localStorage.setItem(STORAGE_KEYS.IPFS_ENABLED, String(next));
+    setIpfsEnabled(next);
+    // Reinitialize so the new IPFS setting takes effect
+    initialize();
+  }, [initialize]);
 
   const value: SphereContextValue = {
     sphere,
@@ -278,6 +346,8 @@ export function SphereProvider({
     finalizeWallet,
     deleteWallet,
     reinitialize: initialize,
+    ipfsEnabled,
+    toggleIpfs,
   };
 
   return (

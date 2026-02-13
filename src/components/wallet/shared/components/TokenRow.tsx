@@ -103,8 +103,8 @@ export const TokenRow = memo(function TokenRow({ token, delay, isNew = true }: T
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-3">
         <div className="relative w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden">
-          {token.iconUrl ? (
-            <img src={token.iconUrl} alt={token.symbol} className="w-full h-full object-cover" />
+          {(token.iconUrl || TokenRegistry.getInstance().getIconUrl(token.coinId)) ? (
+            <img src={token.iconUrl || TokenRegistry.getInstance().getIconUrl(token.coinId)!} alt={token.symbol} className="w-full h-full object-cover" />
           ) : (
             <Box className="w-5 h-5 text-neutral-400 dark:text-neutral-500" />
           )}
