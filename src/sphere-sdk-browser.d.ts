@@ -36,6 +36,7 @@ declare module '@unicitylabs/sphere-sdk/impl/browser' {
     tokenStorage: TokenStorageProvider<TxfStorageDataBase>;
     l1?: Record<string, unknown>;
     price?: PriceProvider;
+    ipfsTokenStorage?: TokenStorageProvider<TxfStorageDataBase>;
     tokenSyncConfig?: Record<string, unknown>;
   }
 

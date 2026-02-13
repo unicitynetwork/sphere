@@ -32,6 +32,9 @@ export const STORAGE_KEYS = {
   // Agent Chat Sessions
   AGENT_CHAT_SESSIONS: 'sphere_agent_chat_sessions',
 
+  // IPFS
+  IPFS_ENABLED: 'sphere_ipfs_enabled',
+
   // Dev Settings
   DEV_AGGREGATOR_URL: 'sphere_dev_aggregator_url',
   DEV_SKIP_TRUST_BASE: 'sphere_dev_skip_trust_base',

@@ -25,6 +25,11 @@ export interface SphereContextValue {
   finalizeWallet: (importedSphere?: Sphere) => void;
   deleteWallet: () => Promise<void>;
   reinitialize: () => Promise<void>;
+
+  /** Whether IPFS token sync is currently enabled */
+  ipfsEnabled: boolean;
+  /** Toggle IPFS sync on/off (persists to localStorage, triggers reinitialize) */
+  toggleIpfs: () => void;
 }
 
 export interface CreateWalletOptions {

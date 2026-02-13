@@ -43,6 +43,8 @@ export function useSphereEvents(): void {
 
     const handleSyncCompleted = invalidatePayments;
 
+    const handleSyncRemoteUpdate = invalidatePayments;
+
     // Bridge incoming SDK DMs to ChatRepository and fire custom event
     const handleDmReceived = (dm: DirectMessage) => {
       const chatRepo = ChatRepository.getInstance();
@@ -90,6 +92,7 @@ export function useSphereEvents(): void {
     sphere.on('nametag:recovered', handleNametagChange);
     sphere.on('identity:changed', handleIdentityChange);
     sphere.on('sync:completed', handleSyncCompleted);
+    sphere.on('sync:remote-update', handleSyncRemoteUpdate);
     sphere.on('message:dm', handleDmReceived);
     sphere.on('payment_request:incoming', handlePaymentRequestIncoming);
 
@@ -100,6 +103,7 @@ export function useSphereEvents(): void {
       sphere.off('nametag:recovered', handleNametagChange);
       sphere.off('identity:changed', handleIdentityChange);
       sphere.off('sync:completed', handleSyncCompleted);
+      sphere.off('sync:remote-update', handleSyncRemoteUpdate);
       sphere.off('message:dm', handleDmReceived);
       sphere.off('payment_request:incoming', handlePaymentRequestIncoming);
     };
