@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/sphere/fix-address-selector-nametag-stale/Union.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <title>Unicity Agent Sphere</title>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-J2S6VSBDSH"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-J2S6VSBDSH');
+    </script>
+    <script>
+      // Prevent FOUC by applying theme before React loads
+      (function() {
+        const stored = localStorage.getItem('sphere-theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = stored || (prefersDark ? 'dark' : 'light');
+        document.documentElement.classList.add(theme);
+      })();
+    </script>
+    <script type="module" crossorigin src="/sphere/fix-address-selector-nametag-stale/assets/index-kNh7CKb3.js"></script>
+    <link rel="stylesheet" crossorigin href="/sphere/fix-address-selector-nametag-stale/assets/index-CIOP5eqV.css">
+  </head>
+  <body style="margin: 0;">
+    <div id="root"></div>
+  </body>
+</html>
