@@ -13,6 +13,7 @@ import { GamesChat } from '../components/agents/GamesChat';
 import { AIChat } from '../components/agents/AIChat';
 import { SellAnythingChat } from '../components/agents/SellAnythingChat';
 import { PokemonChat } from '../components/agents/PokemonChat';
+import { IframeAgent } from '../components/agents/IframeAgent';
 import { WalletPanel } from '../components/wallet/WalletPanel';
 import { WalletRequiredBlocker } from '../components/agents/WalletRequiredBlocker';
 import { agents, getAgentConfig } from '../config/activities';
@@ -161,6 +162,10 @@ export function AgentPage() {
   }
 
   const renderChatComponent = () => {
+    if (currentAgent.type === 'iframe') {
+      return <IframeAgent agent={currentAgent} />;
+    }
+
     switch (currentAgent.id) {
       case 'chat':
         return <ChatSection />;
