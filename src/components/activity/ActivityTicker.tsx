@@ -78,7 +78,7 @@ export function ActivityTicker({ agentId }: ActivityTickerProps) {
   const [newActivityIds, setNewActivityIds] = useState<Set<number>>(new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  const { data, isLoading } = useRecentActivity({ enabled: true });
+  const { data } = useRecentActivity({ enabled: true });
 
   const handleNewActivity = useCallback((activity: Activity) => {
     setRealtimeActivities((prev) => {
@@ -196,7 +196,7 @@ export function ActivityTicker({ agentId }: ActivityTickerProps) {
                   <span className="text-sm font-semibold text-neutral-900 dark:text-white whitespace-nowrap">
                     {getActivityTitle(activity.kind)}
                   </span>
-                  <span className="text-xs text-neutral-600 dark:text-neutral-300 max-w-[120px] truncate">
+                  <span className="text-xs text-neutral-600 dark:text-neutral-300 max-w-30 truncate">
                     {getActivityDescription(activity)}
                   </span>
                 </div>
