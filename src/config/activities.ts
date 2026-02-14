@@ -1,8 +1,8 @@
-import { MessageSquare, Trophy, ShoppingBag, Sparkles, Tag, Zap } from 'lucide-react';
+import { MessageSquare, Trophy, ShoppingBag, Sparkles, Tag, Zap, Store } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // Agent types for different UI layouts
-export type AgentType = 'chat' | 'simple-ai' | 'ai-with-sidebar' | 'trivia' | 'unified';
+export type AgentType = 'chat' | 'simple-ai' | 'ai-with-sidebar' | 'trivia' | 'unified' | 'iframe';
 
 // Content types for message cards
 export type ContentType = 'none' | 'game' | 'match' | 'product' | 'merch';
@@ -35,6 +35,8 @@ export interface AgentConfig {
   hasSidebar?: boolean;
   // Whether this agent requires a wallet to function
   requiresWallet?: boolean;
+  // URL for iframe-type agents (external web apps embedded in the chat area)
+  iframeUrl?: string;
 }
 
 // All agents configuration
@@ -197,6 +199,16 @@ export const agents: AgentConfig[] = [
     ],
     contentType: 'product',
     hasSidebar: true,
+  },
+  {
+    id: 'marketplace',
+    name: 'Marketplace',
+    description: 'Unicity Marketplace',
+    Icon: Store,
+    category: 'Trading',
+    color: 'from-violet-500 to-purple-500',
+    type: 'iframe',
+    iframeUrl: 'https://market.unicity.network/',
   },
 ];
 

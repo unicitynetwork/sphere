@@ -94,7 +94,7 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
     if (isOpen) {
       loadSwappableCoins();
     }
-  }, [isOpen]);
+  }, [isOpen, providers?.price]);
 
   // Get user's balance for a specific coin (from their owned assets)
   const getUserBalance = (coinId: string): string => {

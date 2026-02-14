@@ -151,7 +151,7 @@ export function useCreateAddress(): UseCreateAddressReturn {
       console.error("createAddress error:", err);
       setError(message);
     }
-  }, [sphere, queryClient, setStep, setError]);
+  }, [sphere, setStep, setError]);
 
   /**
    * Set existing address (for addresses without nametag)

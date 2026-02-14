@@ -123,7 +123,6 @@ export function SphereProvider({
       sphereRef.current?.destroy();
       sphereRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialize]);
 
   const createWallet = useCallback(

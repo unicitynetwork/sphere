@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Activity as ActivityIconLucide, Loader2 } from 'lucide-react';
 import { useRecentActivity } from '../../hooks/useRecentActivity';
 import { useActivityStream } from '../../hooks/useActivityStream';
 import { ActivityIcon } from './ActivityIcon';
@@ -79,7 +78,7 @@ export function ActivityTicker({ agentId }: ActivityTickerProps) {
   const [newActivityIds, setNewActivityIds] = useState<Set<number>>(new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  const { data, isLoading } = useRecentActivity({ enabled: true });
+  const { data } = useRecentActivity({ enabled: true });
 
   const handleNewActivity = useCallback((activity: Activity) => {
     setRealtimeActivities((prev) => {
@@ -128,39 +127,8 @@ export function ActivityTicker({ agentId }: ActivityTickerProps) {
     .filter((activity) => activity.kind !== 'token_transfer')
     .slice(0, 20);
 
-  if (isLoading && filteredActivities.length === 0) {
-    return (
-      <div className="hidden lg:block">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-orange-500/10 border border-orange-500/30">
-            <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
-            <span className="text-xs font-semibold text-orange-600 dark:text-orange-400 uppercase tracking-wide">Live</span>
-          </div>
-          <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">Activity Feed</span>
-        </div>
-        <div className="flex items-center justify-center h-[60px] rounded-2xl">
-          <Loader2 className="w-5 h-5 text-orange-500 animate-spin" />
-        </div>
-      </div>
-    );
-  }
-
   if (filteredActivities.length === 0) {
-    return (
-      <div className="hidden lg:block">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-neutral-500/10 border border-neutral-500/30">
-            <div className="w-2 h-2 rounded-full bg-neutral-400" />
-            <span className="text-xs font-semibold text-neutral-600 dark:text-neutral-400 uppercase tracking-wide">Live</span>
-          </div>
-          <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400">Activity Feed</span>
-        </div>
-        <div className="flex items-center justify-center gap-2 h-[60px] rounded-2xl">
-          <ActivityIconLucide className="w-5 h-5 text-neutral-400" />
-          <span className="text-sm text-neutral-500 dark:text-neutral-400">No recent activity</span>
-        </div>
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -228,7 +196,7 @@ export function ActivityTicker({ agentId }: ActivityTickerProps) {
                   <span className="text-sm font-semibold text-neutral-900 dark:text-white whitespace-nowrap">
                     {getActivityTitle(activity.kind)}
                   </span>
-                  <span className="text-xs text-neutral-600 dark:text-neutral-300 max-w-[120px] truncate">
+                  <span className="text-xs text-neutral-600 dark:text-neutral-300 max-w-30 truncate">
                     {getActivityDescription(activity)}
                   </span>
                 </div>
