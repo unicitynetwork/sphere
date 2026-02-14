@@ -215,6 +215,7 @@ export class ChatRepository {
         participantPubkey: pubkey,
         participantNametag: nametag,
         participantName: name,
+        lastMessageTime: 0,
       });
       this.saveConversation(conversation);
     } else if (nametag && !conversation.participantNametag) {

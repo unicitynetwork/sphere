@@ -7,18 +7,19 @@ import { DMMessageBubble } from './DMMessageBubble';
 interface DMMessageListProps {
   messages: ChatMessage[];
   isLoading?: boolean;
+  isRecipientTyping?: boolean;
 }
 
-export function DMMessageList({ messages, isLoading }: DMMessageListProps) {
+export function DMMessageList({ messages, isLoading, isRecipientTyping }: DMMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when new messages arrive or typing indicator appears
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isRecipientTyping]);
 
   // Group messages by date
   const groupedMessages = messages.reduce((groups, message) => {
@@ -87,6 +88,27 @@ export function DMMessageList({ messages, isLoading }: DMMessageListProps) {
           </motion.div>
         ))}
       </AnimatePresence>
+
+      {/* Typing indicator */}
+      <AnimatePresence>
+        {isRecipientTyping && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            className="flex items-center gap-2 px-4 py-2"
+          >
+            <div className="bg-neutral-100 dark:bg-neutral-800/50 rounded-2xl rounded-bl-sm px-3 py-2 border border-neutral-200 dark:border-neutral-700/50">
+              <div className="flex gap-0.75">
+                <span className="w-1.5 h-1.5 bg-neutral-400 dark:bg-neutral-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-1.5 h-1.5 bg-neutral-400 dark:bg-neutral-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-1.5 h-1.5 bg-neutral-400 dark:bg-neutral-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div ref={bottomRef} />
     </div>
   );
