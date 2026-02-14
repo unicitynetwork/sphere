@@ -37,6 +37,7 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
     setSearchQuery,
     filteredConversations,
     totalUnreadCount,
+    isRecipientTyping,
   } = useChat();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -297,7 +298,7 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
 
         {/* Messages */}
         {selectedConversation ? (
-          <DMMessageList messages={messages} isLoading={isLoadingMessages} />
+          <DMMessageList messages={messages} isLoading={isLoadingMessages} isRecipientTyping={isRecipientTyping} />
         ) : (
           <div className="flex flex-col items-center justify-center text-center p-8 min-h-0">
             <motion.div
@@ -334,6 +335,7 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
               onSend={handleSend}
               isSending={isSending}
               placeholder={`Message ${selectedConversation.getDisplayName()}...`}
+              participantPubkey={selectedConversation.participantPubkey}
             />
           </div>
         )}

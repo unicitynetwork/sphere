@@ -87,7 +87,7 @@ export function useCreateAddress(): UseCreateAddressReturn {
   }, []);
 
   /**
-   * Step 1: Derive new address using sphere-sdk
+   * Step 1: Derive new address using sphere-sdk, then check for existing nametag
    */
   const startCreateAddress = useCallback(async () => {
     if (!sphere) {
@@ -104,7 +104,37 @@ export function useCreateAddress(): UseCreateAddressReturn {
         ? Math.max(...tracked.map(a => a.index)) + 1
         : 0;
 
+      // Switch to the new address (derives internally if needed)
+      // Timeout guards against SDK hanging on Nostr publish when relay is not connected
+      try {
+        await Promise.race([
+          sphere.switchToAddress(nextIndex),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+        ]);
+      } catch (e) {
+        if (!(e instanceof Error && e.message === 'timeout')) throw e;
+      }
       const derived = sphere.deriveAddress(nextIndex);
+
+      // Check if SDK recovered a nametag during the switch.
+      // After timeout, sphere.identity is already set to the NEW address.
+      if (sphere.identity?.nametag) {
+        setState(prev => ({
+          ...prev,
+          step: 'complete',
+          progress: 'Address created successfully!',
+          newAddress: {
+            l1Address: derived.address,
+            path: derived.path,
+            index: derived.index,
+          },
+        }));
+        window.dispatchEvent(new Event("wallet-updated"));
+        await queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.all });
+        await queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.payments.tokens.all });
+        await queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.l1.all });
+        return;
+      }
 
       setState(prev => ({
         ...prev,
@@ -121,7 +151,7 @@ export function useCreateAddress(): UseCreateAddressReturn {
       console.error("createAddress error:", err);
       setError(message);
     }
-  }, [sphere, queryClient, setStep, setError]);
+  }, [sphere, setStep, setError]);
 
   /**
    * Set existing address (for addresses without nametag)
@@ -149,11 +179,11 @@ export function useCreateAddress(): UseCreateAddressReturn {
   }, [sphere]);
 
   /**
-   * Step 2: Submit nametag, create address atomically via SDK
+   * Step 2: Register nametag on the current address (already switched in startCreateAddress)
    */
   const submitNametag = useCallback(async (nametag: string) => {
-    if (!state.newAddress || !sphere) {
-      setError("No address or wallet not initialized");
+    if (!sphere) {
+      setError("Wallet not initialized");
       return;
     }
 
@@ -168,9 +198,9 @@ export function useCreateAddress(): UseCreateAddressReturn {
         return;
       }
 
-      // Create address with nametag (atomic: derives, mints, syncs)
+      // Register nametag on the current address
       setStep('creating', 'Creating Unicity ID...');
-      await sphere.switchToAddress(state.newAddress.index, { nametag: cleanTag });
+      await sphere.registerNametag(cleanTag);
 
       // Complete
       setStep('complete', 'Address created successfully!');
@@ -189,7 +219,7 @@ export function useCreateAddress(): UseCreateAddressReturn {
       console.error("submitNametag error:", err);
       setError(message);
     }
-  }, [state.newAddress, sphere, queryClient, setStep, setError]);
+  }, [sphere, queryClient, setStep, setError]);
 
   return {
     state,
