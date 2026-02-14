@@ -145,9 +145,9 @@ export class ChatConversation {
     this.participantPubkey = data.participantPubkey;
     this.participantNametag = data.participantNametag;
     this.participantName = data.participantName;
-    this.lastMessageTime = data.lastMessageTime || Date.now();
-    this.lastMessageText = data.lastMessageText || '';
-    this.unreadCount = data.unreadCount || 0;
+    this.lastMessageTime = data.lastMessageTime ?? Date.now();
+    this.lastMessageText = data.lastMessageText ?? '';
+    this.unreadCount = data.unreadCount ?? 0;
     this.isApproved = data.isApproved ?? true;
     this.createdAt = data.createdAt || Date.now();
   }

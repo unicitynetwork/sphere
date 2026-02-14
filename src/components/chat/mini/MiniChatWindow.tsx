@@ -43,6 +43,16 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
     // Mark conversation as read when window is open
     chatRepository.markConversationAsRead(conversation.id);
     queryClient.invalidateQueries({ queryKey: ['chat', 'unreadCount'] });
+    // Send SDK read receipts for unread incoming messages
+    if (sphere) {
+      const msgs = chatRepository.getMessagesForConversation(conversation.id);
+      const unreadIncomingIds = msgs
+        .filter(m => !m.isFromMe && m.status !== MessageStatus.READ)
+        .map(m => m.id);
+      if (unreadIncomingIds.length > 0) {
+        sphere.communications.markAsRead(unreadIncomingIds);
+      }
+    }
 
     const handleDMReceived = (event: CustomEvent<ChatMessage>) => {
       const message = event.detail;
@@ -52,6 +62,10 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
         // Auto-mark as read since window is open
         chatRepository.markConversationAsRead(conversation.id);
         queryClient.invalidateQueries({ queryKey: ['chat', 'unreadCount'] });
+        // Send SDK read receipt
+        if (sphere) {
+          sphere.communications.markAsRead([message.id]);
+        }
       }
     };
 
@@ -59,7 +73,7 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
     return () => {
       window.removeEventListener('dm-received', handleDMReceived as EventListener);
     };
-  }, [conversation.id, queryClient]);
+  }, [conversation.id, queryClient, sphere]);
 
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {

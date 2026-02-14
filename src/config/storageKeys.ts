@@ -53,20 +53,19 @@ export const STORAGE_KEY_GENERATORS = {
 const STORAGE_PREFIX = 'sphere_';
 
 /**
- * Clear all Sphere app data from localStorage.
+ * Clear all Sphere data from localStorage.
+ * Messages are recovered from Nostr relay on next login (self-wrap replay).
  */
 export function clearAllSphereData(): void {
   const keysToRemove: string[] = [];
-
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
-    if (key && key.startsWith(STORAGE_PREFIX)) {
+    if (key?.startsWith(STORAGE_PREFIX)) {
       keysToRemove.push(key);
     }
   }
-
-  keysToRemove.forEach(key => localStorage.removeItem(key));
-  console.log(`Cleared ${keysToRemove.length} sphere_* keys from localStorage`);
+  keysToRemove.forEach((key) => localStorage.removeItem(key));
+  console.log(`Cleared ${keysToRemove.length} sphere keys from localStorage`);
 }
 
 export type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS];
