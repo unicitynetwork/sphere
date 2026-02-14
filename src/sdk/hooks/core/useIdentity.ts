@@ -19,7 +19,7 @@ export function useIdentity(): UseIdentityReturn {
 
   const query = useQuery({
     queryKey: SPHERE_KEYS.identity.current,
-    queryFn: () => sphere?.identity ?? null,
+    queryFn: () => sphere?.identity ? { ...sphere.identity } : null,
     enabled: !!sphere,
     staleTime: Infinity,
   });

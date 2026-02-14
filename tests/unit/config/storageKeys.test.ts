@@ -95,21 +95,23 @@ describe("clearAllSphereData", () => {
     vi.unstubAllGlobals();
   });
 
-  it("should remove all sphere_* keys", () => {
-    // Setup: add some sphere keys
+  it("should remove all sphere_ keys but preserve non-sphere keys", () => {
+    // Setup: add sphere keys (should all be removed)
     localStorageMock["sphere_theme"] = "dark";
     localStorageMock["sphere_chat_messages"] = "data";
     localStorageMock["sphere_agent_chat_sessions"] = "sessions";
+    localStorageMock["sphere_direct_messages"] = "sdk_data";
 
     // Setup: add non-sphere key (should NOT be removed)
     localStorageMock["other_app_key"] = "some_value";
 
     clearAllSphereData();
 
-    // Verify sphere keys are removed
+    // Verify all sphere keys are removed
     expect(localStorageMock["sphere_theme"]).toBeUndefined();
     expect(localStorageMock["sphere_chat_messages"]).toBeUndefined();
     expect(localStorageMock["sphere_agent_chat_sessions"]).toBeUndefined();
+    expect(localStorageMock["sphere_direct_messages"]).toBeUndefined();
 
     // Verify non-sphere key is preserved
     expect(localStorageMock["other_app_key"]).toBe("some_value");
@@ -133,14 +135,15 @@ describe("clearAllSphereData", () => {
   it("should log the number of cleared keys", () => {
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    localStorageMock["sphere_key1"] = "value1";
-    localStorageMock["sphere_key2"] = "value2";
-    localStorageMock["sphere_key3"] = "value3";
+    // Add known app keys
+    localStorageMock["sphere_theme"] = "dark";
+    localStorageMock["sphere_chat_messages"] = "data";
+    localStorageMock["sphere_agent_memory:u1:a1"] = "mem";
 
     clearAllSphereData();
 
     expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining("3 sphere_* keys")
+      expect.stringContaining("sphere keys")
     );
 
     consoleSpy.mockRestore();

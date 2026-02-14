@@ -120,7 +120,7 @@ export function WalletPanel() {
                   </motion.button>
                 )}
               </div>
-              <AddressSelector currentNametag={nametag ?? undefined} compact />
+              <AddressSelector compact />
             </div>
           </div>
 

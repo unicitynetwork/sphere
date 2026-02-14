@@ -1,7 +1,8 @@
-import { forwardRef, useRef, useImperativeHandle } from 'react';
+import { forwardRef, useRef, useImperativeHandle, useCallback } from 'react';
 import { Send, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useKeyboardScrollIntoView } from '../../../hooks/useKeyboardScrollIntoView';
+import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
 
 interface DMChatInputProps {
   value: string;
@@ -10,7 +11,10 @@ interface DMChatInputProps {
   isSending?: boolean;
   placeholder?: string;
   disabled?: boolean;
+  participantPubkey?: string;
 }
+
+const TYPING_THROTTLE_MS = 3000;
 
 export const DMChatInput = forwardRef<HTMLTextAreaElement, DMChatInputProps>(
   function DMChatInput(
@@ -21,16 +25,37 @@ export const DMChatInput = forwardRef<HTMLTextAreaElement, DMChatInputProps>(
       isSending = false,
       placeholder = 'Type a message...',
       disabled = false,
+      participantPubkey,
     },
     ref
   ) {
     const internalRef = useRef<HTMLTextAreaElement>(null);
+    const lastTypingSentRef = useRef(0);
+    const { sphere } = useSphereContext();
 
     // Expose the internal ref to parent components
     useImperativeHandle(ref, () => internalRef.current!, []);
 
     // Use Visual Viewport API to scroll input into view when keyboard opens
     useKeyboardScrollIntoView(internalRef);
+
+    const sendTypingIndicator = useCallback(() => {
+      if (!sphere || !participantPubkey) return;
+      const now = Date.now();
+      if (now - lastTypingSentRef.current < TYPING_THROTTLE_MS) return;
+      lastTypingSentRef.current = now;
+      sphere.communications.sendTypingIndicator(participantPubkey).catch(() => {});
+    }, [sphere, participantPubkey]);
+
+    const handleChange = useCallback(
+      (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        onChange(e.target.value);
+        if (e.target.value.trim()) {
+          sendTypingIndicator();
+        }
+      },
+      [onChange, sendTypingIndicator]
+    );
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -50,7 +75,7 @@ export const DMChatInput = forwardRef<HTMLTextAreaElement, DMChatInputProps>(
           <textarea
             ref={internalRef}
             value={value}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={handleChange}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
             disabled={disabled || isSending}
