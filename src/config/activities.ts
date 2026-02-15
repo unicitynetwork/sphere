@@ -211,9 +211,9 @@ export const agents: AgentConfig[] = [
     iframeUrl: 'https://market.unicity.network/',
   },
   {
-    id: 'connect-demo',
-    name: 'Connect Demo',
-    description: 'dApp integration demo',
+    id: 'example',
+    name: 'Example',
+    description: 'Test iframe dApp',
     Icon: Plug,
     category: 'Developer',
     color: 'from-blue-500 to-indigo-500',
