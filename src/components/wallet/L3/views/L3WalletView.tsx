@@ -388,27 +388,27 @@ export function L3WalletView({
         </div>
 
         {/* Actions - Speed focused */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-2 sm:gap-3">
           <motion.button
             whileHover={{ scale: isFaucetLoading ? 1 : 1.02, y: isFaucetLoading ? 0 : -2 }}
             whileTap={{ scale: isFaucetLoading ? 1 : 0.98 }}
             onClick={handleTopUp}
             disabled={isFaucetLoading || !nametag}
-            className="relative px-3 py-3 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 text-white text-sm shadow-xl shadow-orange-500/20 flex items-center justify-center gap-2 overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
+            className="relative px-2 py-2.5 sm:px-3 sm:py-3 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 text-white text-xs sm:text-sm shadow-xl shadow-orange-500/20 flex items-center justify-center gap-1.5 sm:gap-2 overflow-hidden whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isFaucetLoading ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />
                 <span className="hidden sm:inline">Requesting...</span>
               </>
             ) : faucetSuccess ? (
               <>
-                <CheckCircle className="w-4 h-4" />
+                <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 <span className="hidden sm:inline">Success!</span>
               </>
             ) : (
               <>
-                <Plus className="w-4 h-4" />
+                <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 <span>Top Up</span>
               </>
             )}
@@ -418,9 +418,9 @@ export function L3WalletView({
             whileHover={{ scale: 1.02, y: -2 }}
             whileTap={{ scale: 0.98 }}
             onClick={() => setIsSwapModalOpen(true)}
-            className="relative px-3 py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2"
+            className="relative px-2 py-2.5 sm:px-3 sm:py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-xs sm:text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap"
           >
-            <ArrowDownUp className="w-4 h-4" />
+            <ArrowDownUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             <span>Swap</span>
           </motion.button>
 
@@ -429,9 +429,9 @@ export function L3WalletView({
             whileTap={{ scale: sendableTokens.length > 0 ? 0.98 : 1 }}
             onClick={() => setIsSendModalOpen(true)}
             disabled={sendableTokens.length === 0}
-            className="relative px-3 py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="relative px-2 py-2.5 sm:px-3 sm:py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-xs sm:text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <ArrowUpRight className="w-4 h-4" />
+            <ArrowUpRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             <span>Send</span>
           </motion.button>
         </div>

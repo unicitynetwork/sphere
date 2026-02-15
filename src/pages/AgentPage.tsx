@@ -193,7 +193,7 @@ export function AgentPage() {
   return (
     <div className="h-full flex flex-col">
       {/* Desktop agent grid - always visible */}
-      <div className="hidden lg:block mb-8 relative px-8 pt-8 pb-5 rounded-2xl dark:bg-linear-to-br dark:from-neutral-900/40 dark:to-neutral-800/20 backdrop-blur-sm border border-neutral-200 dark:border-neutral-800/50">
+      <div data-tutorial="agents" className="hidden lg:block mb-8 relative px-8 pt-8 pb-5 rounded-2xl dark:bg-linear-to-br dark:from-neutral-900/40 dark:to-neutral-800/20 backdrop-blur-sm border border-neutral-200 dark:border-neutral-800/50">
         <div className="absolute top-0 left-0 w-32 h-32 border-l-2 border-t-2 border-orange-500/50 rounded-tl-2xl" />
         <div className="absolute bottom-0 right-0 w-32 h-32 border-r-2 border-b-2 border-orange-500/50 rounded-br-2xl" />
 
@@ -322,7 +322,7 @@ export function AgentPage() {
       </div>
 
       {/* Mobile tab switcher with sliding indicator */}
-      <div className="lg:hidden shrink-0 relative flex p-1 mb-3 bg-neutral-100 dark:bg-neutral-800/50 rounded-2xl backdrop-blur-sm border border-neutral-200 dark:border-neutral-700/30 overflow-hidden">
+      <div data-tutorial="mobile-tabs" className="lg:hidden shrink-0 relative flex p-1 mb-3 bg-neutral-100 dark:bg-neutral-800/50 rounded-2xl backdrop-blur-sm border border-neutral-200 dark:border-neutral-700/30 overflow-hidden">
         {/* Sliding background indicator */}
         <motion.div
           className="absolute top-1 bottom-1 left-1 bg-linear-to-r from-orange-500 to-orange-600 rounded-xl shadow-lg shadow-orange-500/20"
@@ -347,6 +347,7 @@ export function AgentPage() {
 
         {/* Wallet tab */}
         <button
+          data-tutorial="mobile-wallet-tab"
           onClick={() => scrollToPanel('wallet')}
           className={`relative z-10 flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium transition-colors duration-200 ${
             activePanel === 'wallet' ? 'text-white' : 'text-neutral-500 dark:text-neutral-400'
@@ -363,24 +364,24 @@ export function AgentPage() {
         onScroll={handleScroll}
         className="lg:hidden flex-1 min-h-0 flex overflow-x-auto snap-x snap-mandatory scrollbar-hide py-1"
       >
-        <div className="w-full shrink-0 snap-center h-full">
+        <div data-tutorial="mobile-chat" className="w-full shrink-0 snap-center h-full">
           <WalletRequiredBlocker agentId={agentId!} onOpenWallet={() => scrollToPanel('wallet')}>
             {renderChatComponent()}
           </WalletRequiredBlocker>
         </div>
-        <div className="w-full shrink-0 snap-center h-full">
+        <div data-tutorial="mobile-wallet" className="w-full shrink-0 snap-center h-full">
           <WalletPanel />
         </div>
       </div>
 
       {/* Desktop grid layout */}
       <div className="hidden lg:grid lg:grid-cols-3 lg:gap-8 lg:flex-1 lg:min-h-[650px] lg:py-2">
-        <div className="lg:col-span-2 h-full min-h-0">
+        <div data-tutorial="chat" className="lg:col-span-2 h-full min-h-0">
           <WalletRequiredBlocker agentId={agentId!}>
             {renderChatComponent()}
           </WalletRequiredBlocker>
         </div>
-        <div className="h-full min-h-0">
+        <div data-tutorial="wallet" className="h-full min-h-0">
           <WalletPanel />
         </div>
       </div>
