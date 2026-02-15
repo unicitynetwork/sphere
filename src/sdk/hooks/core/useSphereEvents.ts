@@ -109,8 +109,8 @@ export function useSphereEvents(): void {
       window.dispatchEvent(new CustomEvent('chat-updated'));
     };
 
-    // Bridge typing indicators to custom event
-    const handleMessageTyping = (data: { senderPubkey: string; senderNametag?: string; timestamp: number }) => {
+    // Bridge composing indicators to custom event
+    const handleComposingStarted = (data: { senderPubkey: string; senderNametag?: string; expiresIn: number }) => {
       window.dispatchEvent(new CustomEvent('dm-typing', { detail: data }));
     };
 
@@ -128,7 +128,7 @@ export function useSphereEvents(): void {
     sphere.on('sync:remote-update', handleSyncRemoteUpdate);
     sphere.on('message:dm', handleDmReceived);
     sphere.on('message:read', handleMessageRead);
-    sphere.on('message:typing', handleMessageTyping);
+    sphere.on('composing:started', handleComposingStarted);
     sphere.on('payment_request:incoming', handlePaymentRequestIncoming);
 
     // Hydrate ChatRepository from messages already in SDK.
@@ -182,7 +182,7 @@ export function useSphereEvents(): void {
       sphere.off('sync:remote-update', handleSyncRemoteUpdate);
       sphere.off('message:dm', handleDmReceived);
       sphere.off('message:read', handleMessageRead);
-      sphere.off('message:typing', handleMessageTyping);
+      sphere.off('composing:started', handleComposingStarted);
       sphere.off('payment_request:incoming', handlePaymentRequestIncoming);
     };
   }, [sphere, queryClient]);
