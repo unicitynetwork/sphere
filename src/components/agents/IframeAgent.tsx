@@ -16,15 +16,26 @@ export function IframeAgent({ agent }: IframeAgentProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const hostRef = useRef<ConnectHost | null>(null);
   const transportRef = useRef<PostMessageTransport | null>(null);
+  const initializedRef = useRef(false);
   const { sphere } = useSphereContext();
   const { requestApproval, requestIntent } = useConnectContext();
 
+  // Stable refs to avoid effect re-runs
+  const sphereRef = useRef(sphere);
+  sphereRef.current = sphere;
+  const requestApprovalRef = useRef(requestApproval);
+  requestApprovalRef.current = requestApproval;
+  const requestIntentRef = useRef(requestIntent);
+  requestIntentRef.current = requestIntent;
+
+  // Track sphere availability so the effect re-runs when sphere loads
+  const sphereReady = !!sphere;
+
   useEffect(() => {
     const iframe = iframeRef.current;
-    if (!iframe || !sphere || !agent.iframeUrl) return;
-
-    // Don't re-create if already set up for this iframe
-    if (hostRef.current) return;
+    if (!iframe || !sphereRef.current || !agent.iframeUrl) return;
+    // Prevent StrictMode double-init
+    if (initializedRef.current) return;
 
     let origin: string;
     try {
@@ -34,26 +45,33 @@ export function IframeAgent({ agent }: IframeAgentProps) {
       return;
     }
 
+    initializedRef.current = true;
+
     const transport = PostMessageTransport.forHost(iframe, {
       allowedOrigins: [origin],
     });
     transportRef.current = transport;
 
     const host = new ConnectHost({
-      sphere,
+      sphere: sphereRef.current,
       transport,
-      onConnectionRequest: (dapp: DAppMetadata, perms: PermissionScope[]) => requestApproval(dapp, perms),
-      onIntent: (action: string, params: Record<string, unknown>) => requestIntent(action, params),
+      onConnectionRequest: (dapp: DAppMetadata, perms: PermissionScope[]) =>
+        requestApprovalRef.current(dapp, perms),
+      onIntent: (action: string, params: Record<string, unknown>) => requestIntentRef.current(action, params),
     } as any);
     hostRef.current = host;
 
+    // Real cleanup only when component actually unmounts (navigate away)
     return () => {
+      // In StrictMode, initializedRef prevents re-creation so cleanup is safe
       hostRef.current?.destroy();
       hostRef.current = null;
       transportRef.current?.destroy();
       transportRef.current = null;
+      initializedRef.current = false;
     };
-  }, [sphere, agent.iframeUrl, requestApproval, requestIntent]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.iframeUrl, sphereReady]);
 
   return (
     <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden relative lg:shadow-xl dark:lg:shadow-2xl h-full min-h-0 theme-transition">
