@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { STORAGE_KEYS } from '../config/storageKeys';
 
 export interface TutorialStep {
@@ -70,7 +70,7 @@ function getSteps() {
 export function useTutorial() {
   const [isActive, setIsActive] = useState(false);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [steps, setSteps] = useState<TutorialStep[]>(getSteps);
+  const steps = useMemo(getSteps, []);
 
   // Check on mount whether tutorial should show
   useEffect(() => {
