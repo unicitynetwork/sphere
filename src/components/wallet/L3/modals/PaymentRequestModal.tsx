@@ -1,10 +1,10 @@
-import { X, Check, Sparkles, Trash2, Loader2, XIcon, ArrowRight, Clock, Receipt, AlertCircle } from 'lucide-react'; // Иконки
-import { useIncomingPaymentRequests } from '../hooks/useIncomingPaymentRequests';
-import { type IncomingPaymentRequest, PaymentRequestStatus } from '../data/model';
-import { useWallet } from '../hooks/useWallet';
+import { Check, Sparkles, Trash2, Loader2, XIcon, ArrowRight, Clock, Receipt, AlertCircle } from 'lucide-react';
+import { useIncomingPaymentRequests, type IncomingPaymentRequest, PaymentRequestStatus } from '../hooks/useIncomingPaymentRequests';
+import { useTransfer } from '../../../../sdk';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useState } from 'react';
 import { AmountFormatUtils } from '../utils/currency';
+import { BaseModal, ModalHeader, EmptyState } from '../../ui';
 
 interface PaymentRequestsModalProps {
   isOpen: boolean;
@@ -13,7 +13,7 @@ interface PaymentRequestsModalProps {
 
 export function PaymentRequestsModal({ isOpen, onClose }: PaymentRequestsModalProps) {
   const { requests, pendingCount, reject, clearProcessed, paid } = useIncomingPaymentRequests();
-  const { sendAmount } = useWallet();
+  const { transfer } = useTransfer();
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -31,12 +31,12 @@ export function PaymentRequestsModal({ isOpen, onClose }: PaymentRequestsModalPr
     setProcessingId(req.id);
     setErrors(prev => ({ ...prev, [req.id]: '' }));
     try {
-      console.log(`Initiating payment for request ${req.requestId} to @${req.recipientNametag}`);
-      await sendAmount({
-        recipientNametag: req.recipientNametag,
+      const recipient = req.recipientNametag ? `@${req.recipientNametag}` : req.senderPubkey;
+      console.log(`Initiating payment for request ${req.requestId} to ${recipient}`);
+      await transfer({
+        recipient,
         amount: req.amount.toString(),
         coinId: req.coinId,
-        eventId: req.id
       });
       paid(req);
     } catch (error: unknown) {
@@ -56,128 +56,68 @@ export function PaymentRequestsModal({ isOpen, onClose }: PaymentRequestsModalPr
     }
   };
 
+  const subtitle = pendingCount > 0 ? (
+    <div className="flex items-center gap-2">
+      <span className="flex h-2 w-2 relative">
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+        <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
+      </span>
+      <span className="text-orange-500 dark:text-orange-400 font-semibold">
+        {pendingCount} pending
+      </span>
+    </div>
+  ) : undefined;
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          {/* Backdrop with Blur */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={handleSafeClose}
-            className="fixed inset-0 z-100 bg-black/60 dark:bg-black/80 backdrop-blur-sm"
+    <BaseModal isOpen={isOpen} onClose={handleSafeClose}>
+      <ModalHeader
+        title="Payment Requests"
+        icon={Receipt}
+        subtitle={subtitle}
+        onClose={handleSafeClose}
+        closeDisabled={isGlobalProcessing}
+      />
+
+      {/* Content - Scrollable */}
+      <div className="relative flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3 z-10 min-h-0">
+        {requests.length === 0 ? (
+          <EmptyState
+            icon={Sparkles}
+            title="No Requests"
+            description="Incoming payment requests will appear here"
           />
+        ) : (
+          <AnimatePresence mode='popLayout'>
+            {requests.map((req) => (
+              <RequestCard
+                key={req.id}
+                req={req}
+                error={errors[req.id]}
+                onPay={() => handlePay(req)}
+                onReject={() => reject(req)}
+                isProcessing={processingId === req.id}
+                isGlobalDisabled={isGlobalProcessing}
+              />
+            ))}
+          </AnimatePresence>
+        )}
+      </div>
 
-          {/* Modal Container */}
-          <div className="fixed inset-0 z-100 flex items-center justify-center p-4 sm:p-6 pointer-events-none">
-            {/* Modal with animated background orbs */}
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-              className="relative w-full max-w-md max-h-[600px] bg-white dark:bg-[#111] border border-neutral-200 dark:border-white/10 rounded-3xl shadow-2xl pointer-events-auto flex flex-col overflow-hidden"
-            >
-              {/* Background Orbs */}
-              <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
-              <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
-
-              {/* Header - Fixed */}
-              <div className="relative shrink-0 px-6 py-4 border-b border-neutral-200/50 dark:border-neutral-700/50 flex justify-between items-center z-20">
-                <div className="flex items-center gap-3">
-                  <motion.div
-                    whileHover={{ scale: 1.05 }}
-                    className="relative w-11 h-11 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-lg shadow-orange-500/30"
-                  >
-                    <Receipt className="w-5 h-5 text-white" />
-                  </motion.div>
-                  <div>
-                    <h3 className="text-lg font-bold text-neutral-900 dark:text-white leading-tight">Payment Requests</h3>
-                    {pendingCount > 0 && (
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="flex h-2 w-2 relative">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
-                        </span>
-                        <p className="text-xs text-orange-500 dark:text-orange-400 font-semibold">
-                          {pendingCount} pending
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <motion.button
-                  whileHover={{ scale: 1.1, rotate: 90 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={handleSafeClose}
-                  disabled={isGlobalProcessing}
-                  className={`w-9 h-9 flex items-center justify-center rounded-xl transition-colors ${isGlobalProcessing
-                    ? 'bg-neutral-200/50 dark:bg-neutral-800/50 text-neutral-400 dark:text-neutral-600 cursor-not-allowed'
-                    : 'bg-neutral-200/80 dark:bg-neutral-800/80 hover:bg-neutral-300/80 dark:hover:bg-neutral-700/80 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-white'
-                    }`}
-                >
-                  <X className="w-4 h-4" />
-                </motion.button>
-              </div>
-
-              {/* Content - Scrollable */}
-              <div className="relative flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3 z-10 min-h-0">
-                {requests.length === 0 ? (
-                  <div className="h-full min-h-[300px] flex flex-col items-center justify-center text-center py-12">
-                    <motion.div
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      transition={{ type: "spring", stiffness: 200, damping: 15 }}
-                      className="relative w-20 h-20 mb-6"
-                    >
-                      <div className="absolute inset-0 bg-orange-500/20 rounded-3xl blur-xl" />
-                      <div className="relative w-full h-full bg-neutral-200/80 dark:bg-neutral-800/80 rounded-3xl flex items-center justify-center border border-neutral-300/50 dark:border-neutral-700/50">
-                        <Sparkles className="w-10 h-10 text-orange-500 dark:text-orange-400" />
-                      </div>
-                    </motion.div>
-                    <p className="text-neutral-900 dark:text-white font-bold text-lg mb-2">No Requests</p>
-                    <p className="text-neutral-500 dark:text-neutral-400 text-sm max-w-[220px] leading-relaxed">
-                      Incoming payment requests will appear here
-                    </p>
-                  </div>
-                ) : (
-                  <AnimatePresence mode='popLayout'>
-                    {requests.map((req) => (
-                      <RequestCard
-                        key={req.id}
-                        req={req}
-                        error={errors[req.id]}
-                        onPay={() => handlePay(req)}
-                        onReject={() => reject(req)}
-                        isProcessing={processingId === req.id}
-                        isGlobalDisabled={isGlobalProcessing}
-                      />
-                    ))}
-                  </AnimatePresence>
-                )}
-              </div>
-
-              {/* Footer - Fixed */}
-              {hasProcessed && (
-                <div className="relative shrink-0 p-4 border-t border-neutral-200/50 dark:border-neutral-700/50 backdrop-blur-xl z-20">
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={clearProcessed}
-                    disabled={isGlobalProcessing}
-                    className="w-full py-3 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider text-neutral-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all disabled:opacity-50 border border-neutral-200/50 dark:border-neutral-700/50 hover:border-red-500/30"
-                  >
-                    <Trash2 className="w-4 h-4" /> Clear History
-                  </motion.button>
-                </div>
-              )}
-            </motion.div>
-          </div>
-        </>
+      {/* Footer - Fixed */}
+      {hasProcessed && (
+        <div className="relative shrink-0 p-4 border-t border-neutral-200/50 dark:border-neutral-700/50 backdrop-blur-xl z-20">
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={clearProcessed}
+            disabled={isGlobalProcessing}
+            className="w-full py-3 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider text-neutral-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all disabled:opacity-50 border border-neutral-200/50 dark:border-neutral-700/50 hover:border-red-500/30"
+          >
+            <Trash2 className="w-4 h-4" /> Clear History
+          </motion.button>
+        </div>
       )}
-    </AnimatePresence>
+    </BaseModal>
   );
 }
 
@@ -231,7 +171,9 @@ function RequestCard({ req, error, onPay, onReject, isProcessing, isGlobalDisabl
           <div className="flex flex-col">
             <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-1.5">From</span>
             <div className="flex items-center gap-2">
-              <span className="text-neutral-900 dark:text-white font-bold text-base">@{req.recipientNametag}</span>
+              <span className="text-neutral-900 dark:text-white font-bold text-base">
+                {req.recipientNametag ? `@${req.recipientNametag}` : `${req.senderPubkey.slice(0, 12)}...`}
+              </span>
             </div>
           </div>
           <div className="bg-neutral-200/50 dark:bg-neutral-700/50 px-2.5 py-1 rounded-lg text-[10px] text-neutral-500 dark:text-neutral-400 font-medium">

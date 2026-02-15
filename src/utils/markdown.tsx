@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Copy, Check } from 'lucide-react';
+import { getMentionClickHandler } from './mentionHandler';
 
 // Code block component with copy button
 function CodeBlock({ code, language, keyPrefix }: { code: string; language?: string; keyPrefix: string }) {
@@ -153,8 +154,9 @@ function replaceMathPlaceholders(
   return parts.length > 0 ? parts : [text];
 }
 
-// Parse inline markdown and HTML (bold, italic, code, br, links, images, plain URLs)
-function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
+
+// Parse inline markdown and HTML (bold, italic, code, br, links, images, plain URLs, @mentions)
+function parseInline(text: string, keyPrefix: string, mentionClassName: string = 'text-white'): React.ReactNode[] {
   // FIRST PASS: Handle escape sequences (e.g., \* should become just *)
   const unescapedText = text.replace(/\\([*_`[\]()#+-.|!\\])/g, '$1');
 
@@ -179,7 +181,9 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   let key = 0;
 
   // THIRD PASS: Process markdown - math placeholders won't be captured by markdown patterns
-  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(((?:[^\s()]|\([^\s)]*\))+)(?:\s+"([^"]+)")?\)|!\[([^\]]*)\]\(((?:[^()]|\([^)]*\))+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"]))/gi;
+  // Added @mention pattern at the end: @username (alphanumeric, underscore, hyphen)
+  // Note: (?<!\S) ensures @ is at start of word (not in email like user@example.com)
+  const regex = /(\*\*(.+?)\*\*|\*([^\s*](?:[^*]*[^\s*])?)\*|_([^_]+?)_|`([^`]+?)`|<br\s*\/?>|<b>(.+?)<\/b>|<strong>(.+?)<\/strong>|<i>(.+?)<\/i>|<em>(.+?)<\/em>|<code>(.+?)<\/code>|<a\s+href=["']([^"']+)["']>(.+?)<\/a>|\[([^\]]+)\]\(((?:[^\s()]|\([^\s)]*\))+)(?:\s+"([^"]+)")?\)|!\[([^\]]*)\]\(((?:[^()]|\([^)]*\))+)\)|(https?:\/\/[^\s<>[\]()]+[^\s<>[\]().,;:!?'"])|((?<!\S)@[\w-]+))/gi;
   let lastIndex = 0;
   let match;
 
@@ -192,16 +196,16 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
     }
 
     if (match[2]) {
-      // **bold** - just render the text content (which may include math placeholders)
-      const content = replaceMathPlaceholders(match[2], mathBlocks, `${keyPrefix}-bold`, key);
+      // **bold** - recursively parse content for @mentions, links, etc.
+      const content = parseInline(match[2], `${keyPrefix}-bold-${key}`, mentionClassName);
       parts.push(<strong key={`${keyPrefix}-strong-${key++}`}>{content}</strong>);
     } else if (match[3]) {
-      // *italic*
-      const content = replaceMathPlaceholders(match[3], mathBlocks, `${keyPrefix}-italic`, key);
+      // *italic* - recursively parse content
+      const content = parseInline(match[3], `${keyPrefix}-italic-${key}`, mentionClassName);
       parts.push(<em key={`${keyPrefix}-em-${key++}`}>{content}</em>);
     } else if (match[4]) {
-      // _italic_
-      const content = replaceMathPlaceholders(match[4], mathBlocks, `${keyPrefix}-italic2`, key);
+      // _italic_ - recursively parse content
+      const content = parseInline(match[4], `${keyPrefix}-italic2-${key}`, mentionClassName);
       parts.push(<em key={`${keyPrefix}-em2-${key++}`}>{content}</em>);
     } else if (match[5]) {
       // `code` - don't process math inside code blocks
@@ -214,20 +218,20 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
       // <br> or <br/>
       parts.push(<br key={`${keyPrefix}-br-${key++}`} />);
     } else if (match[6]) {
-      // <b>text</b>
-      const content = replaceMathPlaceholders(match[6], mathBlocks, `${keyPrefix}-b`, key);
+      // <b>text</b> - recursively parse content
+      const content = parseInline(match[6], `${keyPrefix}-b-${key}`, mentionClassName);
       parts.push(<strong key={`${keyPrefix}-b-${key++}`}>{content}</strong>);
     } else if (match[7]) {
-      // <strong>text</strong>
-      const content = replaceMathPlaceholders(match[7], mathBlocks, `${keyPrefix}-strong`, key);
+      // <strong>text</strong> - recursively parse content
+      const content = parseInline(match[7], `${keyPrefix}-strong-${key}`, mentionClassName);
       parts.push(<strong key={`${keyPrefix}-strong2-${key++}`}>{content}</strong>);
     } else if (match[8]) {
-      // <i>text</i>
-      const content = replaceMathPlaceholders(match[8], mathBlocks, `${keyPrefix}-i`, key);
+      // <i>text</i> - recursively parse content
+      const content = parseInline(match[8], `${keyPrefix}-i-${key}`, mentionClassName);
       parts.push(<em key={`${keyPrefix}-i-${key++}`}>{content}</em>);
     } else if (match[9]) {
-      // <em>text</em>
-      const content = replaceMathPlaceholders(match[9], mathBlocks, `${keyPrefix}-em`, key);
+      // <em>text</em> - recursively parse content
+      const content = parseInline(match[9], `${keyPrefix}-em-${key}`, mentionClassName);
       parts.push(<em key={`${keyPrefix}-em3-${key++}`}>{content}</em>);
     } else if (match[10]) {
       // <code>text</code> - don't process math inside code blocks
@@ -237,16 +241,16 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
         </code>
       );
     } else if (match[11] && match[12]) {
-      // <a href="url">text</a>
-      const content = replaceMathPlaceholders(match[12], mathBlocks, `${keyPrefix}-a`, key);
+      // <a href="url">text</a> - recursively parse content
+      const content = parseInline(match[12], `${keyPrefix}-a-${key}`, mentionClassName);
       parts.push(
         <a key={`${keyPrefix}-a-${key++}`} href={match[11]} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 underline">
           {content}
         </a>
       );
     } else if (match[13] && match[14]) {
-      // [text](url) or [text](url "tooltip") markdown link
-      const content = replaceMathPlaceholders(match[13], mathBlocks, `${keyPrefix}-link`, key);
+      // [text](url) or [text](url "tooltip") markdown link - recursively parse content
+      const content = parseInline(match[13], `${keyPrefix}-link-${key}`, mentionClassName);
       const tooltip = match[15]; // Optional tooltip
       parts.push(
         <a
@@ -286,6 +290,36 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
         >
           {url}
         </a>
+      );
+    } else if (match[19]) {
+      // @mention (e.g., @username)
+      const mention = match[19];
+      const username = mention.slice(1); // Remove @ prefix
+      parts.push(
+        <span
+          key={`${keyPrefix}-mention-${key++}`}
+          className={`${mentionClassName} font-bold cursor-pointer hover:underline`}
+          onClick={(e) => {
+            e.stopPropagation();
+            const handler = getMentionClickHandler();
+            if (handler) {
+              handler(username);
+            }
+          }}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              const handler = getMentionClickHandler();
+              if (handler) {
+                handler(username);
+              }
+            }
+          }}
+        >
+          {mention}
+        </span>
       );
     }
 
@@ -372,7 +406,7 @@ function splitTableRow(line: string): string[] {
 }
 
 // Parse markdown table
-function parseTable(lines: string[], keyPrefix: string): React.ReactNode {
+function parseTable(lines: string[], keyPrefix: string, mentionClassName: string = 'text-white'): React.ReactNode {
   const rows = lines
     .filter(line => !line.match(/^\|[\s-:|]+\|$/)) // Skip separator rows
     .map(line => splitTableRow(line));
@@ -388,7 +422,7 @@ function parseTable(lines: string[], keyPrefix: string): React.ReactNode {
           <tr className="border-b border-neutral-300 dark:border-neutral-600">
             {header.map((cell, i) => (
               <th key={i} className="text-left p-2 font-semibold text-neutral-800 dark:text-neutral-200">
-                {parseInline(cell, `${keyPrefix}-th-${i}`)}
+                {parseInline(cell, `${keyPrefix}-th-${i}`, mentionClassName)}
               </th>
             ))}
           </tr>
@@ -398,7 +432,7 @@ function parseTable(lines: string[], keyPrefix: string): React.ReactNode {
             <tr key={rowIndex} className="border-b border-neutral-200 dark:border-neutral-700/50 hover:bg-neutral-100 dark:hover:bg-neutral-700/20">
               {row.map((cell, cellIndex) => (
                 <td key={cellIndex} className="p-2 text-neutral-700 dark:text-neutral-300">
-                  {parseInline(cell, `${keyPrefix}-td-${rowIndex}-${cellIndex}`)}
+                  {parseInline(cell, `${keyPrefix}-td-${rowIndex}-${cellIndex}`, mentionClassName)}
                 </td>
               ))}
             </tr>
@@ -410,7 +444,7 @@ function parseTable(lines: string[], keyPrefix: string): React.ReactNode {
 }
 
 // Parse header line (# ## ### etc.)
-function parseHeader(line: string, keyPrefix: string): React.ReactNode {
+function parseHeader(line: string, keyPrefix: string, mentionClassName: string = 'text-white'): React.ReactNode {
   const match = line.match(/^(#{1,6})\s+(.+)$/);
   if (!match) return null;
 
@@ -426,7 +460,7 @@ function parseHeader(line: string, keyPrefix: string): React.ReactNode {
     6: 'text-sm font-medium text-neutral-500 dark:text-neutral-400 mt-2 mb-1',
   };
 
-  const inlineContent = parseInline(content, `${keyPrefix}-h`);
+  const inlineContent = parseInline(content, `${keyPrefix}-h`, mentionClassName);
 
   switch (level) {
     case 1:
@@ -450,9 +484,16 @@ function parseHeader(line: string, keyPrefix: string): React.ReactNode {
 // Supports: **bold**, *italic*, _italic_, `code`, ```code blocks```, # headers, tables,
 // unordered lists (* or - followed by space), HTML tags: <br>, <b>, <strong>, <i>, <em>, <code>, <a href="">
 // Links: [text](url), plain URLs (https://... http://...)
-export function MarkdownContent({ text }: { text: string }) {
+interface MarkdownContentProps {
+  text: string;
+  /** Custom class for @mentions. Defaults to "text-white" */
+  mentionClassName?: string;
+}
+
+export function MarkdownContent({ text, mentionClassName = 'text-white' }: MarkdownContentProps) {
   const parts: React.ReactNode[] = [];
   let key = 0;
+  const mClass = mentionClassName;
 
   const lines = text.split('\n');
   let i = 0;
@@ -473,7 +514,7 @@ export function MarkdownContent({ text }: { text: string }) {
         if (beforeMath.trim()) {
           parts.push(
             <p key={`p-${key++}`} className="leading-relaxed">
-              {parseInline(beforeMath, `line-${key}`)}
+              {parseInline(beforeMath, `line-${key}`, mClass)}
             </p>
           );
         }
@@ -507,7 +548,7 @@ export function MarkdownContent({ text }: { text: string }) {
             if (afterMath.trim()) {
               parts.push(
                 <p key={`p-${key++}`} className="leading-relaxed">
-                  {parseInline(afterMath, `line-${key}`)}
+                  {parseInline(afterMath, `line-${key}`, mClass)}
                 </p>
               );
             }
@@ -532,7 +573,7 @@ export function MarkdownContent({ text }: { text: string }) {
           const fullText = '\\[' + mathLines.join('\n');
           parts.push(
             <p key={`p-${key++}`} className="leading-relaxed">
-              {parseInline(fullText, `line-${key}`)}
+              {parseInline(fullText, `line-${key}`, mClass)}
             </p>
           );
         }
@@ -543,7 +584,7 @@ export function MarkdownContent({ text }: { text: string }) {
         const unescaped = line.replace('\\\\[', '\\[');
         parts.push(
           <p key={`p-${key++}`} className="leading-relaxed">
-            {parseInline(unescaped, `line-${key}`)}
+            {parseInline(unescaped, `line-${key}`, mClass)}
           </p>
         );
         i++;
@@ -571,7 +612,7 @@ export function MarkdownContent({ text }: { text: string }) {
 
     // Check if this is a header
     if (line.trim().match(/^#{1,6}\s+/)) {
-      const header = parseHeader(line.trim(), `header-${key++}`);
+      const header = parseHeader(line.trim(), `header-${key++}`, mClass);
       if (header) {
         parts.push(header);
         i++;
@@ -599,7 +640,7 @@ export function MarkdownContent({ text }: { text: string }) {
         i++;
       }
       if (tableLines.length >= 2) {
-        parts.push(parseTable(tableLines, `table-${key++}`));
+        parts.push(parseTable(tableLines, `table-${key++}`, mClass));
       }
       continue;
     }
@@ -625,7 +666,7 @@ export function MarkdownContent({ text }: { text: string }) {
           <ul key={`ul-${key++}`} className="list-disc list-inside space-y-1 ml-1">
             {listItems.map((item, idx) => (
               <li key={idx} className="text-neutral-800 dark:text-neutral-200">
-                {parseInline(item.content, `li-${key}-${idx}`)}
+                {parseInline(item.content, `li-${key}-${idx}`, mClass)}
               </li>
             ))}
           </ul>
@@ -644,7 +685,7 @@ export function MarkdownContent({ text }: { text: string }) {
     // Regular line
     parts.push(
       <p key={`p-${key++}`} className="leading-relaxed">
-        {parseInline(line, `line-${key}`)}
+        {parseInline(line, `line-${key}`, mClass)}
       </p>
     );
     i++;

@@ -1,4 +1,1 @@
-export { useWalletOperations } from "./useWalletOperations";
-export { useTransactions } from "./useTransactions";
-export { useBalance } from "./useBalance";
-export { useL1Wallet, L1_KEYS } from "./useL1Wallet";
+// L1 hooks barrel - legacy hooks removed, see SDK hooks in src/sdk/hooks/

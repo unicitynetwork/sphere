@@ -1,0 +1,314 @@
+================================================================================
+SPHERE WALLET - ISSUES VISUAL SUMMARY
+================================================================================
+
+ISSUE #1: TOKEN VALIDATION INCONSISTENCY [CRITICAL]
+================================================================================
+
+DATA FLOW (BROKEN):
+
+   Faucet Request
+        |
+        v
+  Step 0: Input (4 new tokens)
+        |
+        v
+  Step 1: Load localStorage (empty)
+        |
+        v
+  Step 2: Load IPFS (empty)
+        |
+        v
+  Step 3: Normalize Proofs (4 tokens)
+        |
+        v
+  Step 4: Validate Commitments
+        |  PROBLEM: Genesis-only tokens
+        |  fail validateTransactionCommitment()
+        |
+        +---> Token A: FAIL (no previousStateHash) --------+
+        |     Token B: FAIL (no previousStateHash)         |
+        |     Token C: FAIL (no previousStateHash)         |
+        |     Token D: PASS (has transactions)             |
+        |                                                   |
+        |  ctx.tokens = {D}                                |
+        |  ctx.invalid = {A, B, C}                         |
+        |                                                   v
+        v                                          ctx.invalid has 3 tokens
+  Step 5: SDK Validation
+        |
+        |  PROBLEM: Validates separately
+        |  ALL 4 tokens pass SDK validation
+        |
+        |  Result:
+        |  - Token D: still in ctx.tokens (PASS)
+        |  - Token A,B,C: removed from ctx.invalid? (UNCLEAR)
+        |                         ^
+        |                         |
+        |         INCONSISTENCY: Where are A,B,C now?
+        |
+        v
+  Step 6-8: Merge/Dedup
+        |
+        v
+  Step 9: Prepare Storage
+        |
+        v
+  Step 10: Upload to IPFS
+        |
+        v
+  RESULT: 3 tokens FAIL validation + ALL 4 appear VALID
+
+ROOT CAUSE:
+  - validateTransactionCommitment() rejects genesis-only tokens
+  - Line 773-774: Fails if previousStateHash is missing
+  - Genesis tokens have no previousStateHash (no transitions yet)
+  - Step 5 re-validates separately, but results aren't reconciled
+
+
+FIX:
+  1. Allow missing previousStateHash for genesis tokens
+  2. Only reject if previousStateHash EXISTS but is malformed
+  3. Add separate handling for genesis-only tokens (no transactions)
+
+
+================================================================================
+ISSUE #2: IPNS RESOLUTION FAILURE [HIGH]
+================================================================================
+
+REQUEST FLOW (BROKEN):
+
+   User requests wallet sync
+        |
+        v
+   inventorySync(params) called
+        |  PROBLEM: ipnsName may be undefined/empty
+        |           due to race condition
+        |
+        v
+   step2_loadIpfs() calls
+        |
+        v
+   resolver.resolveIpnsName(ipnsName)
+        |
+        |  PROBLEM: No validation of ipnsName!
+        |  ipnsName could be:
+        |    - undefined
+        |    - null
+        |    - ""
+        |    - "undefined"
+        |
+        +---> tryGatewayPath()
+        |     URL: https://gateway/ipns/{ipnsName}
+        |     If ipnsName="": URL becomes /ipns/ (EMPTY!)
+        |
+        +---> tryRoutingApi()
+        |     URL: https://gateway/api/v0/routing/get?arg=/ipns/{ipnsName}
+        |     If ipnsName="": becomes /ipns/ (EMPTY!)
+        |
+        v
+   HTTP 400 Bad Request
+        |
+        |  PROBLEM: Gateway rejects empty IPNS name
+        |  This error is treated as "gateway failed"
+        |  not "IPNS name invalid"
+        |
+        v
+   RESULT: IPFS sync blocked, no error message about invalid IPNS
+
+
+ROOT CAUSE:
+  1. Race condition: sync starts before IPNS derivation
+  2. No validation in resolveIpnsName() or inventorySync()
+  3. JavaScript silently coerces undefined/null to strings
+  4. HTTP layer treats 400 as "try next gateway" not "invalid parameter"
+
+
+FIX:
+  1. Add validation in inventorySync() - check ipnsName before processing
+  2. Add validation in resolveIpnsName() - check format and non-empty
+  3. Return clear error (not 400 from HTTP layer)
+
+
+================================================================================
+ISSUE #3: EXCESSIVE QUERY CALLS [MEDIUM]
+================================================================================
+
+EVENT CASCADE (TOO MANY REFETCHES):
+
+   User loads wallet
+        |
+        v
+   tokensQuery runs (1st call)
+        +---> spent check: 3 requests to aggregator
+        |
+        v
+   IPFS sync starts (inventory sync)
+        |
+        +---> emits wallet-updated event
+        |
+        v
+   handleWalletUpdate() fires
+        +---> refetchQueries(KEYS.TOKENS)
+        |
+        v
+   tokensQuery runs (2nd call)
+        +---> spent check: 3 requests to aggregator
+        +---> clearUnspentCacheEntries() (clears cache!)
+        |
+        v
+   IPFS step 5 completes
+        |
+        +---> emits wallet-updated event
+        |
+        v
+   handleWalletUpdate() fires
+        +---> refetchQueries(KEYS.TOKENS)
+        |
+        v
+   tokensQuery runs (3rd call)
+        +---> spent check: 3 requests to aggregator
+        |
+        v
+   ... repeats 20+ times ...
+        |
+        v
+   RESULT: 60+ aggregator requests instead of 3
+
+
+ROOT CAUSE:
+  1. Multiple wallet-updated events (from IPFS sync steps)
+  2. No debouncing on handleWalletUpdate()
+  3. Each query execution runs spent check
+  4. clearUnspentCacheEntries() forces re-check each time
+  5. No time-based throttling for spent checks
+
+
+FIX:
+  1. Debounce wallet-updated handler (500ms)
+  2. Only refetch if stale (>1 second old)
+  3. Add 30-second throttling to spent check (sessionStorage)
+  4. Don't clear UNSPENT cache on every query run
+
+
+================================================================================
+ISSUE #4: CID MISMATCH WARNING [LOW]
+================================================================================
+
+ENCODING DIFFERENCE (NON-CRITICAL):
+
+   Browser computes CID
+        |
+        |  Content: { _meta: {...}, tokens: {...} }
+        |  Process:
+        |    1. jsonCodec.encode(content)
+        |    2. sha256.digest(encoded)
+        |    3. CID.createV1(jsonCodec.code, hash)
+        |
+        v
+   Expected CID: bagaaierau67uhdo...
+        |
+        |  PROBLEM: Truncated/incomplete representation
+        |
+        v
+   Upload to gateway
+        |
+        v
+   Gateway returns CID
+        |
+        |  Gateway process:
+        |    1. May reorder JSON keys
+        |    2. May use different whitespace
+        |    3. May use CBOR instead of JSON
+        |    4. Result: Different CID encoding (same content hash!)
+        |
+        v
+   Returned CID: bafkreifhx5by3sy...
+        |
+        v
+   String comparison: bagaa... !== bafk...
+        |
+        v
+   WARNING: "CID mismatch"
+        |
+        v
+   RESULT: Upload succeeds but warning in logs
+
+
+ROOT CAUSE:
+  1. Expected CID computed locally with one encoding
+  2. Gateway returns CID with potentially different encoding
+  3. String comparison treats different encodings as errors
+  4. Actually same content (same multihash), different representation
+
+
+FIX:
+  1. Parse both CIDs to canonical form
+  2. Compare multihash instead of string
+  3. Accept encoding differences as normal
+  4. Only error if actual hash differs
+
+
+================================================================================
+SEVERITY MATRIX
+================================================================================
+
+        IMPACT
+        ^
+        |  CRITICAL: High impact + High likelihood
+        |     Issue #1: Token validation
+        |
+        |  HIGH: High impact OR High likelihood
+        |     Issue #2: IPNS failure
+        |
+        |  MEDIUM: Medium impact or likelihood
+        |     Issue #3: Query performance
+        |
+        |  LOW: Low impact, cosmetic
+        |     Issue #4: CID mismatch
+        |
+        +-------------------------------------> LIKELIHOOD
+           Low   Medium   High   Critical
+
+
+TIME TO FIX:
+  Issue #1: 30 min (CRITICAL, do first)
+  Issue #2: 20 min (HIGH, do second)
+  Issue #3: 45 min (MEDIUM, do third)
+  Issue #4: 20 min (LOW, do last)
+  ------
+  TOTAL:  115 min = 1h 55 min
+
+
+================================================================================
+VERIFICATION CHECKLIST
+================================================================================
+
+BEFORE FIXES:
+  [ ] Can reproduce all 4 issues
+  [ ] Console shows all error patterns
+  [ ] Network requests confirm excessive load
+
+AFTER FIXING ISSUE #1:
+  [ ] Faucet tokens load without validation errors
+  [ ] All 4 tokens appear in wallet
+  [ ] No duplicate entries in localStorage
+  [ ] Tokens don't flip between valid/invalid
+
+AFTER FIXING ISSUE #2:
+  [ ] No HTTP 400 errors from IPFS endpoints
+  [ ] IPNS resolution validates parameters
+  [ ] Sync fails gracefully with clear error message
+
+AFTER FIXING ISSUE #3:
+  [ ] Wallet load completes in <1 second (vs 2-6 seconds)
+  [ ] "Running spent check" appears 1-2 times (vs 20+)
+  [ ] Network requests reduced from 60+ to <10
+
+AFTER FIXING ISSUE #4:
+  [ ] No "mismatch" warnings in console
+  [ ] See "CID verified" instead
+  [ ] Upload completes successfully
+
+
+================================================================================

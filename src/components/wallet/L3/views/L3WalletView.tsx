@@ -1,51 +1,263 @@
-import { Plus, ArrowUpRight, Sparkles, Loader2, Coins, Layers, Bell, CheckCircle, XCircle, Key, Download, Upload, Clock } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { Plus, ArrowUpRight, ArrowDownUp, Sparkles, Loader2, Coins, Layers, CheckCircle, XCircle, Eye, EyeOff, Wifi } from 'lucide-react';
+import { AnimatePresence, motion, useMotionValue, useTransform, animate } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { useWallet } from '../hooks/useWallet';
-import { CreateWalletFlow } from '../onboarding/CreateWalletFlow';
+import { useNavigate } from 'react-router-dom';
+import { useIdentity, useAssets, useTokens, useL1Balance } from '../../../../sdk';
+import { useSphereContext } from '../../../../sdk/hooks/core/useSphere';
+import { CreateWalletFlow } from '../../onboarding/CreateWalletFlow';
 import { TokenRow } from '../../shared/components';
 import { SendModal } from '../modals/SendModal';
-import { useIncomingPaymentRequests } from '../hooks/useIncomingPaymentRequests';
+import { SwapModal } from '../modals/SwapModal';
 import { PaymentRequestsModal } from '../modals/PaymentRequestModal';
-import { FaucetService } from '../services/FaucetService';
+import { FaucetService } from '../../../../services/FaucetService';
 import { SeedPhraseModal } from '../modals/SeedPhraseModal';
-import { useIpfsStorage } from '../hooks/useIpfsStorage';
 import { TransactionHistoryModal } from '../modals/TransactionHistoryModal';
-
+import { SettingsModal } from '../modals/SettingsModal';
+import { BackupWalletModal, LogoutConfirmModal } from '../../shared/modals';
+import { SaveWalletModal } from '../../L1/components/modals';
 type Tab = 'assets' | 'tokens';
 
-export function L3WalletView({ showBalances }: { showBalances: boolean }) {
-  const { identity, assets, tokens, isLoadingAssets, isLoadingIdentity, nametag, getSeedPhrase } = useWallet();
-  const { exportTxf, importTxf, isExportingTxf, isImportingTxf } = useIpfsStorage();
+// Animated balance display with smooth number transitions
+function BalanceDisplay({
+  totalValue,
+  showBalances,
+  onToggle,
+  isLoading
+}: {
+  totalValue: number;
+  showBalances: boolean;
+  onToggle: () => void;
+  isLoading?: boolean;
+}) {
+  const motionValue = useMotionValue(0);
+  const displayed = useTransform(motionValue, (v) =>
+    `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  );
+
+  useEffect(() => {
+    // Only animate if current value differs from target
+    if (Math.abs(motionValue.get() - totalValue) > 0.001) {
+      const controls = animate(motionValue, totalValue, {
+        duration: 0.5,
+        ease: 'easeOut',
+      });
+      return controls.stop;
+    }
+  }, [totalValue, motionValue]);
+
+  return (
+    <div className="flex items-center gap-3">
+      <h2 className="text-4xl text-neutral-900 dark:text-white font-bold tracking-tight">
+        {isLoading ? (
+          <span className="inline-flex items-center gap-2">
+            <span className="inline-block w-32 h-9 bg-neutral-200 dark:bg-neutral-700 rounded-lg animate-pulse" />
+          </span>
+        ) : showBalances ? (
+          <motion.span>{displayed}</motion.span>
+        ) : (
+          '••••••'
+        )}
+      </h2>
+      <motion.button
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={onToggle}
+        className="p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg transition-colors text-neutral-400 dark:text-neutral-500 hover:text-neutral-900 dark:hover:text-white"
+        title={showBalances ? "Hide balances" : "Show balances"}
+      >
+        {showBalances ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+      </motion.button>
+    </div>
+  );
+}
+
+// Inline status line showing current wallet activity
+function WalletStatusLine({
+  isLoadingAssets,
+  isLoadingL1,
+  pendingCount,
+}: {
+  isLoadingAssets: boolean;
+  isLoadingL1: boolean;
+  pendingCount: number;
+}) {
+  const items: { label: string; spinning?: boolean }[] = [];
+
+  if (isLoadingAssets) items.push({ label: 'Loading assets', spinning: true });
+  if (isLoadingL1) items.push({ label: 'Loading L1 balance', spinning: true });
+  if (pendingCount > 0) items.push({ label: `${pendingCount} pending transfer${pendingCount > 1 ? 's' : ''}` });
+
+  if (items.length === 0) return null;
+
+  // Show the first (most relevant) status item
+  const current = items[0];
+
+  return (
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={current.label}
+        initial={{ opacity: 0, y: -4 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 4 }}
+        className="flex items-center justify-center gap-1.5 text-xs text-neutral-400 dark:text-neutral-500"
+      >
+        {current.spinning ? (
+          <Loader2 className="w-3 h-3 animate-spin" />
+        ) : (
+          <Wifi className="w-3 h-3" />
+        )}
+        <span>{current.label}...</span>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+interface L3WalletViewProps {
+  showBalances: boolean;
+  setShowBalances: (value: boolean) => void;
+  isHistoryOpen: boolean;
+  setIsHistoryOpen: (value: boolean) => void;
+  isRequestsOpen: boolean;
+  setIsRequestsOpen: (value: boolean) => void;
+  isSettingsOpen: boolean;
+  setIsSettingsOpen: (value: boolean) => void;
+  isL1WalletOpen: boolean;
+  setIsL1WalletOpen: (value: boolean) => void;
+}
+
+export function L3WalletView({
+  showBalances,
+  setShowBalances,
+  isHistoryOpen,
+  setIsHistoryOpen,
+  isRequestsOpen,
+  setIsRequestsOpen,
+  isSettingsOpen,
+  setIsSettingsOpen,
+  setIsL1WalletOpen,
+}: L3WalletViewProps) {
+  const navigate = useNavigate();
+
+  // SDK hooks
+  const { identity, nametag, isLoading: isLoadingIdentity } = useIdentity();
+  const { assets: sdkAssets, isLoading: isLoadingAssets } = useAssets();
+  const { tokens: sdkTokens, pendingTokens } = useTokens();
+  const { balance: l1BalanceData, isLoading: isLoadingL1 } = useL1Balance();
+  const { sphere, deleteWallet } = useSphereContext();
+
+  const assets = sdkAssets;
+
+  const tokens = sdkTokens;
+  const sendableTokens = useMemo(() => tokens.filter(t => t.coinId !== 'NAMETAG'), [tokens]);
+
+  // L1 balance as a number (ALPHA units)
+  const l1Balance = useMemo(() => {
+    if (!l1BalanceData?.total) return 0;
+    return Number(l1BalanceData.total) / 1e8;
+  }, [l1BalanceData]);
+
   const [activeTab, setActiveTab] = useState<Tab>('assets');
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
-  const [isRequestsOpen, setIsRequestsOpen] = useState(false);
+  const [isSwapModalOpen, setIsSwapModalOpen] = useState(false);
   const [isSeedPhraseOpen, setIsSeedPhraseOpen] = useState(false);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [seedPhrase, setSeedPhrase] = useState<string[]>([]);
   const [isFaucetLoading, setIsFaucetLoading] = useState(false);
   const [faucetSuccess, setFaucetSuccess] = useState(false);
   const [faucetError, setFaucetError] = useState<string | null>(null);
-  const [importSuccess, setImportSuccess] = useState(false);
-  const [importError, setImportError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { pendingCount } = useIncomingPaymentRequests();
+  // Track previous token/asset IDs to detect truly new items
+  const prevTokenIdsRef = useRef<Set<string>>(new Set());
+  const prevAssetCoinIdsRef = useRef<Set<string>>(new Set());
+  const isFirstLoadRef = useRef(true);
 
-  const prevPendingCount = useRef(0);
+  // Compute new token IDs by comparing with previous snapshot
+  const newTokenIds = useMemo(() => {
+    if (isFirstLoadRef.current) {
+      return new Set<string>(); // First load - no animations
+    }
+
+    const newIds = new Set<string>();
+    tokens.filter(t => t.coinId !== 'NAMETAG').forEach(token => {
+      if (!prevTokenIdsRef.current.has(token.id)) {
+        newIds.add(token.id);
+      }
+    });
+    return newIds;
+  }, [tokens]);
+
+  // Compute new asset IDs by comparing with previous snapshot
+  const newAssetCoinIds = useMemo(() => {
+    if (isFirstLoadRef.current) {
+      return new Set<string>(); // First load - no animations
+    }
+
+    const newIds = new Set<string>();
+    if (l1Balance > 0 && !prevAssetCoinIdsRef.current.has('l1-alpha')) {
+      newIds.add('l1-alpha');
+    }
+    assets.forEach(asset => {
+      if (!prevAssetCoinIdsRef.current.has(asset.coinId)) {
+        newIds.add(asset.coinId);
+      }
+    });
+    return newIds;
+  }, [assets, l1Balance]);
+
+  // Update previous snapshots after render (for next comparison)
+  useEffect(() => {
+    const currentIds = new Set(tokens.filter(t => t.coinId !== 'NAMETAG').map(t => t.id));
+    prevTokenIdsRef.current = currentIds;
+    isFirstLoadRef.current = false;
+  }, [tokens]);
 
   useEffect(() => {
-    if (pendingCount > prevPendingCount.current) {
-      console.log("🔔 New payment request received! Opening modal...");
-      setIsRequestsOpen(true);
-    }
-    prevPendingCount.current = pendingCount;
-  }, [pendingCount]);
+    const currentIds = new Set(assets.map(a => a.coinId));
+    if (l1Balance > 0) currentIds.add('l1-alpha');
+    prevAssetCoinIdsRef.current = currentIds;
+  }, [assets, l1Balance]);
+
+  // New modal states
+  const [isBackupOpen, setIsBackupOpen] = useState(false);
+  const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
+  const [isSaveWalletOpen, setIsSaveWalletOpen] = useState(false);
+
+  // Stable callback for toggling balance visibility (for memoized BalanceDisplay)
+  const handleToggleBalances = useCallback(() => {
+    setShowBalances(!showBalances);
+  }, [showBalances, setShowBalances]);
+
+  // Create L1 ALPHA asset
+  const l1AlphaAsset = useMemo(() => {
+    const satoshis = BigInt(Math.round(l1Balance * 100000000));
+    const totalAmount = satoshis.toString();
+    const fiatValue = l1Balance * 1.0; // priceUsd = 1.0
+    return {
+      coinId: 'l1-alpha',
+      symbol: 'ALPHA',
+      name: 'Unicity Alphanet',
+      totalAmount,
+      decimals: 8,
+      tokenCount: 1,
+      confirmedAmount: totalAmount,
+      unconfirmedAmount: '0',
+      confirmedTokenCount: 1,
+      unconfirmedTokenCount: 0,
+      iconUrl: undefined,
+      priceUsd: 1.0,
+      priceEur: 0.92,
+      change24h: 0,
+      fiatValueUsd: fiatValue,
+      fiatValueEur: fiatValue * 0.92,
+    } satisfies import('@unicitylabs/sphere-sdk').Asset;
+  }, [l1Balance]);
 
   const totalValue = useMemo(() => {
-    return assets.reduce((sum, asset) => sum + asset.getTotalFiatValue('USD'), 0);
-  }, [assets]);
+    // Sum up L3 asset values (using SDK-provided fiat values for accuracy)
+    const l3Value = sdkAssets.reduce((sum, asset) => sum + (asset.fiatValueUsd ?? 0), 0);
+    const l1Value = l1AlphaAsset.fiatValueUsd ?? 0;
+    return l3Value + l1Value;
+  }, [sdkAssets, l1AlphaAsset]);
 
   const handleTopUp = async () => {
     if (!nametag) {
@@ -75,129 +287,124 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
     }
   };
 
-  const handleShowSeedPhrase = async () => {
-    const phrase = await getSeedPhrase();
-    if (phrase) {
-      setSeedPhrase(phrase);
+  const handleShowSeedPhrase = () => {
+    if (!sphere) return;
+    const mnemonic = sphere.getMnemonic();
+    if (mnemonic) {
+      setSeedPhrase(mnemonic.split(' '));
       setIsSeedPhraseOpen(true);
+    } else {
+      alert("Recovery phrase not available.\n\nThis wallet was imported from a file that doesn't contain a mnemonic phrase. Only the master key was imported.");
     }
   };
 
-  const handleExportTxf = useCallback(async () => {
+  // Check if mnemonic is available
+  const hasMnemonic = useMemo(() => {
+    return sphere?.getMnemonic() !== null;
+  }, [sphere]);
+
+  // Handle export wallet file (using SDK's exportToJSON)
+  const handleExportWalletFile = () => {
+    setIsSaveWalletOpen(true);
+  };
+
+  // Handle save wallet
+  const handleSaveWallet = async (filename: string, password?: string) => {
+    if (!sphere) return;
     try {
-      setImportError(null);
-      await exportTxf();
-    } catch (error) {
-      console.error('Export failed:', error);
+      const jsonData = await sphere.exportToJSON({ password, includeMnemonic: true });
+      const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename.endsWith('.json') ? filename : `${filename}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setIsSaveWalletOpen(false);
+    } catch (err) {
+      console.error('Failed to save wallet:', err);
     }
-  }, [exportTxf]);
+  };
 
-  const handleImportTxf = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setImportError(null);
-    setImportSuccess(false);
-
+  // Handle logout
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const handleLogout = async () => {
     try {
-      const content = await file.text();
-      const result = await importTxf(content);
-
-      if (result.success) {
-        setImportSuccess(true);
-        setTimeout(() => setImportSuccess(false), 3000);
-      } else {
-        setImportError(result.error || 'Import failed');
-      }
-    } catch (error) {
-      setImportError(error instanceof Error ? error.message : 'Import failed');
+      setIsLoggingOut(true);
+      // Await full cleanup before navigating so IntroPage sees clean state
+      // (WELCOME_ACCEPTED cleared, walletExists=false).
+      await deleteWallet();
+      navigate('/', { replace: true });
+    } catch (err) {
+      console.error('Failed to logout:', err);
+      setIsLoggingOut(false);
     }
+  };
 
-    // Reset file input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  }, [importTxf]);
+  // Handle backup and logout
+  const handleBackupAndLogout = () => {
+    setIsLogoutConfirmOpen(false);
+    setIsBackupOpen(true);
+  };
+
+  // Format L1 balance for settings modal
+  const formatL1Balance = (balance: number) => {
+    return balance.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  };
 
   if (isLoadingIdentity) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex flex-col items-center justify-center h-full gap-3">
         <Loader2 className="animate-spin text-neutral-400 dark:text-neutral-600" />
+        <WalletStatusLine
+          isLoadingAssets={isLoadingAssets}
+          isLoadingL1={isLoadingL1}
+          pendingCount={0}
+        />
       </div>
     );
   }
 
-  if (!identity || !nametag) {
+  if (!identity) {
     return <CreateWalletFlow />;
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* L2 Specific Header Stats */}
+    <div className="flex flex-col h-full relative">
+      {/* Main Balance - Centered with Eye Toggle */}
       <div className="px-6 mb-6 shrink-0">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <p className="text-xs text-orange-600/70 dark:text-orange-300/70">AgentSphere Balance</p>
-            <span className="flex h-2 w-2 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-                 <button
-                    onClick={() => setIsHistoryOpen(true)}
-                    className="p-1.5 rounded-lg hover:bg-neutral-200/50 dark:hover:bg-white/10 transition-colors group"
-                    title="Transaction history"
-                 >
-                    <Clock className="w-5 h-5 text-neutral-400 dark:text-neutral-500 group-hover:text-neutral-900 dark:group-hover:text-white transition-colors" />
-                 </button>
-                 <button
-                    onClick={handleShowSeedPhrase}
-                    className="p-1.5 rounded-lg hover:bg-neutral-200/50 dark:hover:bg-white/10 transition-colors group"
-                    title="View recovery phrase"
-                 >
-                    <Key className="w-5 h-5 text-neutral-400 dark:text-neutral-500 group-hover:text-neutral-900 dark:group-hover:text-white transition-colors" />
-                 </button>
-                 <button
-                    onClick={() => setIsRequestsOpen(true)}
-                    className="relative p-1.5 rounded-lg hover:bg-neutral-200/50 dark:hover:bg-white/10 transition-colors group"
-                 >
-                    <Bell className={`w-5 h-5 ${pendingCount > 0 ? 'text-neutral-900 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`} />
-                    {pendingCount > 0 && (
-                        <span className="absolute top-0 right-0 flex h-2.5 w-2.5">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500 border-2 border-white dark:border-[#0a0a0a]"></span>
-                        </span>
-                    )}
-                 </button>
-            </div>
+        <div className="flex flex-col items-center justify-center mb-6 pt-2">
+          <BalanceDisplay
+            totalValue={totalValue}
+            showBalances={showBalances}
+            onToggle={handleToggleBalances}
+            isLoading={isLoadingAssets && totalValue === 0}
+          />
+          <WalletStatusLine
+            isLoadingAssets={isLoadingAssets}
+            isLoadingL1={isLoadingL1}
+            pendingCount={pendingTokens.length}
+          />
         </div>
 
-        <h2 className="text-3xl text-neutral-900 dark:text-white font-bold tracking-tight mb-4">
-          {showBalances
-            ? `$${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-            : '••••••'}
-        </h2>
-
-        {/* L2 Actions - Speed focused */}
-        <div className="grid grid-cols-2 gap-3">
+        {/* Actions - Speed focused */}
+        <div className="grid grid-cols-3 gap-3">
           <motion.button
             whileHover={{ scale: isFaucetLoading ? 1 : 1.02, y: isFaucetLoading ? 0 : -2 }}
             whileTap={{ scale: isFaucetLoading ? 1 : 0.98 }}
             onClick={handleTopUp}
             disabled={isFaucetLoading || !nametag}
-            className="relative px-4 py-3 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 text-white text-sm shadow-xl shadow-orange-500/20 flex items-center justify-center gap-2 overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
+            className="relative px-3 py-3 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 text-white text-sm shadow-xl shadow-orange-500/20 flex items-center justify-center gap-2 overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isFaucetLoading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Requesting...</span>
+                <span className="hidden sm:inline">Requesting...</span>
               </>
             ) : faucetSuccess ? (
               <>
                 <CheckCircle className="w-4 h-4" />
-                <span>Success!</span>
+                <span className="hidden sm:inline">Success!</span>
               </>
             ) : (
               <>
@@ -210,8 +417,19 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
           <motion.button
             whileHover={{ scale: 1.02, y: -2 }}
             whileTap={{ scale: 0.98 }}
+            onClick={() => setIsSwapModalOpen(true)}
+            className="relative px-3 py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2"
+          >
+            <ArrowDownUp className="w-4 h-4" />
+            <span>Swap</span>
+          </motion.button>
+
+          <motion.button
+            whileHover={{ scale: sendableTokens.length > 0 ? 1.02 : 1, y: sendableTokens.length > 0 ? -2 : 0 }}
+            whileTap={{ scale: sendableTokens.length > 0 ? 0.98 : 1 }}
             onClick={() => setIsSendModalOpen(true)}
-            className="relative px-4 py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2"
+            disabled={sendableTokens.length === 0}
+            className="relative px-3 py-3 rounded-xl bg-neutral-100 dark:bg-neutral-800/80 hover:bg-neutral-200 dark:hover:bg-neutral-700/80 text-neutral-900 dark:text-white text-sm border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ArrowUpRight className="w-4 h-4" />
             <span>Send</span>
@@ -269,139 +487,125 @@ export function L3WalletView({ showBalances }: { showBalances: boolean }) {
         </div>
       </div>
 
-      {/* L2 Assets List */}
+      {/* Assets List */}
       <div className="p-6 pt-0 flex-1 overflow-y-auto custom-scrollbar">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-orange-500" />
             <h4 className="text-sm text-neutral-500 dark:text-neutral-400">Network Assets</h4>
           </div>
-          <div className="flex items-center gap-2">
-            {/* Hidden file input for import */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".txf,.json"
-              onChange={handleImportTxf}
-              className="hidden"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isImportingTxf}
-              className="flex items-center gap-1 text-xs text-orange-500 dark:text-orange-400 hover:text-orange-600 dark:hover:text-orange-300 disabled:opacity-50"
-              title="Import tokens from TXF file"
-            >
-              {isImportingTxf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-              <span>Import</span>
-            </button>
-            <button
-              onClick={handleExportTxf}
-              disabled={isExportingTxf}
-              className="flex items-center gap-1 text-xs text-orange-500 dark:text-orange-400 hover:text-orange-600 dark:hover:text-orange-300 disabled:opacity-50"
-              title="Export tokens as TXF file"
-            >
-              {isExportingTxf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-              <span>Export</span>
-            </button>
-          </div>
         </div>
 
-        {/* Import feedback */}
-        <AnimatePresence>
-          {importSuccess && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="mb-4 flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-xl"
-            >
-              <CheckCircle className="w-4 h-4 text-green-500 dark:text-green-400 shrink-0" />
-              <p className="text-xs text-green-600 dark:text-green-400">Tokens imported successfully!</p>
-            </motion.div>
-          )}
-          {importError && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="mb-4 flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl"
-            >
-              <XCircle className="w-4 h-4 text-red-500 dark:text-red-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-red-600 dark:text-red-400">{importError}</p>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <div className="relative min-h-50">
+          {isLoadingAssets ? (
+            <div className="py-10 text-center">
+              <Loader2 className="w-6 h-6 text-orange-500 animate-spin mx-auto" />
+            </div>
+          ) : (
+            <>
+              {/* ASSETS VIEW - no container animation, only item animations */}
+              {activeTab === 'assets' && (
+                <div className="space-y-2">
+                  {assets.length === 0 && l1Balance === 0 ? (
+                    <EmptyState />
+                  ) : (
+                    <>
+                      {/* L1 ALPHA - only show if balance > 0 */}
+                      {l1Balance > 0 && (
+                        <AssetRow
+                          key="l1-alpha"
+                          asset={l1AlphaAsset}
+                          showBalances={showBalances}
+                          delay={newAssetCoinIds.has('l1-alpha') ? 0 : 0}
+                          layer="L1"
+                          isNew={newAssetCoinIds.has('l1-alpha')}
+                          onClick={() => setIsL1WalletOpen(true)}
+                        />
+                      )}
+                      {/* L3 Assets */}
+                      {assets.map((asset, index) => (
+                        <AssetRow
+                          key={asset.coinId}
+                          asset={asset}
+                          showBalances={showBalances}
+                          delay={newAssetCoinIds.has(asset.coinId) ? (index + 1) * 0.05 : 0}
+                          layer="L3"
+                          isNew={newAssetCoinIds.has(asset.coinId)}
+                        />
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
 
-        {isLoadingAssets ? (
-          <div className="py-10 text-center">
-            <Loader2 className="w-6 h-6 text-orange-500 animate-spin mx-auto" />
-          </div>
-        ) : (
-          <AnimatePresence mode="wait">
-            {activeTab === 'assets' && (
-              /* ASSETS VIEW */
-              <motion.div
-                key="assets"
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
-                transition={{ duration: 0.2 }}
-                className="space-y-2"
-              >
-                {assets.length === 0 ? (
-                  <EmptyState />
-                ) : (
-                  assets.map((asset, index) => (
-                    <AssetRow
-                      key={asset.coinId}
-                      asset={asset}
-                      showBalances={showBalances}
-                      delay={index * 0.05}
-                    />
-                  ))
-                )}
-              </motion.div>
-            )}
-
-            {activeTab === 'tokens' && (
-              <motion.div
-                key="tokens"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.2 }}
-                className="space-y-2"
-              >
-                {tokens.filter(t => t.type !== 'Nametag').length === 0 ? (
-                  <EmptyState text="No individual tokens found." />
-                ) : (
-                  tokens
-                    .filter(t => t.type !== 'Nametag')
-                    .sort((a, b) => b.timestamp - a.timestamp)
-                    .map((token, index) => (
-                      <TokenRow
-                        key={token.id}
-                        token={token}
-                        delay={index * 0.05}
-                      />
-                    ))
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        )}
+              {/* TOKENS VIEW - no container animation, only item animations */}
+              {activeTab === 'tokens' && (
+                <div className="space-y-2">
+                  {tokens.filter(t => t.coinId !== 'NAMETAG').length === 0 ? (
+                    <EmptyState text="No individual tokens found." />
+                  ) : (
+                    tokens
+                      .filter(t => t.coinId !== 'NAMETAG')
+                      .sort((a, b) => b.createdAt - a.createdAt)
+                      .map((token, index) => (
+                        <TokenRow
+                          key={token.id}
+                          token={token}
+                          delay={newTokenIds.has(token.id) ? index * 0.05 : 0}
+                          isNew={newTokenIds.has(token.id)}
+                        />
+                      ))
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
+
+      {/* Existing Modals */}
       <SendModal isOpen={isSendModalOpen} onClose={() => setIsSendModalOpen(false)} />
-
+      <SwapModal isOpen={isSwapModalOpen} onClose={() => setIsSwapModalOpen(false)} />
       <PaymentRequestsModal isOpen={isRequestsOpen} onClose={() => setIsRequestsOpen(false)} />
-
       <SeedPhraseModal
         isOpen={isSeedPhraseOpen}
         onClose={() => setIsSeedPhraseOpen(false)}
         seedPhrase={seedPhrase}
       />
-
       <TransactionHistoryModal isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} />
+
+      {/* New Modals */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        onOpenL1Wallet={() => setIsL1WalletOpen(true)}
+        onBackupWallet={() => setIsBackupOpen(true)}
+        onLogout={() => setIsLogoutConfirmOpen(true)}
+        l1Balance={formatL1Balance(l1Balance)}
+      />
+
+      <BackupWalletModal
+        isOpen={isBackupOpen}
+        onClose={() => setIsBackupOpen(false)}
+        onExportWalletFile={handleExportWalletFile}
+        onShowRecoveryPhrase={handleShowSeedPhrase}
+      />
+
+      <LogoutConfirmModal
+        isOpen={isLogoutConfirmOpen}
+        onClose={() => setIsLogoutConfirmOpen(false)}
+        onBackupAndLogout={handleBackupAndLogout}
+        onLogoutWithoutBackup={handleLogout}
+        isLoggingOut={isLoggingOut}
+      />
+
+      <SaveWalletModal
+        show={isSaveWalletOpen}
+        onConfirm={handleSaveWallet}
+        onCancel={() => setIsSaveWalletOpen(false)}
+        hasMnemonic={hasMnemonic}
+      />
+
     </div>
   );
 }

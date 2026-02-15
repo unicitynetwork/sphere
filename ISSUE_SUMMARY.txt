@@ -1,0 +1,257 @@
+================================================================================
+SPHERE WALLET CONSOLE LOGS ANALYSIS - EXECUTIVE SUMMARY
+================================================================================
+
+ANALYZED: Faucet token request console logs
+SCOPE: Validation, IPNS resolution, query performance, data consistency
+FINDINGS: 4 Issues identified (1 Critical, 1 High, 1 Medium, 1 Low)
+
+================================================================================
+ISSUE #1: TOKEN VALIDATION INCONSISTENCY [CRITICAL]
+================================================================================
+
+OBSERVED ANOMALY:
+  Step 4 (InventorySyncService): 3 tokens FAIL validation
+    - Token 7eb75565... failed transaction 0: "Invalid or missing previousStateHash"
+    - Token 96c00ec1... failed transaction 0: "Invalid or missing previousStateHash"
+    - Token f51f74fe... failed transaction 0: "Invalid or missing previousStateHash"
+
+  Step 5 (IpfsStorageService): ALL 4 tokens show VALID
+
+  DISCREPANCY: 3 → 4 tokens (invalid tokens resurrected as valid)
+
+ROOT CAUSE:
+  File: src/components/wallet/L3/services/InventorySyncService.ts
+
+  validateTransactionCommitment() at line 773-774:
+    if (!tx.previousStateHash || !isValidHexString(tx.previousStateHash, 64)) {
+      return { valid: false, reason: 'Invalid or missing previousStateHash' };
+    }
+
+  PROBLEM: Rejects genesis-only tokens (no transaction chain yet)
+
+  PROCESS:
+    1. Step 4: Validates commitment structure → FAILS tokens with no previousStateHash
+    2. Step 5: Calls SDK validation separately → PASSES same tokens
+    3. Step 9: Writes BOTH invalid + valid copies to IPFS
+    4. Result: Duplicate/conflicting token states in storage
+
+IMPACT:
+  - Tokens flip between valid/invalid on next sync
+  - Possible token loss or balance corruption
+  - User sees inconsistent wallet state
+  - DATA INTEGRITY RISK
+
+SEVERITY: CRITICAL (Security/Correctness)
+
+FIX LOCATION: Line 773 & 778-786 in InventorySyncService.ts
+  - Allow missing previousStateHash for genesis transitions
+  - Skip chain verification if previousStateHash is null/undefined
+  - Treat genesis-only tokens as VALID (no transactions yet)
+
+TIME TO FIX: ~30 minutes
+
+================================================================================
+ISSUE #2: IPNS RESOLUTION FAILURE [HIGH]
+================================================================================
+
+OBSERVED ERROR:
+  POST https://unicity-ipfs1.dyndns.org/api/v0/routing/get?arg=/ipns/ 400
+  GET https://unicity-ipfs1.dyndns.org/ipns/ 400
+
+  URL PATH: /ipns/ (EMPTY - nothing after /ipns/)
+
+ROOT CAUSE:
+  File: src/components/wallet/L3/services/IpfsHttpResolver.ts
+
+  Line 66:  const url = `${gatewayUrl}/ipns/${ipnsName}`;
+  Line 102: const url = `${gatewayUrl}/api/v0/routing/get?arg=/ipns/${ipnsName}`;
+
+  PROBLEM: No validation of ipnsName parameter
+
+  When ipnsName is:
+    - undefined → URL becomes /ipns/undefined
+    - null      → URL becomes /ipns/null
+    - ""        → URL becomes /ipns/ (observed!)
+
+  CAUSE: Race condition
+    1. inventorySync() called before IPNS name derivation completes
+    2. SyncParams.ipnsName is empty/undefined
+    3. resolveIpnsName() accepts any string without validation
+    4. HTTP layer doesn't reject malformed URLs gracefully
+    5. Gateway returns 400 Bad Request
+
+IMPACT:
+  - IPFS sync completely blocked
+  - All gateway requests fail with 400 errors
+  - Tokens can't be backed up to IPFS
+  - User loses data backup capability
+  - HTTP 400 errors flood logs (noise)
+
+SEVERITY: HIGH (Availability)
+
+FIX LOCATION:
+  1. IpfsHttpResolver.ts line 205 (resolveIpnsName):
+     - Add validation: if (!ipnsName || ipnsName.trim() === '') return error
+
+  2. InventorySyncService.ts line 132 (inventorySync):
+     - Validate params.ipnsName before processing
+     - Return error if IPNS name missing
+
+TIME TO FIX: ~20 minutes
+
+================================================================================
+ISSUE #3: EXCESSIVE QUERY CALLS - SPENT CHECK LOOP [MEDIUM]
+================================================================================
+
+OBSERVED ANOMALY:
+  "[tokensQuery] Running spent check" appears 20+ times
+  Should appear 1-2 times maximum
+
+  Each call makes 3+ requests to aggregator
+  Total: 60+ aggregator requests for single wallet load
+
+ROOT CAUSE:
+  File: src/components/wallet/L3/hooks/useWallet.ts
+
+  Line 231-246: tokensQuery runs spent check every time it executes
+  Line 238: Clears UNSPENT cache each time (forces fresh check)
+
+  PROBLEM: Multiple invalidation sources:
+
+  1. Line 46-71: wallet-updated event handler calls refetchQueries()
+  2. Line 149-158: Auto-sync lifecycle hook triggers refetch
+  3. Step 4/5/9 in InventorySyncService emit wallet-updated events
+  4. Each event refetch re-runs spent check
+  5. No debouncing or throttling
+
+  RESULT: Query executes 20+ times in succession
+    - Spent check runs each time
+    - Each check: 3+ aggregator requests
+    - Total: 60+ requests for 1 wallet load
+
+IMPACT:
+  - Massive aggregator load (20x normal)
+  - Slow wallet load (2-6 seconds instead of <500ms)
+  - Battery drain on mobile
+  - Possible rate limiting from aggregator
+  - Poor user experience
+
+SEVERITY: MEDIUM (Performance)
+
+FIX LOCATION: useWallet.ts line 181-268
+
+  APPROACH:
+    1. Debounce wallet-updated handler (500ms)
+    2. Only refetch (don't invalidate) if <1 second old
+    3. Add time-based cache: Skip spent check if <30s since last check
+    4. Use sessionStorage to track last check time
+    5. Remove clearUnspentCacheEntries() call (use cache!)
+
+TIME TO FIX: ~45 minutes
+
+================================================================================
+ISSUE #4: CID MISMATCH WARNING [LOW]
+================================================================================
+
+OBSERVED WARNING:
+  ⚠️ CID mismatch: expected bagaaierau67uhdo..., got bafkreifhx5by3sy...
+
+  Expected: bagaaierau67uhdo (incomplete/truncated)
+  Got:      bafkreifhx5by3sy (proper CIDv1 Base32)
+
+ROOT CAUSE:
+  File: src/components/wallet/L3/services/InventorySyncService.ts line 1432
+
+  Browser computes: computeCidFromContent() → should return "bafk..."
+  Gateway returns: Different encoding → returns "bafk..." or alternative
+
+  PROBLEM: CID encoding differs between systems
+    - Browser: JSON encoding via multiformats/codecs/json
+    - Gateway: May use different JSON serialization or CBOR
+    - Object key order may differ
+    - Whitespace may differ
+
+  RESULT: Same content, different CID due to encoding variation
+
+IMPACT:
+  - Non-blocking (handled gracefully)
+  - Uses gateway CID as authoritative
+  - No functional impact
+  - Just noise in logs
+
+SEVERITY: LOW (Polish)
+
+FIX LOCATION: InventorySyncService.ts line 1429-1434
+
+  IMPROVEMENT:
+    - Parse both CIDs to canonical form
+    - Compare multihash (encoding-independent)
+    - Only warn if hash differs (data integrity issue)
+    - Accept encoding differences as normal
+
+TIME TO FIX: ~20 minutes
+
+================================================================================
+PRIORITY RECOMMENDATIONS
+================================================================================
+
+1. CRITICAL (Fix First):
+   Issue #1 - Token Validation Inconsistency
+   Why: Data integrity risk, possible token loss
+   Effort: 30 min
+   Impact: High
+
+2. HIGH (Fix Second):
+   Issue #2 - IPNS Resolution Failure
+   Why: Blocks all IPFS operations
+   Effort: 20 min
+   Impact: High (availability)
+
+3. MEDIUM (Fix Third):
+   Issue #3 - Excessive Query Calls
+   Why: Performance improvement, better UX
+   Effort: 45 min
+   Impact: Medium (UX/performance)
+
+4. LOW (Fix Last):
+   Issue #4 - CID Mismatch Warning
+   Why: Polish/logging clarity
+   Effort: 20 min
+   Impact: Low (logging)
+
+TOTAL ESTIMATED TIME: 2 hours 15 minutes
+
+================================================================================
+FILES TO MODIFY
+================================================================================
+
+1. /home/vrogojin/sphere/src/components/wallet/L3/services/InventorySyncService.ts
+   - Lines 615-640: Fix genesis token rejection logic
+   - Lines 773-786: Allow missing previousStateHash for genesis
+   - Lines 1429-1434: Improve CID comparison
+   - Lines 132-167: Add sync parameter validation
+
+2. /home/vrogojin/sphere/src/components/wallet/L3/services/IpfsHttpResolver.ts
+   - Lines 205-220: Add IPNS name validation
+   - Lines 66, 102: Safe URL construction with validation
+
+3. /home/vrogojin/sphere/src/components/wallet/L3/hooks/useWallet.ts
+   - Lines 46-71: Debounce wallet-updated handler
+   - Lines 181-268: Add time-based spent check throttling
+   - Line 238: Don't clear cache aggressively
+
+================================================================================
+DETAILED ANALYSIS
+================================================================================
+
+See: /home/vrogojin/sphere/CONSOLE_LOGS_ANALYSIS.md
+
+This file contains:
+- Detailed code walkthroughs
+- Evidence and reproduction steps
+- Fix implementation examples
+- Testing recommendations
+- Complete code snippets
+
+================================================================================

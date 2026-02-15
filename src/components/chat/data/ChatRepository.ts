@@ -5,9 +5,7 @@ import {
   type ChatConversationData,
   type ChatMessageData,
 } from './models';
-
-const STORAGE_KEY_CONVERSATIONS = 'unicity_chat_conversations';
-const STORAGE_KEY_MESSAGES = 'unicity_chat_messages';
+import { STORAGE_KEYS } from '../../../config/storageKeys';
 
 export class ChatRepository {
   private static instance: ChatRepository;
@@ -27,7 +25,7 @@ export class ChatRepository {
 
   getConversations(): ChatConversation[] {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY_CONVERSATIONS);
+      const raw = localStorage.getItem(STORAGE_KEYS.CHAT_CONVERSATIONS);
       if (!raw) return [];
       const parsed: ChatConversationData[] = JSON.parse(raw);
       return parsed
@@ -65,7 +63,7 @@ export class ChatRepository {
 
   private saveConversations(conversations: ChatConversation[]): void {
     localStorage.setItem(
-      STORAGE_KEY_CONVERSATIONS,
+      STORAGE_KEYS.CHAT_CONVERSATIONS,
       JSON.stringify(conversations.map((c) => c.toJSON()))
     );
   }
@@ -84,9 +82,12 @@ export class ChatRepository {
   updateConversationLastMessage(conversationId: string, text: string, timestamp: number): void {
     const conversation = this.getConversation(conversationId);
     if (conversation) {
-      conversation.lastMessageText = text;
-      conversation.lastMessageTime = timestamp;
-      this.saveConversation(conversation);
+      // Only update if this message is newer than the current last message
+      if (timestamp >= conversation.lastMessageTime) {
+        conversation.lastMessageText = text;
+        conversation.lastMessageTime = timestamp;
+        this.saveConversation(conversation);
+      }
     }
   }
 
@@ -124,7 +125,7 @@ export class ChatRepository {
 
   private getAllMessages(): ChatMessage[] {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY_MESSAGES);
+      const raw = localStorage.getItem(STORAGE_KEYS.CHAT_MESSAGES);
       if (!raw) return [];
       const parsed: ChatMessageData[] = JSON.parse(raw);
       return parsed.map((m) => ChatMessage.fromJSON(m));
@@ -135,7 +136,7 @@ export class ChatRepository {
   }
 
   private saveMessages(messages: ChatMessage[]): void {
-    localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messages.map((m) => m.toJSON())));
+    localStorage.setItem(STORAGE_KEYS.CHAT_MESSAGES, JSON.stringify(messages.map((m) => m.toJSON())));
   }
 
   getMessagesForConversation(conversationId: string): ChatMessage[] {
@@ -214,6 +215,7 @@ export class ChatRepository {
         participantPubkey: pubkey,
         participantNametag: nametag,
         participantName: name,
+        lastMessageTime: 0,
       });
       this.saveConversation(conversation);
     } else if (nametag && !conversation.participantNametag) {
@@ -226,8 +228,8 @@ export class ChatRepository {
   }
 
   clearAllData(): void {
-    localStorage.removeItem(STORAGE_KEY_CONVERSATIONS);
-    localStorage.removeItem(STORAGE_KEY_MESSAGES);
+    localStorage.removeItem(STORAGE_KEYS.CHAT_CONVERSATIONS);
+    localStorage.removeItem(STORAGE_KEYS.CHAT_MESSAGES);
     this.notifyUpdate();
   }
 }

@@ -1,0 +1,139 @@
+/**
+ * PasswordPromptScreen - Enter password for encrypted wallet files
+ */
+import { useState } from "react";
+import { motion } from "framer-motion";
+import { Lock, ArrowLeft, ArrowRight, Loader2, Eye, EyeOff } from "lucide-react";
+
+interface PasswordPromptScreenProps {
+  fileName: string;
+  isBusy: boolean;
+  error: string | null;
+  onSubmit: (password: string) => void;
+  onBack: () => void;
+}
+
+export function PasswordPromptScreen({
+  fileName,
+  isBusy,
+  error,
+  onSubmit,
+  onBack,
+}: PasswordPromptScreenProps) {
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (password.trim()) {
+      onSubmit(password);
+    }
+  };
+
+  return (
+    <motion.div
+      key="passwordPrompt"
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.9 }}
+      transition={{ duration: 0.1 }}
+      className="relative z-10 w-full max-w-90"
+    >
+      {/* Icon */}
+      <motion.div
+        className="relative w-18 h-18 mx-auto mb-6"
+        whileHover={{ scale: 1.05 }}
+      >
+        <div className="absolute inset-0 bg-amber-500/30 rounded-2xl blur-xl" />
+        <div className="relative w-full h-full rounded-2xl bg-linear-to-br from-amber-500 to-amber-600 flex items-center justify-center shadow-xl shadow-amber-500/25">
+          <Lock className="w-9 h-9 text-white" />
+        </div>
+      </motion.div>
+
+      <h2 className="text-2xl font-bold text-neutral-900 dark:text-white mb-2 tracking-tight">
+        Enter Password
+      </h2>
+      <p className="text-neutral-500 dark:text-neutral-400 text-sm mb-6 mx-auto leading-relaxed">
+        The file{" "}
+        <span className="font-medium text-neutral-700 dark:text-neutral-300">
+          {fileName}
+        </span>{" "}
+        is encrypted
+      </p>
+
+      <form onSubmit={handleSubmit}>
+        {/* Password Input */}
+        <div className="relative mb-5">
+          <input
+            type={showPassword ? "text" : "password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Wallet password"
+            autoFocus
+            disabled={isBusy}
+            className="w-full px-4 py-3 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700/50 rounded-xl text-sm text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 pr-12 disabled:opacity-50"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword(!showPassword)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+          >
+            {showPassword ? (
+              <EyeOff className="w-4 h-4" />
+            ) : (
+              <Eye className="w-4 h-4" />
+            )}
+          </button>
+        </div>
+
+        {/* Buttons */}
+        <div className="flex gap-3">
+          <motion.button
+            type="button"
+            onClick={onBack}
+            disabled={isBusy}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="flex-1 py-3.5 px-5 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300 text-sm font-bold border border-neutral-200 dark:border-neutral-700/50 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back
+          </motion.button>
+
+          <motion.button
+            type="submit"
+            disabled={isBusy || !password.trim()}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="flex-2 relative py-3.5 px-5 rounded-xl bg-linear-to-r from-amber-500 to-amber-600 text-white text-sm font-bold shadow-xl shadow-amber-500/25 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden group"
+          >
+            <div className="absolute inset-0 bg-linear-to-r from-amber-400 to-amber-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <span className="relative z-10 flex items-center gap-2">
+              {isBusy ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Decrypting...
+                </>
+              ) : (
+                <>
+                  Unlock
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </span>
+          </motion.button>
+        </div>
+      </form>
+
+      {error && (
+        <motion.p
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-3 text-red-500 dark:text-red-400 text-xs bg-red-500/10 border border-red-500/20 p-2 rounded-lg"
+        >
+          {error}
+        </motion.p>
+      )}
+    </motion.div>
+  );
+}

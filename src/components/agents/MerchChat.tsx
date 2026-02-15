@@ -1,16 +1,10 @@
 import { useState } from 'react';
-import { Image as ImageIcon, Package, Wallet } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { X, Wallet, CheckCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../config/activities';
-import { v4 as uuidv4 } from 'uuid';
 import { merchItems } from '../../data/agentsMockData';
-import { AgentChat, type SidebarItem } from './shared';
-
-// Order item for sidebar
-interface OrderItem extends SidebarItem {
-  status: 'pending' | 'completed' | 'cancelled';
-  description?: string;
-}
+import { AgentChat } from './shared';
+import { recordActivity } from '../../services/ActivityService';
 
 // Card data for merch items
 interface MerchCardData {
@@ -25,10 +19,10 @@ interface MerchChatProps {
 }
 
 export function MerchChat({ agent }: MerchChatProps) {
-  const [orders, setOrders] = useState<OrderItem[]>(() => {
-    const stored = localStorage.getItem('sphere_merch_orders');
-    return stored ? JSON.parse(stored) : [];
-  });
+  // Order modal state
+  const [showOrderModal, setShowOrderModal] = useState(false);
+  const [pendingOrder, setPendingOrder] = useState<MerchCardData | null>(null);
+  const [orderStep, setOrderStep] = useState<'confirm' | 'processing' | 'success'>('confirm');
 
   const getMockResponse = async (
     userInput: string,
@@ -83,33 +77,37 @@ export function MerchChat({ agent }: MerchChatProps) {
     }
   };
 
+  const handleOrderNow = (cardData: MerchCardData) => {
+    setPendingOrder(cardData);
+    setOrderStep('confirm');
+    setShowOrderModal(true);
+  };
+
+  const handleConfirmOrder = async () => {
+    if (!pendingOrder) return;
+
+    setOrderStep('processing');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    setOrderStep('success');
+
+    // Record merch order activity
+    recordActivity('merch_order', {
+      isPublic: true,
+      data: {
+        itemName: pendingOrder.title,
+        price: pendingOrder.price,
+      },
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    setShowOrderModal(false);
+    setPendingOrder(null);
+  };
+
   return (
-    <AgentChat<MerchCardData, OrderItem>
+    <AgentChat<MerchCardData>
       agent={agent}
-      sidebarConfig={{
-        title: 'My Orders',
-        emptyText: 'No orders yet',
-        emptyIcon: <Package className="w-8 h-8 mx-auto opacity-50" />,
-        items: orders,
-        setItems: setOrders,
-        storageKey: 'sphere_merch_orders',
-        renderItem: (order) => (
-          <>
-            {order.image ? (
-              <img src={order.image} alt="" className="w-12 h-12 rounded-lg object-cover" />
-            ) : (
-              <div className={`w-12 h-12 rounded-lg bg-linear-to-br ${agent.color} flex items-center justify-center`}>
-                <ImageIcon className="w-5 h-5 text-white/70" />
-              </div>
-            )}
-            <div className="flex-1 min-w-0">
-              <p className="text-neutral-900 dark:text-white text-sm font-medium truncate">{order.title}</p>
-              {order.amount && <p className="text-purple-600 dark:text-purple-400 text-xs">${order.amount}</p>}
-              <p className="text-neutral-500 text-xs">{new Date(order.timestamp).toLocaleDateString()}</p>
-            </div>
-          </>
-        ),
-      }}
       getMockResponse={getMockResponse}
       renderMessageCard={(cardData) => (
         <div className="mt-4 rounded-xl overflow-hidden border border-neutral-300 dark:border-neutral-600/50">
@@ -118,80 +116,91 @@ export function MerchChat({ agent }: MerchChatProps) {
       )}
       actionConfig={{
         label: (cardData) => `Order Now - $${cardData.price}`,
-        onAction: () => {},
-      }}
-      transactionConfig={{
-        confirmTitle: 'Confirm Order',
-        processingText: 'Confirming order',
-        successText: 'Order placed',
-        renderConfirmContent: (cardData, onConfirm) => (
-          <>
-            <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700 mb-4">
-              <img src={cardData.image} alt="" className="w-full h-32 object-cover" />
-              <div className="p-4 bg-neutral-100 dark:bg-neutral-800">
-                <p className="text-neutral-900 dark:text-white font-medium">{cardData.title}</p>
-                <p className="text-purple-600 dark:text-purple-400 text-lg font-bold mt-1">${cardData.price}</p>
-              </div>
-            </div>
-
-            <motion.button
-              onClick={onConfirm}
-              className={`w-full py-4 rounded-xl bg-linear-to-r ${agent.color} text-white font-bold flex items-center justify-center gap-2`}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Wallet className="w-5 h-5" />
-              Confirm & Pay
-            </motion.button>
-          </>
-        ),
-        onConfirm: async (cardData) => {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          return {
-            id: uuidv4(),
-            title: cardData.title,
-            image: cardData.image,
-            timestamp: Date.now(),
-            status: 'pending' as const,
-            amount: cardData.price,
-            description: cardData.description,
-          };
-        },
-      }}
-      detailsConfig={{
-        title: 'Order Details',
-        renderContent: (order) => (
-          <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700">
-            {order.image ? (
-              <img src={order.image} alt="" className="w-full h-40 object-cover" />
-            ) : (
-              <div className={`w-full h-40 bg-linear-to-br ${agent.color} flex items-center justify-center`}>
-                <ImageIcon className="w-12 h-12 text-white/50" />
-              </div>
-            )}
-            <div className="p-4 bg-neutral-100 dark:bg-neutral-800">
-              <p className="text-neutral-900 dark:text-white font-medium text-lg">{order.title}</p>
-              {order.description && (
-                <p className="text-neutral-500 dark:text-neutral-400 text-sm mt-2">{order.description}</p>
-              )}
-              <div className="flex items-center justify-between mt-4">
-                <p className="text-purple-600 dark:text-purple-400 text-xl font-bold">${order.amount}</p>
-                <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                  order.status === 'completed' ? 'bg-green-500/20 text-green-400' :
-                  order.status === 'cancelled' ? 'bg-red-500/20 text-red-400' :
-                  'bg-yellow-500/20 text-yellow-400'
-                }`}>
-                  {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                </span>
-              </div>
-              <p className="text-neutral-500 text-sm mt-3">
-                {new Date(order.timestamp).toLocaleString()}
-              </p>
-            </div>
-          </div>
-        ),
+        onAction: handleOrderNow,
       }}
       bgGradient={{ from: 'bg-purple-500/5', to: 'bg-pink-500/5' }}
+      additionalContent={
+        <AnimatePresence>
+          {showOrderModal && pendingOrder && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+              onClick={() => orderStep === 'confirm' && setShowOrderModal(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-2xl p-6 max-w-md w-full shadow-2xl"
+                onClick={e => e.stopPropagation()}
+              >
+                {orderStep === 'confirm' && (
+                  <>
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-xl font-bold text-neutral-900 dark:text-white">Confirm Order</h3>
+                      <button onClick={() => setShowOrderModal(false)} className="text-neutral-400 hover:text-neutral-900 dark:hover:text-white">
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700 mb-4">
+                      <img src={pendingOrder.image} alt="" className="w-full h-32 object-cover" />
+                      <div className="p-4 bg-neutral-100 dark:bg-neutral-800">
+                        <p className="text-neutral-900 dark:text-white font-medium">{pendingOrder.title}</p>
+                        {pendingOrder.description && (
+                          <p className="text-neutral-500 dark:text-neutral-400 text-sm mt-1">{pendingOrder.description}</p>
+                        )}
+                        <p className="text-purple-600 dark:text-purple-400 text-lg font-bold mt-2">${pendingOrder.price}</p>
+                      </div>
+                    </div>
+
+                    <motion.button
+                      onClick={handleConfirmOrder}
+                      className={`w-full py-4 rounded-xl bg-linear-to-r ${agent.color} text-white font-bold flex items-center justify-center gap-2`}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      <Wallet className="w-5 h-5" />
+                      Confirm & Pay
+                    </motion.button>
+                  </>
+                )}
+
+                {orderStep === 'processing' && (
+                  <div className="py-12 text-center">
+                    <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-purple-500/20 flex items-center justify-center">
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                      >
+                        <Wallet className="w-8 h-8 text-purple-600 dark:text-purple-500" />
+                      </motion.div>
+                    </div>
+                    <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">Processing</h3>
+                    <p className="text-neutral-500 dark:text-neutral-400">Confirming your order...</p>
+                  </div>
+                )}
+
+                {orderStep === 'success' && (
+                  <div className="py-12 text-center">
+                    <motion.div
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-500 flex items-center justify-center"
+                    >
+                      <CheckCircle className="w-8 h-8 text-white" />
+                    </motion.div>
+                    <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">Order Placed!</h3>
+                    <p className="text-neutral-500 dark:text-neutral-400">Your merch is on the way!</p>
+                  </div>
+                )}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      }
     />
   );
 }

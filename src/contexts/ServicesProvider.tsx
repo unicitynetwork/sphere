@@ -1,59 +1,40 @@
-import React, { useEffect, useState, type ReactNode } from 'react';
-import { IdentityManager } from '../components/wallet/L3/services/IdentityManager';
-import { NostrService } from '../components/wallet/L3/services/NostrService';
+import React, { useState, useEffect, useMemo, type ReactNode } from 'react';
 import { ServicesContext } from './ServicesContext';
+import { useSphereContext } from '../sdk/hooks/core/useSphere';
 
 export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [isNostrConnected, setIsNostrConnected] = useState(false);
+  const [isGroupChatConnected, setIsGroupChatConnected] = useState(false);
+  const { sphere } = useSphereContext();
 
-  // Create singleton instances once
-  const identityManager = IdentityManager.getInstance();
-  const nostrService = NostrService.getInstance(identityManager);
+  const groupChat = sphere?.groupChat ?? null;
 
+  // Auto-connect group chat when available
   useEffect(() => {
-    let isMounted = true;
+    if (!groupChat || !sphere) return;
 
-    const initializeNostr = async () => {
-      try {
-        // Check if user has identity before starting Nostr
-        const identity = await identityManager.getCurrentIdentity();
-        if (!identity) {
-          console.log("🔕 No identity found. Nostr service on standby.");
-          return;
-        }
+    groupChat.connect().then(() => {
+      setIsGroupChatConnected(groupChat.getConnectionStatus());
+    }).catch((err) => {
+      console.error('[ServicesProvider] Group chat connect failed:', err);
+      // Connection events will fire on reconnect
+    });
 
-        console.log("🚀 Starting Nostr service from ServicesProvider...");
-        await nostrService.start();
-
-        if (isMounted) {
-          setIsNostrConnected(true);
-          console.log("✅ Nostr service connected");
-        }
-      } catch (error) {
-        console.error("❌ Failed to start Nostr service:", error);
-      }
-    };
-
-    // Initialize on mount
-    initializeNostr();
-
-    // Re-initialize when wallet is created/restored
-    const handleWalletLoaded = () => {
-      console.log("📢 Wallet loaded, initializing Nostr...");
-      initializeNostr();
-    };
-
-    window.addEventListener('wallet-loaded', handleWalletLoaded);
+    const unsubscribe = sphere.on('groupchat:connection', (data) => {
+      setIsGroupChatConnected(data.connected);
+    });
 
     return () => {
-      isMounted = false;
-      window.removeEventListener('wallet-loaded', handleWalletLoaded);
-      console.log("🛑 ServicesProvider cleanup");
+      unsubscribe();
     };
-  }, [identityManager, nostrService]);
+  }, [groupChat, sphere]);
+
+  const value = useMemo(() => ({
+    groupChat,
+    isGroupChatConnected,
+  }), [groupChat, isGroupChatConnected]);
 
   return (
-    <ServicesContext.Provider value={{ identityManager, nostrService, isNostrConnected }}>
+    <ServicesContext.Provider value={value}>
       {children}
     </ServicesContext.Provider>
   );

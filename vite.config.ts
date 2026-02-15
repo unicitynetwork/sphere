@@ -27,6 +27,9 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       nodePolyfills({
         protocolImports: true,
+        globals: {
+          Buffer: 'build',
+        },
       }),
     ],
     base: env.BASE_PATH || '/',
@@ -49,8 +52,40 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
           rewrite: (path) => path.replace(/^\/rpc/, ''),
+        },
+        '/dev-rpc': {
+          target: 'https://dev-aggregator.dyndns.org',
+          changeOrigin: true,
+          secure: false,
+          rewrite: (path) => path.replace(/^\/dev-rpc/, ''),
+        },
+        '/coingecko': {
+          target: 'https://api.coingecko.com/api/v3',
+          changeOrigin: true,
+          secure: true,
+          rewrite: (path) => path.replace(/^\/coingecko/, ''),
         }
       }
+    },
+    // Ensure polyfill shims resolve correctly for symlinked file: dependencies
+    resolve: {
+      alias: {
+        'vite-plugin-node-polyfills/shims/buffer': path.resolve(__dirname, 'node_modules/vite-plugin-node-polyfills/shims/buffer'),
+        'vite-plugin-node-polyfills/shims/process': path.resolve(__dirname, 'node_modules/vite-plugin-node-polyfills/shims/process'),
+        'vite-plugin-node-polyfills/shims/global': path.resolve(__dirname, 'node_modules/vite-plugin-node-polyfills/shims/global'),
+      },
+    },
+    // Pre-bundle heavy CJS dependencies to speed up dev server cold start
+    optimizeDeps: {
+      include: [
+        'elliptic',
+        'crypto-js',
+        'framer-motion',
+        'react',
+        'react-dom',
+        'react-router-dom',
+        '@tanstack/react-query',
+      ],
     }
   };
 });

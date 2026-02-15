@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChatRepository } from '../data/ChatRepository';
-import { ChatConversation, ChatMessage } from '../data/models';
-import { useServices } from '../../../contexts/useServices';
+import { ChatMessage, ChatConversation, MessageStatus, MessageType } from '../data/models';
+import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
+import { STORAGE_KEYS } from '../../../config/storageKeys';
 
 const QUERY_KEYS = {
   CONVERSATIONS: ['chat', 'conversations'],
@@ -35,6 +36,9 @@ export interface UseChatReturn {
   totalUnreadCount: number;
   markAsRead: (conversationId: string) => void;
 
+  // Typing indicator
+  isRecipientTyping: boolean;
+
   // Search/Filter
   searchQuery: string;
   setSearchQuery: (query: string) => void;
@@ -43,10 +47,12 @@ export interface UseChatReturn {
 
 export const useChat = (): UseChatReturn => {
   const queryClient = useQueryClient();
-  const { nostrService } = useServices();
+  const { sphere } = useSphereContext();
   const [selectedConversation, setSelectedConversation] = useState<ChatConversation | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isRecipientTyping, setIsRecipientTyping] = useState(false);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Listen for chat updates
   useEffect(() => {
@@ -69,20 +75,41 @@ export const useChat = (): UseChatReturn => {
         });
         // Auto-mark as read since user is viewing
         chatRepository.markConversationAsRead(selectedConversation.id);
+        // Send SDK read receipt
+        if (sphere) {
+          sphere.communications.markAsRead([message.id]);
+        }
+        // Clear typing indicator — they sent their message
+        if (!message.isFromMe) {
+          setIsRecipientTyping(false);
+          clearTimeout(typingTimeoutRef.current);
+        }
       }
       // Always refetch conversations for updated last message
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.CONVERSATIONS });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
     };
 
+    // Listen for typing indicator events
+    const handleTyping = (e: CustomEvent) => {
+      if (selectedConversation && e.detail.senderPubkey === selectedConversation.participantPubkey) {
+        setIsRecipientTyping(true);
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => setIsRecipientTyping(false), 1500);
+      }
+    };
+
     window.addEventListener('chat-updated', handleChatUpdate);
     window.addEventListener('dm-received', handleDMReceived as EventListener);
+    window.addEventListener('dm-typing', handleTyping as EventListener);
 
     return () => {
       window.removeEventListener('chat-updated', handleChatUpdate);
       window.removeEventListener('dm-received', handleDMReceived as EventListener);
+      window.removeEventListener('dm-typing', handleTyping as EventListener);
+      clearTimeout(typingTimeoutRef.current);
     };
-  }, [queryClient, selectedConversation]);
+  }, [queryClient, selectedConversation, sphere]);
 
   // Query conversations
   const conversationsQuery = useQuery({
@@ -90,6 +117,19 @@ export const useChat = (): UseChatReturn => {
     queryFn: () => chatRepository.getConversations(),
     staleTime: 30000,
   });
+
+  // Restore selected conversation from localStorage when conversations are loaded
+  useEffect(() => {
+    if (conversationsQuery.data && conversationsQuery.data.length > 0 && !selectedConversation) {
+      const savedConversationId = localStorage.getItem(STORAGE_KEYS.CHAT_SELECTED_DM);
+      if (savedConversationId) {
+        const savedConversation = conversationsQuery.data.find((c) => c.id === savedConversationId);
+        if (savedConversation) {
+          setSelectedConversation(savedConversation);
+        }
+      }
+    }
+  }, [conversationsQuery.data, selectedConversation]);
 
   // Query messages for selected conversation
   const messagesQuery = useQuery({
@@ -112,15 +152,28 @@ export const useChat = (): UseChatReturn => {
   // Send message mutation
   const sendMessageMutation = useMutation({
     mutationFn: async (content: string) => {
-      if (!selectedConversation) throw new Error('No conversation selected');
+      if (!selectedConversation || !sphere) throw new Error('No conversation selected');
 
-      const message = await nostrService.sendDirectMessage(
+      const dm = await sphere.communications.sendDM(
         selectedConversation.participantPubkey,
         content,
-        selectedConversation.participantNametag
       );
 
-      return !!message;
+      // Save sent message to ChatRepository for local persistence
+      const chatMessage = new ChatMessage({
+        id: dm.id,
+        conversationId: selectedConversation.id,
+        content: dm.content,
+        timestamp: dm.timestamp,
+        isFromMe: true,
+        status: MessageStatus.SENT,
+        type: MessageType.TEXT,
+        senderPubkey: dm.senderPubkey,
+        senderNametag: dm.senderNametag ?? undefined,
+      });
+      chatRepository.saveMessage(chatMessage);
+
+      return true;
     },
     onSuccess: () => {
       setMessageInput('');
@@ -133,23 +186,23 @@ export const useChat = (): UseChatReturn => {
 
   // Start new conversation
   const startNewConversation = useCallback(
-    async (pubkeyOrNametag: string): Promise<ChatConversation | null> => {
+    async (identifier: string): Promise<ChatConversation | null> => {
       try {
-        let pubkey = pubkeyOrNametag;
-        let nametag: string | undefined;
+        if (!sphere) return null;
 
-        // Check if it's a nametag (contains @ or is not a valid hex string)
-        if (pubkeyOrNametag.includes('@') || !/^[0-9a-fA-F]{64}$/.test(pubkeyOrNametag)) {
-          nametag = pubkeyOrNametag.replace('@', '');
-          const resolvedPubkey = await nostrService.queryPubkeyByNametag(nametag);
-          if (!resolvedPubkey) {
-            console.error(`Could not resolve nametag: ${nametag}`);
-            return null;
-          }
-          pubkey = resolvedPubkey;
+        // Normalize: add @ for bare nametags (not an address or pubkey)
+        const input = identifier.startsWith('@') || identifier.startsWith('DIRECT:') || identifier.startsWith('PROXY:')
+          || identifier.startsWith('alpha') || /^[0-9a-fA-F]{64,66}$/.test(identifier)
+          ? identifier
+          : `@${identifier}`;
+
+        const peerInfo = await sphere.resolve(input);
+        if (!peerInfo?.transportPubkey) {
+          console.error(`Could not resolve: ${identifier}`);
+          return null;
         }
 
-        const conversation = chatRepository.getOrCreateConversation(pubkey, nametag);
+        const conversation = chatRepository.getOrCreateConversation(peerInfo.transportPubkey, peerInfo.nametag);
         setSelectedConversation(conversation);
         queryClient.invalidateQueries({ queryKey: QUERY_KEYS.CONVERSATIONS });
         return conversation;
@@ -158,19 +211,34 @@ export const useChat = (): UseChatReturn => {
         return null;
       }
     },
-    [nostrService, queryClient]
+    [sphere, queryClient]
   );
 
   // Select conversation
   const selectConversation = useCallback(
     (conversation: ChatConversation | null) => {
       setSelectedConversation(conversation);
+      setIsRecipientTyping(false);
+      // Persist selected conversation ID
       if (conversation) {
+        localStorage.setItem(STORAGE_KEYS.CHAT_SELECTED_DM, conversation.id);
         chatRepository.markConversationAsRead(conversation.id);
         queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
+        // Send SDK read receipts for unread incoming messages
+        if (sphere) {
+          const messages = chatRepository.getMessagesForConversation(conversation.id);
+          const unreadIncomingIds = messages
+            .filter(m => !m.isFromMe && m.status !== MessageStatus.READ)
+            .map(m => m.id);
+          if (unreadIncomingIds.length > 0) {
+            sphere.communications.markAsRead(unreadIncomingIds);
+          }
+        }
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.CHAT_SELECTED_DM);
       }
     },
-    [queryClient]
+    [queryClient, sphere]
   );
 
   // Delete conversation
@@ -190,8 +258,18 @@ export const useChat = (): UseChatReturn => {
     (conversationId: string) => {
       chatRepository.markConversationAsRead(conversationId);
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
+      // Send SDK read receipts for unread incoming messages
+      if (sphere) {
+        const messages = chatRepository.getMessagesForConversation(conversationId);
+        const unreadIncomingIds = messages
+          .filter(m => !m.isFromMe && m.status !== MessageStatus.READ)
+          .map(m => m.id);
+        if (unreadIncomingIds.length > 0) {
+          sphere.communications.markAsRead(unreadIncomingIds);
+        }
+      }
     },
-    [queryClient]
+    [queryClient, sphere]
   );
 
   // Send message
@@ -238,6 +316,9 @@ export const useChat = (): UseChatReturn => {
     // Unread
     totalUnreadCount: unreadCountQuery.data || 0,
     markAsRead,
+
+    // Typing indicator
+    isRecipientTyping,
 
     // Search/Filter
     searchQuery,

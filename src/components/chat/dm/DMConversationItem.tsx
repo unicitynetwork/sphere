@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { Trash2 } from 'lucide-react';
 import { ChatConversation } from '../data/models';
+import { getColorFromPubkey } from '../utils/avatarColors';
 
 interface DMConversationItemProps {
   conversation: ChatConversation;
@@ -20,6 +21,8 @@ export function DMConversationItem({
     onDelete();
   };
 
+  const avatarColor = getColorFromPubkey(conversation.participantPubkey);
+
   return (
     <motion.div
       whileHover={{ scale: 1.02 }}
@@ -38,11 +41,7 @@ export function DMConversationItem({
       <div className="flex items-center gap-3 relative z-10">
         {/* Avatar */}
         <div
-          className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-medium shrink-0 ${
-            isSelected
-              ? 'bg-white/20 text-white'
-              : 'bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-md'
-          }`}
+          className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-medium shrink-0 bg-linear-to-br ${avatarColor.gradient} text-white shadow-md`}
         >
           {conversation.getAvatar()}
         </div>

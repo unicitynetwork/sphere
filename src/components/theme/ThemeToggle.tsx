@@ -11,7 +11,7 @@ export function ThemeToggle() {
       whileHover={{ scale: 1.05, y: -2 }}
       whileTap={{ scale: 0.95 }}
       transition={{ duration: 0.05 }}
-      className="relative p-2 sm:p-2.5 lg:p-3 rounded-lg sm:rounded-xl transition-all group bg-transparent hover:bg-theme-bg-tertiary dark:hover:bg-neutral-800/80"
+      className="relative p-2 sm:p-2.5 lg:p-3 rounded-lg sm:rounded-xl transition-all group bg-transparent hover:bg-theme-bg-tertiary dark:hover:bg-neutral-800/80 cursor-pointer"
       aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
     >
       <div className="relative w-4 h-4 sm:w-5 sm:h-5">

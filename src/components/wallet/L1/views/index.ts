@@ -1,3 +1,1 @@
-export { NoWalletView } from "./NoWalletView";
-export { HistoryView } from "./HistoryView";
-export { MainWalletView } from "./MainWalletView";
+// L1 views barrel - legacy views removed, see L1WalletModal for current L1 UI
