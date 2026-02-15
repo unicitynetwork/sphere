@@ -8,6 +8,7 @@ import { queryClient } from './lib/queryClient'
 import { ThemeInitializer } from './components/theme'
 import { SphereProvider } from './sdk/SphereProvider'
 import { ServicesProvider } from './contexts/ServicesProvider'
+import { ConnectProvider } from './components/connect'
 import { ToastContainer } from './components/ui/Toast'
 import mixpanel from 'mixpanel-browser'
 
@@ -55,12 +56,14 @@ createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <SphereProvider network="testnet">
         <ServicesProvider>
-          <ThemeInitializer>
-            <HashRouter>
-              <App />
-            </HashRouter>
-            <ToastContainer />
-          </ThemeInitializer>
+          <ConnectProvider>
+            <ThemeInitializer>
+              <HashRouter>
+                <App />
+              </HashRouter>
+              <ToastContainer />
+            </ThemeInitializer>
+          </ConnectProvider>
         </ServicesProvider>
       </SphereProvider>
     </QueryClientProvider>
