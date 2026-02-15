@@ -2,16 +2,21 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { Header } from './Header';
 import { MiniChatBubbles } from '../chat/mini';
 import { useUIState } from '../../hooks/useUIState';
+import { TutorialOverlay } from '../tutorial/TutorialOverlay';
+import { useTutorial } from '../../hooks/useTutorial';
 
 export function DashboardLayout() {
   const location = useLocation();
   const isMinePage = location.pathname === '/mine';
   const { isFullscreen } = useUIState();
+  const tutorial = useTutorial();
 
   // Hide mini chat on the DM chat page (to avoid duplicate UI)
   // But show it when fullscreen is active
   const isChatPage = location.pathname === '/agents/chat';
   const showMiniChat = !isChatPage || isFullscreen;
+
+  const isAgentPage = location.pathname.startsWith('/agents/');
 
   return (
     <div className="h-full flex flex-col bg-neutral-100 dark:bg-linear-to-br dark:from-neutral-950 dark:via-neutral-900 dark:to-neutral-950 theme-transition overflow-y-auto overflow-x-hidden">
@@ -26,6 +31,19 @@ export function DashboardLayout() {
 
       {/* Mini chat bubbles - hidden on chat page unless fullscreen */}
       {showMiniChat && <MiniChatBubbles />}
+
+      {/* Onboarding tutorial overlay */}
+      {isAgentPage && tutorial.isActive && (
+        <TutorialOverlay
+          isActive={tutorial.isActive}
+          currentStep={tutorial.currentStep}
+          currentStepIndex={tutorial.currentStepIndex}
+          totalSteps={tutorial.totalSteps}
+          isLastStep={tutorial.isLastStep}
+          onNext={tutorial.next}
+          onDismiss={tutorial.dismiss}
+        />
+      )}
     </div>
   );
 }
