@@ -23,10 +23,6 @@ export const STORAGE_KEYS = {
   // Transaction history
   TRANSACTION_HISTORY: 'sphere_transaction_history',
 
-  // Chat (User-to-User DMs)
-  CHAT_CONVERSATIONS: 'sphere_chat_conversations',
-  CHAT_MESSAGES: 'sphere_chat_messages',
-
   // Chat UI State
   CHAT_MODE: 'sphere_chat_mode',
   CHAT_SELECTED_GROUP: 'sphere_chat_selected_group',
@@ -51,6 +47,7 @@ export const STORAGE_KEY_GENERATORS = {
   // Agent chat messages per session: `sphere_agent_chat_messages:${sessionId}`
   agentChatMessages: (sessionId: string) =>
     `sphere_agent_chat_messages:${sessionId}` as const,
+
 } as const;
 
 const STORAGE_PREFIX = 'sphere_';

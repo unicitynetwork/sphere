@@ -5,6 +5,7 @@ import { AgentPage } from './pages/AgentPage';
 import { DevelopersPage } from './pages/DevelopersPage';
 import { MineAlphaPage } from './pages/MineAlphaPage';
 import { DocsPage } from './pages/DocsPage';
+import { ConnectPage } from './pages/ConnectPage';
 import { useSphereEvents } from './sdk';
 
 export default function App() {
@@ -13,6 +14,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<IntroPage />} />
+      <Route path="/connect" element={<ConnectPage />} />
       <Route element={<DashboardLayout />}>
         <Route path="/home" element={<Navigate to="/agents/chat" replace />} />
         <Route path="/agents/:agentId" element={<AgentPage />} />

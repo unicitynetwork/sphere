@@ -1,4 +1,4 @@
-import { MessageSquare, Trophy, ShoppingBag, Sparkles, Tag, Zap, Store } from 'lucide-react';
+import { MessageSquare, Trophy, ShoppingBag, Sparkles, Tag, Zap, Store, Plug } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // Agent types for different UI layouts
@@ -209,6 +209,17 @@ export const agents: AgentConfig[] = [
     color: 'from-violet-500 to-purple-500',
     type: 'iframe',
     iframeUrl: 'https://market.unicity.network/',
+  },
+  {
+    id: 'example',
+    name: 'Example',
+    description: 'Test iframe dApp',
+    Icon: Plug,
+    category: 'Developer',
+    color: 'from-blue-500 to-indigo-500',
+    type: 'iframe',
+    iframeUrl: 'http://localhost:5174',
+    requiresWallet: true,
   },
 ];
 

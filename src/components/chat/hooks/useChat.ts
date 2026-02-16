@@ -1,32 +1,56 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChatRepository } from '../data/ChatRepository';
-import { ChatMessage, ChatConversation, MessageStatus, MessageType } from '../data/models';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
+import { useIdentity } from '../../../sdk/hooks/core/useIdentity';
+import {
+  type Conversation,
+  type DisplayMessage,
+  type DmReceivedDetail,
+  buildConversations,
+  toDisplayMessage,
+  getDisplayName,
+  CHAT_KEYS,
+} from '../data/chatTypes';
 import { STORAGE_KEYS } from '../../../config/storageKeys';
 
-const QUERY_KEYS = {
-  CONVERSATIONS: ['chat', 'conversations'],
-  MESSAGES: (conversationId: string) => ['chat', 'messages', conversationId],
-  UNREAD_COUNT: ['chat', 'unreadCount'],
-};
+// Local type mirroring SDK's DirectMessage (SDK DTS not always available)
+interface SDKDirectMessage {
+  id: string;
+  senderPubkey: string;
+  senderNametag?: string;
+  recipientPubkey: string;
+  recipientNametag?: string;
+  content: string;
+  timestamp: number;
+  isRead: boolean;
+}
 
-const chatRepository = ChatRepository.getInstance();
+function buildAddressId(directAddress: string): string {
+  let hash = directAddress;
+  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
+  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
+  const first = hash.slice(0, 6).toLowerCase();
+  const last = hash.slice(-6).toLowerCase();
+  return `DIRECT_${first}_${last}`;
+}
 
 export interface UseChatReturn {
   // Conversations
-  conversations: ChatConversation[];
+  conversations: Conversation[];
   isLoadingConversations: boolean;
-  selectedConversation: ChatConversation | null;
-  selectConversation: (conversation: ChatConversation | null) => void;
-  startNewConversation: (pubkeyOrNametag: string) => Promise<ChatConversation | null>;
-  deleteConversation: (id: string) => void;
+  selectedConversation: Conversation | null;
+  selectConversation: (conversation: Conversation | null) => void;
+  startNewConversation: (pubkeyOrNametag: string) => Promise<Conversation | null>;
 
   // Messages
-  messages: ChatMessage[];
+  messages: DisplayMessage[];
   isLoadingMessages: boolean;
   sendMessage: (content: string) => Promise<boolean>;
   isSending: boolean;
+
+  // Lazy loading
+  hasMore: boolean;
+  loadMore: () => void;
 
   // Input state
   messageInput: string;
@@ -34,7 +58,7 @@ export interface UseChatReturn {
 
   // Unread
   totalUnreadCount: number;
-  markAsRead: (conversationId: string) => void;
+  markAsRead: (peerPubkey: string) => void;
 
   // Typing indicator
   isRecipientTyping: boolean;
@@ -42,151 +66,150 @@ export interface UseChatReturn {
   // Search/Filter
   searchQuery: string;
   setSearchQuery: (query: string) => void;
-  filteredConversations: ChatConversation[];
+  filteredConversations: Conversation[];
 }
 
 export const useChat = (): UseChatReturn => {
   const queryClient = useQueryClient();
   const { sphere } = useSphereContext();
-  const [selectedConversation, setSelectedConversation] = useState<ChatConversation | null>(null);
+  const { directAddress } = useIdentity();
+  const addressId = directAddress ? buildAddressId(directAddress) : 'default';
+
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isRecipientTyping, setIsRecipientTyping] = useState(false);
+  const [messageLimit, setMessageLimit] = useState(20);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // Listen for chat updates
-  useEffect(() => {
-    const handleChatUpdate = () => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.CONVERSATIONS });
-      if (selectedConversation) {
-        queryClient.invalidateQueries({
-          queryKey: QUERY_KEYS.MESSAGES(selectedConversation.id),
-        });
-      }
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
-    };
+  // Address-scoped selected DM key
+  const selectedDmKey = `${STORAGE_KEYS.CHAT_SELECTED_DM}_${addressId}`;
 
-    const handleDMReceived = (event: CustomEvent<ChatMessage>) => {
-      const message = event.detail;
-      // If we're viewing this conversation, refetch messages
-      if (selectedConversation && message.conversationId === selectedConversation.id) {
-        queryClient.invalidateQueries({
-          queryKey: QUERY_KEYS.MESSAGES(selectedConversation.id),
-        });
-        // Auto-mark as read since user is viewing
-        chatRepository.markConversationAsRead(selectedConversation.id);
-        // Send SDK read receipt
-        if (sphere) {
-          sphere.communications.markAsRead([message.id]);
+  // Reset UI state when address changes
+  useEffect(() => {
+    setSelectedConversation(null);
+    setMessageInput('');
+    setSearchQuery('');
+    setIsRecipientTyping(false);
+    setMessageLimit(20);
+  }, [addressId]);
+
+  // Listen for real-time DM events and typing indicators
+  useEffect(() => {
+    const handleDMReceived = (event: CustomEvent<DmReceivedDetail>) => {
+      const { peerPubkey, messageId, isFromMe } = event.detail;
+
+      // If we're viewing this conversation, auto-mark as read
+      if (selectedConversation && peerPubkey === selectedConversation.peerPubkey) {
+        if (sphere && !isFromMe) {
+          sphere.communications.markAsRead([messageId]);
         }
         // Clear typing indicator — they sent their message
-        if (!message.isFromMe) {
+        if (!isFromMe) {
           setIsRecipientTyping(false);
           clearTimeout(typingTimeoutRef.current);
         }
       }
-      // Always refetch conversations for updated last message
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.CONVERSATIONS });
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
+
+      // Invalidate all chat queries (conversations, messages, unread count)
+      queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
     };
 
-    // Listen for typing indicator events
     const handleTyping = (e: CustomEvent) => {
-      if (selectedConversation && e.detail.senderPubkey === selectedConversation.participantPubkey) {
+      if (selectedConversation && e.detail.senderPubkey === selectedConversation.peerPubkey) {
         setIsRecipientTyping(true);
         clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => setIsRecipientTyping(false), 1500);
       }
     };
 
-    window.addEventListener('chat-updated', handleChatUpdate);
     window.addEventListener('dm-received', handleDMReceived as EventListener);
     window.addEventListener('dm-typing', handleTyping as EventListener);
 
     return () => {
-      window.removeEventListener('chat-updated', handleChatUpdate);
       window.removeEventListener('dm-received', handleDMReceived as EventListener);
       window.removeEventListener('dm-typing', handleTyping as EventListener);
       clearTimeout(typingTimeoutRef.current);
     };
   }, [queryClient, selectedConversation, sphere]);
 
-  // Query conversations
+  // Query conversations from SDK
   const conversationsQuery = useQuery({
-    queryKey: QUERY_KEYS.CONVERSATIONS,
-    queryFn: () => chatRepository.getConversations(),
+    queryKey: CHAT_KEYS.conversations(addressId),
+    queryFn: () => {
+      if (!sphere) return [];
+      const sdkConvs = sphere.communications.getConversations();
+      return buildConversations(sdkConvs, sphere.identity!.chainPubkey);
+    },
+    enabled: !!sphere,
     staleTime: 30000,
   });
 
   // Restore selected conversation from localStorage when conversations are loaded
   useEffect(() => {
     if (conversationsQuery.data && conversationsQuery.data.length > 0 && !selectedConversation) {
-      const savedConversationId = localStorage.getItem(STORAGE_KEYS.CHAT_SELECTED_DM);
-      if (savedConversationId) {
-        const savedConversation = conversationsQuery.data.find((c) => c.id === savedConversationId);
+      const savedPeerPubkey = localStorage.getItem(selectedDmKey);
+      if (savedPeerPubkey) {
+        const savedConversation = conversationsQuery.data.find((c) => c.peerPubkey === savedPeerPubkey);
         if (savedConversation) {
           setSelectedConversation(savedConversation);
         }
       }
     }
-  }, [conversationsQuery.data, selectedConversation]);
+  }, [conversationsQuery.data, selectedConversation, selectedDmKey]);
 
-  // Query messages for selected conversation
+  // Query messages for selected conversation with lazy loading
+  const selectedPeerPubkey = selectedConversation?.peerPubkey;
   const messagesQuery = useQuery({
-    queryKey: QUERY_KEYS.MESSAGES(selectedConversation?.id || ''),
+    queryKey: [...CHAT_KEYS.messages(addressId, selectedPeerPubkey || ''), messageLimit],
     queryFn: () => {
-      if (!selectedConversation) return [];
-      return chatRepository.getMessagesForConversation(selectedConversation.id);
+      if (!selectedPeerPubkey || !sphere) return { messages: [] as DisplayMessage[], hasMore: false };
+      const page = sphere.communications.getConversationPage(selectedPeerPubkey, { limit: messageLimit });
+      const myPubkey = sphere.identity!.chainPubkey;
+      return {
+        messages: page.messages.map((dm: SDKDirectMessage) => toDisplayMessage(dm, myPubkey)),
+        hasMore: page.hasMore,
+      };
     },
-    enabled: !!selectedConversation,
+    enabled: !!selectedPeerPubkey && !!sphere,
     staleTime: 10000,
+    placeholderData: keepPreviousData,
   });
 
-  // Query total unread count
+  // Reset limit when switching conversations
+  useEffect(() => {
+    setMessageLimit(20);
+  }, [selectedPeerPubkey]);
+
+  // Load more messages
+  const loadMore = useCallback(() => {
+    setMessageLimit((prev) => prev + 20);
+  }, []);
+
+  // Query total unread count from SDK
   const unreadCountQuery = useQuery({
-    queryKey: QUERY_KEYS.UNREAD_COUNT,
-    queryFn: () => chatRepository.getTotalUnreadCount(),
+    queryKey: CHAT_KEYS.unreadCount(addressId),
+    queryFn: () => sphere?.communications.getUnreadCount() ?? 0,
+    enabled: !!sphere,
     staleTime: 30000,
   });
 
-  // Send message mutation
+  // Send message mutation — SDK auto-saves
   const sendMessageMutation = useMutation({
     mutationFn: async (content: string) => {
-      if (!selectedConversation || !sphere) throw new Error('No conversation selected');
-
-      const dm = await sphere.communications.sendDM(
-        selectedConversation.participantPubkey,
-        content,
-      );
-
-      // Save sent message to ChatRepository for local persistence
-      const chatMessage = new ChatMessage({
-        id: dm.id,
-        conversationId: selectedConversation.id,
-        content: dm.content,
-        timestamp: dm.timestamp,
-        isFromMe: true,
-        status: MessageStatus.SENT,
-        type: MessageType.TEXT,
-        senderPubkey: dm.senderPubkey,
-        senderNametag: dm.senderNametag ?? undefined,
-      });
-      chatRepository.saveMessage(chatMessage);
-
+      if (!selectedPeerPubkey || !sphere) throw new Error('No conversation selected');
+      await sphere.communications.sendDM(selectedPeerPubkey, content);
       return true;
     },
     onSuccess: () => {
       setMessageInput('');
-      queryClient.invalidateQueries({
-        queryKey: QUERY_KEYS.MESSAGES(selectedConversation?.id || ''),
-      });
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.CONVERSATIONS });
+      queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
     },
   });
 
   // Start new conversation
   const startNewConversation = useCallback(
-    async (identifier: string): Promise<ChatConversation | null> => {
+    async (identifier: string): Promise<Conversation | null> => {
       try {
         if (!sphere) return null;
 
@@ -202,74 +225,66 @@ export const useChat = (): UseChatReturn => {
           return null;
         }
 
-        const conversation = chatRepository.getOrCreateConversation(peerInfo.transportPubkey, peerInfo.nametag);
+        const conversation: Conversation = {
+          peerPubkey: peerInfo.transportPubkey,
+          peerNametag: peerInfo.nametag,
+          lastMessageText: '',
+          lastMessageTime: Date.now(),
+          unreadCount: 0,
+        };
+
         setSelectedConversation(conversation);
-        queryClient.invalidateQueries({ queryKey: QUERY_KEYS.CONVERSATIONS });
+        localStorage.setItem(selectedDmKey, conversation.peerPubkey);
+        queryClient.invalidateQueries({ queryKey: CHAT_KEYS.conversations(addressId) });
         return conversation;
       } catch (error) {
         console.error('Failed to start conversation', error);
         return null;
       }
     },
-    [sphere, queryClient]
+    [sphere, queryClient, addressId, selectedDmKey],
   );
 
   // Select conversation
   const selectConversation = useCallback(
-    (conversation: ChatConversation | null) => {
+    (conversation: Conversation | null) => {
       setSelectedConversation(conversation);
       setIsRecipientTyping(false);
-      // Persist selected conversation ID
       if (conversation) {
-        localStorage.setItem(STORAGE_KEYS.CHAT_SELECTED_DM, conversation.id);
-        chatRepository.markConversationAsRead(conversation.id);
-        queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
+        localStorage.setItem(selectedDmKey, conversation.peerPubkey);
         // Send SDK read receipts for unread incoming messages
         if (sphere) {
-          const messages = chatRepository.getMessagesForConversation(conversation.id);
-          const unreadIncomingIds = messages
-            .filter(m => !m.isFromMe && m.status !== MessageStatus.READ)
+          const msgs: SDKDirectMessage[] = sphere.communications.getConversation(conversation.peerPubkey);
+          const unreadIncomingIds = msgs
+            .filter(m => !m.isRead && m.senderPubkey === conversation.peerPubkey)
             .map(m => m.id);
           if (unreadIncomingIds.length > 0) {
             sphere.communications.markAsRead(unreadIncomingIds);
+            queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
           }
         }
       } else {
-        localStorage.removeItem(STORAGE_KEYS.CHAT_SELECTED_DM);
+        localStorage.removeItem(selectedDmKey);
       }
     },
-    [queryClient, sphere]
-  );
-
-  // Delete conversation
-  const deleteConversation = useCallback(
-    (id: string) => {
-      chatRepository.deleteConversation(id);
-      if (selectedConversation?.id === id) {
-        setSelectedConversation(null);
-      }
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.CONVERSATIONS });
-    },
-    [queryClient, selectedConversation]
+    [queryClient, sphere, selectedDmKey, addressId],
   );
 
   // Mark as read
   const markAsRead = useCallback(
-    (conversationId: string) => {
-      chatRepository.markConversationAsRead(conversationId);
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
-      // Send SDK read receipts for unread incoming messages
+    (peerPubkey: string) => {
       if (sphere) {
-        const messages = chatRepository.getMessagesForConversation(conversationId);
-        const unreadIncomingIds = messages
-          .filter(m => !m.isFromMe && m.status !== MessageStatus.READ)
+        const msgs: SDKDirectMessage[] = sphere.communications.getConversation(peerPubkey);
+        const unreadIncomingIds = msgs
+          .filter(m => !m.isRead && m.senderPubkey === peerPubkey)
           .map(m => m.id);
         if (unreadIncomingIds.length > 0) {
           sphere.communications.markAsRead(unreadIncomingIds);
+          queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
         }
       }
     },
-    [queryClient, sphere]
+    [queryClient, sphere, addressId],
   );
 
   // Send message
@@ -278,7 +293,7 @@ export const useChat = (): UseChatReturn => {
       if (!content.trim()) return false;
       return sendMessageMutation.mutateAsync(content);
     },
-    [sendMessageMutation]
+    [sendMessageMutation],
   );
 
   // Filter conversations by search query
@@ -289,8 +304,8 @@ export const useChat = (): UseChatReturn => {
     const query = searchQuery.toLowerCase();
     return conversations.filter(
       (c) =>
-        c.getDisplayName().toLowerCase().includes(query) ||
-        c.lastMessageText.toLowerCase().includes(query)
+        getDisplayName(c.peerPubkey, c.peerNametag).toLowerCase().includes(query) ||
+        c.lastMessageText.toLowerCase().includes(query),
     );
   }, [conversationsQuery.data, searchQuery]);
 
@@ -301,13 +316,16 @@ export const useChat = (): UseChatReturn => {
     selectedConversation,
     selectConversation,
     startNewConversation,
-    deleteConversation,
 
     // Messages
-    messages: messagesQuery.data || [],
+    messages: messagesQuery.data?.messages || [],
     isLoadingMessages: messagesQuery.isLoading,
     sendMessage,
     isSending: sendMessageMutation.isPending,
+
+    // Lazy loading
+    hasMore: messagesQuery.data?.hasMore ?? false,
+    loadMore,
 
     // Input state
     messageInput,
