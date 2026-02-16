@@ -22,8 +22,10 @@ const DiscordIcon = ({ className }: { className?: string }) => (
 
 const navItems: { label: string; path: string; external?: boolean }[] = [
   { label: 'Home', path: '/agents/chat' },
-  { label: 'Developers', path: '/developers' },
-  { label: 'Mine Alpha', path: '/mine' },
+  { label: 'Markets', path: '/markets' },
+  { label: 'Agents', path: '/explore-agents' },
+  { label: 'Devs', path: '/developers' },
+  { label: 'About', path: '/about' },
 ];
 
 export function Header() {
@@ -66,7 +68,7 @@ export function Header() {
     navigate(path);
   };
 
-  const isActive = (path: string | null) => {
+  const isActive = (path: string) => {
     if (!path) return false;
     if (path === '/agents/chat') {
       return location.pathname.startsWith('/agents/');
@@ -126,7 +128,7 @@ export function Header() {
               item.external ? (
                 <a
                   key={item.label}
-                  href={item.path!}
+                  href={item.path}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="relative px-5 py-2.5 flex items-center text-sm font-medium transition-colors duration-300 group"
@@ -135,7 +137,7 @@ export function Header() {
                     {item.label}
                   </span>
                 </a>
-              ) : item.path ? (
+              ) : (
                 <Link
                   key={item.label}
                   to={item.path}
@@ -163,17 +165,6 @@ export function Header() {
                     {item.label}
                   </span>
                 </Link>
-              ) : (
-                <button
-                  key={item.label}
-                  className="relative px-5 py-2.5 flex items-center text-sm font-medium text-neutral-400 dark:text-neutral-500 cursor-not-allowed"
-                  title="Coming soon"
-                >
-                  <span>{item.label}</span>
-                  <span className="ml-2 px-1.5 py-0.5 text-[10px] rounded bg-neutral-200/60 dark:bg-neutral-700/40 text-neutral-500 dark:text-neutral-500">
-                    Soon
-                  </span>
-                </button>
               )
             ))}
           </nav>
@@ -280,7 +271,7 @@ export function Header() {
               item.external ? (
                 <a
                   key={item.label}
-                  href={item.path!}
+                  href={item.path}
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={() => setMobileMenuOpen(false)}
@@ -288,10 +279,10 @@ export function Header() {
                 >
                   {item.label}
                 </a>
-              ) : item.path ? (
+              ) : (
                 <button
                   key={item.label}
-                  onClick={() => handleMobileNavigation(item.path!)}
+                  onClick={() => handleMobileNavigation(item.path)}
                   className={`relative w-full flex items-center px-4 py-3 rounded-xl text-base font-medium transition-all text-left ${
                     isActive(item.path)
                       ? 'text-neutral-900 dark:text-white'
@@ -308,14 +299,6 @@ export function Header() {
                     />
                   )}
                   {item.label}
-                </button>
-              ) : (
-                <button
-                  key={item.label}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-base font-medium text-neutral-400 dark:text-neutral-500 cursor-not-allowed"
-                >
-                  {item.label}
-                  <span className="text-xs bg-neutral-200 dark:bg-neutral-700 px-2 py-0.5 rounded-full">Soon</span>
                 </button>
               )
             ))}
