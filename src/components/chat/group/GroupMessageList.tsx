@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Loader2 } from 'lucide-react';
+import { ChevronUp, Loader2 } from 'lucide-react';
 import type { GroupMessageData } from '@unicitylabs/sphere-sdk';
 import { GroupMessageBubble } from './GroupMessageBubble';
 import { getMessageFormattedDate } from '../utils/groupChatHelpers';
@@ -13,6 +13,8 @@ interface GroupMessageListProps {
   onDeleteMessage?: (messageId: string) => Promise<boolean>;
   isDeletingMessage?: boolean;
   onReplyToMessage?: (message: GroupMessageData) => void;
+  hasMore?: boolean;
+  loadMore?: () => void;
 }
 
 export function GroupMessageList({
@@ -23,17 +25,39 @@ export function GroupMessageList({
   onDeleteMessage,
   isDeletingMessage = false,
   onReplyToMessage,
+  hasMore,
+  loadMore,
 }: GroupMessageListProps) {
   // Create a map for quick lookup of messages by ID (for reply-to)
   const messagesById = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const loadingMoreRef = useRef(false);
+  const scrollStateBeforeLoadRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
 
-  // Auto-scroll to bottom when messages change
+  // Auto-scroll to bottom when messages change (skip when loading more)
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      if (loadingMoreRef.current && scrollStateBeforeLoadRef.current) {
+        // Restore scroll position after loading older messages
+        const { scrollHeight: prevHeight, scrollTop: prevTop } = scrollStateBeforeLoadRef.current;
+        scrollRef.current.scrollTop = prevTop + (scrollRef.current.scrollHeight - prevHeight);
+        loadingMoreRef.current = false;
+        scrollStateBeforeLoadRef.current = null;
+      } else {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
     }
   }, [messages]);
+
+  const handleLoadMore = useCallback(() => {
+    if (!loadMore || !scrollRef.current) return;
+    loadingMoreRef.current = true;
+    scrollStateBeforeLoadRef.current = {
+      scrollHeight: scrollRef.current.scrollHeight,
+      scrollTop: scrollRef.current.scrollTop,
+    };
+    loadMore();
+  }, [loadMore]);
 
   // Group messages by date
   const groupedMessages: { date: string; messages: GroupMessageData[] }[] = [];
@@ -66,6 +90,17 @@ export function GroupMessageList({
       ref={scrollRef}
       className="flex-1 overflow-y-auto px-4 py-4 space-y-6 min-h-0"
     >
+      {hasMore && (
+        <div className="flex items-center justify-center py-2">
+          <button
+            onClick={handleLoadMore}
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-medium text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700/50 hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
+          >
+            <ChevronUp className="w-3.5 h-3.5" />
+            Load earlier messages
+          </button>
+        </div>
+      )}
       {groupedMessages.map((group, groupIndex) => (
         <div key={group.date} className="space-y-4">
           {/* Date separator */}
