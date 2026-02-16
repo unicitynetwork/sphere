@@ -3,6 +3,7 @@ import { MessageSquare } from 'lucide-react';
 import { ERROR_CODES } from '@unicitylabs/sphere-sdk/connect';
 import { BaseModal, ModalHeader, Button } from '../wallet/ui';
 import { SendModal } from '../wallet/L3/modals/SendModal';
+import { SendPaymentRequestModal } from '../wallet/L3/modals/SendPaymentRequestModal';
 import { useConnectContext } from './ConnectContext';
 import { useSendDM } from '../../sdk/hooks/comms/useSendDM';
 
@@ -41,6 +42,28 @@ export function ConnectIntentHandler() {
           amount: params.amount as string,
           coinId: (params.coinId as string) ?? 'UCT',
           memo: params.memo as string | undefined,
+        }}
+      />
+    );
+  }
+
+  // --- Payment Request Intent: reuse SendPaymentRequestModal ---
+  if (action === 'payment_request') {
+    return (
+      <SendPaymentRequestModal
+        isOpen={true}
+        onClose={(result) => {
+          if (result?.success) {
+            resolveIntent({ success: true, requestId: result.requestId });
+          } else {
+            rejectIntent(ERROR_CODES.USER_REJECTED, 'User cancelled');
+          }
+        }}
+        prefill={{
+          to: params.to as string,
+          amount: params.amount as string,
+          coinId: (params.coinId as string) ?? 'UCT',
+          message: params.message as string | undefined,
         }}
       />
     );

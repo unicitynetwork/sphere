@@ -21,7 +21,7 @@ export function WalletPanel() {
   const [isNametagModalOpen, setIsNametagModalOpen] = useState(false);
   const { isLoading: isWalletLoading, walletExists, error: walletError } = useWalletStatus();
   const { identity, nametag, isLoading: isLoadingIdentity } = useIdentity();
-  const { pendingCount, requests } = useIncomingPaymentRequests();
+  const { pendingCount, requests, reject, paid, clearProcessed } = useIncomingPaymentRequests();
   const { setFullscreen } = useUIState();
 
   // Track previous pending count to detect new requests
@@ -200,6 +200,11 @@ export function WalletPanel() {
           setIsSettingsOpen={setIsSettingsOpen}
           isL1WalletOpen={isL1WalletOpen}
           setIsL1WalletOpen={setIsL1WalletOpen}
+          paymentRequests={requests}
+          paymentRequestsPendingCount={pendingCount}
+          paymentRequestsReject={reject}
+          paymentRequestsPaid={paid}
+          paymentRequestsClearProcessed={clearProcessed}
         />
       </div>
 
