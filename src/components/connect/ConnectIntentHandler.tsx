@@ -1,17 +1,36 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { ERROR_CODES } from '@unicitylabs/sphere-sdk/connect';
 import { BaseModal, ModalHeader, Button } from '../wallet/ui';
 import { SendModal } from '../wallet/L3/modals/SendModal';
 import { SendPaymentRequestModal } from '../wallet/L3/modals/SendPaymentRequestModal';
+import { SendModal as L1SendModal } from '../wallet/L1/components/modals/SendModal';
 import { useConnectContext } from './ConnectContext';
 import { useSendDM } from '../../sdk/hooks/comms/useSendDM';
+import { useIdentity, useL1Balance, useL1Send } from '../../sdk';
 
 export function ConnectIntentHandler() {
   const { pendingIntent, resolveIntent, rejectIntent, connectHost } = useConnectContext();
   const { sendDM, isLoading: isSendingDM } = useSendDM();
   const [dmError, setDmError] = useState<string | null>(null);
   const [autoApproveDM, setAutoApproveDM] = useState(false);
+
+  // L1 hooks (always called — hooks cannot be conditional)
+  const { l1Address } = useIdentity();
+  const { balance: l1BalanceData } = useL1Balance();
+  const { send: l1Send, estimateFee, resolveAddress } = useL1Send();
+  const l1VestingBalances = l1BalanceData ? {
+    vested: BigInt(l1BalanceData.vested),
+    unvested: BigInt(l1BalanceData.unvested),
+    all: BigInt(l1BalanceData.total),
+  } : { vested: 0n, unvested: 0n, all: 0n };
+
+  const handleL1Send = useCallback(async (destination: string, amount: string) => {
+    const amountAlpha = Number(amount);
+    if (isNaN(amountAlpha) || amountAlpha <= 0) throw new Error('Invalid amount');
+    const amountSatoshis = Math.round(amountAlpha * 1e8).toString();
+    await l1Send({ toAddress: destination, amount: amountSatoshis });
+  }, [l1Send]);
 
   // Ref so the auto-approve closure always uses the latest sendDM
   const sendDMRef = useRef(sendDM);
@@ -65,6 +84,36 @@ export function ConnectIntentHandler() {
           coinId: (params.coinId as string) ?? 'UCT',
           message: params.message as string | undefined,
         }}
+      />
+    );
+  }
+
+  // --- L1 Send Intent ---
+  if (action === 'l1_send') {
+    const toParam = params.to as string | undefined;
+    const amountParam = params.amount as string | undefined;
+    // Convert sats to ALPHA if amount looks like sats (integer >= 1000)
+    let amountAlpha = amountParam;
+    if (amountParam && /^\d+$/.test(amountParam) && Number(amountParam) >= 1000) {
+      amountAlpha = (Number(amountParam) / 1e8).toString();
+    }
+
+    return (
+      <L1SendModal
+        show={true}
+        selectedAddress={l1Address ?? ''}
+        onClose={(result) => {
+          if (result?.success) {
+            resolveIntent({ success: true });
+          } else {
+            rejectIntent(ERROR_CODES.USER_REJECTED, 'User cancelled');
+          }
+        }}
+        onSend={handleL1Send}
+        vestingBalances={l1VestingBalances}
+        onEstimateFee={estimateFee}
+        onResolveAddress={resolveAddress}
+        prefill={toParam ? { to: toParam, amount: amountAlpha ?? '' } : undefined}
       />
     );
   }
