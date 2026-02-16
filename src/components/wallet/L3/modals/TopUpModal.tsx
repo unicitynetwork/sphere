@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Sparkles, Receipt, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { Plus, Sparkles, Receipt, CheckCircle, XCircle } from 'lucide-react';
 import { useIdentity } from '../../../../sdk';
 import { FaucetService } from '../../../../services/FaucetService';
 import { showToast } from '../../../ui/toast-utils';

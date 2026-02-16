@@ -301,10 +301,36 @@ export function SphereProvider({
       sphereRef.current = null;
     }
     if (providers) {
-      await Sphere.clear({
+      // Sphere.clear() may hang if deleteDatabase() is blocked by stale connections.
+      // Race it against a timeout and fall back to brute-force IndexedDB cleanup.
+      const clearDone = Sphere.clear({
         storage: providers.storage,
         tokenStorage: providers.tokenStorage,
       });
+      const timeout = new Promise<'timeout'>(r => setTimeout(() => r('timeout'), 3000));
+      const result = await Promise.race([clearDone.then(() => 'ok' as const), timeout]);
+      if (result === 'timeout') {
+        console.warn('[deleteWallet] Sphere.clear() blocked — forcing IndexedDB cleanup');
+        try {
+          const dbs = await indexedDB.databases();
+          await Promise.allSettled(
+            dbs
+              .filter(db => db.name?.startsWith('sphere-'))
+              .map(db => new Promise<void>((resolve, reject) => {
+                const req = indexedDB.deleteDatabase(db.name!);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+                // If blocked again, resolve anyway — stale DB will be overwritten on next login
+                req.onblocked = () => {
+                  console.warn(`[deleteWallet] deleteDatabase blocked for ${db.name}, continuing`);
+                  resolve();
+                };
+              })),
+          );
+        } catch (err) {
+          console.warn('[deleteWallet] indexedDB.databases() not supported, skipping forced cleanup', err);
+        }
+      }
     }
     clearAllSphereData();
     queryClient.clear();

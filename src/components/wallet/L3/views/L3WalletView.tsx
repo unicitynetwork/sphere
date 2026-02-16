@@ -150,7 +150,7 @@ export function L3WalletView({
   const navigate = useNavigate();
 
   // SDK hooks
-  const { identity, nametag, isLoading: isLoadingIdentity } = useIdentity();
+  const { identity, isLoading: isLoadingIdentity } = useIdentity();
   const { assets: sdkAssets, isLoading: isLoadingAssets } = useAssets();
   const { tokens: sdkTokens, pendingTokens } = useTokens();
   const { balance: l1BalanceData, isLoading: isLoadingL1 } = useL1Balance();

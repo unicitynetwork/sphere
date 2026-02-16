@@ -163,7 +163,7 @@ export function SendModal({ show, selectedAddress, onClose, onSend, vestingBalan
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        onClick={onClose}
+        onClick={() => onClose()}
         className="absolute inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm"
       />
 
@@ -188,7 +188,7 @@ export function SendModal({ show, selectedAddress, onClose, onSend, vestingBalan
             </h3>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => onClose()}
             className="p-2 hover:bg-neutral-100 dark:hover:bg-white/5 rounded-full transition-colors"
           >
             <X className="w-5 h-5 text-neutral-500 dark:text-neutral-400" />
