@@ -2,7 +2,7 @@ name: Deploy Branch to GitHub Pages
 
 on:
   push:
-    branches: ['**']  # All branches
+    branches-ignore: ['gh-pages']
   delete:  # Triggered when a branch is deleted
   workflow_dispatch:
 
