@@ -168,10 +168,11 @@ export function SphereProvider({
       } catch (err) {
         // If nametag was taken or any other error during init,
         // wallet data may already be persisted — clean it up
-        await Sphere.clear({
+        const clearDone = Sphere.clear({
           storage: providers.storage,
           tokenStorage: providers.tokenStorage,
         });
+        await Promise.race([clearDone, new Promise(r => setTimeout(r, 3000))]);
         sphereRef.current = null;
         setSphere(null);
         setWalletExists(false);
@@ -274,11 +275,12 @@ export function SphereProvider({
           error: result.error,
         };
       } catch (err) {
-        // Clean up on failure
-        await Sphere.clear({
+        // Clean up on failure (with timeout to avoid hanging on blocked IDB)
+        const clearDone = Sphere.clear({
           storage: providers.storage,
           tokenStorage: providers.tokenStorage,
         });
+        await Promise.race([clearDone, new Promise(r => setTimeout(r, 3000))]);
         sphereRef.current = null;
         setSphere(null);
         setWalletExists(false);
@@ -299,7 +301,7 @@ export function SphereProvider({
     }
 
     // Disconnect storage providers to release IndexedDB connections,
-    // then attempt to delete the databases via SDK.
+    // then delete the databases via SDK.
     if (providers) {
       await Promise.allSettled([
         providers.storage.disconnect(),
@@ -309,17 +311,20 @@ export function SphereProvider({
         storage: providers.storage,
         tokenStorage: providers.tokenStorage,
       });
-      await Promise.race([clearDone, new Promise(r => setTimeout(r, 3000))]);
+      await Promise.race([clearDone, new Promise(r => setTimeout(r, 5000))]);
     }
 
     // Clear localStorage regardless of whether DB deletion succeeded.
     clearAllSphereData();
 
-    // Hard reload guarantees all IndexedDB connections are released
-    // and avoids deadlock where a pending deleteDatabase() blocks
-    // a subsequent open() from fresh providers.
-    window.location.replace('/');
-  }, [providers]);
+    // Reset React state
+    setSphere(null);
+    setWalletExists(false);
+    setError(null);
+
+    // Reinitialize with fresh providers
+    await initialize();
+  }, [providers, initialize]);
 
   const finalizeWallet = useCallback((importedSphere?: Sphere) => {
     if (importedSphere) {
