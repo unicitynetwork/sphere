@@ -1,35 +1,74 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageCircle } from 'lucide-react';
-import { ChatMessage } from '../data/models';
+import { MessageCircle, ChevronUp } from 'lucide-react';
+import { type DisplayMessage, formatMessageDate } from '../data/chatTypes';
 import { DMMessageBubble } from './DMMessageBubble';
 
 interface DMMessageListProps {
-  messages: ChatMessage[];
+  messages: DisplayMessage[];
   isLoading?: boolean;
   isRecipientTyping?: boolean;
+  hasMore?: boolean;
+  loadMore?: () => void;
 }
 
-export function DMMessageList({ messages, isLoading, isRecipientTyping }: DMMessageListProps) {
+export function DMMessageList({ messages, isLoading, isRecipientTyping, hasMore, loadMore }: DMMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const prevMessagesLenRef = useRef(0);
+  const loadingMoreRef = useRef(false);
+  const scrollStateBeforeLoadRef = useRef({ scrollHeight: 0, scrollTop: 0 });
 
-  // Auto-scroll to bottom when new messages arrive or typing indicator appears
+  // Auto-scroll to bottom for new messages, or restore position after load-more
   useEffect(() => {
-    if (scrollRef.current) {
+    if (!scrollRef.current) return;
+
+    if (loadingMoreRef.current) {
+      // Restore scroll position after loading older messages at the top
+      const el = scrollRef.current;
+      const { scrollHeight: prevHeight, scrollTop: prevTop } = scrollStateBeforeLoadRef.current;
+      el.scrollTop = prevTop + (el.scrollHeight - prevHeight);
+      loadingMoreRef.current = false;
+      prevMessagesLenRef.current = messages.length;
+      return;
+    }
+
+    if (messages.length > prevMessagesLenRef.current) {
+      const el = scrollRef.current;
+      const wasNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+      if (wasNearBottom || prevMessagesLenRef.current === 0) {
+        el.scrollTop = el.scrollHeight;
+      }
+    }
+    prevMessagesLenRef.current = messages.length;
+  }, [messages]);
+
+  // Scroll to bottom when typing indicator appears
+  useEffect(() => {
+    if (isRecipientTyping && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, isRecipientTyping]);
+  }, [isRecipientTyping]);
+
+  const handleLoadMore = useCallback(() => {
+    if (!loadMore || !scrollRef.current) return;
+    loadingMoreRef.current = true;
+    scrollStateBeforeLoadRef.current = {
+      scrollHeight: scrollRef.current.scrollHeight,
+      scrollTop: scrollRef.current.scrollTop,
+    };
+    loadMore();
+  }, [loadMore]);
 
   // Group messages by date
   const groupedMessages = messages.reduce((groups, message) => {
-    const date = message.getFormattedDate();
+    const date = formatMessageDate(message.timestamp);
     if (!groups[date]) {
       groups[date] = [];
     }
     groups[date].push(message);
     return groups;
-  }, {} as Record<string, ChatMessage[]>);
+  }, {} as Record<string, DisplayMessage[]>);
 
   if (isLoading) {
     return (
@@ -62,6 +101,19 @@ export function DMMessageList({ messages, isLoading, isRecipientTyping }: DMMess
       ref={scrollRef}
       className="overflow-y-auto px-4 py-4 space-y-4 min-h-0"
     >
+      {/* Load earlier messages */}
+      {hasMore && (
+        <div className="flex items-center justify-center py-2">
+          <button
+            onClick={handleLoadMore}
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-medium text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700/50 hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors"
+          >
+            <ChevronUp className="w-3.5 h-3.5" />
+            Load earlier messages
+          </button>
+        </div>
+      )}
+
       <AnimatePresence mode="popLayout">
         {Object.entries(groupedMessages).map(([date, dateMessages]) => (
           <motion.div

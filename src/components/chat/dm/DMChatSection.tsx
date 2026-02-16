@@ -12,6 +12,7 @@ import { NewConversationModal } from './NewConversationModal';
 import { agents } from '../../../config/activities';
 import { setMentionClickHandler } from '../../../utils/mentionHandler';
 import { getColorFromPubkey } from '../utils/avatarColors';
+import { getDisplayName, getAvatar } from '../data/chatTypes';
 import type { ChatModeChangeHandler } from '../../../types';
 
 interface DMChatSectionProps {
@@ -25,7 +26,6 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
   const {
     selectedConversation,
     selectConversation,
-    deleteConversation,
     startNewConversation,
     messages,
     isLoadingMessages,
@@ -38,6 +38,8 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
     filteredConversations,
     totalUnreadCount,
     isRecipientTyping,
+    hasMore,
+    loadMore,
   } = useChat();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -97,7 +99,7 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
       const nametag = pendingRecipient.startsWith('@') ? pendingRecipient.slice(1) : pendingRecipient;
       // Check if conversation already exists
       const existingConversation = filteredConversations.find(
-        (c) => c.participantNametag?.toLowerCase() === nametag.toLowerCase()
+        (c) => c.peerNametag?.toLowerCase() === nametag.toLowerCase()
       );
       if (existingConversation) {
         selectConversation(existingConversation);
@@ -116,7 +118,7 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
       const nametag = username.startsWith('@') ? username.slice(1) : username;
       // Check if conversation already exists
       const existingConversation = filteredConversations.find(
-        (c) => c.participantNametag?.toLowerCase() === nametag.toLowerCase()
+        (c) => c.peerNametag?.toLowerCase() === nametag.toLowerCase()
       );
       if (existingConversation) {
         selectConversation(existingConversation);
@@ -162,7 +164,6 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
           selectConversation(conversation);
           setSidebarOpen(false);
         }}
-        onDelete={deleteConversation}
         onNewConversation={() => setShowNewConversation(true)}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -170,7 +171,7 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
         onClose={() => setSidebarOpen(false)}
         isCollapsed={sidebarCollapsed}
         onCollapse={() => setSidebarCollapsed(true)}
-        totalUnreadCount={totalUnreadCount}
+        hasUnread={totalUnreadCount > 0}
         onModeChange={onModeChange}
       />
 
@@ -254,12 +255,12 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
               {selectedConversation ? (
                 <>
                   <motion.div whileHover={{ scale: 1.05 }} className="relative">
-                    <div className={`relative w-12 h-12 rounded-xl bg-linear-to-br ${getColorFromPubkey(selectedConversation.participantPubkey).gradient} flex items-center justify-center shadow-xl text-white font-medium`}>
-                      {selectedConversation.getAvatar()}
+                    <div className={`relative w-12 h-12 rounded-xl bg-linear-to-br ${getColorFromPubkey(selectedConversation.peerPubkey).gradient} flex items-center justify-center shadow-xl text-white font-medium`}>
+                      {getAvatar(selectedConversation.peerPubkey, selectedConversation.peerNametag)}
                     </div>
                   </motion.div>
                   <h3 className="text-neutral-900 dark:text-white font-medium">
-                    {selectedConversation.getDisplayName()}
+                    {getDisplayName(selectedConversation.peerPubkey, selectedConversation.peerNametag)}
                   </h3>
                 </>
               ) : (
@@ -298,7 +299,7 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
 
         {/* Messages */}
         {selectedConversation ? (
-          <DMMessageList messages={messages} isLoading={isLoadingMessages} isRecipientTyping={isRecipientTyping} />
+          <DMMessageList key={selectedConversation.peerPubkey} messages={messages} isLoading={isLoadingMessages} isRecipientTyping={isRecipientTyping} hasMore={hasMore} loadMore={loadMore} />
         ) : (
           <div className="flex flex-col items-center justify-center text-center p-8 min-h-0">
             <motion.div
@@ -334,8 +335,8 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
               onChange={setMessageInput}
               onSend={handleSend}
               isSending={isSending}
-              placeholder={`Message ${selectedConversation.getDisplayName()}...`}
-              participantPubkey={selectedConversation.participantPubkey}
+              placeholder={`Message ${getDisplayName(selectedConversation.peerPubkey, selectedConversation.peerNametag)}...`}
+              participantPubkey={selectedConversation.peerPubkey}
             />
           </div>
         )}
