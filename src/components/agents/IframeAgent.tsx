@@ -57,8 +57,8 @@ export function IframeAgent({ agent }: IframeAgentProps) {
       transport,
       onConnectionRequest: (dapp: DAppMetadata, perms: PermissionScope[]) =>
         requestApprovalRef.current(dapp, perms),
-      onIntent: (action: string, params: Record<string, unknown>) => requestIntentRef.current(action, params),
-    } as any);
+      onIntent: (action, params) => requestIntentRef.current(action, params),
+    });
     hostRef.current = host;
     setConnectHost(host);
 

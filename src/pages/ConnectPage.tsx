@@ -118,9 +118,9 @@ export function ConnectPage() {
         }
         return result;
       },
-      onIntent: (action: string, params: Record<string, unknown>) =>
+      onIntent: (action, params) =>
         requestIntentRef.current(action, params),
-    } as any);
+    });
     hostRef.current = host;
     setConnectHost(host);
 

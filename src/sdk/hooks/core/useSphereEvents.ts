@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSphereContext } from './useSphere';
 import { SPHERE_KEYS } from '../../queryKeys';
@@ -17,23 +17,22 @@ interface SDKDirectMessage {
 export function useSphereEvents(): void {
   const { sphere } = useSphereContext();
   const queryClient = useQueryClient();
+  const invalidateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!sphere) return;
 
+    // Debounced payment invalidation — SDK fires bursts of events during
+    // init / sync, so we coalesce them into a single invalidation pass.
+    // Uses the parent key so TanStack fires one notification (not four).
     const invalidatePayments = () => {
-      queryClient.invalidateQueries({
-        queryKey: SPHERE_KEYS.payments.tokens.all,
-      });
-      queryClient.invalidateQueries({
-        queryKey: SPHERE_KEYS.payments.balance.all,
-      });
-      queryClient.invalidateQueries({
-        queryKey: SPHERE_KEYS.payments.assets.all,
-      });
-      queryClient.invalidateQueries({
-        queryKey: SPHERE_KEYS.payments.transactions.all,
-      });
+      if (invalidateTimerRef.current) return; // already scheduled
+      invalidateTimerRef.current = setTimeout(() => {
+        invalidateTimerRef.current = null;
+        queryClient.invalidateQueries({
+          queryKey: SPHERE_KEYS.payments.all,
+        });
+      }, 300);
     };
 
     const handleIncomingTransfer = (transfer: IncomingTransfer) => {
@@ -118,6 +117,10 @@ export function useSphereEvents(): void {
     sphere.on('payment_request:incoming', handlePaymentRequestIncoming);
 
     return () => {
+      if (invalidateTimerRef.current) {
+        clearTimeout(invalidateTimerRef.current);
+        invalidateTimerRef.current = null;
+      }
       sphere.off('transfer:incoming', handleIncomingTransfer);
       sphere.off('transfer:confirmed', handleTransferConfirmed);
       sphere.off('nametag:registered', handleNametagChange);
