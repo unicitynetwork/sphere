@@ -144,15 +144,6 @@ export function SphereProvider({
         await providers.transport.disconnect();
       }
 
-      // WORKAROUND: SDK bug — Sphere.create() calls Sphere.exists() which
-      // temporarily connects then disconnects storage. storeMnemonic() runs
-      // immediately after but assumes storage is still connected.
-      // Suppress storage disconnect during init so the connection persists.
-      const realStorageDisconnect = providers.storage.disconnect;
-      const realTokenDisconnect = providers.tokenStorage.disconnect;
-      (providers.storage as any).disconnect = async () => {};
-      (providers.tokenStorage as any).disconnect = async () => {};
-
       try {
         const { sphere: instance, generatedMnemonic } = await Sphere.init({
           ...providers,
@@ -186,9 +177,6 @@ export function SphereProvider({
         setSphere(null);
         setWalletExists(false);
         throw err;
-      } finally {
-        (providers.storage as any).disconnect = realStorageDisconnect;
-        (providers.tokenStorage as any).disconnect = realTokenDisconnect;
       }
     },
     [providers],
@@ -233,33 +221,21 @@ export function SphereProvider({
         await providers.transport.disconnect();
       }
 
-      // WORKAROUND: Same SDK bug as createWallet — Sphere.create() internally
-      // calls exists() which disconnects storage before storeMnemonic() runs.
-      const realStorageDisconnect = providers.storage.disconnect;
-      const realTokenDisconnect = providers.tokenStorage.disconnect;
-      (providers.storage as any).disconnect = async () => {};
-      (providers.tokenStorage as any).disconnect = async () => {};
-
-      try {
-        const { sphere: instance } = await Sphere.init({
-          ...providers,
-          mnemonic,
-          nametag: options?.nametag,
-          l1: {},
-        });
-        if (providers.ipfsTokenStorage) {
-          await instance.addTokenStorageProvider(providers.ipfsTokenStorage);
-          instance.sync().catch(err => console.warn('[SphereProvider] Initial IPFS sync failed:', err));
-        }
-
-        sphereRef.current = instance;
-        setSphere(instance);
-        setWalletExists(true);
-        return instance;
-      } finally {
-        (providers.storage as any).disconnect = realStorageDisconnect;
-        (providers.tokenStorage as any).disconnect = realTokenDisconnect;
+      const { sphere: instance } = await Sphere.init({
+        ...providers,
+        mnemonic,
+        nametag: options?.nametag,
+        l1: {},
+      });
+      if (providers.ipfsTokenStorage) {
+        await instance.addTokenStorageProvider(providers.ipfsTokenStorage);
+        instance.sync().catch(err => console.warn('[SphereProvider] Initial IPFS sync failed:', err));
       }
+
+      sphereRef.current = instance;
+      setSphere(instance);
+      setWalletExists(true);
+      return instance;
     },
     [providers],
   );
@@ -325,7 +301,7 @@ export function SphereProvider({
     }
 
     // Disconnect storage providers to release IndexedDB connections,
-    // then attempt to delete the databases via SDK.
+    // then delete the databases via SDK.
     if (providers) {
       await Promise.allSettled([
         providers.storage.disconnect(),
@@ -335,17 +311,20 @@ export function SphereProvider({
         storage: providers.storage,
         tokenStorage: providers.tokenStorage,
       });
-      await Promise.race([clearDone, new Promise(r => setTimeout(r, 3000))]);
+      await Promise.race([clearDone, new Promise(r => setTimeout(r, 5000))]);
     }
 
     // Clear localStorage regardless of whether DB deletion succeeded.
     clearAllSphereData();
 
-    // Hard reload guarantees all IndexedDB connections are released
-    // and avoids deadlock where a pending deleteDatabase() blocks
-    // a subsequent open() from fresh providers.
-    window.location.replace('/');
-  }, [providers]);
+    // Reset React state
+    setSphere(null);
+    setWalletExists(false);
+    setError(null);
+
+    // Reinitialize with fresh providers
+    await initialize();
+  }, [providers, initialize]);
 
   const finalizeWallet = useCallback((importedSphere?: Sphere) => {
     if (importedSphere) {
