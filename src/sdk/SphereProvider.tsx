@@ -65,7 +65,7 @@ export function SphereProvider({
   const [ipfsEnabled, setIpfsEnabled] = useState(isIpfsEnabled);
   const sphereRef = useRef<Sphere | null>(null);
 
-  const initialize = useCallback(async () => {
+  const initialize = useCallback(async (attempt = 0) => {
     try {
       // Destroy previous instance to release IndexedDB connections
       if (sphereRef.current) {
@@ -109,8 +109,18 @@ export function SphereProvider({
         });
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+
+      // IndexedDB may be temporarily blocked after database deletion.
+      // Retry once after a short delay before giving up.
+      if (message.includes('IndexedDB open timed out') && attempt < 1) {
+        console.warn('[SphereProvider] IndexedDB open timed out, retrying in 1s...');
+        await new Promise(r => setTimeout(r, 1000));
+        return initialize(attempt + 1);
+      }
+
       console.error('[SphereProvider] Initialization failed:', err);
-      setError(err instanceof Error ? err : new Error(String(err)));
+      setError(err instanceof Error ? err : new Error(message));
     } finally {
       setIsLoading(false);
     }

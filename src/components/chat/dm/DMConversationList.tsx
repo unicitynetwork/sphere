@@ -1,14 +1,13 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { MessageSquarePlus, Search, X, PanelLeftClose, Sparkles, Hash, User } from 'lucide-react';
-import { ChatConversation } from '../data/models';
+import type { Conversation } from '../data/chatTypes';
 import { DMConversationItem } from './DMConversationItem';
 import type { ChatModeChangeHandler } from '../../../types';
 
 interface DMConversationListProps {
-  conversations: ChatConversation[];
-  selectedConversation: ChatConversation | null;
-  onSelect: (conversation: ChatConversation) => void;
-  onDelete: (id: string) => void;
+  conversations: Conversation[];
+  selectedConversation: Conversation | null;
+  onSelect: (conversation: Conversation) => void;
   onNewConversation: () => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
@@ -16,7 +15,7 @@ interface DMConversationListProps {
   onClose: () => void;
   isCollapsed: boolean;
   onCollapse: () => void;
-  totalUnreadCount: number;
+  hasUnread: boolean;
   onModeChange: ChatModeChangeHandler;
 }
 
@@ -24,7 +23,6 @@ export function DMConversationList({
   conversations,
   selectedConversation,
   onSelect,
-  onDelete,
   onNewConversation,
   searchQuery,
   onSearchChange,
@@ -32,7 +30,7 @@ export function DMConversationList({
   onClose,
   isCollapsed,
   onCollapse,
-  totalUnreadCount,
+  hasUnread,
   onModeChange,
 }: DMConversationListProps) {
   return (
@@ -69,10 +67,8 @@ export function DMConversationList({
             <div className="flex items-center gap-2">
               <h3 className="text-neutral-900 dark:text-white font-medium">Messages</h3>
               <Sparkles className="w-4 h-4 text-orange-500 animate-pulse" />
-              {totalUnreadCount > 0 && (
-                <span className="px-1.5 py-0.5 text-xs rounded-full bg-orange-500 text-white">
-                  {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
-                </span>
+              {hasUnread && (
+                <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
               )}
             </div>
             <div className="flex items-center gap-2">
@@ -161,7 +157,7 @@ export function DMConversationList({
             <AnimatePresence mode="popLayout">
               {conversations.map((conversation) => (
                 <motion.div
-                  key={conversation.id}
+                  key={conversation.peerPubkey}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, x: -100 }}
@@ -169,9 +165,8 @@ export function DMConversationList({
                 >
                   <DMConversationItem
                     conversation={conversation}
-                    isSelected={selectedConversation?.id === conversation.id}
+                    isSelected={selectedConversation?.peerPubkey === conversation.peerPubkey}
                     onClick={() => onSelect(conversation)}
-                    onDelete={() => onDelete(conversation.id)}
                   />
                 </motion.div>
               ))}

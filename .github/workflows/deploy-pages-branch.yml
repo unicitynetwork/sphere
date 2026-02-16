@@ -3,6 +3,7 @@ name: Deploy Branch to GitHub Pages
 on:
   push:
     branches: ['**']  # All branches
+  delete:  # Triggered when a branch is deleted
   workflow_dispatch:
 
 permissions:
@@ -13,8 +14,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cleanup job - runs when a branch is deleted
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+    steps:
+      - name: Checkout gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+
+      - name: Get branch name
+        id: branch
+        run: |
+          # Sanitize branch name for use in URL path (replace / with -)
+          BRANCH_NAME="${{ github.event.ref }}"
+          BRANCH_NAME="${BRANCH_NAME//\//-}"
+          echo "name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+
+      - name: Remove branch directory
+        run: |
+          if [ -d "${{ steps.branch.outputs.name }}" ]; then
+            rm -rf "${{ steps.branch.outputs.name }}"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "Remove ${{ steps.branch.outputs.name }} (branch deleted)"
+            git push
+          else
+            echo "Directory ${{ steps.branch.outputs.name }} does not exist, skipping"
+          fi
+
   build-and-deploy:
     runs-on: ubuntu-latest
+    if: github.event_name != 'delete'
+    outputs:
+      branch_name: ${{ steps.branch.outputs.name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,9 +86,18 @@ jobs:
           destination_dir: ${{ steps.branch.outputs.name }}
           keep_files: true
 
+      - name: Output deployment URL
+        run: |
+          echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ steps.branch.outputs.name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 **URL:** https://${{ github.repository_owner }}.github.io/sphere/${{ steps.branch.outputs.name }}/" >> $GITHUB_STEP_SUMMARY
+
   deploy-redirect:
     runs-on: ubuntu-latest
     needs: build-and-deploy
+    if: github.event_name != 'delete'
     steps:
       - name: Create redirect page
         run: |
