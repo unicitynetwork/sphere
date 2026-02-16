@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Sparkles, Github, Menu, X } from 'lucide-react';
+import { Github, Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { isMock } from '../../hooks/useAgentChat';
@@ -104,8 +104,10 @@ export function Header() {
             <div className="relative">
               <div className="flex items-center gap-1.5 sm:gap-2">
                 <h1 className="text-base sm:text-lg lg:text-xl bg-clip-text text-neutral-900 dark:text-white">AgentSphere</h1>
-                <Sparkles className="w-3 h-3 sm:w-4 sm:h-4 text-orange-500 animate-pulse" />
-                {isMock() && (
+                <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs bg-orange-500/15 text-orange-600 dark:text-orange-400 border border-orange-500/30 font-medium">
+                  beta
+                </span>
+{isMock() && (
                   <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 border border-yellow-500/30">
                     DEMO
                   </span>

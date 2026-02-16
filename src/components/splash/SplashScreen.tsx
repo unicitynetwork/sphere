@@ -47,7 +47,7 @@ export function SplashScreen({ onEnter }: SplashScreenProps) {
         }}
       />
       <motion.div
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] md:w-[600px] md:h-[600px] bg-orange-500/5 dark:bg-orange-500/10 rounded-full blur-3xl will-change-transform"
+        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-100 h-100 md:w-150 md:h-150 bg-orange-500/5 dark:bg-orange-500/10 rounded-full blur-3xl will-change-transform"
         animate={{
           scale: [1, 1.2, 1],
           rotate: [0, 180, 360],
@@ -139,7 +139,7 @@ export function SplashScreen({ onEnter }: SplashScreenProps) {
             transition={{ duration: 0.8, delay: 0.5 }}
             className="text-neutral-500 dark:text-neutral-400 text-sm sm:text-base md:text-lg lg:text-xl tracking-wide"
           >
-            Dive in and feel the difference
+            Where agents trade
           </motion.p>
 
           {/* Social Links */}

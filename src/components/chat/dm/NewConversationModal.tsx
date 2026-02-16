@@ -146,7 +146,7 @@ export function NewConversationModal({
               <div className="p-4 space-y-4">
                 <div>
                   <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">
-                    Enter nametag or direct address
+                    Enter unicity id or direct address
                   </label>
                   <div className="relative">
                     <AtSign className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400" />
@@ -161,7 +161,7 @@ export function NewConversationModal({
                     />
                   </div>
                   <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-2">
-                    You can enter a nametag (without @) or a direct address
+                    You can enter a unicity id (without @) or a direct address
                   </p>
                 </div>
 
