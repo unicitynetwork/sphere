@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Loader2, User, CheckCircle, Coins, Hash } from 'lucide-react';
 import type { Asset } from '@unicitylabs/sphere-sdk';
@@ -10,12 +10,20 @@ import { BaseModal, ModalHeader, Button } from '../../ui';
 
 type Step = 'recipient' | 'asset' | 'amount' | 'confirm' | 'processing' | 'success';
 
-interface SendModalProps {
-  isOpen: boolean;
-  onClose: () => void;
+export interface SendPrefill {
+  to: string;
+  amount: string;
+  coinId: string;
+  memo?: string;
 }
 
-export function SendModal({ isOpen, onClose }: SendModalProps) {
+interface SendModalProps {
+  isOpen: boolean;
+  onClose: (result?: { success: boolean }) => void;
+  prefill?: SendPrefill;
+}
+
+export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
   const { assets: sdkAssets } = useAssets();
   const { transfer, isLoading: isTransferring } = useTransfer();
   const { sphere } = useSphereContext();
@@ -31,6 +39,34 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
 
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [amountInput, setAmountInput] = useState('');
+  const [memoInput, setMemoInput] = useState('');
+
+  // Pre-fill from connect intent (dApp request)
+  const prefillApplied = useRef(false);
+  useEffect(() => {
+    if (!prefill || !isOpen || prefillApplied.current) return;
+    if (assets.length === 0) return; // wait for assets to load
+
+    const { to, amount, coinId } = prefill;
+
+    if (to.startsWith('DIRECT://')) {
+      setRecipientMode('direct');
+      setRecipient(to);
+    } else {
+      setRecipientMode('nametag');
+      setRecipient(to.replace(/^@/, ''));
+    }
+
+    setAmountInput(amount);
+    if (prefill.memo) setMemoInput(prefill.memo);
+
+    const asset = assets.find(a => a.coinId === coinId);
+    if (asset) {
+      setSelectedAsset(asset);
+      setStep('confirm');
+      prefillApplied.current = true;
+    }
+  }, [prefill, isOpen, assets]);
 
   const handleRecipientChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (recipientMode === 'nametag') {
@@ -51,7 +87,9 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
     setRecipient('');
     setSelectedAsset(null);
     setAmountInput('');
+    setMemoInput('');
     setRecipientError(null);
+    prefillApplied.current = false;
   };
 
   const handleClose = () => {
@@ -119,6 +157,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
         coinId: selectedAsset.coinId,
         amount,
         recipient,
+        ...(memoInput ? { memo: memoInput } : {}),
       });
 
       setStep('success');
@@ -127,6 +166,11 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
       setRecipientError(e.message || "Transfer failed");
       setStep('confirm');
     }
+  };
+
+  const handleSuccessClose = () => {
+    reset();
+    onClose({ success: true });
   };
 
   const getTitle = () => {
@@ -245,6 +289,16 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
                 {insufficientBalance && <p className="text-red-500 text-sm mt-2">Insufficient balance</p>}
                 {recipientError && <p className="text-red-500 text-sm mt-2">{recipientError}</p>}
               </div>
+              <div className="mb-6">
+                <label className="text-sm text-neutral-500 dark:text-neutral-400 block mb-2">Memo (optional)</label>
+                <input
+                  type="text"
+                  value={memoInput}
+                  onChange={(e) => setMemoInput(e.target.value)}
+                  className="w-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-xl py-3 px-4 text-neutral-900 dark:text-white outline-none focus:border-orange-500 text-sm"
+                  placeholder="Add a note to this transfer"
+                />
+              </div>
               <Button
                 onClick={handleAmountNext}
                 disabled={!amountInput || insufficientBalance}
@@ -277,6 +331,11 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
                     {recipientMode === 'direct' ? recipient : `@${recipient}`}
                   </span>
                 </div>
+                {memoInput && (
+                  <div className="text-xs text-neutral-400 dark:text-neutral-500 mt-3 italic">
+                    &ldquo;{memoInput}&rdquo;
+                  </div>
+                )}
               </div>
 
               {/* Strategy Info */}
@@ -323,7 +382,7 @@ export function SendModal({ isOpen, onClose }: SendModalProps) {
               <p className="text-neutral-500 dark:text-neutral-400">
                 Successfully sent <b>{amountInput} {selectedAsset?.symbol}</b> to <b>{recipientMode === 'direct' ? recipient : `@${recipient}`}</b>
               </p>
-              <button onClick={handleClose} className="mt-8 px-8 py-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white transition-colors">
+              <button onClick={handleSuccessClose} className="mt-8 px-8 py-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white transition-colors">
                 Close
               </button>
             </motion.div>

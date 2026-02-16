@@ -2,7 +2,10 @@ import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSphereContext } from './useSphere';
 import { SPHERE_KEYS } from '../../queryKeys';
+import { formatAmount } from '../../index';
+import { showToast } from '../../../components/ui/toast-utils';
 import type { DmReceivedDetail } from '../../../components/chat/data/chatTypes';
+import type { IncomingTransfer } from '@unicitylabs/sphere-sdk';
 
 // SDK DM shape (local mirror — SDK DTS not always available)
 interface SDKDirectMessage {
@@ -33,7 +36,23 @@ export function useSphereEvents(): void {
       });
     };
 
-    const handleIncomingTransfer = invalidatePayments;
+    const handleIncomingTransfer = (transfer: IncomingTransfer) => {
+      invalidatePayments();
+
+      // Build toast message
+      const sender = transfer.senderNametag ? `@${transfer.senderNametag}` : 'Someone';
+      const tokenSummary = transfer.tokens.map(t => {
+        const amt = formatAmount(t.amount, t.decimals);
+        return `${amt} ${t.symbol}`;
+      }).join(', ');
+
+      let message = `${sender} sent you ${tokenSummary}`;
+      if (transfer.memo) {
+        message += `\n"${transfer.memo}"`;
+      }
+
+      showToast(message, 'success', 6000);
+    };
     const handleTransferConfirmed = invalidatePayments;
 
     const handleNametagChange = () => {
