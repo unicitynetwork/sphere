@@ -29,15 +29,13 @@ export function MiniChatBubble({ conversation, onClick, index }: MiniChatBubbleP
         {getAvatar(conversation.peerPubkey, conversation.peerNametag)}
       </motion.div>
 
-      {/* Unread badge */}
+      {/* Unread dot */}
       {conversation.unreadCount > 0 && (
         <motion.div
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
-          className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-xs font-bold flex items-center justify-center shadow-md"
-        >
-          {conversation.unreadCount > 99 ? '99+' : conversation.unreadCount}
-        </motion.div>
+          className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-orange-500 border-2 border-white dark:border-neutral-800 shadow-md"
+        />
       )}
 
       {/* Tooltip on hover */}

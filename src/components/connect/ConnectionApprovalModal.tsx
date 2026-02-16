@@ -16,6 +16,7 @@ const PERMISSION_LABELS: Record<string, string> = {
   [PERMISSION_SCOPES.TRANSFER_REQUEST]: 'Request transfers',
   [PERMISSION_SCOPES.L1_TRANSFER]: 'Request L1 transfers',
   [PERMISSION_SCOPES.DM_REQUEST]: 'Send direct messages',
+  [PERMISSION_SCOPES.DM_READ]: 'Read direct messages',
   [PERMISSION_SCOPES.PAYMENT_REQUEST]: 'Payment requests',
   [PERMISSION_SCOPES.SIGN_REQUEST]: 'Sign messages',
 };

@@ -46,7 +46,7 @@ export function ConnectPage() {
   const [searchParams] = useSearchParams();
   const origin = searchParams.get('origin');
   const { sphere, isLoading } = useSphereContext();
-  const { requestApproval, requestIntent } = useConnectContext();
+  const { requestApproval, requestIntent, setConnectHost } = useConnectContext();
   const hostRef = useRef<ConnectHost | null>(null);
   const transportRef = useRef<PostMessageTransport | null>(null);
   const [status, setStatus] = useState<'waiting' | 'ready' | 'error'>('waiting');
@@ -122,6 +122,7 @@ export function ConnectPage() {
         requestIntentRef.current(action, params),
     } as any);
     hostRef.current = host;
+    setConnectHost(host);
 
     setStatus('ready');
 

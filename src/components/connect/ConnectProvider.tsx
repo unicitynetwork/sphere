@@ -1,5 +1,6 @@
-import { useState, useCallback, type ReactNode } from 'react';
+import { useState, useCallback, useRef, type ReactNode } from 'react';
 import type { DAppMetadata, PermissionScope } from '@unicitylabs/sphere-sdk/connect';
+import type { ConnectHost } from '@unicitylabs/sphere-sdk/connect';
 import {
   ConnectContext,
   type PendingApproval,
@@ -16,6 +17,13 @@ interface ConnectProviderProps {
 export function ConnectProvider({ children }: ConnectProviderProps) {
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [pendingIntent, setPendingIntent] = useState<PendingIntent | null>(null);
+  const connectHostRef = useRef<ConnectHost | null>(null);
+  const [, forceUpdate] = useState(0);
+
+  const setConnectHost = useCallback((host: ConnectHost | null) => {
+    connectHostRef.current = host;
+    forceUpdate((n) => n + 1);
+  }, []);
 
   const requestApproval = useCallback(
     (dapp: DAppMetadata, permissions: PermissionScope[]) => {
@@ -73,6 +81,8 @@ export function ConnectProvider({ children }: ConnectProviderProps) {
     denyConnection,
     resolveIntent,
     rejectIntent,
+    connectHost: connectHostRef.current,
+    setConnectHost,
   };
 
   return (

@@ -178,9 +178,7 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
                         {conversation.lastMessageText || 'No messages yet'}
                       </p>
                       {conversation.unreadCount > 0 && (
-                        <span className="text-xs px-1.5 py-0.5 rounded-full bg-orange-500 text-white shrink-0">
-                          {conversation.unreadCount > 99 ? '99+' : conversation.unreadCount}
-                        </span>
+                        <span className="w-2.5 h-2.5 rounded-full bg-orange-500 shrink-0" />
                       )}
                     </div>
                   </div>

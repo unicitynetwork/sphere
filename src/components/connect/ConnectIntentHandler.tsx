@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { ERROR_CODES } from '@unicitylabs/sphere-sdk/connect';
 import { BaseModal, ModalHeader, Button } from '../wallet/ui';
@@ -7,9 +7,14 @@ import { useConnectContext } from './ConnectContext';
 import { useSendDM } from '../../sdk/hooks/comms/useSendDM';
 
 export function ConnectIntentHandler() {
-  const { pendingIntent, resolveIntent, rejectIntent } = useConnectContext();
+  const { pendingIntent, resolveIntent, rejectIntent, connectHost } = useConnectContext();
   const { sendDM, isLoading: isSendingDM } = useSendDM();
   const [dmError, setDmError] = useState<string | null>(null);
+  const [autoApproveDM, setAutoApproveDM] = useState(false);
+
+  // Ref so the auto-approve closure always uses the latest sendDM
+  const sendDMRef = useRef(sendDM);
+  sendDMRef.current = sendDM;
 
   if (!pendingIntent) return null;
 
@@ -46,6 +51,37 @@ export function ConnectIntentHandler() {
     const to = params.to as string;
     const message = params.message as string;
 
+    const handleSendDM = async () => {
+      setDmError(null);
+      try {
+        const dm = await sendDM(to, message);
+
+        // Register auto-approve if user checked the checkbox
+        if (autoApproveDM && connectHost) {
+          connectHost.setIntentAutoApprove('dm', async (_action, intentParams) => {
+            try {
+              const result = await sendDMRef.current(
+                intentParams.to as string,
+                intentParams.message as string,
+              );
+              return { result: { sent: true, messageId: result.id, timestamp: result.timestamp } };
+            } catch (err) {
+              return {
+                error: {
+                  code: ERROR_CODES.INTERNAL_ERROR,
+                  message: err instanceof Error ? err.message : 'DM failed',
+                },
+              };
+            }
+          });
+        }
+
+        resolveIntent({ sent: true, messageId: dm.id, timestamp: dm.timestamp });
+      } catch (err) {
+        setDmError(err instanceof Error ? err.message : 'Failed to send DM');
+      }
+    };
+
     return (
       <BaseModal isOpen={true} onClose={handleClose} showOrbs={false}>
         <ModalHeader title="dApp DM Request" icon={MessageSquare} onClose={handleClose} />
@@ -60,6 +96,19 @@ export function ConnectIntentHandler() {
             </div>
           </div>
 
+          {/* Auto-approve checkbox */}
+          <label className="flex items-center gap-3 mb-4 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={autoApproveDM}
+              onChange={(e) => setAutoApproveDM(e.target.checked)}
+              className="w-4 h-4 rounded accent-orange-500"
+            />
+            <span className="text-sm text-neutral-600 dark:text-neutral-400">
+              Allow this dApp to send DMs without confirmation
+            </span>
+          </label>
+
           {dmError && (
             <div className="text-red-500 text-sm mb-3 text-center">{dmError}</div>
           )}
@@ -72,15 +121,7 @@ export function ConnectIntentHandler() {
               variant="primary"
               fullWidth
               disabled={isSendingDM}
-              onClick={async () => {
-                setDmError(null);
-                try {
-                  const dm = await sendDM(to, message);
-                  resolveIntent({ sent: true, messageId: dm.id, timestamp: dm.timestamp });
-                } catch (err) {
-                  setDmError(err instanceof Error ? err.message : 'Failed to send DM');
-                }
-              }}
+              onClick={handleSendDM}
             >
               {isSendingDM ? 'Sending…' : 'Send DM'}
             </Button>

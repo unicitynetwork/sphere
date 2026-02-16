@@ -18,7 +18,7 @@ export function IframeAgent({ agent }: IframeAgentProps) {
   const transportRef = useRef<PostMessageTransport | null>(null);
   const initializedRef = useRef(false);
   const { sphere } = useSphereContext();
-  const { requestApproval, requestIntent } = useConnectContext();
+  const { requestApproval, requestIntent, setConnectHost } = useConnectContext();
 
   // Stable refs to avoid effect re-runs
   const sphereRef = useRef(sphere);
@@ -60,12 +60,14 @@ export function IframeAgent({ agent }: IframeAgentProps) {
       onIntent: (action: string, params: Record<string, unknown>) => requestIntentRef.current(action, params),
     } as any);
     hostRef.current = host;
+    setConnectHost(host);
 
     // Real cleanup only when component actually unmounts (navigate away)
     return () => {
       // In StrictMode, initializedRef prevents re-creation so cleanup is safe
       hostRef.current?.destroy();
       hostRef.current = null;
+      setConnectHost(null);
       transportRef.current?.destroy();
       transportRef.current = null;
       initializedRef.current = false;

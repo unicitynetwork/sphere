@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react';
 import type { DAppMetadata, PermissionScope } from '@unicitylabs/sphere-sdk/connect';
+import type { ConnectHost } from '@unicitylabs/sphere-sdk/connect';
 
 export interface PendingApproval {
   dapp: DAppMetadata;
@@ -43,6 +44,12 @@ export interface ConnectContextValue {
 
   /** Reject the pending intent with an error */
   rejectIntent: (code: number, message: string) => void;
+
+  /** Reference to the ConnectHost instance for auto-approve management */
+  connectHost: ConnectHost | null;
+
+  /** Set the ConnectHost reference */
+  setConnectHost: (host: ConnectHost | null) => void;
 }
 
 export const ConnectContext = createContext<ConnectContextValue | null>(null);
