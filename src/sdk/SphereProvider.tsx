@@ -5,7 +5,6 @@ import {
   useRef,
   type ReactNode,
 } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { Sphere } from '@unicitylabs/sphere-sdk';
 import {
   createBrowserProviders,
@@ -56,7 +55,6 @@ export function SphereProvider({
   children,
   network = 'testnet',
 }: SphereProviderProps) {
-  const queryClient = useQueryClient();
   const [sphere, setSphere] = useState<Sphere | null>(null);
   const [providers, setProviders] = useState<BrowserProviders | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -294,61 +292,34 @@ export function SphereProvider({
   );
 
   const deleteWallet = useCallback(async () => {
-    // Destroy sphere first to release all IndexedDB connections,
-    // otherwise deleteDatabase() in Sphere.clear() may be blocked.
+    // Destroy sphere to close SDK connections (Nostr, IndexedDB handles, etc.)
     if (sphereRef.current) {
       await sphereRef.current.destroy();
       sphereRef.current = null;
     }
+
+    // Disconnect storage providers to release IndexedDB connections,
+    // then attempt to delete the databases via SDK.
     if (providers) {
-      // Sphere.clear() may hang if deleteDatabase() is blocked by stale connections.
-      // Race it against a timeout and fall back to brute-force IndexedDB cleanup.
+      await Promise.allSettled([
+        providers.storage.disconnect(),
+        providers.tokenStorage.disconnect(),
+      ]);
       const clearDone = Sphere.clear({
         storage: providers.storage,
         tokenStorage: providers.tokenStorage,
       });
-      const timeout = new Promise<'timeout'>(r => setTimeout(() => r('timeout'), 3000));
-      const result = await Promise.race([clearDone.then(() => 'ok' as const), timeout]);
-      if (result === 'timeout') {
-        console.warn('[deleteWallet] Sphere.clear() blocked — forcing IndexedDB cleanup');
-        try {
-          const dbs = await indexedDB.databases();
-          await Promise.allSettled(
-            dbs
-              .filter(db => db.name?.startsWith('sphere-'))
-              .map(db => new Promise<void>((resolve, reject) => {
-                const req = indexedDB.deleteDatabase(db.name!);
-                req.onsuccess = () => resolve();
-                req.onerror = () => reject(req.error);
-                // If blocked again, resolve anyway — stale DB will be overwritten on next login
-                req.onblocked = () => {
-                  console.warn(`[deleteWallet] deleteDatabase blocked for ${db.name}, continuing`);
-                  resolve();
-                };
-              })),
-          );
-        } catch (err) {
-          console.warn('[deleteWallet] indexedDB.databases() not supported, skipping forced cleanup', err);
-        }
-      }
+      await Promise.race([clearDone, new Promise(r => setTimeout(r, 3000))]);
     }
-    clearAllSphereData();
-    queryClient.clear();
-    setSphere(null);
-    setWalletExists(false);
-    setError(null);
 
-    // Create fresh providers WITHOUT connecting transport.
-    // The SDK handles the full connection lifecycle (connect, setIdentity,
-    // subscribe) internally. resolveNametag() also connects on demand.
-    const freshProviders = createBrowserProviders({
-      network,
-      price: { platform: 'coingecko', baseUrl: COINGECKO_BASE_URL, cacheTtlMs: 5 * 60_000 },
-      groupChat: true,
-      ...getIpfsConfig(),
-    });
-    setProviders(freshProviders);
-  }, [providers, queryClient, network]);
+    // Clear localStorage regardless of whether DB deletion succeeded.
+    clearAllSphereData();
+
+    // Hard reload guarantees all IndexedDB connections are released
+    // and avoids deadlock where a pending deleteDatabase() blocks
+    // a subsequent open() from fresh providers.
+    window.location.replace('/');
+  }, [providers]);
 
   const finalizeWallet = useCallback((importedSphere?: Sphere) => {
     if (importedSphere) {
