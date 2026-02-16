@@ -1,11 +1,15 @@
+import { useState } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { ERROR_CODES } from '@unicitylabs/sphere-sdk/connect';
 import { BaseModal, ModalHeader, Button } from '../wallet/ui';
 import { SendModal } from '../wallet/L3/modals/SendModal';
 import { useConnectContext } from './ConnectContext';
+import { useSendDM } from '../../sdk/hooks/comms/useSendDM';
 
 export function ConnectIntentHandler() {
   const { pendingIntent, resolveIntent, rejectIntent } = useConnectContext();
+  const { sendDM, isLoading: isSendingDM } = useSendDM();
+  const [dmError, setDmError] = useState<string | null>(null);
 
   if (!pendingIntent) return null;
 
@@ -56,19 +60,29 @@ export function ConnectIntentHandler() {
             </div>
           </div>
 
+          {dmError && (
+            <div className="text-red-500 text-sm mb-3 text-center">{dmError}</div>
+          )}
+
           <div className="flex gap-3">
-            <Button variant="secondary" fullWidth onClick={handleClose}>
+            <Button variant="secondary" fullWidth onClick={handleClose} disabled={isSendingDM}>
               Cancel
             </Button>
             <Button
               variant="primary"
               fullWidth
-              onClick={() => {
-                // DM not fully integrated yet — return success stub
-                resolveIntent({ sent: false, reason: 'DM UI integration pending' });
+              disabled={isSendingDM}
+              onClick={async () => {
+                setDmError(null);
+                try {
+                  const dm = await sendDM(to, message);
+                  resolveIntent({ sent: true, messageId: dm.id, timestamp: dm.timestamp });
+                } catch (err) {
+                  setDmError(err instanceof Error ? err.message : 'Failed to send DM');
+                }
               }}
             >
-              Send DM
+              {isSendingDM ? 'Sending…' : 'Send DM'}
             </Button>
           </div>
         </div>
