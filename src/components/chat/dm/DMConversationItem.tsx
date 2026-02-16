@@ -1,34 +1,26 @@
 import { motion } from 'framer-motion';
-import { Trash2 } from 'lucide-react';
-import { ChatConversation } from '../data/models';
+import { type Conversation, getAvatar, getDisplayName, formatRelativeTime } from '../data/chatTypes';
 import { getColorFromPubkey } from '../utils/avatarColors';
 
 interface DMConversationItemProps {
-  conversation: ChatConversation;
+  conversation: Conversation;
   isSelected: boolean;
   onClick: () => void;
-  onDelete: () => void;
 }
 
 export function DMConversationItem({
   conversation,
   isSelected,
   onClick,
-  onDelete,
 }: DMConversationItemProps) {
-  const handleDelete = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onDelete();
-  };
-
-  const avatarColor = getColorFromPubkey(conversation.participantPubkey);
+  const avatarColor = getColorFromPubkey(conversation.peerPubkey);
 
   return (
     <motion.div
       whileHover={{ scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
       onClick={onClick}
-      className={`p-3 rounded-xl cursor-pointer transition-all relative overflow-hidden group ${
+      className={`p-3 rounded-xl cursor-pointer transition-all relative overflow-hidden ${
         isSelected
           ? 'bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30'
           : 'bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-700/50 border border-neutral-200 dark:border-neutral-700/50'
@@ -40,10 +32,15 @@ export function DMConversationItem({
 
       <div className="flex items-center gap-3 relative z-10">
         {/* Avatar */}
-        <div
-          className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-medium shrink-0 bg-linear-to-br ${avatarColor.gradient} text-white shadow-md`}
-        >
-          {conversation.getAvatar()}
+        <div className="relative shrink-0">
+          <div
+            className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-medium bg-linear-to-br ${avatarColor.gradient} text-white shadow-md`}
+          >
+            {getAvatar(conversation.peerPubkey, conversation.peerNametag)}
+          </div>
+          {conversation.unreadCount > 0 && !isSelected && (
+            <span className="absolute -top-1 -right-1 w-3 h-3 bg-orange-500 rounded-full border-2 border-white dark:border-neutral-800" />
+          )}
         </div>
 
         {/* Content */}
@@ -54,51 +51,24 @@ export function DMConversationItem({
                 isSelected ? 'text-white' : 'text-neutral-900 dark:text-white'
               }`}
             >
-              {conversation.getDisplayName()}
+              {getDisplayName(conversation.peerPubkey, conversation.peerNametag)}
             </span>
             <span
               className={`text-xs shrink-0 ${
                 isSelected ? 'text-white/70' : 'text-neutral-500 dark:text-neutral-400'
               }`}
             >
-              {conversation.getFormattedLastMessageTime()}
+              {formatRelativeTime(conversation.lastMessageTime)}
             </span>
           </div>
-          <div className="flex items-center justify-between gap-2 mt-0.5">
-            <p
-              className={`text-sm truncate ${
-                isSelected ? 'text-white/80' : 'text-neutral-500 dark:text-neutral-400'
-              }`}
-            >
-              {conversation.lastMessageText || 'No messages yet'}
-            </p>
-            {conversation.unreadCount > 0 && (
-              <span
-                className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${
-                  isSelected
-                    ? 'bg-white/20 text-white'
-                    : 'bg-orange-500 text-white'
-                }`}
-              >
-                {conversation.unreadCount > 99 ? '99+' : conversation.unreadCount}
-              </span>
-            )}
-          </div>
+          <p
+            className={`text-sm truncate mt-0.5 ${
+              isSelected ? 'text-white/80' : 'text-neutral-500 dark:text-neutral-400'
+            }`}
+          >
+            {conversation.lastMessageText || 'No messages yet'}
+          </p>
         </div>
-
-        {/* Delete button (visible on hover) */}
-        <motion.button
-          onClick={handleDelete}
-          className={`absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity ${
-            isSelected
-              ? 'hover:bg-white/20 text-white'
-              : 'hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500'
-          }`}
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-        >
-          <Trash2 className="w-4 h-4" />
-        </motion.button>
       </div>
     </motion.div>
   );

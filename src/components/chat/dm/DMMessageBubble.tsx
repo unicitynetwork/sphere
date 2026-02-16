@@ -1,10 +1,10 @@
 import { motion } from 'framer-motion';
-import { Check, CheckCheck, Clock, AlertCircle } from 'lucide-react';
-import { ChatMessage, MessageStatus } from '../data/models';
+import { Check, CheckCheck } from 'lucide-react';
+import { type DisplayMessage, formatMessageTime } from '../data/chatTypes';
 import { MarkdownContent } from '../../../utils/markdown';
 
 interface DMMessageBubbleProps {
-  message: ChatMessage;
+  message: DisplayMessage;
   delay?: number;
 }
 
@@ -13,16 +13,12 @@ export function DMMessageBubble({ message, delay = 0 }: DMMessageBubbleProps) {
 
   const StatusIcon = () => {
     switch (message.status) {
-      case MessageStatus.PENDING:
-        return <Clock className="w-3 h-3 text-white/60" />;
-      case MessageStatus.SENT:
+      case 'SENT':
         return <Check className="w-3 h-3 text-white/60" />;
-      case MessageStatus.DELIVERED:
+      case 'DELIVERED':
         return <CheckCheck className="w-3 h-3 text-white/60" />;
-      case MessageStatus.READ:
+      case 'READ':
         return <CheckCheck className="w-3 h-3 text-blue-300" />;
-      case MessageStatus.FAILED:
-        return <AlertCircle className="w-3 h-3 text-red-300" />;
       default:
         return <Check className="w-3 h-3 text-white/60" />;
     }
@@ -83,7 +79,7 @@ export function DMMessageBubble({ message, delay = 0 }: DMMessageBubbleProps) {
       {/* Timestamp and status - below bubble */}
       <div className={`flex items-center gap-1.5 mt-1 px-1 ${isOwn ? 'flex-row-reverse' : ''}`}>
         <span className="text-xs text-neutral-500 dark:text-neutral-400">
-          {message.getFormattedTime()}
+          {formatMessageTime(message.timestamp)}
         </span>
         {isOwn && <StatusIcon />}
       </div>

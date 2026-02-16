@@ -3,27 +3,51 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { X, Search, MessageCirclePlus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { ChatRepository } from '../data/ChatRepository';
+import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
+import { useIdentity } from '../../../sdk/hooks/core/useIdentity';
+import { type Conversation, buildConversations, getDisplayName, getAvatar, formatRelativeTime, CHAT_KEYS } from '../data/chatTypes';
 import { useMiniChatStore } from './miniChatStore';
-import type { ChatConversation } from '../data/models';
 import { getColorFromPubkey } from '../utils/avatarColors';
+
+// SDK DM shape (local mirror)
+interface SDKDirectMessage {
+  id: string;
+  senderPubkey: string;
+  recipientPubkey: string;
+  isRead: boolean;
+}
+
+function buildAddressId(directAddress: string): string {
+  let hash = directAddress;
+  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
+  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
+  const first = hash.slice(0, 6).toLowerCase();
+  const last = hash.slice(-6).toLowerCase();
+  return `DIRECT_${first}_${last}`;
+}
 
 interface MiniChatListProps {
   onClose: () => void;
 }
 
-const chatRepository = ChatRepository.getInstance();
-
 export function MiniChatList({ onClose }: MiniChatListProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { sphere } = useSphereContext();
+  const { directAddress } = useIdentity();
+  const addressId = directAddress ? buildAddressId(directAddress) : 'default';
   const { openWindow } = useMiniChatStore();
   const [searchQuery, setSearchQuery] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
 
   const { data: conversations = [] } = useQuery({
-    queryKey: ['chat', 'conversations'],
-    queryFn: () => chatRepository.getConversations(),
+    queryKey: CHAT_KEYS.conversations(addressId),
+    queryFn: () => {
+      if (!sphere) return [];
+      const sdkConvs = sphere.communications.getConversations();
+      return buildConversations(sdkConvs, sphere.identity!.chainPubkey);
+    },
+    enabled: !!sphere,
     staleTime: 30000,
   });
 
@@ -32,7 +56,7 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
     const query = searchQuery.toLowerCase();
     return conversations.filter(
       (c) =>
-        c.getDisplayName().toLowerCase().includes(query) ||
+        getDisplayName(c.peerPubkey, c.peerNametag).toLowerCase().includes(query) ||
         c.lastMessageText.toLowerCase().includes(query)
     );
   }, [conversations, searchQuery]);
@@ -57,10 +81,18 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  const handleConversationClick = (conversation: ChatConversation) => {
-    chatRepository.markConversationAsRead(conversation.id);
-    queryClient.invalidateQueries({ queryKey: ['chat', 'unreadCount'] });
-    queryClient.invalidateQueries({ queryKey: ['chat', 'conversations'] });
+  const handleConversationClick = (conversation: Conversation) => {
+    // Mark as read via SDK
+    if (sphere) {
+      const msgs: SDKDirectMessage[] = sphere.communications.getConversation(conversation.peerPubkey);
+      const unreadIncomingIds = msgs
+        .filter(m => !m.isRead && m.senderPubkey === conversation.peerPubkey)
+        .map(m => m.id);
+      if (unreadIncomingIds.length > 0) {
+        sphere.communications.markAsRead(unreadIncomingIds);
+        queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
+      }
+    }
     openWindow(conversation);
   };
 
@@ -123,22 +155,22 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
           <div className="p-2">
             {filteredConversations.map((conversation) => (
                 <motion.button
-                  key={conversation.id}
+                  key={conversation.peerPubkey}
                   onClick={() => handleConversationClick(conversation)}
                   className="w-full p-3 rounded-xl flex items-center gap-3 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.99 }}
                 >
-                  <div className={`w-10 h-10 rounded-xl bg-linear-to-br ${getColorFromPubkey(conversation.participantPubkey).gradient} flex items-center justify-center text-white font-medium text-sm shrink-0 shadow-md`}>
-                    {conversation.getAvatar()}
+                  <div className={`w-10 h-10 rounded-xl bg-linear-to-br ${getColorFromPubkey(conversation.peerPubkey).gradient} flex items-center justify-center text-white font-medium text-sm shrink-0 shadow-md`}>
+                    {getAvatar(conversation.peerPubkey, conversation.peerNametag)}
                   </div>
                   <div className="flex-1 min-w-0 text-left">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium text-neutral-900 dark:text-white truncate text-sm">
-                        {conversation.getDisplayName()}
+                        {getDisplayName(conversation.peerPubkey, conversation.peerNametag)}
                       </span>
                       <span className="text-xs text-neutral-500 dark:text-neutral-400 shrink-0">
-                        {conversation.getFormattedLastMessageTime()}
+                        {formatRelativeTime(conversation.lastMessageTime)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-2 mt-0.5">
@@ -146,9 +178,7 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
                         {conversation.lastMessageText || 'No messages yet'}
                       </p>
                       {conversation.unreadCount > 0 && (
-                        <span className="text-xs px-1.5 py-0.5 rounded-full bg-orange-500 text-white shrink-0">
-                          {conversation.unreadCount > 99 ? '99+' : conversation.unreadCount}
-                        </span>
+                        <span className="w-2.5 h-2.5 rounded-full bg-orange-500 shrink-0" />
                       )}
                     </div>
                   </div>

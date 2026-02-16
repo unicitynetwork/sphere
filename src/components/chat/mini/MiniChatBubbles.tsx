@@ -3,18 +3,31 @@ import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'framer-motion';
 import { MessageCircle } from 'lucide-react';
-import { ChatRepository } from '../data/ChatRepository';
-import type { ChatMessage } from '../data/models';
+import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
+import { useIdentity } from '../../../sdk/hooks/core/useIdentity';
+import { type Conversation, buildConversations, CHAT_KEYS } from '../data/chatTypes';
 import { useMiniChatStore } from './miniChatStore';
 import { MiniChatBubble } from './MiniChatBubble';
 import { MiniChatList } from './MiniChatList';
 import { MiniChatWindow } from './MiniChatWindow';
 
 const MAX_VISIBLE_BUBBLES = 5;
-const chatRepository = ChatRepository.getInstance();
+
+function buildAddressId(directAddress: string): string {
+  let hash = directAddress;
+  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
+  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
+  const first = hash.slice(0, 6).toLowerCase();
+  const last = hash.slice(-6).toLowerCase();
+  return `DIRECT_${first}_${last}`;
+}
 
 export function MiniChatBubbles() {
   const queryClient = useQueryClient();
+  const { sphere } = useSphereContext();
+  const { directAddress } = useIdentity();
+  const addressId = directAddress ? buildAddressId(directAddress) : 'default';
+
   const {
     openWindowIds,
     minimizedWindowIds,
@@ -26,38 +39,32 @@ export function MiniChatBubbles() {
   } = useMiniChatStore();
 
   const { data: conversations = [] } = useQuery({
-    queryKey: ['chat', 'conversations'],
-    queryFn: () => chatRepository.getConversations(),
+    queryKey: CHAT_KEYS.conversations(addressId),
+    queryFn: () => {
+      if (!sphere) return [];
+      const sdkConvs = sphere.communications.getConversations();
+      return buildConversations(sdkConvs, sphere.identity!.chainPubkey);
+    },
+    enabled: !!sphere,
     staleTime: 5000,
   });
 
   const { data: totalUnreadCount = 0 } = useQuery({
-    queryKey: ['chat', 'unreadCount'],
-    queryFn: () => chatRepository.getTotalUnreadCount(),
+    queryKey: CHAT_KEYS.unreadCount(addressId),
+    queryFn: () => sphere?.communications.getUnreadCount() ?? 0,
+    enabled: !!sphere,
     staleTime: 5000,
   });
 
   // Listen for real-time message updates
   useEffect(() => {
-    const handleChatUpdate = () => {
-      queryClient.invalidateQueries({ queryKey: ['chat', 'conversations'] });
-      queryClient.invalidateQueries({ queryKey: ['chat', 'unreadCount'] });
+    const handleDMReceived = () => {
+      queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
     };
 
-    const handleDMReceived = (event: CustomEvent<ChatMessage>) => {
-      const message = event.detail;
-      // Invalidate conversations and unread count
-      queryClient.invalidateQueries({ queryKey: ['chat', 'conversations'] });
-      queryClient.invalidateQueries({ queryKey: ['chat', 'unreadCount'] });
-      // Invalidate messages for the specific conversation
-      queryClient.invalidateQueries({ queryKey: ['chat', 'messages', message.conversationId] });
-    };
-
-    window.addEventListener('chat-updated', handleChatUpdate);
     window.addEventListener('dm-received', handleDMReceived as EventListener);
 
     return () => {
-      window.removeEventListener('chat-updated', handleChatUpdate);
       window.removeEventListener('dm-received', handleDMReceived as EventListener);
     };
   }, [queryClient]);
@@ -65,8 +72,8 @@ export function MiniChatBubbles() {
   // Preserve window order based on when they were opened (openWindowIds order)
   const openWindows = useMemo(() => {
     return openWindowIds
-      .map((id) => conversations.find((c) => c.id === id))
-      .filter((c): c is NonNullable<typeof c> => c !== undefined);
+      .map((id) => conversations.find((c) => c.peerPubkey === id))
+      .filter((c): c is Conversation => c !== undefined);
   }, [conversations, openWindowIds]);
 
   const sortedConversations = useMemo(() => {
@@ -78,7 +85,7 @@ export function MiniChatBubbles() {
   }, [conversations]);
 
   // Windows that are open and NOT minimized should show as chat windows
-  const windowsToRender = openWindows.filter((w) => !minimizedWindowIds.includes(w.id));
+  const windowsToRender = openWindows.filter((w) => !minimizedWindowIds.includes(w.peerPubkey));
 
   // Single list of bubbles: conversations that should show as bubbles (not as windows)
   const visibleBubbles = useMemo(() => {
@@ -92,7 +99,7 @@ export function MiniChatBubbles() {
     // - dismissed ones (closed with ×)
     // - ones that have visible windows (open and not minimized)
     return sortedConversations
-      .filter((c) => !dismissedIds.has(c.id) && !visibleWindowIds.has(c.id))
+      .filter((c) => !dismissedIds.has(c.peerPubkey) && !visibleWindowIds.has(c.peerPubkey))
       .slice(0, MAX_VISIBLE_BUBBLES);
   }, [sortedConversations, openWindowIds, minimizedWindowIds, dismissedWindowIds]);
 
@@ -112,9 +119,7 @@ export function MiniChatBubbles() {
           <MessageCircle className="w-5 h-5" />
 
           {totalUnreadCount > 0 && !isListExpanded && (
-            <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-xs font-bold flex items-center justify-center shadow-md">
-              {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
-            </span>
+            <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-orange-500 shadow-md" />
           )}
         </button>
 
@@ -122,7 +127,7 @@ export function MiniChatBubbles() {
           {!isListExpanded &&
             visibleBubbles.map((conversation, index) => (
               <MiniChatBubble
-                key={conversation.id}
+                key={conversation.peerPubkey}
                 conversation={conversation}
                 onClick={() => openWindow(conversation)}
                 index={index}
@@ -141,7 +146,7 @@ export function MiniChatBubbles() {
         <AnimatePresence>
           {windowsToRender.map((conversation, index) => (
             <MiniChatWindow
-              key={conversation.id}
+              key={conversation.peerPubkey}
               conversation={conversation}
               index={index}
             />

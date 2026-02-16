@@ -1,4 +1,4 @@
-import { Plus, ArrowUpRight, ArrowDownUp, Sparkles, Loader2, Coins, Layers, CheckCircle, XCircle, Eye, EyeOff, Wifi } from 'lucide-react';
+import { Plus, ArrowUpRight, ArrowDownUp, Sparkles, Loader2, Coins, Layers, Eye, EyeOff, Wifi } from 'lucide-react';
 import { AnimatePresence, motion, useMotionValue, useTransform, animate } from 'framer-motion';
 import { AssetRow } from '../../shared/components';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
@@ -10,7 +10,7 @@ import { TokenRow } from '../../shared/components';
 import { SendModal } from '../modals/SendModal';
 import { SwapModal } from '../modals/SwapModal';
 import { PaymentRequestsModal } from '../modals/PaymentRequestModal';
-import { FaucetService } from '../../../../services/FaucetService';
+import { TopUpModal } from '../modals/TopUpModal';
 import { SeedPhraseModal } from '../modals/SeedPhraseModal';
 import { TransactionHistoryModal } from '../modals/TransactionHistoryModal';
 import { SettingsModal } from '../modals/SettingsModal';
@@ -124,6 +124,11 @@ interface L3WalletViewProps {
   setIsSettingsOpen: (value: boolean) => void;
   isL1WalletOpen: boolean;
   setIsL1WalletOpen: (value: boolean) => void;
+  paymentRequests: import('../hooks/useIncomingPaymentRequests').IncomingPaymentRequest[];
+  paymentRequestsPendingCount: number;
+  paymentRequestsReject: (request: import('../hooks/useIncomingPaymentRequests').IncomingPaymentRequest) => Promise<void>;
+  paymentRequestsPaid: (request: import('../hooks/useIncomingPaymentRequests').IncomingPaymentRequest) => Promise<void>;
+  paymentRequestsClearProcessed: () => void;
 }
 
 export function L3WalletView({
@@ -136,11 +141,16 @@ export function L3WalletView({
   isSettingsOpen,
   setIsSettingsOpen,
   setIsL1WalletOpen,
+  paymentRequests,
+  paymentRequestsPendingCount,
+  paymentRequestsReject,
+  paymentRequestsPaid,
+  paymentRequestsClearProcessed,
 }: L3WalletViewProps) {
   const navigate = useNavigate();
 
   // SDK hooks
-  const { identity, nametag, isLoading: isLoadingIdentity } = useIdentity();
+  const { identity, isLoading: isLoadingIdentity } = useIdentity();
   const { assets: sdkAssets, isLoading: isLoadingAssets } = useAssets();
   const { tokens: sdkTokens, pendingTokens } = useTokens();
   const { balance: l1BalanceData, isLoading: isLoadingL1 } = useL1Balance();
@@ -162,9 +172,7 @@ export function L3WalletView({
   const [isSwapModalOpen, setIsSwapModalOpen] = useState(false);
   const [isSeedPhraseOpen, setIsSeedPhraseOpen] = useState(false);
   const [seedPhrase, setSeedPhrase] = useState<string[]>([]);
-  const [isFaucetLoading, setIsFaucetLoading] = useState(false);
-  const [faucetSuccess, setFaucetSuccess] = useState(false);
-  const [faucetError, setFaucetError] = useState<string | null>(null);
+  const [isTopUpModalOpen, setIsTopUpModalOpen] = useState(false);
 
   // Track previous token/asset IDs to detect truly new items
   const prevTokenIdsRef = useRef<Set<string>>(new Set());
@@ -258,34 +266,6 @@ export function L3WalletView({
     const l1Value = l1AlphaAsset.fiatValueUsd ?? 0;
     return l3Value + l1Value;
   }, [sdkAssets, l1AlphaAsset]);
-
-  const handleTopUp = async () => {
-    if (!nametag) {
-      setFaucetError('Nametag is required to request tokens');
-      return;
-    }
-
-    setIsFaucetLoading(true);
-    setFaucetError(null);
-    setFaucetSuccess(false);
-
-    try {
-      const results = await FaucetService.requestAllCoins(nametag);
-      const failedRequests = results.filter(r => !r.success);
-
-      if (failedRequests.length > 0) {
-        const failedCoins = failedRequests.map(r => r.coin).join(', ');
-        setFaucetError(`Failed to request: ${failedCoins}`);
-      } else {
-        setFaucetSuccess(true);
-        setTimeout(() => setFaucetSuccess(false), 3000);
-      }
-    } catch (error) {
-      setFaucetError(error instanceof Error ? error.message : 'Failed to request tokens');
-    } finally {
-      setIsFaucetLoading(false);
-    }
-  };
 
   const handleShowSeedPhrase = () => {
     if (!sphere) return;
@@ -389,28 +369,13 @@ export function L3WalletView({
         {/* Actions - Speed focused */}
         <div className="grid grid-cols-3 gap-2 sm:gap-3">
           <motion.button
-            whileHover={{ scale: isFaucetLoading ? 1 : 1.02, y: isFaucetLoading ? 0 : -2 }}
-            whileTap={{ scale: isFaucetLoading ? 1 : 0.98 }}
-            onClick={handleTopUp}
-            disabled={isFaucetLoading || !nametag}
-            className="relative px-2 py-2.5 sm:px-3 sm:py-3 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 text-white text-xs sm:text-sm shadow-xl shadow-orange-500/20 flex items-center justify-center gap-1.5 sm:gap-2 overflow-hidden whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+            whileHover={{ scale: 1.02, y: -2 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => setIsTopUpModalOpen(true)}
+            className="relative px-2 py-2.5 sm:px-3 sm:py-3 rounded-xl bg-linear-to-br from-orange-500 to-orange-600 text-white text-xs sm:text-sm shadow-xl shadow-orange-500/20 flex items-center justify-center gap-1.5 sm:gap-2 overflow-hidden whitespace-nowrap"
           >
-            {isFaucetLoading ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />
-                <span className="hidden sm:inline">Requesting...</span>
-              </>
-            ) : faucetSuccess ? (
-              <>
-                <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                <span className="hidden sm:inline">Success!</span>
-              </>
-            ) : (
-              <>
-                <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                <span>Top Up</span>
-              </>
-            )}
+            <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span>Top Up</span>
           </motion.button>
 
           <motion.button
@@ -435,20 +400,6 @@ export function L3WalletView({
           </motion.button>
         </div>
 
-        {/* Error feedback */}
-        <AnimatePresence>
-          {faucetError && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="mt-3 flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl"
-            >
-              <XCircle className="w-4 h-4 text-red-500 dark:text-red-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-red-600 dark:text-red-400">{faucetError}</p>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
 
       <div className="px-6 mb-4 shrink-0">
@@ -562,10 +513,19 @@ export function L3WalletView({
         </div>
       </div>
 
-      {/* Existing Modals */}
+      {/* Modals */}
+      <TopUpModal isOpen={isTopUpModalOpen} onClose={() => setIsTopUpModalOpen(false)} />
       <SendModal isOpen={isSendModalOpen} onClose={() => setIsSendModalOpen(false)} />
       <SwapModal isOpen={isSwapModalOpen} onClose={() => setIsSwapModalOpen(false)} />
-      <PaymentRequestsModal isOpen={isRequestsOpen} onClose={() => setIsRequestsOpen(false)} />
+      <PaymentRequestsModal
+        isOpen={isRequestsOpen}
+        onClose={() => setIsRequestsOpen(false)}
+        requests={paymentRequests}
+        pendingCount={paymentRequestsPendingCount}
+        reject={paymentRequestsReject}
+        paid={paymentRequestsPaid}
+        clearProcessed={paymentRequestsClearProcessed}
+      />
       <SeedPhraseModal
         isOpen={isSeedPhraseOpen}
         onClose={() => setIsSeedPhraseOpen(false)}

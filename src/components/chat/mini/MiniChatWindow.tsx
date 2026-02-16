@@ -3,24 +3,42 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { X, Minus, Maximize2, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { ChatRepository } from '../data/ChatRepository';
-import { ChatMessage, MessageStatus, MessageType } from '../data/models';
-import type { ChatConversation } from '../data/models';
 import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
+import { useIdentity } from '../../../sdk/hooks/core/useIdentity';
+import { type Conversation, type DisplayMessage, type DmReceivedDetail, toDisplayMessage, formatMessageTime, getDisplayName, getAvatar, CHAT_KEYS } from '../data/chatTypes';
 import { useMiniChatStore } from './miniChatStore';
 import { MiniChatInput } from './MiniChatInput';
 import { MarkdownContent } from '../../../utils/markdown';
 import { getColorFromPubkey } from '../utils/avatarColors';
+
+// SDK DM shape (local mirror)
+interface SDKDirectMessage {
+  id: string;
+  senderPubkey: string;
+  senderNametag?: string;
+  recipientPubkey: string;
+  recipientNametag?: string;
+  content: string;
+  timestamp: number;
+  isRead: boolean;
+}
 
 const WINDOW_WIDTH = 328;
 const WINDOW_HEIGHT = 455;
 const WINDOW_GAP = 12;
 const BUBBLES_WIDTH = 88;
 
-const chatRepository = ChatRepository.getInstance();
+function buildAddressId(directAddress: string): string {
+  let hash = directAddress;
+  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
+  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
+  const first = hash.slice(0, 6).toLowerCase();
+  const last = hash.slice(-6).toLowerCase();
+  return `DIRECT_${first}_${last}`;
+}
 
 interface MiniChatWindowProps {
-  conversation: ChatConversation;
+  conversation: Conversation;
   index: number;
 }
 
@@ -28,43 +46,47 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { sphere } = useSphereContext();
+  const { directAddress } = useIdentity();
+  const addressId = directAddress ? buildAddressId(directAddress) : 'default';
   const { closeWindow, minimizeWindow } = useMiniChatStore();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { data: messages = [], isLoading } = useQuery({
-    queryKey: ['chat', 'messages', conversation.id],
-    queryFn: () => chatRepository.getMessagesForConversation(conversation.id),
+    queryKey: CHAT_KEYS.messages(addressId, conversation.peerPubkey),
+    queryFn: (): DisplayMessage[] => {
+      if (!sphere) return [];
+      const sdkMsgs: SDKDirectMessage[] = sphere.communications.getConversation(conversation.peerPubkey);
+      const myPubkey = sphere.identity!.chainPubkey;
+      return sdkMsgs.map((dm) => toDisplayMessage(dm, myPubkey));
+    },
+    enabled: !!sphere,
     staleTime: 5000,
   });
 
   // Listen for real-time messages and mark as read
   useEffect(() => {
     // Mark conversation as read when window is open
-    chatRepository.markConversationAsRead(conversation.id);
-    queryClient.invalidateQueries({ queryKey: ['chat', 'unreadCount'] });
-    // Send SDK read receipts for unread incoming messages
     if (sphere) {
-      const msgs = chatRepository.getMessagesForConversation(conversation.id);
+      const msgs: SDKDirectMessage[] = sphere.communications.getConversation(conversation.peerPubkey);
       const unreadIncomingIds = msgs
-        .filter(m => !m.isFromMe && m.status !== MessageStatus.READ)
+        .filter(m => !m.isRead && m.senderPubkey === conversation.peerPubkey)
         .map(m => m.id);
       if (unreadIncomingIds.length > 0) {
         sphere.communications.markAsRead(unreadIncomingIds);
+        queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
       }
     }
 
-    const handleDMReceived = (event: CustomEvent<ChatMessage>) => {
-      const message = event.detail;
-      if (message.conversationId === conversation.id) {
+    const handleDMReceived = (event: CustomEvent<DmReceivedDetail>) => {
+      const detail = event.detail;
+      if (detail.peerPubkey === conversation.peerPubkey) {
         // Refetch messages for this conversation
-        queryClient.invalidateQueries({ queryKey: ['chat', 'messages', conversation.id] });
+        queryClient.invalidateQueries({ queryKey: CHAT_KEYS.messages(addressId, conversation.peerPubkey) });
         // Auto-mark as read since window is open
-        chatRepository.markConversationAsRead(conversation.id);
-        queryClient.invalidateQueries({ queryKey: ['chat', 'unreadCount'] });
-        // Send SDK read receipt
-        if (sphere) {
-          sphere.communications.markAsRead([message.id]);
+        if (sphere && !detail.isFromMe) {
+          sphere.communications.markAsRead([detail.messageId]);
+          queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
         }
       }
     };
@@ -73,35 +95,16 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
     return () => {
       window.removeEventListener('dm-received', handleDMReceived as EventListener);
     };
-  }, [conversation.id, queryClient, sphere]);
+  }, [conversation.peerPubkey, queryClient, sphere, addressId]);
 
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {
       if (!sphere) throw new Error('Wallet not initialized');
-      const dm = await sphere.communications.sendDM(
-        conversation.participantPubkey,
-        content,
-      );
-
-      // Save sent message to ChatRepository for local persistence
-      const chatMessage = new ChatMessage({
-        id: dm.id,
-        conversationId: conversation.id,
-        content: dm.content,
-        timestamp: dm.timestamp,
-        isFromMe: true,
-        status: MessageStatus.SENT,
-        type: MessageType.TEXT,
-        senderPubkey: dm.senderPubkey,
-        senderNametag: dm.senderNametag ?? undefined,
-      });
-      chatRepository.saveMessage(chatMessage);
-
+      await sphere.communications.sendDM(conversation.peerPubkey, content);
       return true;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chat', 'messages', conversation.id] });
-      queryClient.invalidateQueries({ queryKey: ['chat', 'conversations'] });
+      queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
     },
   });
 
@@ -110,8 +113,8 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
   }, [messages]);
 
   const handleExpand = () => {
-    closeWindow(conversation.id);
-    const nametag = conversation.participantNametag || conversation.participantPubkey;
+    closeWindow(conversation.peerPubkey);
+    const nametag = conversation.peerNametag || conversation.peerPubkey;
     navigate(`/agents/chat?nametag=${encodeURIComponent(nametag)}`);
   };
 
@@ -135,17 +138,17 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
       className="fixed bottom-4 z-100000 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-2xl flex flex-col overflow-hidden"
     >
       <div className="p-3 border-b border-neutral-200 dark:border-neutral-700 flex items-center gap-3 bg-linear-to-r from-white to-neutral-50 dark:from-neutral-900 dark:to-neutral-800 shrink-0">
-        <div className={`w-9 h-9 rounded-lg bg-linear-to-br ${getColorFromPubkey(conversation.participantPubkey).gradient} flex items-center justify-center text-white font-medium text-sm shadow-md shrink-0`}>
-          {conversation.getAvatar()}
+        <div className={`w-9 h-9 rounded-lg bg-linear-to-br ${getColorFromPubkey(conversation.peerPubkey).gradient} flex items-center justify-center text-white font-medium text-sm shadow-md shrink-0`}>
+          {getAvatar(conversation.peerPubkey, conversation.peerNametag)}
         </div>
         <div className="flex-1 min-w-0">
           <h4 className="font-medium text-neutral-900 dark:text-white text-sm truncate">
-            {conversation.getDisplayName()}
+            {getDisplayName(conversation.peerPubkey, conversation.peerNametag)}
           </h4>
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <motion.button
-            onClick={() => minimizeWindow(conversation.id)}
+            onClick={() => minimizeWindow(conversation.peerPubkey)}
             className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 dark:text-neutral-400 transition-colors"
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
@@ -163,7 +166,7 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
             <Maximize2 className="w-4 h-4" />
           </motion.button>
           <motion.button
-            onClick={() => closeWindow(conversation.id)}
+            onClick={() => closeWindow(conversation.peerPubkey)}
             className="p-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-neutral-500 dark:text-neutral-400 hover:text-red-500 transition-colors"
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
@@ -205,7 +208,7 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
                     <div
                       className={`text-[10px] mt-1 ${isOwn ? 'text-white/60' : 'text-neutral-400'}`}
                     >
-                      {message.getFormattedTime()}
+                      {formatMessageTime(message.timestamp)}
                     </div>
                   </div>
                 </div>
@@ -219,7 +222,7 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
       <MiniChatInput
         onSend={handleSend}
         isSending={sendMutation.isPending}
-        placeholder={`Message ${conversation.getDisplayName()}...`}
+        placeholder={`Message ${getDisplayName(conversation.peerPubkey, conversation.peerNametag)}...`}
       />
     </motion.div>
   );

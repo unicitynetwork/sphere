@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { X, ArrowRight, ArrowLeft, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -20,17 +20,23 @@ interface TxPreview {
   totalAlpha: string;
 }
 
+export interface L1SendPrefill {
+  to: string;
+  amount: string;  // in ALPHA (not sats)
+}
+
 interface SendModalProps {
   show: boolean;
   selectedAddress: string;
-  onClose: () => void;
+  onClose: (result?: { success: boolean }) => void;
   onSend: (destination: string, amount: string) => Promise<void>;
   vestingBalances?: VestingBalances;
   onEstimateFee?: (to: string, amountSats: string) => Promise<{ fee: string; feeRate: number }>;
   onResolveAddress?: (destination: string) => Promise<{ address: string; nametag?: string }>;
+  prefill?: L1SendPrefill;
 }
 
-export function SendModal({ show, selectedAddress, onClose, onSend, vestingBalances: propBalances, onEstimateFee, onResolveAddress }: SendModalProps) {
+export function SendModal({ show, selectedAddress, onClose, onSend, vestingBalances: propBalances, onEstimateFee, onResolveAddress, prefill }: SendModalProps) {
   const [destination, setDestination] = useState("");
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +45,7 @@ export function SendModal({ show, selectedAddress, onClose, onSend, vestingBalan
   const [step, setStep] = useState<'input' | 'confirm'>('input');
   const [preview, setPreview] = useState<TxPreview | null>(null);
   const [isPreparing, setIsPreparing] = useState(false);
+  const prefillApplied = useRef(false);
 
   // Reset on close and sync balances when modal opens
   useEffect(() => {
@@ -49,10 +56,19 @@ export function SendModal({ show, selectedAddress, onClose, onSend, vestingBalan
       setVestingMode("all");
       setStep('input');
       setPreview(null);
+      prefillApplied.current = false;
     } else if (propBalances) {
       setBalances(propBalances);
     }
   }, [show, selectedAddress, propBalances]);
+
+  // Apply prefill
+  useEffect(() => {
+    if (!show || !prefill || prefillApplied.current) return;
+    prefillApplied.current = true;
+    setDestination(prefill.to);
+    setAmount(prefill.amount);
+  }, [show, prefill]);
 
   const handleModeChange = (mode: VestingMode) => {
     setVestingMode(mode);
@@ -133,7 +149,7 @@ export function SendModal({ show, selectedAddress, onClose, onSend, vestingBalan
 
     try {
       await onSend(preview.resolvedAddress, amount);
-      onClose();
+      onClose({ success: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Transaction failed");
     }
@@ -147,7 +163,7 @@ export function SendModal({ show, selectedAddress, onClose, onSend, vestingBalan
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        onClick={onClose}
+        onClick={() => onClose()}
         className="absolute inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm"
       />
 
@@ -172,7 +188,7 @@ export function SendModal({ show, selectedAddress, onClose, onSend, vestingBalan
             </h3>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => onClose()}
             className="p-2 hover:bg-neutral-100 dark:hover:bg-white/5 rounded-full transition-colors"
           >
             <X className="w-5 h-5 text-neutral-500 dark:text-neutral-400" />

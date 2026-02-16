@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSphereContext } from '../../../../sdk/hooks/core/useSphere';
 import type { IncomingPaymentRequest as SDKPaymentRequest } from '@unicitylabs/sphere-sdk';
 
@@ -77,16 +77,30 @@ export const useIncomingPaymentRequests = () => {
         );
     }, [sphere]);
 
-    return {
-        requests,
-        pendingCount: requests.filter(r => r.status === PaymentRequestStatus.PENDING).length,
-        accept: (request: IncomingPaymentRequest) =>
-            updateStatus(request, PaymentRequestStatus.ACCEPTED, 'accepted'),
-        reject: (request: IncomingPaymentRequest) =>
-            updateStatus(request, PaymentRequestStatus.REJECTED, 'rejected'),
-        paid: (request: IncomingPaymentRequest) =>
-            updateStatus(request, PaymentRequestStatus.PAID, 'paid'),
-        clearProcessed: () =>
-            setRequests(prev => prev.filter(r => r.status === PaymentRequestStatus.PENDING)),
-    };
+    const pendingCount = useMemo(
+        () => requests.filter(r => r.status === PaymentRequestStatus.PENDING).length,
+        [requests],
+    );
+
+    const accept = useCallback(
+        (request: IncomingPaymentRequest) => updateStatus(request, PaymentRequestStatus.ACCEPTED, 'accepted'),
+        [updateStatus],
+    );
+
+    const reject = useCallback(
+        (request: IncomingPaymentRequest) => updateStatus(request, PaymentRequestStatus.REJECTED, 'rejected'),
+        [updateStatus],
+    );
+
+    const paid = useCallback(
+        (request: IncomingPaymentRequest) => updateStatus(request, PaymentRequestStatus.PAID, 'paid'),
+        [updateStatus],
+    );
+
+    const clearProcessed = useCallback(
+        () => setRequests(prev => prev.filter(r => r.status === PaymentRequestStatus.PENDING)),
+        [],
+    );
+
+    return { requests, pendingCount, accept, reject, paid, clearProcessed };
 };

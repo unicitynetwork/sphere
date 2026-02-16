@@ -1,34 +1,36 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Loader2, User, CheckCircle, Coins, Hash } from 'lucide-react';
-import type { Asset } from '@unicitylabs/sphere-sdk';
-import { toSmallestUnit } from '@unicitylabs/sphere-sdk';
-import { useAssets, useTransfer, formatAmount } from '../../../../sdk';
+import { ArrowRight, Loader2, User, CheckCircle, Hash, Receipt } from 'lucide-react';
+import { TokenRegistry, toSmallestUnit } from '@unicitylabs/sphere-sdk';
 import { useSphereContext } from '../../../../sdk/hooks/core/useSphere';
 import { BaseModal, ModalHeader, Button } from '../../ui';
 
-type Step = 'recipient' | 'asset' | 'amount' | 'confirm' | 'processing' | 'success';
+type Step = 'recipient' | 'coin' | 'amount' | 'confirm' | 'processing' | 'success';
 
-export interface SendPrefill {
+interface CoinOption {
+  coinId: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  iconUrl?: string;
+}
+
+export interface PaymentRequestPrefill {
   to: string;
   amount: string;
   coinId: string;
-  memo?: string;
+  message?: string;
 }
 
-interface SendModalProps {
+interface SendPaymentRequestModalProps {
   isOpen: boolean;
-  onClose: (result?: { success: boolean }) => void;
-  prefill?: SendPrefill;
+  onClose: (result?: { success: boolean; requestId?: string }) => void;
+  prefill?: PaymentRequestPrefill;
 }
 
-export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
-  const { assets: sdkAssets } = useAssets();
-  const { transfer, isLoading: isTransferring } = useTransfer();
+export function SendPaymentRequestModal({ isOpen, onClose, prefill }: SendPaymentRequestModalProps) {
   const { sphere } = useSphereContext();
-
-  const assets = sdkAssets;
 
   // State
   const [step, setStep] = useState<Step>('recipient');
@@ -37,17 +39,39 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
   const [isCheckingRecipient, setIsCheckingRecipient] = useState(false);
   const [recipientError, setRecipientError] = useState<string | null>(null);
 
-  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
+  const [availableCoins, setAvailableCoins] = useState<CoinOption[]>([]);
+  const [selectedCoin, setSelectedCoin] = useState<CoinOption | null>(null);
   const [amountInput, setAmountInput] = useState('');
-  const [memoInput, setMemoInput] = useState('');
+  const [messageInput, setMessageInput] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [requestId, setRequestId] = useState<string | null>(null);
+
+  // Load all fungible coins from TokenRegistry
+  useEffect(() => {
+    if (!isOpen) return;
+    const registry = TokenRegistry.getInstance();
+    const definitions = registry.getAllDefinitions();
+
+    const coins: CoinOption[] = definitions
+      .filter(def => def.assetKind === 'fungible')
+      .map(def => ({
+        coinId: def.id,
+        symbol: def.symbol || def.name.toUpperCase(),
+        name: def.name,
+        decimals: def.decimals || 0,
+        iconUrl: registry.getIconUrl(def.id) ?? undefined,
+      }));
+
+    setAvailableCoins(coins);
+  }, [isOpen]);
 
   // Pre-fill from connect intent (dApp request)
   const prefillApplied = useRef(false);
   useEffect(() => {
     if (!prefill || !isOpen || prefillApplied.current) return;
-    if (assets.length === 0) return; // wait for assets to load
+    if (availableCoins.length === 0) return;
 
-    const { to, amount, coinId } = prefill;
+    const { to, amount, coinId, message } = prefill;
 
     if (to.startsWith('DIRECT://')) {
       setRecipientMode('direct');
@@ -58,15 +82,15 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
     }
 
     setAmountInput(amount);
-    if (prefill.memo) setMemoInput(prefill.memo);
+    if (message) setMessageInput(message);
 
-    const asset = assets.find(a => a.coinId === coinId);
-    if (asset) {
-      setSelectedAsset(asset);
+    const coin = availableCoins.find(c => c.coinId === coinId);
+    if (coin) {
+      setSelectedCoin(coin);
       setStep('confirm');
       prefillApplied.current = true;
     }
-  }, [prefill, isOpen, assets]);
+  }, [prefill, isOpen, availableCoins]);
 
   const handleRecipientChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (recipientMode === 'nametag') {
@@ -85,10 +109,12 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
     setStep('recipient');
     setRecipientMode('nametag');
     setRecipient('');
-    setSelectedAsset(null);
+    setSelectedCoin(null);
     setAmountInput('');
-    setMemoInput('');
+    setMessageInput('');
     setRecipientError(null);
+    setError(null);
+    setRequestId(null);
     prefillApplied.current = false;
   };
 
@@ -97,7 +123,7 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
     onClose();
   };
 
-  // STEP 1: Validate Recipient via SDK transport
+  // STEP 1: Validate Recipient
   const handleRecipientNext = async () => {
     if (!recipient.trim()) return;
     setIsCheckingRecipient(true);
@@ -111,7 +137,7 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
           return;
         }
         setRecipient(addr);
-        setStep('asset');
+        setStep('coin');
       } else {
         const cleanTag = recipient.replace('@', '').replace('@unicity', '').trim();
         const transport = sphere?.getTransport();
@@ -120,17 +146,17 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
           const pubkey = await transport.resolveNametag(cleanTag);
           if (pubkey) {
             setRecipient(cleanTag);
-            setStep('asset');
+            setStep('coin');
           } else {
             setRecipientError(`User @${cleanTag} not found`);
           }
         } else {
           setRecipient(cleanTag);
-          setStep('asset');
+          setStep('coin');
         }
       }
     } catch {
-      setRecipientError("Network error");
+      setRecipientError('Network error');
     } finally {
       setIsCheckingRecipient(false);
     }
@@ -138,49 +164,55 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
 
   // STEP 3: Go to confirm
   const handleAmountNext = () => {
-    if (!selectedAsset || !amountInput) return;
-    const targetAmount = toSmallestUnit(amountInput, selectedAsset.decimals);
+    if (!selectedCoin || !amountInput) return;
+    const targetAmount = toSmallestUnit(amountInput, selectedCoin.decimals);
     if (targetAmount <= 0n) return;
     setStep('confirm');
   };
 
-  // STEP 4: Execute transfer via SDK
-  const handleSend = async () => {
-    if (!selectedAsset || !amountInput || !recipient) return;
+  // STEP 4: Send payment request via SDK
+  const handleSendRequest = async () => {
+    if (!selectedCoin || !amountInput || !recipient) return;
 
     setStep('processing');
-    setRecipientError(null);
+    setError(null);
 
     try {
-      const amount = toSmallestUnit(amountInput, selectedAsset.decimals).toString();
-      await transfer({
-        coinId: selectedAsset.coinId,
+      const amount = toSmallestUnit(amountInput, selectedCoin.decimals).toString();
+      const recipientStr = recipientMode === 'nametag' ? `@${recipient}` : recipient;
+
+      const result = await sphere!.payments.sendPaymentRequest(recipientStr, {
         amount,
-        recipient,
-        ...(memoInput ? { memo: memoInput } : {}),
+        coinId: selectedCoin.coinId,
+        ...(messageInput ? { message: messageInput } : {}),
       });
 
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to send payment request');
+      }
+
+      setRequestId(result.requestId || null);
       setStep('success');
     } catch (e: any) {
       console.error(e);
-      setRecipientError(e.message || "Transfer failed");
+      setError(e.message || 'Failed to send payment request');
       setStep('confirm');
     }
   };
 
   const handleSuccessClose = () => {
     reset();
-    onClose({ success: true });
+    onClose({ success: true, requestId: requestId || undefined });
   };
 
   const getTitle = () => {
     switch (step) {
-      case 'recipient': return 'Send To';
-      case 'asset': return 'Select Asset';
+      case 'recipient': return 'Request From';
+      case 'coin': return 'Select Currency';
       case 'amount': return 'Enter Amount';
-      case 'confirm': return 'Confirm Transfer';
-      case 'processing': return 'Processing...';
-      case 'success': return 'Sent!';
+      case 'confirm': return 'Confirm Request';
+      case 'processing': return 'Sending...';
+      case 'success': return 'Request Sent!';
     }
   };
 
@@ -196,7 +228,7 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
             <motion.div key="rec" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <div className="mb-6">
                 <label className="text-sm text-neutral-500 dark:text-neutral-400 block mb-2">
-                  {recipientMode === 'nametag' ? 'Unicity Nametag' : 'Direct Address'}
+                  {recipientMode === 'nametag' ? 'Who should pay you?' : 'Direct Address'}
                 </label>
                 <div className="relative">
                   {recipientMode === 'nametag' && (
@@ -234,19 +266,24 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
             </motion.div>
           )}
 
-          {/* 2. ASSET */}
-          {step === 'asset' && (
-            <motion.div key="asset" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2">
-              {assets.map(asset => (
+          {/* 2. COIN SELECTION (all coins from registry, no balance) */}
+          {step === 'coin' && (
+            <motion.div key="coin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2">
+              {availableCoins.map(coin => (
                 <button
-                  key={asset.coinId}
-                  onClick={() => { setSelectedAsset(asset); setStep('amount'); }}
+                  key={coin.coinId}
+                  onClick={() => { setSelectedCoin(coin); setStep('amount'); }}
                   className="w-full p-3 flex items-center gap-3 bg-neutral-50 dark:bg-neutral-900/50 hover:bg-neutral-100 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-white/5 rounded-xl transition-colors text-left"
                 >
-                  <img src={asset.iconUrl || ''} className="w-8 h-8 rounded-full" alt="" />
+                  {coin.iconUrl ? (
+                    <img src={coin.iconUrl} className="w-8 h-8 rounded-full" alt="" />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-neutral-200 dark:bg-neutral-700 flex items-center justify-center text-xs font-bold text-neutral-500">
+                      {coin.symbol.slice(0, 2)}
+                    </div>
+                  )}
                   <div className="flex-1">
-                    <div className="text-neutral-900 dark:text-white font-medium">{asset.symbol}</div>
-                    <div className="text-xs text-neutral-500 dark:text-neutral-400">{formatAmount(asset.totalAmount, asset.decimals)} available</div>
+                    <div className="text-neutral-900 dark:text-white font-medium">{coin.symbol}</div>
                   </div>
                   <ArrowRight className="w-4 h-4 text-neutral-400 dark:text-neutral-600" />
                 </button>
@@ -255,72 +292,57 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
           )}
 
           {/* 3. AMOUNT */}
-          {step === 'amount' && selectedAsset && (() => {
-            const insufficientBalance = amountInput !== '' && toSmallestUnit(amountInput, selectedAsset.decimals) > BigInt(selectedAsset.totalAmount);
-            return (
+          {step === 'amount' && selectedCoin && (
             <motion.div key="amt" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <div className="mb-6">
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="text-neutral-500 dark:text-neutral-400">Amount</span>
-                  <span className="text-neutral-500 dark:text-neutral-400">
-                    Available: <span className="text-neutral-900 dark:text-white">{formatAmount(selectedAsset.totalAmount, selectedAsset.decimals)}</span>
-                  </span>
+                <div className="text-sm text-neutral-500 dark:text-neutral-400 mb-2">
+                  Amount ({selectedCoin.symbol})
                 </div>
-                <div className="relative">
-                  <input
-                    autoFocus
-                    type="text"
-                    inputMode="decimal"
-                    value={amountInput}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v === '' || /^\d*\.?\d*$/.test(v)) setAmountInput(v);
-                    }}
-                    className={`w-full bg-neutral-100 dark:bg-neutral-900 border rounded-xl py-3 px-4 text-neutral-900 dark:text-white text-2xl font-mono outline-none ${insufficientBalance ? 'border-red-500 focus:border-red-500' : 'border-neutral-200 dark:border-white/10 focus:border-orange-500'}`}
-                    placeholder="0.00"
-                  />
-                  <button
-                    onClick={() => setAmountInput(formatAmount(selectedAsset.totalAmount, selectedAsset.decimals))}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-neutral-200 dark:bg-neutral-800 text-orange-500 dark:text-orange-400 px-2 py-1 rounded hover:bg-neutral-300 dark:hover:bg-neutral-700"
-                  >
-                    MAX
-                  </button>
-                </div>
-                {insufficientBalance && <p className="text-red-500 text-sm mt-2">Insufficient balance</p>}
-                {recipientError && <p className="text-red-500 text-sm mt-2">{recipientError}</p>}
+                <input
+                  autoFocus
+                  type="text"
+                  inputMode="decimal"
+                  value={amountInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === '' || /^\d*\.?\d*$/.test(v)) setAmountInput(v);
+                  }}
+                  className="w-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-xl py-3 px-4 text-neutral-900 dark:text-white text-2xl font-mono outline-none focus:border-orange-500"
+                  placeholder="0.00"
+                />
               </div>
               <div className="mb-6">
-                <label className="text-sm text-neutral-500 dark:text-neutral-400 block mb-2">Memo (optional)</label>
+                <label className="text-sm text-neutral-500 dark:text-neutral-400 block mb-2">Message (optional)</label>
                 <input
                   type="text"
-                  value={memoInput}
-                  onChange={(e) => setMemoInput(e.target.value)}
+                  value={messageInput}
+                  onChange={(e) => setMessageInput(e.target.value)}
                   className="w-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-xl py-3 px-4 text-neutral-900 dark:text-white outline-none focus:border-orange-500 text-sm"
-                  placeholder="Add a note to this transfer"
+                  placeholder="e.g. Payment for order #1234"
                 />
               </div>
               <Button
                 onClick={handleAmountNext}
-                disabled={!amountInput || insufficientBalance}
+                disabled={!amountInput}
                 fullWidth
               >
                 Review
               </Button>
             </motion.div>
-            );
-          })()}
+          )}
 
           {/* 4. CONFIRM */}
-          {step === 'confirm' && selectedAsset && (
+          {step === 'confirm' && selectedCoin && (
             <motion.div key="conf" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
 
               {/* Summary Card */}
               <div className="bg-neutral-100 dark:bg-neutral-900 rounded-2xl p-5 mb-6 border border-neutral-200 dark:border-white/10 text-center">
-                <div className="text-sm text-neutral-500 dark:text-neutral-400 mb-1">You are sending</div>
+                <div className="text-sm text-neutral-500 dark:text-neutral-400 mb-1">You are requesting</div>
                 <div className="text-3xl font-bold text-neutral-900 dark:text-white mb-4">
-                  {amountInput} <span className="text-orange-500">{selectedAsset.symbol}</span>
+                  {amountInput} <span className="text-orange-500">{selectedCoin.symbol}</span>
                 </div>
 
+                <div className="text-sm text-neutral-500 dark:text-neutral-400 mb-1">from</div>
                 <div className="flex items-center justify-center gap-2 text-sm bg-neutral-200 dark:bg-neutral-800/50 p-2 rounded-lg mx-auto max-w-max">
                   {recipientMode === 'direct' ? (
                     <Hash className="w-4 h-4 text-neutral-500 dark:text-neutral-400" />
@@ -331,34 +353,33 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
                     {recipientMode === 'direct' ? recipient : `@${recipient}`}
                   </span>
                 </div>
-                {memoInput && (
+                {messageInput && (
                   <div className="text-xs text-neutral-400 dark:text-neutral-500 mt-3 italic">
-                    &ldquo;{memoInput}&rdquo;
+                    &ldquo;{messageInput}&rdquo;
                   </div>
                 )}
               </div>
 
-              {/* Strategy Info */}
+              {/* Info */}
               <div className="mb-6 space-y-2">
-                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-start gap-3">
-                  <Coins className="w-5 h-5 text-emerald-500 dark:text-emerald-400 mt-0.5" />
+                <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-start gap-3">
+                  <Receipt className="w-5 h-5 text-blue-500 dark:text-blue-400 mt-0.5" />
                   <div>
-                    <div className="text-emerald-600 dark:text-emerald-400 text-sm font-medium">Smart Transfer</div>
+                    <div className="text-blue-600 dark:text-blue-400 text-sm font-medium">Payment Request</div>
                     <div className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                      Token splitting and transfer optimization is handled automatically.
+                      The recipient will receive a notification and can choose to pay or decline.
                     </div>
                   </div>
                 </div>
               </div>
 
-              {recipientError && <p className="text-red-500 text-sm mb-4 text-center">{recipientError}</p>}
+              {error && <p className="text-red-500 text-sm mb-4 text-center">{error}</p>}
 
               <button
-                onClick={handleSend}
-                disabled={isTransferring}
-                className="w-full py-3 bg-neutral-900 dark:bg-white text-white dark:text-black font-bold rounded-xl hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors disabled:opacity-50"
+                onClick={handleSendRequest}
+                className="w-full py-3 bg-neutral-900 dark:bg-white text-white dark:text-black font-bold rounded-xl hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors"
               >
-                Confirm & Send
+                Send Request
               </button>
             </motion.div>
           )}
@@ -367,8 +388,8 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
           {step === 'processing' && (
             <motion.div key="proc" className="py-10 text-center">
               <Loader2 className="w-12 h-12 text-orange-500 animate-spin mx-auto mb-4" />
-              <h3 className="text-neutral-900 dark:text-white font-medium text-lg">Sending Transaction...</h3>
-              <p className="text-neutral-500 text-sm mt-2">Processing proofs and broadcasting via Nostr</p>
+              <h3 className="text-neutral-900 dark:text-white font-medium text-lg">Sending Payment Request...</h3>
+              <p className="text-neutral-500 text-sm mt-2">Delivering request via Nostr</p>
             </motion.div>
           )}
 
@@ -378,9 +399,9 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
               <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/50">
                 <CheckCircle className="w-8 h-8 text-emerald-500" />
               </div>
-              <h3 className="text-neutral-900 dark:text-white font-bold text-2xl mb-2">Success!</h3>
+              <h3 className="text-neutral-900 dark:text-white font-bold text-2xl mb-2">Request Sent!</h3>
               <p className="text-neutral-500 dark:text-neutral-400">
-                Successfully sent <b>{amountInput} {selectedAsset?.symbol}</b> to <b>{recipientMode === 'direct' ? recipient : `@${recipient}`}</b>
+                Payment request for <b>{amountInput} {selectedCoin?.symbol}</b> sent to <b>{recipientMode === 'direct' ? recipient : `@${recipient}`}</b>
               </p>
               <button onClick={handleSuccessClose} className="mt-8 px-8 py-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white transition-colors">
                 Close

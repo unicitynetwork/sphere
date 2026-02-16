@@ -1,5 +1,5 @@
 import { useSyncExternalStore, useCallback } from 'react';
-import type { ChatConversation } from '../data/models';
+import type { Conversation } from '../data/chatTypes';
 
 const STORAGE_KEY = 'sphere_mini_chat';
 const MAX_OPEN_WINDOWS = 3;
@@ -74,25 +74,26 @@ export const miniChatStore = {
   },
 
   // Open a chat window (or restore if minimized)
-  openWindow: (conversation: ChatConversation) => {
-    const isAlreadyOpen = state.openWindowIds.includes(conversation.id);
-    const isMinimized = state.minimizedWindowIds.includes(conversation.id);
+  openWindow: (conversation: Conversation) => {
+    const id = conversation.peerPubkey;
+    const isAlreadyOpen = state.openWindowIds.includes(id);
+    const isMinimized = state.minimizedWindowIds.includes(id);
 
     if (isAlreadyOpen && !isMinimized) {
       return; // Already open and visible
     }
 
     const nextOpenIds = [...state.openWindowIds];
-    const nextMinimizedIds = state.minimizedWindowIds.filter((id) => id !== conversation.id);
+    const nextMinimizedIds = state.minimizedWindowIds.filter((wid) => wid !== id);
     // Remove from dismissed when opening
-    const nextDismissedIds = state.dismissedWindowIds.filter((id) => id !== conversation.id);
+    const nextDismissedIds = state.dismissedWindowIds.filter((wid) => wid !== id);
 
     if (!isAlreadyOpen) {
       // Add to open windows
       if (nextOpenIds.length >= MAX_OPEN_WINDOWS) {
         nextOpenIds.shift();
       }
-      nextOpenIds.push(conversation.id);
+      nextOpenIds.push(id);
     }
 
     state = {
@@ -172,7 +173,7 @@ export const miniChatStore = {
 export function useMiniChatStore() {
   const storeState = useSyncExternalStore(miniChatStore.subscribe, miniChatStore.getState);
 
-  const openWindow = useCallback((conversation: ChatConversation) => {
+  const openWindow = useCallback((conversation: Conversation) => {
     miniChatStore.openWindow(conversation);
   }, []);
 

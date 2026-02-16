@@ -1,5 +1,5 @@
 import { Check, Sparkles, Trash2, Loader2, XIcon, ArrowRight, Clock, Receipt, AlertCircle } from 'lucide-react';
-import { useIncomingPaymentRequests, type IncomingPaymentRequest, PaymentRequestStatus } from '../hooks/useIncomingPaymentRequests';
+import { type IncomingPaymentRequest, PaymentRequestStatus } from '../hooks/useIncomingPaymentRequests';
 import { useTransfer } from '../../../../sdk';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useState } from 'react';
@@ -9,10 +9,14 @@ import { BaseModal, ModalHeader, EmptyState } from '../../ui';
 interface PaymentRequestsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  requests: IncomingPaymentRequest[];
+  pendingCount: number;
+  reject: (request: IncomingPaymentRequest) => Promise<void>;
+  paid: (request: IncomingPaymentRequest) => Promise<void>;
+  clearProcessed: () => void;
 }
 
-export function PaymentRequestsModal({ isOpen, onClose }: PaymentRequestsModalProps) {
-  const { requests, pendingCount, reject, clearProcessed, paid } = useIncomingPaymentRequests();
+export function PaymentRequestsModal({ isOpen, onClose, requests, pendingCount, reject, clearProcessed, paid }: PaymentRequestsModalProps) {
   const { transfer } = useTransfer();
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});

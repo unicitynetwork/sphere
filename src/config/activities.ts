@@ -1,4 +1,4 @@
-import { MessageSquare, Trophy, ShoppingBag, Sparkles, Tag, Zap, Store } from 'lucide-react';
+import { MessageSquare, Trophy, ShoppingBag, Sparkles, Tag, Zap, Store, Plug } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // Agent types for different UI layouts
@@ -37,6 +37,8 @@ export interface AgentConfig {
   requiresWallet?: boolean;
   // URL for iframe-type agents (external web apps embedded in the chat area)
   iframeUrl?: string;
+  // Multiple URL options for iframe agents (shows a URL picker)
+  iframeUrls?: { label: string; url: string }[];
 }
 
 // All agents configuration
@@ -209,6 +211,21 @@ export const agents: AgentConfig[] = [
     color: 'from-violet-500 to-purple-500',
     type: 'iframe',
     iframeUrl: 'https://market.unicity.network/',
+  },
+  {
+    id: 'example',
+    name: 'Example',
+    description: 'Test iframe dApp',
+    Icon: Plug,
+    category: 'Developer',
+    color: 'from-blue-500 to-indigo-500',
+    type: 'iframe',
+    iframeUrl: 'https://unicitynetwork.github.io/sphere-sdk-connect-example/',
+    iframeUrls: [
+      { label: 'GitHub Pages', url: 'https://unicitynetwork.github.io/sphere-sdk-connect-example/' },
+      { label: 'Localhost', url: 'http://localhost:5174' },
+    ],
+    requiresWallet: true,
   },
 ];
 

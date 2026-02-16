@@ -5,7 +5,6 @@ import {
   useRef,
   type ReactNode,
 } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { Sphere } from '@unicitylabs/sphere-sdk';
 import {
   createBrowserProviders,
@@ -56,7 +55,6 @@ export function SphereProvider({
   children,
   network = 'testnet',
 }: SphereProviderProps) {
-  const queryClient = useQueryClient();
   const [sphere, setSphere] = useState<Sphere | null>(null);
   const [providers, setProviders] = useState<BrowserProviders | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -65,7 +63,7 @@ export function SphereProvider({
   const [ipfsEnabled, setIpfsEnabled] = useState(isIpfsEnabled);
   const sphereRef = useRef<Sphere | null>(null);
 
-  const initialize = useCallback(async () => {
+  const initialize = useCallback(async (attempt = 0) => {
     try {
       // Destroy previous instance to release IndexedDB connections
       if (sphereRef.current) {
@@ -109,8 +107,18 @@ export function SphereProvider({
         });
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+
+      // IndexedDB may be temporarily blocked after database deletion.
+      // Retry once after a short delay before giving up.
+      if (message.includes('IndexedDB open timed out') && attempt < 1) {
+        console.warn('[SphereProvider] IndexedDB open timed out, retrying in 1s...');
+        await new Promise(r => setTimeout(r, 1000));
+        return initialize(attempt + 1);
+      }
+
       console.error('[SphereProvider] Initialization failed:', err);
-      setError(err instanceof Error ? err : new Error(String(err)));
+      setError(err instanceof Error ? err : new Error(message));
     } finally {
       setIsLoading(false);
     }
@@ -160,10 +168,11 @@ export function SphereProvider({
       } catch (err) {
         // If nametag was taken or any other error during init,
         // wallet data may already be persisted — clean it up
-        await Sphere.clear({
+        const clearDone = Sphere.clear({
           storage: providers.storage,
           tokenStorage: providers.tokenStorage,
         });
+        await Promise.race([clearDone, new Promise(r => setTimeout(r, 3000))]);
         sphereRef.current = null;
         setSphere(null);
         setWalletExists(false);
@@ -266,11 +275,12 @@ export function SphereProvider({
           error: result.error,
         };
       } catch (err) {
-        // Clean up on failure
-        await Sphere.clear({
+        // Clean up on failure (with timeout to avoid hanging on blocked IDB)
+        const clearDone = Sphere.clear({
           storage: providers.storage,
           tokenStorage: providers.tokenStorage,
         });
+        await Promise.race([clearDone, new Promise(r => setTimeout(r, 3000))]);
         sphereRef.current = null;
         setSphere(null);
         setWalletExists(false);
@@ -284,35 +294,37 @@ export function SphereProvider({
   );
 
   const deleteWallet = useCallback(async () => {
-    // Destroy sphere first to release all IndexedDB connections,
-    // otherwise deleteDatabase() in Sphere.clear() may be blocked.
+    // Destroy sphere to close SDK connections (Nostr, IndexedDB handles, etc.)
     if (sphereRef.current) {
       await sphereRef.current.destroy();
       sphereRef.current = null;
     }
+
+    // Disconnect storage providers to release IndexedDB connections,
+    // then delete the databases via SDK.
     if (providers) {
-      await Sphere.clear({
+      await Promise.allSettled([
+        providers.storage.disconnect(),
+        providers.tokenStorage.disconnect(),
+      ]);
+      const clearDone = Sphere.clear({
         storage: providers.storage,
         tokenStorage: providers.tokenStorage,
       });
+      await Promise.race([clearDone, new Promise(r => setTimeout(r, 5000))]);
     }
+
+    // Clear localStorage regardless of whether DB deletion succeeded.
     clearAllSphereData();
-    queryClient.clear();
+
+    // Reset React state
     setSphere(null);
     setWalletExists(false);
     setError(null);
 
-    // Create fresh providers WITHOUT connecting transport.
-    // The SDK handles the full connection lifecycle (connect, setIdentity,
-    // subscribe) internally. resolveNametag() also connects on demand.
-    const freshProviders = createBrowserProviders({
-      network,
-      price: { platform: 'coingecko', baseUrl: COINGECKO_BASE_URL, cacheTtlMs: 5 * 60_000 },
-      groupChat: true,
-      ...getIpfsConfig(),
-    });
-    setProviders(freshProviders);
-  }, [providers, queryClient, network]);
+    // Reinitialize with fresh providers
+    await initialize();
+  }, [providers, initialize]);
 
   const finalizeWallet = useCallback((importedSphere?: Sphere) => {
     if (importedSphere) {
