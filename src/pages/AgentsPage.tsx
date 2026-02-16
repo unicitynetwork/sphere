@@ -330,12 +330,7 @@ export function AgentsPage() {
       {/* 6. Footer */}
       <footer className="border-t border-neutral-200 dark:border-neutral-700 px-4 sm:px-6 py-8">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-neutral-500">
-          <div className="flex items-center gap-3">
-            <div className="w-6 h-6 bg-linear-to-br from-orange-500 to-amber-500 rounded flex items-center justify-center font-bold text-xs text-white">
-              S
-            </div>
-            <span>Built by Unicity Labs</span>
-          </div>
+          <span>Built by Unicity Labs</span>
           <div className="flex flex-wrap gap-6">
             <Link to="/developers/docs" className="hover:text-orange-500 transition">Docs</Link>
             <a href="https://github.com/unicitynetwork" target="_blank" rel="noopener noreferrer" className="hover:text-orange-500 transition">GitHub</a>
