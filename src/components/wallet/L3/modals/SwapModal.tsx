@@ -220,7 +220,7 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
     <BaseModal isOpen={isOpen} onClose={handleClose} showOrbs={false}>
       <ModalHeader title={getTitle()} onClose={handleClose} />
 
-      <div className="p-6">
+      <div className="p-6 flex-1 min-h-0 overflow-y-auto">
         <AnimatePresence mode="wait">
 
           {/* SWAP INTERFACE */}

@@ -79,7 +79,7 @@ export function Header() {
 
   return (
     <>
-    <header className={`border-b backdrop-blur-2xl sticky top-0 z-50 w-screen border-neutral-200 dark:border-neutral-800/50 bg-white/80 ${isMinePage ? 'dark:bg-gray-950/90' : 'theme-transition dark:bg-neutral-900/80'}`}>
+    <header data-tutorial="header" className={`border-b backdrop-blur-2xl sticky top-0 z-50 w-screen border-neutral-200 dark:border-neutral-800/50 bg-white/80 ${isMinePage ? 'dark:bg-gray-950/90' : 'theme-transition dark:bg-neutral-900/80'}`}>
       {/* Background decorative elements (clipped to header bounds) */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-0 left-0 w-96 h-full bg-linear-to-r from-orange-500/5 dark:from-orange-500/10 to-transparent blur-3xl" />
