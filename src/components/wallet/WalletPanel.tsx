@@ -1,4 +1,4 @@
-import { Wallet, Clock, Bell, MoreVertical, Tag, Loader2 } from 'lucide-react';
+import { Wallet, Clock, Bell, MoreVertical, Tag, Loader2, RefreshCw } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { L3WalletView } from './L3/views/L3WalletView';
@@ -19,7 +19,7 @@ export function WalletPanel() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isL1WalletOpen, setIsL1WalletOpen] = useState(false);
   const [isNametagModalOpen, setIsNametagModalOpen] = useState(false);
-  const { isLoading: isWalletLoading, walletExists } = useWalletStatus();
+  const { isLoading: isWalletLoading, walletExists, error: walletError } = useWalletStatus();
   const { identity, nametag, isLoading: isLoadingIdentity } = useIdentity();
   const { pendingCount, requests } = useIncomingPaymentRequests();
   const { setFullscreen } = useUIState();
@@ -48,6 +48,31 @@ export function WalletPanel() {
     }
     prevPendingCountRef.current = pendingCount;
   }, [pendingCount, requests.length, setFullscreen]);
+
+  // Initialization error (e.g. IndexedDB timeout after retry)
+  if (walletError) {
+    return (
+      <div className={PANEL_SHELL}>
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center">
+          <div className="w-12 h-12 rounded-xl bg-red-500/10 flex items-center justify-center">
+            <RefreshCw className="w-6 h-6 text-red-500" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-neutral-900 dark:text-white">Initialization error</p>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">Please reload the page</p>
+          </div>
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => window.location.reload()}
+            className="px-5 py-2 bg-linear-to-r from-orange-500 to-orange-600 text-white text-sm font-medium rounded-xl shadow-lg shadow-orange-500/25"
+          >
+            Reload
+          </motion.button>
+        </div>
+      </div>
+    );
+  }
 
   // Wallet system still initializing
   if (isWalletLoading) {
