@@ -37,6 +37,8 @@ export interface AgentConfig {
   requiresWallet?: boolean;
   // URL for iframe-type agents (external web apps embedded in the chat area)
   iframeUrl?: string;
+  // Multiple URL options for iframe agents (shows a URL picker)
+  iframeUrls?: { label: string; url: string }[];
 }
 
 // All agents configuration
@@ -218,7 +220,11 @@ export const agents: AgentConfig[] = [
     category: 'Developer',
     color: 'from-blue-500 to-indigo-500',
     type: 'iframe',
-    iframeUrl: 'http://localhost:5174',
+    iframeUrl: 'https://unicitynetwork.github.io/sphere-sdk-connect-example/',
+    iframeUrls: [
+      { label: 'GitHub Pages', url: 'https://unicitynetwork.github.io/sphere-sdk-connect-example/' },
+      { label: 'Localhost', url: 'http://localhost:5174' },
+    ],
     requiresWallet: true,
   },
 ];
