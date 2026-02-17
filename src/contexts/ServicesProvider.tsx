@@ -32,10 +32,19 @@ export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }
       }
     };
 
+    // Auto-join "General" group when connected (if not already a member)
+    const handleConnection = (data: { connected: boolean }) => {
+      setIsGroupChatConnected(data.connected);
+      if (data.connected) {
+        const groups = groupChat.getGroups();
+        if (!groups.some(g => g.id === 'general')) {
+          groupChat.joinGroup('general').catch(() => {});
+        }
+      }
+    };
+
     const unsubs = [
-      sphere.on('groupchat:connection', (data) => {
-        setIsGroupChatConnected(data.connected);
-      }),
+      sphere.on('groupchat:connection', handleConnection),
       sphere.on('identity:changed', handleIdentityChange),
     ];
 

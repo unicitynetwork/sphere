@@ -5,7 +5,7 @@ import {
   useRef,
   type ReactNode,
 } from 'react';
-import { Sphere } from '@unicitylabs/sphere-sdk';
+import { Sphere, TokenRegistry, NETWORKS } from '@unicitylabs/sphere-sdk';
 import {
   createBrowserProviders,
   type BrowserProviders,
@@ -82,6 +82,15 @@ export function SphereProvider({
         ...getIpfsConfig(),
       });
       setProviders(browserProviders);
+
+      // Configure our bundle's TokenRegistry singleton — the SDK configures
+      // its own internal copy during Sphere.init(), but due to separate
+      // bundle entry points the singleton we import is a different instance.
+      const netConfig = NETWORKS[network] ?? NETWORKS.testnet;
+      TokenRegistry.configure({
+        remoteUrl: netConfig.tokenRegistryUrl,
+        storage: browserProviders.storage,
+      });
 
       const exists = await Sphere.exists(browserProviders.storage);
       setWalletExists(exists);
@@ -160,6 +169,26 @@ export function SphereProvider({
         sphereRef.current = instance;
         setSphere(instance);
         setWalletExists(true);
+
+        // Notify kbbot of new wallet (fire and forget)
+        const kbbotUrl = import.meta.env.VITE_KBBOT_URL as string | undefined;
+        if (kbbotUrl && instance.identity) {
+          fetch(`${kbbotUrl}/api/notify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              pubkey: instance.identity.chainPubkey,
+              nametag: instance.identity.nametag,
+            }),
+          })
+            .then((res) => {
+              if (!res.ok) console.error(`[kbbot] notify failed: ${res.status} ${res.statusText}`);
+              else console.log('[kbbot] notify sent', { pubkey: instance.identity!.chainPubkey, nametag: instance.identity!.nametag });
+            })
+            .catch((err) => console.error('[kbbot] notify error:', err));
+        } else if (kbbotUrl) {
+          console.warn('[kbbot] notify skipped — no identity on created sphere');
+        }
 
         if (!generatedMnemonic) {
           throw new Error('Failed to generate mnemonic');
@@ -261,6 +290,7 @@ export function SphereProvider({
           oracle: providers.oracle,
           tokenStorage: providers.tokenStorage,
           l1: {},
+          groupChat: providers.groupChat,
         });
 
         // Don't setSphere here — the onboarding flow calls finalizeWallet(sphere)
@@ -336,6 +366,24 @@ export function SphereProvider({
       }
       sphereRef.current = importedSphere;
       setSphere(importedSphere);
+
+      // Notify kbbot of imported wallet (fire and forget)
+      const kbbotUrl = import.meta.env.VITE_KBBOT_URL as string | undefined;
+      if (kbbotUrl && importedSphere.identity) {
+        fetch(`${kbbotUrl}/api/notify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pubkey: importedSphere.identity.chainPubkey,
+            nametag: importedSphere.identity.nametag,
+          }),
+        })
+          .then((res) => {
+            if (!res.ok) console.error(`[kbbot] notify failed: ${res.status} ${res.statusText}`);
+            else console.log('[kbbot] notify sent', { pubkey: importedSphere.identity!.chainPubkey, nametag: importedSphere.identity!.nametag });
+          })
+          .catch((err) => console.error('[kbbot] notify error:', err));
+      }
     }
     setWalletExists(true);
   }, [providers]);
