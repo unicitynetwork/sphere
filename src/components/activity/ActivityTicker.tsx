@@ -14,8 +14,18 @@ const INTENT_DOT: Record<string, string> = {
 
 export function ActivityTicker() {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const { listings, newListingIds } = useMarketFeed();
+  const { listings: liveListings, newListingIds } = useMarketFeed();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const frozenRef = useRef<typeof liveListings | null>(null);
+
+  // Freeze listings while an item is expanded so the ticker doesn't shift
+  if (expandedId && !frozenRef.current) {
+    frozenRef.current = liveListings;
+  } else if (!expandedId) {
+    frozenRef.current = null;
+  }
+
+  const listings = frozenRef.current ?? liveListings;
 
   if (listings.length === 0) {
     return (
@@ -43,13 +53,17 @@ export function ActivityTicker() {
 
   return (
     <div className="flex items-center gap-2 px-2 sm:px-3 py-1 bg-neutral-50/80 dark:bg-neutral-900/40 border-b border-neutral-200/50 dark:border-neutral-800/30 shrink-0 overflow-hidden">
-      {/* Live badge */}
+      {/* Live / Paused badge */}
       <div className="flex items-center gap-1.5 shrink-0">
         <div className="relative flex items-center justify-center">
-          <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-          <div className="absolute w-1.5 h-1.5 rounded-full bg-orange-400 animate-ping opacity-75" />
+          <div className={`w-1.5 h-1.5 rounded-full ${expandedId ? 'bg-neutral-400' : 'bg-orange-500'}`} />
+          {!expandedId && (
+            <div className="absolute w-1.5 h-1.5 rounded-full bg-orange-400 animate-ping opacity-75" />
+          )}
         </div>
-        <span className="text-[10px] font-semibold text-orange-600 dark:text-orange-400 uppercase tracking-wider">Live</span>
+        <span className={`text-[10px] font-semibold uppercase tracking-wider ${expandedId ? 'text-neutral-500 dark:text-neutral-400' : 'text-orange-600 dark:text-orange-400'}`}>
+          {expandedId ? 'Paused' : 'Live'}
+        </span>
       </div>
 
       <div className="h-3 w-px bg-neutral-300 dark:bg-neutral-700 shrink-0" />
