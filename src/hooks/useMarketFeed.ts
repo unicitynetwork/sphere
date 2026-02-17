@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSphereContext } from '../sdk/hooks/core/useSphere';
+import { createMarketModule, type MarketModule } from '@unicitylabs/sphere-sdk';
 
 // Local mirror of SDK FeedListing (SDK doesn't export feed types)
 export interface FeedListing {
@@ -39,15 +40,41 @@ export function useMarketFeed(): UseMarketFeedReturn {
   const [isConnected, setIsConnected] = useState(false);
   const [newListingIds, setNewListingIds] = useState<Set<string>>(new Set());
   const unsubRef = useRef<(() => void) | null>(null);
+  const standaloneRef = useRef<MarketModule | null>(null);
+
+  // Use sphere.market when available, otherwise create a standalone MarketModule
+  // so the feed works before wallet creation (getRecentListings & subscribeFeed are public)
+  const market = useMemo(() => {
+    if (sphere?.market) return sphere.market;
+    if (!standaloneRef.current) {
+      standaloneRef.current = createMarketModule();
+    }
+    return standaloneRef.current;
+  }, [sphere]);
+
+  // Drop standalone module once sphere takes over
+  useEffect(() => {
+    if (sphere?.market && standaloneRef.current) {
+      standaloneRef.current.destroy();
+      standaloneRef.current = null;
+    }
+  }, [sphere]);
+
+  // Cleanup standalone module on unmount
+  useEffect(() => {
+    return () => {
+      standaloneRef.current?.destroy();
+      standaloneRef.current = null;
+    };
+  }, []);
 
   // Fetch initial listings via REST
   const { data: initialListings } = useQuery({
     queryKey: ['market', 'feed', 'recent'],
     queryFn: async () => {
-      if (!sphere?.market) return [];
-      return sphere.market.getRecentListings() as Promise<FeedListing[]>;
+      return market.getRecentListings() as Promise<FeedListing[]>;
     },
-    enabled: !!sphere?.market,
+    enabled: !!market,
     staleTime: 60000,
   });
 
@@ -75,9 +102,9 @@ export function useMarketFeed(): UseMarketFeedReturn {
   }, []);
 
   useEffect(() => {
-    if (!sphere?.market) return;
+    if (!market) return;
 
-    unsubRef.current = sphere.market.subscribeFeed(
+    unsubRef.current = market.subscribeFeed(
       handleFeedMessage as (msg: unknown) => void,
     );
     setIsConnected(true);
@@ -87,7 +114,7 @@ export function useMarketFeed(): UseMarketFeedReturn {
       unsubRef.current = null;
       setIsConnected(false);
     };
-  }, [sphere, handleFeedMessage]);
+  }, [market, handleFeedMessage]);
 
   // Merge: realtime first, then fill from REST (dedup by id)
   const seenIds = new Set<string>();

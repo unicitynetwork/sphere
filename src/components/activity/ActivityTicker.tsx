@@ -62,7 +62,7 @@ export function ActivityTicker() {
         ref={scrollContainerRef}
         className="flex items-center gap-2.5 overflow-x-auto pt-2 pb-4 px-2 -mx-2 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar]:mt-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-neutral-300 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-700 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-neutral-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-neutral-600"
       >
-        <AnimatePresence initial={false} mode="popLayout">
+        <AnimatePresence initial={false}>
           {listings.map((listing) => {
             const glowColors = INTENT_GLOW_COLORS[listing.type] || DEFAULT_GLOW;
             const isNew = newListingIds.has(listing.id);
@@ -70,11 +70,10 @@ export function ActivityTicker() {
             return (
               <motion.div
                 key={listing.id}
-                layout
-                initial={{ opacity: 0, scale: 0.95 }}
+                initial={{ opacity: 0, x: -20 }}
                 animate={{
                   opacity: 1,
-                  scale: 1,
+                  x: 0,
                   transition: {
                     duration: 0.4,
                     ease: [0.25, 0.46, 0.45, 0.94],
@@ -82,7 +81,7 @@ export function ActivityTicker() {
                 }}
                 exit={{
                   opacity: 0,
-                  scale: 0.95,
+                  x: -20,
                   transition: { duration: 0.2, ease: 'easeOut' }
                 }}
                 className={`

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 
-type ApiKey = 'init' | 'payments' | 'communication' | 'agents';
+type ApiKey = 'init' | 'payments' | 'communication' | 'market';
 
 interface ApiInfo {
   icon: string;
@@ -27,141 +27,161 @@ export function DevelopersPage() {
 
   const apis: Record<ApiKey, ApiInfo> = {
     init: {
-      icon: '🔑',
+      icon: '\u{1F511}',
       title: 'Initialization',
       tagline: 'Your key is your identity.',
-      description: 'No API keys. Your cryptographic keypair IS your Unicity ID. Self-authenticated, decentralized identity.',
+      description: 'Provider-based architecture. Your BIP39 mnemonic IS your identity. Auto-creates or loads existing wallets.',
       color: 'from-emerald-500 to-teal-500',
-      code: `const sphere = await Sphere.init({ mode: 'trusted', mnemonic: '...' });`,
-      fullExample: `// Trusted mode (browser - local key management)
-const sphere = await Sphere.init({
-  mode: 'trusted',
-  mnemonic: 'abandon badge cable ...'
-});
-console.log(sphere.address); // "unicity:0x8f3a..."
+      code: `const { sphere } = await Sphere.init({ ...providers, mnemonic: '...' });`,
+      fullExample: `import { Sphere } from '@unicitylabs/sphere-sdk';
+import { createBrowserProviders } from '@unicitylabs/sphere-sdk/impl/browser';
 
-// Untrusted mode (server agent - remote signing)
-const sphere = await Sphere.init({
-  mode: 'untrusted',
-  remoteUnicityId: 'unicity:0x8f3a...'
+// Create providers for your target network
+const providers = createBrowserProviders({ network: 'testnet' });
+
+// Auto-load existing wallet or create new one
+const { sphere, created, generatedMnemonic } = await Sphere.init({
+  ...providers,
+  autoGenerate: true, // generate mnemonic if no wallet exists
 });
-// Transactions tunneled to browser for signing`,
-      features: ['Self-authenticated', 'No registration', 'BIP32 HD wallets', 'Cross-device sync']
+
+if (generatedMnemonic) {
+  console.log('Backup this mnemonic:', generatedMnemonic);
+}
+
+console.log('Identity:', sphere.identity);
+console.log('Ready:', sphere.isReady);`,
+      features: ['Provider-based', 'BIP39 HD wallets', 'Auto-load or create', 'Multi-address']
     },
     payments: {
-      icon: '⚡',
+      icon: '\u26A1',
       title: 'Payments',
-      tagline: "Three parameters. That's it.",
-      description: 'Send any token to anyone. No gas estimation. No nonce management. No failed transactions.',
+      tagline: 'L3 instant. L1 on-chain.',
+      description: 'Send tokens to anyone via @nametag or address. Instant P2P settlement on Layer 3, ALPHA blockchain on Layer 1.',
       color: 'from-orange-500 to-amber-500',
-      code: `await sphere.send("USDC", 100, "@merchant");`,
-      fullExample: `// Simple payment (use @nametag or unicity:0x...)
-await sphere.send("USDC", 100, "@merchant");
-
-// Listen for incoming payments
-sphere.on.receive((transfer) => {
-  console.log(\`Received \${transfer.amount} \${transfer.token}\`);
+      code: `await sphere.payments.send({ recipient: '@merchant', amount: '100', coinId });`,
+      fullExample: `// Send tokens (use @nametag or direct address)
+await sphere.payments.send({
+  coinId: '0x...',         // token type ID
+  amount: '100000000',     // in smallest units
+  recipient: '@merchant',  // @nametag or DIRECT:// address
+  memo: 'Order #123',
 });
 
-// Check balance
-const balance = await sphere.getBalance("USDC");
+// Check balance (synchronous)
+const assets = sphere.payments.getBalance();
+assets.forEach(a => console.log(\`\${a.symbol}: \${a.totalAmount}\`));
 
-// With escrow
-const escrow = await sphere.escrow({
-  token: "USDC",
-  amount: 5000,
-  to: "@seller",
-  releaseCondition: "delivery_confirmed"
+// Get assets with fiat prices
+const withPrices = await sphere.payments.getAssets();
+
+// Listen for incoming transfers
+sphere.on('transfer:incoming', (transfer) => {
+  console.log('Received tokens:', transfer.tokens);
 });
-await escrow.release();`,
-      features: ['Instant P2P settlement', 'Any token, any amount', 'Built-in escrow', 'Nametag support']
+
+// L1 ALPHA blockchain
+const l1Balance = await sphere.payments.l1.getBalance();
+console.log('L1 confirmed:', l1Balance.confirmed);`,
+      features: ['L3 instant settlement', 'L1 ALPHA blockchain', 'Payment requests', 'Nametag support']
     },
     communication: {
-      icon: '💬',
+      icon: '\u{1F4AC}',
       title: 'Communication',
       tagline: 'Message anyone. Human or agent.',
-      description: 'Direct encrypted P2P messaging via Nostr. NIP-17 encryption. No central servers.',
+      description: 'End-to-end encrypted direct messages via Nostr. NIP-29 group chat. Broadcast to topics.',
       color: 'from-violet-500 to-purple-500',
-      code: `await sphere.msg("@alice", { type: "offer", price: 500 });`,
-      fullExample: `// Send an offer
-await sphere.msg("@alice", {
-  type: "offer",
-  item: "PSA-10-charizard",
-  price: 12000,
-  currency: "USDC"
+      code: `await sphere.communications.sendDM('@alice', 'Hello!');`,
+      fullExample: `// Send a direct message (encrypted via Nostr)
+await sphere.communications.sendDM('@alice', 'Hello from the SDK!');
+
+// Listen for incoming messages
+sphere.communications.onDirectMessage((msg) => {
+  console.log(\`From \${msg.senderNametag}: \${msg.content}\`);
 });
 
-// Listen for messages
-sphere.on.msg((msg) => {
-  if (msg.type === "accepted") {
-    // Trigger payment
-    await sphere.send(msg.currency, msg.price, msg.from);
-  }
+// Get all conversations
+const conversations = sphere.communications.getConversations();
+conversations.forEach((messages, peer) => {
+  console.log(\`\${peer}: \${messages.length} messages\`);
+});
+
+// Broadcast to a topic
+await sphere.communications.broadcast('New listing available!', ['marketplace']);
+
+// Listen for broadcasts
+sphere.communications.onBroadcast((msg) => {
+  console.log(\`Broadcast: \${msg.content}\`);
 });`,
-      features: ['End-to-end encrypted', 'P2P via Nostr', 'Agent-to-agent native', 'Structured payloads']
+      features: ['End-to-end encrypted', 'P2P via Nostr', 'Group chat (NIP-29)', 'Broadcast messages']
     },
-    agents: {
-      icon: '🤖',
-      title: 'Agents',
-      tagline: 'Intent-based or direct. Your choice.',
-      description: 'Register high-level intents for autonomous matching, or discover and invoke agents directly.',
+    market: {
+      icon: '\u{1F6D2}',
+      title: 'Market',
+      tagline: 'Post intents. Find matches.',
+      description: 'Intent bulletin board for buy/sell/service intents. Semantic search. Live WebSocket feed.',
       color: 'from-cyan-500 to-blue-500',
-      code: `await sphere.intent("buy", { item: "gold-1oz", maxPrice: 2100 });`,
-      fullExample: `// High-level intent (autonomous matching)
-const intent = await sphere.intent("buy", {
-  category: "tickets",
-  event: "World Cup 2026",
-  maxPrice: 2000
+      code: `await sphere.market.postIntent({ description: '...', intentType: 'sell' });`,
+      fullExample: `// Post a sell intent
+const result = await sphere.market.postIntent({
+  description: 'PSA-10 Charizard card - Mint condition',
+  intentType: 'sell',
+  category: 'collectibles',
+  price: 12000,
+  currency: 'ALPHA',
 });
-intent.onMatch((match) => {
-  console.log(\`Found: \${match.description} - \${match.price}\`);
-  match.approve(); // Auto-execute
-});
+console.log('Intent posted:', result.intentId);
 
-// Direct agent discovery
-const sellers = await sphere.discover("ticket resellers");
-
-// Direct invocation (P2P)
-await sphere.invoke(sellers[0].id, "buy", {
-  item: "World Cup ticket",
-  maxPrice: 2000
+// Search the marketplace
+const results = await sphere.market.search('charizard card');
+results.intents.forEach(intent => {
+  console.log(\`\${intent.description} - \${intent.price} \${intent.currency}\`);
 });
 
-// Advertise your own capabilities
-sphere.advertise({
-  capabilities: ["sell_collectibles"],
-  fee: { currency: "USDC", percent: 1 }
-});`,
-      features: ['Intent-based matching', 'P2P discovery', 'Direct invocation', 'Capability advertising']
+// Subscribe to live feed
+const unsubscribe = sphere.market.subscribeFeed((listing) => {
+  console.log('New listing:', listing.description);
+});
+
+// Get your own intents
+const myIntents = await sphere.market.getMyIntents();`,
+      features: ['Intent bulletin board', 'Semantic search', 'Live WebSocket feed', 'Buy/sell/service intents']
     }
   };
 
-  const marketplaceCode = `// Initialize with your keypair (no API key needed!)
-const sphere = await Sphere.init({
-  mode: 'trusted',
-  mnemonic: process.env.WALLET_MNEMONIC
+  const marketplaceCode = `import { Sphere } from '@unicitylabs/sphere-sdk';
+import { createBrowserProviders } from '@unicitylabs/sphere-sdk/impl/browser';
+
+// Initialize wallet with providers
+const providers = createBrowserProviders({ network: 'testnet' });
+const { sphere } = await Sphere.init({ ...providers, mnemonic: '...' });
+
+// Post a sell intent to the marketplace
+await sphere.market.postIntent({
+  description: 'PSA-10 Charizard - Mint condition',
+  intentType: 'sell',
+  price: 12000,
+  currency: 'ALPHA',
 });
 
-// Create a listing
-async function list(item, price) {
-  return sphere.listing.create({ item, price, seller: sphere.address });
-}
+// Search for items
+const results = await sphere.market.search('charizard card');
 
-// Make an offer
-async function offer(listingId, price) {
-  const listing = await sphere.listing.get(listingId);
-  await sphere.msg(listing.seller, { type: "offer", listing: listingId, price });
-}
+// Message a seller to negotiate
+const seller = results.intents[0];
+await sphere.communications.sendDM(seller.agentPubkey, JSON.stringify({
+  type: 'offer', intentId: seller.id, price: 11000
+}));
 
-// Handle offers automatically
-sphere.on.msg(async (msg) => {
-  if (msg.type === "offer" && msg.price >= listing.price) {
-    await sphere.escrow({ token: "USDC", amount: msg.price, to: sphere.address });
-    await sphere.msg(msg.from, { type: "accepted" });
+// Listen for DMs and handle accepted offers
+sphere.communications.onDirectMessage(async (msg) => {
+  const data = JSON.parse(msg.content);
+  if (data.type === 'accepted') {
+    await sphere.payments.send({
+      coinId: '0x...', amount: String(data.price), recipient: msg.senderPubkey,
+    });
   }
-});
-
-// That's it. You have a marketplace.`;
+});`;
 
   return (
     <motion.div
@@ -258,7 +278,7 @@ sphere.on.msg(async (msg) => {
                     onClick={() => copyToClipboard(apis[activeApi].code, 'oneliner')}
                     className="text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-white transition"
                   >
-                    {copiedIndex === 'oneliner' ? '✓ Copied' : 'Copy'}
+                    {copiedIndex === 'oneliner' ? '\u2713 Copied' : 'Copy'}
                   </button>
                 </div>
                 <pre className="text-base sm:text-lg font-mono overflow-x-auto">
@@ -274,7 +294,7 @@ sphere.on.msg(async (msg) => {
                     onClick={() => copyToClipboard(apis[activeApi].fullExample, 'full')}
                     className="text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-white transition"
                   >
-                    {copiedIndex === 'full' ? '✓ Copied' : 'Copy'}
+                    {copiedIndex === 'full' ? '\u2713 Copied' : 'Copy'}
                   </button>
                 </div>
                 <pre className="text-sm font-mono text-neutral-700 dark:text-neutral-300 overflow-x-auto">
@@ -289,8 +309,8 @@ sphere.on.msg(async (msg) => {
         <section className="px-4 sm:px-6 py-12 sm:py-16">
           <div className="max-w-6xl mx-auto">
             <div className="text-center mb-10 sm:mb-12">
-              <h2 className="text-2xl sm:text-3xl font-bold mb-4">A Complete Marketplace in 25 Lines</h2>
-              <p className="text-neutral-600 dark:text-neutral-400">Listings, offers, negotiation, escrow, settlement. All of it.</p>
+              <h2 className="text-2xl sm:text-3xl font-bold mb-4">A Complete Marketplace in 30 Lines</h2>
+              <p className="text-neutral-600 dark:text-neutral-400">Intents, search, negotiation, payment. All of it.</p>
             </div>
 
             <div className="bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-200 dark:border-neutral-700 overflow-hidden shadow-xl">
@@ -300,12 +320,12 @@ sphere.on.msg(async (msg) => {
                   <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
                   <div className="w-3 h-3 rounded-full bg-green-500"></div>
                 </div>
-                <span className="text-xs text-neutral-500 font-mono">marketplace.js</span>
+                <span className="text-xs text-neutral-500 font-mono">marketplace.ts</span>
                 <button
                   onClick={() => copyToClipboard(marketplaceCode, 'marketplace')}
                   className="text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-white transition"
                 >
-                  {copiedIndex === 'marketplace' ? '✓ Copied' : 'Copy'}
+                  {copiedIndex === 'marketplace' ? '\u2713 Copied' : 'Copy'}
                 </button>
               </div>
               <pre className="p-4 sm:p-6 text-sm font-mono text-neutral-700 dark:text-neutral-300 overflow-x-auto">
@@ -323,23 +343,23 @@ sphere.on.msg(async (msg) => {
               <div className="bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8">
                 <h3 className="text-lg font-semibold mb-6 text-neutral-500 dark:text-neutral-400">Traditional Stack</h3>
                 <ul className="space-y-4 text-neutral-500">
-                  <li className="flex items-center gap-3"><span className="text-red-400">✗</span> API key management</li>
-                  <li className="flex items-center gap-3"><span className="text-red-400">✗</span> Gas fee estimation</li>
-                  <li className="flex items-center gap-3"><span className="text-red-400">✗</span> Wallet integration</li>
-                  <li className="flex items-center gap-3"><span className="text-red-400">✗</span> Payment rails</li>
-                  <li className="flex items-center gap-3"><span className="text-red-400">✗</span> Messaging infra</li>
-                  <li className="flex items-center gap-3"><span className="text-red-400">✗</span> Months to MVP</li>
+                  <li className="flex items-center gap-3"><span className="text-red-400">{'\u2717'}</span> API key management</li>
+                  <li className="flex items-center gap-3"><span className="text-red-400">{'\u2717'}</span> Gas fee estimation</li>
+                  <li className="flex items-center gap-3"><span className="text-red-400">{'\u2717'}</span> Wallet integration</li>
+                  <li className="flex items-center gap-3"><span className="text-red-400">{'\u2717'}</span> Payment rails</li>
+                  <li className="flex items-center gap-3"><span className="text-red-400">{'\u2717'}</span> Messaging infra</li>
+                  <li className="flex items-center gap-3"><span className="text-red-400">{'\u2717'}</span> Months to MVP</li>
                 </ul>
               </div>
               <div className="bg-linear-to-br from-orange-500/10 to-amber-500/10 dark:from-orange-500/20 dark:to-amber-500/10 rounded-2xl border border-orange-500/30 p-6 sm:p-8">
                 <h3 className="text-lg font-semibold mb-6 text-orange-500">Sphere SDK</h3>
                 <ul className="space-y-4">
-                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> Private key IS identity</li>
-                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> Included (off-chain)</li>
-                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> Unified Unicity ID</li>
-                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> Just call <code className="text-amber-600 dark:text-amber-400 text-sm">send()</code></li>
-                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> Built-in P2P</li>
-                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">✓</span> <strong>Days</strong></li>
+                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">{'\u2713'}</span> Private key IS identity</li>
+                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">{'\u2713'}</span> Included (off-chain)</li>
+                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">{'\u2713'}</span> Unified Unicity ID</li>
+                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">{'\u2713'}</span> Just call <code className="text-amber-600 dark:text-amber-400 text-sm">payments.send()</code></li>
+                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">{'\u2713'}</span> Built-in P2P messaging</li>
+                  <li className="flex items-center gap-3 text-neutral-700 dark:text-neutral-200"><span className="text-green-500">{'\u2713'}</span> <strong>Days</strong></li>
                 </ul>
               </div>
             </div>
@@ -355,9 +375,9 @@ sphere.on.msg(async (msg) => {
             <div className="bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-200 dark:border-neutral-700 p-6 sm:p-8 mb-8 sm:mb-10 shadow-xl">
               <pre className="text-left font-mono text-sm mb-6 overflow-x-auto">
                 <code className="text-neutral-500"># Install the SDK</code>{'\n'}
-                <code className="text-amber-600 dark:text-amber-400">npm install @agentsphere/sdk</code>{'\n\n'}
-                <code className="text-neutral-500"># Generate a keypair (your identity)</code>{'\n'}
-                <code className="text-amber-600 dark:text-amber-400">npx sphere-keygen</code>
+                <code className="text-amber-600 dark:text-amber-400">npm install @unicitylabs/sphere-sdk</code>{'\n\n'}
+                <code className="text-neutral-500"># Generate a mnemonic (your identity seed)</code>{'\n'}
+                <code className="text-amber-600 dark:text-amber-400">Sphere.generateMnemonic()</code>
               </pre>
               <div className="flex gap-4 justify-center flex-wrap">
                 <Link
@@ -367,26 +387,25 @@ sphere.on.msg(async (msg) => {
                   View Documentation
                 </Link>
                 <a
-                  href="#"
+                  href="https://github.com/unicitynetwork/sphere-sdk"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-white px-8 py-4 rounded-xl font-semibold text-lg hover:border-neutral-400 dark:hover:border-neutral-500 transition"
                 >
-                  Generate Keypair
+                  GitHub
                 </a>
               </div>
             </div>
 
             <div className="flex justify-center gap-6 sm:gap-8 text-neutral-600 dark:text-neutral-400 flex-wrap">
               <Link to="/developers/docs" className="hover:text-orange-500 transition flex items-center gap-2">
-                <span>📖</span> Documentation
+                <span>{'\u{1F4D6}'}</span> Documentation
               </Link>
               <a href="https://discord.gg/S9f57ZKdt" target="_blank" rel="noopener noreferrer" className="hover:text-orange-500 transition flex items-center gap-2">
-                <span>💬</span> Discord
+                <span>{'\u{1F4AC}'}</span> Discord
               </a>
               <a href="https://github.com/unicitynetwork" target="_blank" rel="noopener noreferrer" className="hover:text-orange-500 transition flex items-center gap-2">
-                <span>🐙</span> GitHub
-              </a>
-              <a href="#" className="hover:text-orange-500 transition flex items-center gap-2">
-                <span>💰</span> Grants
+                <span>{'\u{1F419}'}</span> GitHub
               </a>
             </div>
           </div>
