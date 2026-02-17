@@ -98,8 +98,9 @@ export function MiniChatBubbles() {
     // Show all conversations EXCEPT:
     // - dismissed ones (closed with ×)
     // - ones that have visible windows (open and not minimized)
+    // Only show bubbles for conversations with unread messages
     return sortedConversations
-      .filter((c) => !dismissedIds.has(c.peerPubkey) && !visibleWindowIds.has(c.peerPubkey))
+      .filter((c) => c.unreadCount > 0 && !dismissedIds.has(c.peerPubkey) && !visibleWindowIds.has(c.peerPubkey))
       .slice(0, MAX_VISIBLE_BUBBLES);
   }, [sortedConversations, openWindowIds, minimizedWindowIds, dismissedWindowIds]);
 
@@ -119,7 +120,9 @@ export function MiniChatBubbles() {
           <MessageCircle className="w-5 h-5" />
 
           {totalUnreadCount > 0 && !isListExpanded && (
-            <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-orange-500 shadow-md" />
+            <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-blue-500 text-white shadow-md">
+              {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
+            </span>
           )}
         </button>
 

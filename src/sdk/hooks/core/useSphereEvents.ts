@@ -64,6 +64,7 @@ export function useSphereEvents(): void {
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.l1.all });
       // Invalidate all chat queries so UI re-fetches for the new address
       queryClient.invalidateQueries({ queryKey: ['chat'] });
+      queryClient.invalidateQueries({ queryKey: ['groupChat'] });
     };
 
     const handleSyncCompleted = invalidatePayments;
