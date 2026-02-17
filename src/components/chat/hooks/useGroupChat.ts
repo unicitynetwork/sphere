@@ -107,9 +107,6 @@ export const useGroupChat = (): UseGroupChatReturn => {
   const [messageInput, setMessageInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [messageLimit, setMessageLimit] = useState(20);
-
-  const autoJoinAttempted = useRef(false);
-
   // Address-scoped selected group key
   const selectedGroupKey = `${STORAGE_KEYS.CHAT_SELECTED_GROUP}_${addressId}`;
 
@@ -121,7 +118,6 @@ export const useGroupChat = (): UseGroupChatReturn => {
       setSelectedGroup(null);
       setSearchQuery('');
       setMessageLimit(20);
-      autoJoinAttempted.current = false;
     }
   }, [addressId]);
 
@@ -204,27 +200,38 @@ export const useGroupChat = (): UseGroupChatReturn => {
     enabled: !!groupChat && isGroupChatConnected,
   });
 
-  // Restore selected group from localStorage when groups are loaded, fallback to "General"
+  // Restore selected group from localStorage when groups are loaded, fallback to "General".
+  // Also fetches messages from relay when the local cache is empty — fixes mobile layout
+  // showing stale/old messages (auto-select previously skipped the fetch path).
   useEffect(() => {
     if (!groupsQuery.data || groupsQuery.data.length === 0 || selectedGroup) return;
+    if (!groupChat) return;
+
+    let target: GroupData | undefined;
 
     const savedGroupId = localStorage.getItem(selectedGroupKey);
     if (savedGroupId) {
-      const savedGroup = groupsQuery.data.find((g) => g.id === savedGroupId);
-      if (savedGroup) {
-        setSelectedGroup(savedGroup);
-        return;
+      target = groupsQuery.data.find((g) => g.id === savedGroupId);
+    }
+    if (!target) {
+      target = groupsQuery.data.find((g) => g.name?.toLowerCase() === 'general');
+    }
+
+    if (target) {
+      setSelectedGroup(target);
+      localStorage.setItem(selectedGroupKey, target.id);
+      groupChat.markGroupAsRead(target.id);
+
+      // Fetch messages from relay if none exist locally (same as selectGroup)
+      const localMessages = groupChat.getMessages(target.id);
+      if (localMessages.length === 0) {
+        const groupId = target.id;
+        groupChat.fetchMessages(groupId).then(() => {
+          queryClient.invalidateQueries({ queryKey: KEYS.messages(groupId) });
+        });
       }
     }
-    // Fallback: auto-select "General" group
-    const generalGroup = groupsQuery.data.find(
-      (g) => g.name?.toLowerCase() === 'general'
-    );
-    if (generalGroup) {
-      setSelectedGroup(generalGroup);
-      localStorage.setItem(selectedGroupKey, generalGroup.id);
-    }
-  }, [groupsQuery.data, selectedGroup, selectedGroupKey]);
+  }, [groupsQuery.data, selectedGroup, selectedGroupKey, groupChat, queryClient, KEYS]);
 
   // Query available groups (for discovery)
   const availableGroupsQuery = useQuery({
@@ -236,30 +243,6 @@ export const useGroupChat = (): UseGroupChatReturn => {
     staleTime: 60000,
     enabled: !!groupChat && isGroupChatConnected,
   });
-
-  // Auto-join "General" if not already a member
-  useEffect(() => {
-    if (!groupChat || !isGroupChatConnected || autoJoinAttempted.current) return;
-    if (!groupsQuery.data || !availableGroupsQuery.data) return;
-
-    const alreadyJoined = groupsQuery.data.some(
-      (g) => g.name?.toLowerCase() === 'general'
-    );
-    if (alreadyJoined) return;
-
-    const generalAvailable = availableGroupsQuery.data.find(
-      (g) => g.name?.toLowerCase() === 'general'
-    );
-    if (!generalAvailable) return;
-
-    autoJoinAttempted.current = true;
-    groupChat.joinGroup(generalAvailable.id).then(() => {
-      queryClient.invalidateQueries({ queryKey: KEYS.groups });
-      queryClient.invalidateQueries({ queryKey: KEYS.available });
-    }).catch((err) => {
-      console.error('[useGroupChat] Auto-join General failed:', err);
-    });
-  }, [groupChat, isGroupChatConnected, groupsQuery.data, availableGroupsQuery.data, queryClient, KEYS]);
 
   // Reset message limit when switching groups
   useEffect(() => {

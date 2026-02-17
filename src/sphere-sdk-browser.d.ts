@@ -38,6 +38,8 @@ declare module '@unicitylabs/sphere-sdk/impl/browser' {
     l1?: Record<string, unknown>;
     price?: PriceProvider;
     ipfsTokenStorage?: TokenStorageProvider<TxfStorageDataBase>;
+    groupChat?: Record<string, unknown> | boolean;
+    market?: Record<string, unknown> | boolean;
     tokenSyncConfig?: Record<string, unknown>;
   }
 
