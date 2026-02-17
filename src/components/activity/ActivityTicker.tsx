@@ -18,7 +18,23 @@ export function ActivityTicker() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   if (listings.length === 0) {
-    return null;
+    return (
+      <div className="flex items-center gap-2 px-2 sm:px-3 py-1 bg-neutral-50/80 dark:bg-neutral-900/40 border-b border-neutral-200/50 dark:border-neutral-800/30 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className="relative flex items-center justify-center">
+            <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+            <div className="absolute w-1.5 h-1.5 rounded-full bg-orange-400 animate-ping opacity-75" />
+          </div>
+          <span className="text-[10px] font-semibold text-orange-600 dark:text-orange-400 uppercase tracking-wider">Live</span>
+        </div>
+        <div className="h-3 w-px bg-neutral-300 dark:bg-neutral-700 shrink-0" />
+        <div className="flex items-center gap-1.5">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-5 w-24 rounded-full bg-neutral-200/60 dark:bg-neutral-700/40 animate-pulse" />
+          ))}
+        </div>
+      </div>
+    );
   }
 
   const toggleExpand = (id: string) => {

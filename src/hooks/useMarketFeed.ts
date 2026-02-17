@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useSphereContext } from '../sdk/hooks/core/useSphere';
+
+const MARKET_API_URL = 'https://market-api.unicity.network';
+const MARKET_WS_URL = 'wss://market-api.unicity.network/ws/feed';
 
 // Local mirror of SDK FeedListing (SDK doesn't export feed types)
 export interface FeedListing {
@@ -34,24 +36,26 @@ export interface UseMarketFeedReturn {
 }
 
 export function useMarketFeed(): UseMarketFeedReturn {
-  const { sphere } = useSphereContext();
   const [realtimeListings, setRealtimeListings] = useState<FeedListing[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [newListingIds, setNewListingIds] = useState<Set<string>>(new Set());
-  const unsubRef = useRef<(() => void) | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
-  // Fetch initial listings via REST
+  // Fetch initial listings via REST — no SDK dependency, starts immediately
   const { data: initialListings } = useQuery({
     queryKey: ['market', 'feed', 'recent'],
     queryFn: async () => {
-      if (!sphere?.market) return [];
-      return sphere.market.getRecentListings() as Promise<FeedListing[]>;
+      const res = await fetch(`${MARKET_API_URL}/api/feed/recent`, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data.listings ?? []) as FeedListing[];
     },
-    enabled: !!sphere?.market,
     staleTime: 60000,
   });
 
-  // Subscribe to WebSocket feed
+  // Subscribe to WebSocket feed — no SDK dependency, connects immediately
   const handleFeedMessage = useCallback((msg: FeedMessage) => {
     if (msg.type === 'initial') {
       setRealtimeListings(msg.listings.slice(0, MAX_LISTINGS));
@@ -75,19 +79,24 @@ export function useMarketFeed(): UseMarketFeedReturn {
   }, []);
 
   useEffect(() => {
-    if (!sphere?.market) return;
+    const ws = new WebSocket(MARKET_WS_URL);
+    wsRef.current = ws;
 
-    unsubRef.current = sphere.market.subscribeFeed(
-      handleFeedMessage as (msg: unknown) => void,
-    );
-    setIsConnected(true);
+    ws.onopen = () => setIsConnected(true);
+    ws.onmessage = (event) => {
+      try {
+        const raw = JSON.parse(typeof event.data === 'string' ? event.data : event.data.toString());
+        handleFeedMessage(raw as FeedMessage);
+      } catch { /* ignore malformed messages */ }
+    };
+    ws.onclose = () => setIsConnected(false);
 
     return () => {
-      unsubRef.current?.();
-      unsubRef.current = null;
+      ws.close();
+      wsRef.current = null;
       setIsConnected(false);
     };
-  }, [sphere, handleFeedMessage]);
+  }, [handleFeedMessage]);
 
   // Merge: realtime first, then fill from REST (dedup by id)
   const seenIds = new Set<string>();

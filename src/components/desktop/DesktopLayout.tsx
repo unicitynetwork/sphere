@@ -23,7 +23,7 @@ const CUSTOM_URL_PRESETS = [
 export function DesktopLayout() {
   const { openTabs, activeTabId, openTab } = useDesktopState();
   const [customUrlInput, setCustomUrlInput] = useState('');
-  const [walletOpen, setWalletOpen] = useState(true);
+  const [walletOpen, setWalletOpen] = useState(() => window.matchMedia('(min-width: 1024px)').matches);
 
   // Auto-open wallet panel when payment request arrives
   useEffect(() => {
@@ -197,7 +197,7 @@ export function DesktopLayout() {
                 animate={{ x: 0 }}
                 exit={{ x: '100%' }}
                 transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                className="lg:hidden absolute right-0 inset-y-0 w-80 z-50"
+                className="lg:hidden absolute inset-0 z-50"
               >
                 <WalletPanel />
               </motion.div>

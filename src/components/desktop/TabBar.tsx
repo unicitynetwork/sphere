@@ -12,18 +12,23 @@ export function TabBar({ walletOpen, onToggleWallet }: TabBarProps) {
   const { openTabs, activeTabId, activateTab, closeTab, showDesktop } = useDesktopState();
 
   return (
-    <div className="flex items-center gap-0.5 sm:gap-1 px-1 sm:px-3 py-1 bg-white/60 dark:bg-neutral-900/60 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800/50 shrink-0 overflow-x-auto scrollbar-hide">
+    <div className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 bg-white/60 dark:bg-neutral-900/60 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800/50 shrink-0 overflow-x-auto scrollbar-hide">
       {/* Show Desktop button */}
       <button
-        onClick={showDesktop}
-        className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors duration-150 shrink-0 ${
+        onClick={() => {
+          showDesktop();
+          if (walletOpen && onToggleWallet && !window.matchMedia('(min-width: 1024px)').matches) {
+            onToggleWallet();
+          }
+        }}
+        className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors duration-150 shrink-0 ${
           activeTabId === null
             ? 'bg-orange-500/15 text-orange-500'
             : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 hover:bg-neutral-200/60 dark:hover:bg-neutral-700/40'
         }`}
         title="Show Desktop"
       >
-        <LayoutGrid className="w-3.5 h-3.5" />
+        <LayoutGrid className="w-4 h-4" />
       </button>
 
       {openTabs.length > 0 && (
@@ -41,13 +46,13 @@ export function TabBar({ walletOpen, onToggleWallet }: TabBarProps) {
             key={tab.id}
             layout
             onClick={() => activateTab(tab.id)}
-            className={`relative flex items-center gap-1 px-1.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg transition-colors duration-150 shrink-0 ${
+            className={`relative flex items-center gap-1.5 px-2 sm:px-3 py-2 text-xs font-medium rounded-lg transition-colors duration-150 shrink-0 ${
               isActive
                 ? 'bg-orange-500 text-white shadow-sm'
                 : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200/60 dark:hover:bg-neutral-700/40'
             }`}
           >
-            {TabIcon && <TabIcon className="w-3.5 h-3.5" />}
+            {TabIcon && <TabIcon className="w-4 h-4" />}
             <span className="max-w-24 truncate hidden sm:inline">{tab.label}</span>
             <span
               role="button"
@@ -74,14 +79,14 @@ export function TabBar({ walletOpen, onToggleWallet }: TabBarProps) {
           <div className="ml-auto" />
           <button
             onClick={onToggleWallet}
-            className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors duration-150 shrink-0 ${
+            className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors duration-150 shrink-0 ${
               walletOpen
                 ? 'bg-orange-500/15 text-orange-500'
                 : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 hover:bg-neutral-200/60 dark:hover:bg-neutral-700/40'
             }`}
             title={walletOpen ? 'Hide Wallet' : 'Show Wallet'}
           >
-            <Wallet className="w-3.5 h-3.5" />
+            <Wallet className="w-4 h-4" />
           </button>
         </>
       )}
