@@ -13,7 +13,7 @@ import { ToastContainer } from './components/ui/Toast'
 import mixpanel from 'mixpanel-browser'
 
 
-mixpanel.init('19d06212425213a4eeb34337016d0186', {
+mixpanel.init(import.meta.env.VITE_MIXPANEL_TOKEN || '19d06212425213a4eeb34337016d0186', {
   autocapture: true,
   record_sessions_percent: 100,
   api_host: 'https://api-eu.mixpanel.com',

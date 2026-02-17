@@ -66,7 +66,7 @@ export class TransactionHistoryService {
       const json = localStorage.getItem(STORAGE_KEYS.TRANSACTION_HISTORY);
       if (json) {
         this._history = JSON.parse(json);
-        console.log(`📜 [TransactionHistory] Loaded ${this._history.length} entries`);
+        if (import.meta.env.DEV) console.log(`📜 [TransactionHistory] Loaded ${this._history.length} entries`);
       }
     } catch (error) {
       console.error('[TransactionHistory] Failed to load from storage:', error);
@@ -147,7 +147,7 @@ export class TransactionHistoryService {
 
     // Deduplicate: skip if similar entry already exists
     if (this.isDuplicate(entry)) {
-      console.log(`📜 [TransactionHistory] Skipping duplicate ${entry.type}: ${entry.amount} ${entry.symbol}`);
+      if (import.meta.env.DEV) console.log(`📜 [TransactionHistory] Skipping duplicate ${entry.type}: ${entry.amount} ${entry.symbol}`);
       // Return a fake entry to satisfy return type - caller doesn't usually need it
       return { id: 'duplicate', ...entry };
     }
@@ -160,7 +160,7 @@ export class TransactionHistoryService {
     this._history.push(historyEntry);
     this.saveToStorage();
 
-    console.log(`📜 [TransactionHistory] Added ${entry.type} transaction: ${entry.amount} ${entry.symbol}`);
+    if (import.meta.env.DEV) console.log(`📜 [TransactionHistory] Added ${entry.type} transaction: ${entry.amount} ${entry.symbol}`);
 
     // Dispatch event for UI updates
     window.dispatchEvent(new Event('transaction-history-updated'));
@@ -222,7 +222,7 @@ export class TransactionHistoryService {
     this._history = [];
     this.saveToStorage();
     window.dispatchEvent(new Event('transaction-history-updated'));
-    console.log('📜 [TransactionHistory] Cleared all history');
+    if (import.meta.env.DEV) console.log('📜 [TransactionHistory] Cleared all history');
   }
 
   /**
@@ -239,7 +239,7 @@ export class TransactionHistoryService {
     this._history = this._history.slice(0, keepCount);
     this.saveToStorage();
 
-    console.log(`📜 [TransactionHistory] Pruned ${removed} old entries`);
+    if (import.meta.env.DEV) console.log(`📜 [TransactionHistory] Pruned ${removed} old entries`);
     return removed;
   }
 
@@ -280,7 +280,7 @@ export class TransactionHistoryService {
     if (imported > 0) {
       this.saveToStorage();
       window.dispatchEvent(new Event('transaction-history-updated'));
-      console.log(`📜 [TransactionHistory] Imported ${imported} entries`);
+      if (import.meta.env.DEV) console.log(`📜 [TransactionHistory] Imported ${imported} entries`);
     }
 
     return imported;

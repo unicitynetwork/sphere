@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Loader2, User, CheckCircle, Hash, Receipt } from 'lucide-react';
@@ -193,9 +192,9 @@ export function SendPaymentRequestModal({ isOpen, onClose, prefill }: SendPaymen
 
       setRequestId(result.requestId || null);
       setStep('success');
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      setError(e.message || 'Failed to send payment request');
+      setError(e instanceof Error ? e.message : 'Failed to send payment request');
       setStep('confirm');
     }
   };

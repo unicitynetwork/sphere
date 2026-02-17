@@ -158,3 +158,7 @@ export const CHAT_KEYS = {
   messages: (addressId: string, peerPubkey: string) => ['chat', 'messages', addressId, peerPubkey] as const,
   unreadCount: (addressId: string) => ['chat', 'unreadCount', addressId] as const,
 };
+
+export const GROUP_CHAT_KEYS = {
+  all: ['groupChat'] as const,
+};

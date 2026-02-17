@@ -11,7 +11,7 @@ interface ProcessingScreenProps {
 }
 
 export function ProcessingScreen({ status, isComplete = false, onComplete }: ProcessingScreenProps) {
-  console.log('🖥️ ProcessingScreen render:', { status, isComplete, hasOnComplete: !!onComplete });
+  if (import.meta.env.DEV) console.log('🖥️ ProcessingScreen render:', { status, isComplete, hasOnComplete: !!onComplete });
 
   return (
     <motion.div

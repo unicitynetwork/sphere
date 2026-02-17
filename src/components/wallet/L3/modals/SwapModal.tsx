@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowDownUp, Loader2, TrendingUp, CheckCircle, ArrowDown } from 'lucide-react';
@@ -164,9 +163,9 @@ export function SwapModal({ isOpen, onClose }: SwapModalProps) {
       );
 
       setStep('success');
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('Swap failed:', e);
-      setError(e.message || 'Swap failed');
+      setError(e instanceof Error ? e.message : 'Swap failed');
       setStep('swap');
     }
   };

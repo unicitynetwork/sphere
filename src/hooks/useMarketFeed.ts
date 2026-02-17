@@ -84,6 +84,7 @@ export function useMarketFeed(): UseMarketFeedReturn {
   useEffect(() => {
     const ws = new WebSocket(MARKET_WS_URL);
     wsRef.current = ws;
+    const timers = newListingTimersRef.current;
 
     ws.onopen = () => setIsConnected(true);
     ws.onmessage = (event) => {
@@ -99,8 +100,8 @@ export function useMarketFeed(): UseMarketFeedReturn {
       wsRef.current = null;
       setIsConnected(false);
       // Clear all pending new-listing timers
-      newListingTimersRef.current.forEach(clearTimeout);
-      newListingTimersRef.current.clear();
+      timers.forEach(clearTimeout);
+      timers.clear();
     };
   }, [handleFeedMessage]);
 

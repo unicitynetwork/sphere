@@ -4,7 +4,7 @@ import { useSphereContext } from './useSphere';
 import { SPHERE_KEYS } from '../../queryKeys';
 import { formatAmount } from '../../index';
 import { showToast } from '../../../components/ui/toast-utils';
-import type { DmReceivedDetail } from '../../../components/chat/data/chatTypes';
+import { CHAT_KEYS, GROUP_CHAT_KEYS, type DmReceivedDetail } from '../../../components/chat/data/chatTypes';
 import type { IncomingTransfer } from '@unicitylabs/sphere-sdk';
 
 // SDK DM shape (local mirror — SDK DTS not always available)
@@ -63,8 +63,8 @@ export function useSphereEvents(): void {
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.payments.all });
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.l1.all });
       // Invalidate all chat queries so UI re-fetches for the new address
-      queryClient.invalidateQueries({ queryKey: ['chat'] });
-      queryClient.invalidateQueries({ queryKey: ['groupChat'] });
+      queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: GROUP_CHAT_KEYS.all });
     };
 
     const handleSyncCompleted = invalidatePayments;
@@ -78,7 +78,7 @@ export function useSphereEvents(): void {
       const peerPubkey = isFromMe ? dm.recipientPubkey : dm.senderPubkey;
 
       // Invalidate chat queries so UI re-reads from SDK
-      queryClient.invalidateQueries({ queryKey: ['chat'] });
+      queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
 
       // Dispatch lightweight event for UI components (useChat, MiniChatWindow)
       const detail: DmReceivedDetail = { peerPubkey, messageId: dm.id, isFromMe };
@@ -92,7 +92,7 @@ export function useSphereEvents(): void {
 
     // Bridge read receipts — SDK already updated isRead, just invalidate
     const handleMessageRead = () => {
-      queryClient.invalidateQueries({ queryKey: ['chat'] });
+      queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
     };
 
     // Bridge composing indicators to custom event

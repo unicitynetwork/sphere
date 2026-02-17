@@ -65,7 +65,7 @@ export function clearAllSphereData(): void {
     }
   }
   keysToRemove.forEach((key) => localStorage.removeItem(key));
-  console.log(`Cleared ${keysToRemove.length} sphere keys from localStorage`);
+  if (import.meta.env.DEV) console.log(`Cleared ${keysToRemove.length} sphere keys from localStorage`);
 }
 
 export type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS];

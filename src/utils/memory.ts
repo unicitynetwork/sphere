@@ -26,12 +26,12 @@ export function loadMemory(userId: string, activityId: string): MemoryState {
         const data = localStorage.getItem(key);
 
         if (!data) {
-            console.log(`[Memory] No stored memory for ${userId}:${activityId}`);
+            if (import.meta.env.DEV) console.log(`[Memory] No stored memory for ${userId}:${activityId}`);
             return {};
         }
 
         const parsed = JSON.parse(data);
-        console.log(`[Memory] Loaded memory for ${userId}:${activityId}:`, Object.keys(parsed));
+        if (import.meta.env.DEV) console.log(`[Memory] Loaded memory for ${userId}:${activityId}:`, Object.keys(parsed));
         return parsed;
     } catch (error) {
         console.warn('[Memory] Failed to load memory:', error);
@@ -53,7 +53,7 @@ export function saveMemory(
         const data = JSON.stringify(memoryState);
 
         localStorage.setItem(key, data);
-        console.log(`[Memory] Saved memory for ${userId}:${activityId}:`, Object.keys(memoryState));
+        if (import.meta.env.DEV) console.log(`[Memory] Saved memory for ${userId}:${activityId}:`, Object.keys(memoryState));
         return true;
     } catch (error) {
         // Handle quota exceeded errors
@@ -74,7 +74,7 @@ export function clearMemory(userId: string, activityId: string): void {
     try {
         const key = getMemoryKey(userId, activityId);
         localStorage.removeItem(key);
-        console.log(`[Memory] Cleared memory for ${userId}:${activityId}`);
+        if (import.meta.env.DEV) console.log(`[Memory] Cleared memory for ${userId}:${activityId}`);
     } catch (error) {
         console.warn('[Memory] Failed to clear memory:', error);
     }

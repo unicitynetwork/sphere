@@ -36,7 +36,7 @@ export function PaymentRequestsModal({ isOpen, onClose, requests, pendingCount, 
     setErrors(prev => ({ ...prev, [req.id]: '' }));
     try {
       const recipient = req.recipientNametag ? `@${req.recipientNametag}` : req.senderPubkey;
-      console.log(`Initiating payment for request ${req.requestId} to ${recipient}`);
+      if (import.meta.env.DEV) console.log(`Initiating payment for request ${req.requestId} to ${recipient}`);
       await transfer({
         recipient,
         amount: req.amount.toString(),

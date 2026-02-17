@@ -111,7 +111,7 @@ export function MerchChat({ agent }: MerchChatProps) {
       getMockResponse={getMockResponse}
       renderMessageCard={(cardData) => (
         <div className="mt-4 rounded-xl overflow-hidden border border-neutral-300 dark:border-neutral-600/50">
-          <img src={cardData.image} alt="" className="w-full h-28 object-cover" />
+          <img src={cardData.image} alt="" loading="lazy" className="w-full h-28 object-cover" />
         </div>
       )}
       actionConfig={{
@@ -146,7 +146,7 @@ export function MerchChat({ agent }: MerchChatProps) {
                     </div>
 
                     <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700 mb-4">
-                      <img src={pendingOrder.image} alt="" className="w-full h-32 object-cover" />
+                      <img src={pendingOrder.image} alt="" loading="lazy" className="w-full h-32 object-cover" />
                       <div className="p-4 bg-neutral-100 dark:bg-neutral-800">
                         <p className="text-neutral-900 dark:text-white font-medium">{pendingOrder.title}</p>
                         {pendingOrder.description && (

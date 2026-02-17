@@ -114,7 +114,7 @@ export function useAgentChat({ activityId, userId }: UseAgentChatOptions) {
         ? loadMemory(effectiveUserId, activityId)
         : {};
 
-      console.log('[useAgentChat] Sending memory state:', memoryState);
+      if (import.meta.env.DEV) console.log('[useAgentChat] Sending memory state:', memoryState);
 
       const apiKey = getAgentApiKey();
       const response = await fetch(`${apiUrl}/chat/stream`, {
