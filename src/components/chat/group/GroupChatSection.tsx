@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Hash, Menu, PanelLeft, ChevronDown, Users, Maximize2, Minimize2, X, Reply } from 'lucide-react';
+import { Hash, Menu, PanelLeft, ChevronDown, Users, Maximize2, Minimize2, X, Reply, Loader2 } from 'lucide-react';
 import type { GroupMessageData } from '@unicitylabs/sphere-sdk';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useGroupChat } from '../hooks/useGroupChat';
@@ -30,6 +30,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     leaveGroup,
     joinGroup,
     filteredGroups,
+    isLoadingGroups,
     availableGroups,
     isLoadingAvailable,
     refreshAvailableGroups,
@@ -37,6 +38,8 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     isLoadingMessages,
     sendMessage,
     isSending,
+    hasMore,
+    loadMore,
     messageInput,
     setMessageInput,
     searchQuery,
@@ -356,7 +359,16 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
         </div>
 
         {/* Messages */}
-        {selectedGroup ? (
+        {(!isConnected || isLoadingGroups) && !selectedGroup ? (
+          <div className="flex-1 flex items-center justify-center min-h-0">
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+            >
+              <Loader2 className="w-8 h-8 text-blue-500" />
+            </motion.div>
+          </div>
+        ) : selectedGroup ? (
           <GroupMessageList
             messages={messages}
             isLoading={isLoadingMessages}
@@ -365,6 +377,8 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
             onDeleteMessage={deleteMessage}
             isDeletingMessage={isDeleting}
             onReplyToMessage={handleReplyToMessage}
+            hasMore={hasMore}
+            loadMore={loadMore}
           />
         ) : (
           <div className="flex flex-col items-center justify-center text-center p-8 min-h-0">

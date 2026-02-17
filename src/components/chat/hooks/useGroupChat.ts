@@ -1,20 +1,31 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import type { GroupData, GroupMessageData, GroupMemberData, CreateGroupOptions } from '@unicitylabs/sphere-sdk';
 import { GroupVisibility } from '@unicitylabs/sphere-sdk';
 import { useServices } from '../../../contexts/useServices';
 import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
+import { useIdentity } from '../../../sdk/hooks/core/useIdentity';
 import { STORAGE_KEYS } from '../../../config/storageKeys';
 import { getGroupDisplayName } from '../utils/groupChatHelpers';
 
-const QUERY_KEYS = {
-  GROUPS: ['groupChat', 'groups'],
-  MESSAGES: (groupId: string) => ['groupChat', 'messages', groupId],
-  MEMBERS: (groupId: string) => ['groupChat', 'members', groupId],
-  AVAILABLE_GROUPS: ['groupChat', 'available'],
-  UNREAD_COUNT: ['groupChat', 'unreadCount'],
-  RELAY_ADMIN: ['groupChat', 'relayAdmin'],
-};
+function buildAddressId(directAddress: string): string {
+  let hash = directAddress;
+  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
+  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
+  const first = hash.slice(0, 6).toLowerCase();
+  const last = hash.slice(-6).toLowerCase();
+  return `DIRECT_${first}_${last}`;
+}
+
+const groupChatKeys = (addressId: string) => ({
+  all: ['groupChat', addressId] as const,
+  groups: ['groupChat', 'groups', addressId] as const,
+  messages: (groupId: string) => ['groupChat', 'messages', addressId, groupId] as const,
+  members: (groupId: string) => ['groupChat', 'members', addressId, groupId] as const,
+  available: ['groupChat', 'available', addressId] as const,
+  unreadCount: ['groupChat', 'unreadCount', addressId] as const,
+  relayAdmin: ['groupChat', 'relayAdmin', addressId] as const,
+});
 
 export interface UseGroupChatReturn {
   // Groups
@@ -35,6 +46,10 @@ export interface UseGroupChatReturn {
   isLoadingMessages: boolean;
   sendMessage: (content: string, replyToId?: string) => Promise<boolean>;
   isSending: boolean;
+
+  // Lazy loading
+  hasMore: boolean;
+  loadMore: () => void;
 
   // Members
   members: GroupMemberData[];
@@ -85,9 +100,30 @@ export const useGroupChat = (): UseGroupChatReturn => {
   const queryClient = useQueryClient();
   const { groupChat, isGroupChatConnected } = useServices();
   const { sphere } = useSphereContext();
+  const { directAddress } = useIdentity();
+  const addressId = directAddress ? buildAddressId(directAddress) : 'default';
+  const KEYS = useMemo(() => groupChatKeys(addressId), [addressId]);
   const [selectedGroup, setSelectedGroup] = useState<GroupData | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [messageLimit, setMessageLimit] = useState(20);
+
+  const autoJoinAttempted = useRef(false);
+
+  // Address-scoped selected group key
+  const selectedGroupKey = `${STORAGE_KEYS.CHAT_SELECTED_GROUP}_${addressId}`;
+
+  // Reset local state when address changes (address switch)
+  const prevAddressIdRef = useRef(addressId);
+  useEffect(() => {
+    if (prevAddressIdRef.current !== addressId) {
+      prevAddressIdRef.current = addressId;
+      setSelectedGroup(null);
+      setSearchQuery('');
+      setMessageLimit(20);
+      autoJoinAttempted.current = false;
+    }
+  }, [addressId]);
 
   // Ref to avoid event subscription churn on group selection changes
   const selectedGroupRef = useRef(selectedGroup);
@@ -98,14 +134,14 @@ export const useGroupChat = (): UseGroupChatReturn => {
     if (!sphere) return;
 
     const handleUpdate = () => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.GROUPS });
+      queryClient.invalidateQueries({ queryKey: KEYS.groups });
       const current = selectedGroupRef.current;
       if (current) {
         queryClient.invalidateQueries({
-          queryKey: QUERY_KEYS.MESSAGES(current.id),
+          queryKey: KEYS.messages(current.id),
         });
       }
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
+      queryClient.invalidateQueries({ queryKey: KEYS.unreadCount });
     };
 
     const handleMessage = (message: GroupMessageData) => {
@@ -113,17 +149,17 @@ export const useGroupChat = (): UseGroupChatReturn => {
       // If we're viewing this group, refetch messages and members
       if (current && message.groupId === current.id) {
         queryClient.invalidateQueries({
-          queryKey: QUERY_KEYS.MESSAGES(current.id),
+          queryKey: KEYS.messages(current.id),
         });
         queryClient.invalidateQueries({
-          queryKey: QUERY_KEYS.MEMBERS(current.id),
+          queryKey: KEYS.members(current.id),
         });
         // Auto-mark as read since user is viewing
         groupChat?.markGroupAsRead(current.id);
       }
       // Always refetch groups for updated last message
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.GROUPS });
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
+      queryClient.invalidateQueries({ queryKey: KEYS.groups });
+      queryClient.invalidateQueries({ queryKey: KEYS.unreadCount });
     };
 
     const handleKicked = (data: { groupId: string }) => {
@@ -148,62 +184,112 @@ export const useGroupChat = (): UseGroupChatReturn => {
     return () => {
       unsubs.forEach((unsub) => unsub());
     };
-  }, [sphere, queryClient, groupChat]);
+  }, [sphere, queryClient, groupChat, KEYS]);
 
   // Query joined groups
   const groupsQuery = useQuery({
-    queryKey: QUERY_KEYS.GROUPS,
+    queryKey: KEYS.groups,
     queryFn: () => {
       if (!groupChat) return [];
       const groups = groupChat.getGroups();
-      // Sort by last message time (descending)
-      return [...groups].sort(
-        (a, b) => (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0)
-      );
+      // Pin "General" first, then sort by last message time (descending)
+      return [...groups].sort((a, b) => {
+        const aGeneral = a.name?.toLowerCase() === 'general' ? 1 : 0;
+        const bGeneral = b.name?.toLowerCase() === 'general' ? 1 : 0;
+        if (aGeneral !== bGeneral) return bGeneral - aGeneral;
+        return (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0);
+      });
     },
     staleTime: 30000,
-    enabled: !!groupChat,
+    enabled: !!groupChat && isGroupChatConnected,
   });
 
-  // Restore selected group from localStorage when groups are loaded
+  // Restore selected group from localStorage when groups are loaded, fallback to "General"
   useEffect(() => {
-    if (groupsQuery.data && groupsQuery.data.length > 0 && !selectedGroup) {
-      const savedGroupId = localStorage.getItem(STORAGE_KEYS.CHAT_SELECTED_GROUP);
-      if (savedGroupId) {
-        const savedGroup = groupsQuery.data.find((g) => g.id === savedGroupId);
-        if (savedGroup) {
-          setSelectedGroup(savedGroup);
-        }
+    if (!groupsQuery.data || groupsQuery.data.length === 0 || selectedGroup) return;
+
+    const savedGroupId = localStorage.getItem(selectedGroupKey);
+    if (savedGroupId) {
+      const savedGroup = groupsQuery.data.find((g) => g.id === savedGroupId);
+      if (savedGroup) {
+        setSelectedGroup(savedGroup);
+        return;
       }
     }
-  }, [groupsQuery.data, selectedGroup]);
+    // Fallback: auto-select "General" group
+    const generalGroup = groupsQuery.data.find(
+      (g) => g.name?.toLowerCase() === 'general'
+    );
+    if (generalGroup) {
+      setSelectedGroup(generalGroup);
+      localStorage.setItem(selectedGroupKey, generalGroup.id);
+    }
+  }, [groupsQuery.data, selectedGroup, selectedGroupKey]);
 
   // Query available groups (for discovery)
   const availableGroupsQuery = useQuery({
-    queryKey: QUERY_KEYS.AVAILABLE_GROUPS,
+    queryKey: KEYS.available,
     queryFn: async () => {
       if (!groupChat) return [];
       return groupChat.fetchAvailableGroups();
     },
     staleTime: 60000,
-    enabled: !!groupChat,
+    enabled: !!groupChat && isGroupChatConnected,
   });
 
-  // Query messages for selected group
+  // Auto-join "General" if not already a member
+  useEffect(() => {
+    if (!groupChat || !isGroupChatConnected || autoJoinAttempted.current) return;
+    if (!groupsQuery.data || !availableGroupsQuery.data) return;
+
+    const alreadyJoined = groupsQuery.data.some(
+      (g) => g.name?.toLowerCase() === 'general'
+    );
+    if (alreadyJoined) return;
+
+    const generalAvailable = availableGroupsQuery.data.find(
+      (g) => g.name?.toLowerCase() === 'general'
+    );
+    if (!generalAvailable) return;
+
+    autoJoinAttempted.current = true;
+    groupChat.joinGroup(generalAvailable.id).then(() => {
+      queryClient.invalidateQueries({ queryKey: KEYS.groups });
+      queryClient.invalidateQueries({ queryKey: KEYS.available });
+    }).catch((err) => {
+      console.error('[useGroupChat] Auto-join General failed:', err);
+    });
+  }, [groupChat, isGroupChatConnected, groupsQuery.data, availableGroupsQuery.data, queryClient, KEYS]);
+
+  // Reset message limit when switching groups
+  useEffect(() => {
+    setMessageLimit(20);
+  }, [selectedGroup?.id]);
+
+  // Query messages for selected group with lazy loading
   const messagesQuery = useQuery({
-    queryKey: QUERY_KEYS.MESSAGES(selectedGroup?.id || ''),
+    queryKey: [...KEYS.messages(selectedGroup?.id || ''), messageLimit],
     queryFn: () => {
-      if (!selectedGroup || !groupChat) return [];
-      const messages = groupChat.getMessages(selectedGroup.id);
-      return [...messages].sort((a, b) => a.timestamp - b.timestamp);
+      if (!selectedGroup || !groupChat) return { messages: [] as GroupMessageData[], hasMore: false };
+      const allMessages = groupChat.getMessages(selectedGroup.id);
+      const sorted = [...allMessages].sort((a, b) => a.timestamp - b.timestamp);
+      const total = sorted.length;
+      const sliced = total > messageLimit ? sorted.slice(total - messageLimit) : sorted;
+      return { messages: sliced, hasMore: total > messageLimit };
     },
     enabled: !!selectedGroup && !!groupChat,
     staleTime: 10000,
+    placeholderData: keepPreviousData,
   });
+
+  // Load more messages
+  const loadMore = useCallback(() => {
+    setMessageLimit((prev) => prev + 20);
+  }, []);
 
   // Query members for selected group
   const membersQuery = useQuery({
-    queryKey: QUERY_KEYS.MEMBERS(selectedGroup?.id || ''),
+    queryKey: KEYS.members(selectedGroup?.id || ''),
     queryFn: () => {
       if (!selectedGroup || !groupChat) return [];
       const members = groupChat.getMembers(selectedGroup.id);
@@ -215,15 +301,15 @@ export const useGroupChat = (): UseGroupChatReturn => {
 
   // Query total unread count
   const unreadCountQuery = useQuery({
-    queryKey: QUERY_KEYS.UNREAD_COUNT,
+    queryKey: KEYS.unreadCount,
     queryFn: () => groupChat?.getTotalUnreadCount() ?? 0,
     staleTime: 30000,
-    enabled: !!groupChat,
+    enabled: !!groupChat && isGroupChatConnected,
   });
 
   // Query relay admin status
   const relayAdminQuery = useQuery({
-    queryKey: QUERY_KEYS.RELAY_ADMIN,
+    queryKey: KEYS.relayAdmin,
     queryFn: async () => {
       if (!groupChat) return false;
       return groupChat.isCurrentUserRelayAdmin();
@@ -239,9 +325,9 @@ export const useGroupChat = (): UseGroupChatReturn => {
       return groupChat.joinGroup(groupId, inviteCode);
     },
     onSuccess: (_, { groupId }) => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.GROUPS });
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.AVAILABLE_GROUPS });
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.MESSAGES(groupId) });
+      queryClient.invalidateQueries({ queryKey: KEYS.groups });
+      queryClient.invalidateQueries({ queryKey: KEYS.available });
+      queryClient.invalidateQueries({ queryKey: KEYS.messages(groupId) });
     },
   });
 
@@ -249,14 +335,21 @@ export const useGroupChat = (): UseGroupChatReturn => {
   const leaveGroupMutation = useMutation({
     mutationFn: async (groupId: string) => {
       if (!groupChat) throw new Error('Group chat not available');
-      return groupChat.leaveGroup(groupId);
+      const success = await groupChat.leaveGroup(groupId);
+      if (!success) throw new Error('Failed to leave group');
+      return true;
     },
     onSuccess: (_, groupId) => {
       if (selectedGroup?.id === groupId) {
         setSelectedGroup(null);
+        localStorage.removeItem(selectedGroupKey);
       }
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.GROUPS });
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.AVAILABLE_GROUPS });
+      queryClient.invalidateQueries({ queryKey: KEYS.groups });
+      queryClient.invalidateQueries({ queryKey: KEYS.available });
+      queryClient.invalidateQueries({ queryKey: KEYS.unreadCount });
+    },
+    onError: (err, groupId) => {
+      console.error(`[useGroupChat] Failed to leave group ${groupId}:`, err);
     },
   });
 
@@ -272,9 +365,9 @@ export const useGroupChat = (): UseGroupChatReturn => {
     onSuccess: () => {
       setMessageInput('');
       queryClient.invalidateQueries({
-        queryKey: QUERY_KEYS.MESSAGES(selectedGroup?.id || ''),
+        queryKey: KEYS.messages(selectedGroup?.id || ''),
       });
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.GROUPS });
+      queryClient.invalidateQueries({ queryKey: KEYS.groups });
     },
   });
 
@@ -283,21 +376,21 @@ export const useGroupChat = (): UseGroupChatReturn => {
     async (group: GroupData | null) => {
       setSelectedGroup(group);
       if (group) {
-        localStorage.setItem(STORAGE_KEYS.CHAT_SELECTED_GROUP, group.id);
+        localStorage.setItem(selectedGroupKey, group.id);
         groupChat?.markGroupAsRead(group.id);
-        queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
+        queryClient.invalidateQueries({ queryKey: KEYS.unreadCount });
 
         // Fetch messages from relay if none exist locally
         const localMessages = groupChat?.getMessages(group.id) ?? [];
         if (localMessages.length === 0 && groupChat) {
           await groupChat.fetchMessages(group.id);
-          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.MESSAGES(group.id) });
+          queryClient.invalidateQueries({ queryKey: KEYS.messages(group.id) });
         }
       } else {
-        localStorage.removeItem(STORAGE_KEYS.CHAT_SELECTED_GROUP);
+        localStorage.removeItem(selectedGroupKey);
       }
     },
-    [queryClient, groupChat]
+    [queryClient, groupChat, KEYS, selectedGroupKey]
   );
 
   // Join group
@@ -308,20 +401,24 @@ export const useGroupChat = (): UseGroupChatReturn => {
         const joinedGroup = groupChat?.getGroup(groupId);
         if (joinedGroup) {
           setSelectedGroup(joinedGroup);
-          localStorage.setItem(STORAGE_KEYS.CHAT_SELECTED_GROUP, joinedGroup.id);
+          localStorage.setItem(selectedGroupKey, joinedGroup.id);
           groupChat?.markGroupAsRead(joinedGroup.id);
-          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
+          queryClient.invalidateQueries({ queryKey: KEYS.unreadCount });
         }
       }
       return success;
     },
-    [joinGroupMutation, queryClient, groupChat]
+    [joinGroupMutation, queryClient, groupChat, KEYS, selectedGroupKey]
   );
 
   // Leave group
   const leaveGroup = useCallback(
     async (groupId: string): Promise<boolean> => {
-      return leaveGroupMutation.mutateAsync(groupId);
+      try {
+        return await leaveGroupMutation.mutateAsync(groupId);
+      } catch {
+        return false;
+      }
     },
     [leaveGroupMutation]
   );
@@ -339,15 +436,15 @@ export const useGroupChat = (): UseGroupChatReturn => {
   const markAsRead = useCallback(
     (groupId: string) => {
       groupChat?.markGroupAsRead(groupId);
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.UNREAD_COUNT });
+      queryClient.invalidateQueries({ queryKey: KEYS.unreadCount });
     },
-    [queryClient, groupChat]
+    [queryClient, groupChat, KEYS]
   );
 
   // Refresh available groups
   const refreshAvailableGroups = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: QUERY_KEYS.AVAILABLE_GROUPS });
-  }, [queryClient]);
+    queryClient.invalidateQueries({ queryKey: KEYS.available });
+  }, [queryClient, KEYS]);
 
   // Filter groups by search query
   const filteredGroups = useMemo(() => {
@@ -399,7 +496,7 @@ export const useGroupChat = (): UseGroupChatReturn => {
     onSuccess: () => {
       if (selectedGroup) {
         queryClient.invalidateQueries({
-          queryKey: QUERY_KEYS.MESSAGES(selectedGroup.id),
+          queryKey: KEYS.messages(selectedGroup.id),
         });
       }
     },
@@ -415,7 +512,7 @@ export const useGroupChat = (): UseGroupChatReturn => {
     onSuccess: () => {
       if (selectedGroup) {
         queryClient.invalidateQueries({
-          queryKey: QUERY_KEYS.MEMBERS(selectedGroup.id),
+          queryKey: KEYS.members(selectedGroup.id),
         });
       }
     },
@@ -444,8 +541,8 @@ export const useGroupChat = (): UseGroupChatReturn => {
       return groupChat.createGroup(options);
     },
     onSuccess: (group) => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.GROUPS });
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.AVAILABLE_GROUPS });
+      queryClient.invalidateQueries({ queryKey: KEYS.groups });
+      queryClient.invalidateQueries({ queryKey: KEYS.available });
       if (group) {
         setSelectedGroup(group);
       }
@@ -462,8 +559,8 @@ export const useGroupChat = (): UseGroupChatReturn => {
       if (selectedGroup?.id === groupId) {
         setSelectedGroup(null);
       }
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.GROUPS });
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.AVAILABLE_GROUPS });
+      queryClient.invalidateQueries({ queryKey: KEYS.groups });
+      queryClient.invalidateQueries({ queryKey: KEYS.available });
     },
   });
 
@@ -499,8 +596,8 @@ export const useGroupChat = (): UseGroupChatReturn => {
     [createInviteMutation]
   );
 
-  // Identity helpers
-  const myPubkey = useMemo(() => groupChat?.getMyPublicKey() ?? null, [groupChat]);
+  // Identity helpers — addressId forces recomputation on address switch
+  const myPubkey = useMemo(() => groupChat?.getMyPublicKey() ?? null, [groupChat, addressId]);
 
   const isAdminOfGroup = useCallback(
     (groupId: string): boolean => {
@@ -524,10 +621,14 @@ export const useGroupChat = (): UseGroupChatReturn => {
     refreshAvailableGroups,
 
     // Messages
-    messages: messagesQuery.data || [],
+    messages: messagesQuery.data?.messages || [],
     isLoadingMessages: messagesQuery.isLoading,
     sendMessage,
     isSending: sendMessageMutation.isPending,
+
+    // Lazy loading
+    hasMore: messagesQuery.data?.hasMore ?? false,
+    loadMore,
 
     // Members
     members: membersQuery.data || [],

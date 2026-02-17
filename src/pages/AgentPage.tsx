@@ -1,103 +1,76 @@
 import { useEffect, useRef, useState } from 'react';
-import { useParams, Navigate } from 'react-router-dom';
-import { MessageSquare, Wallet, ChevronDown, ChevronUp } from 'lucide-react';
+import { useParams, Navigate, useNavigate } from 'react-router-dom';
+import { MessageSquare, Wallet, ChevronDown, ChevronUp, X, Globe, Plus, Maximize2, Minimize2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AgentCard } from '../components/agents/AgentCard';
 import { ActivityTicker } from '../components/activity';
 import { ChatSection } from '../components/chat/ChatSection';
-import { SportChat } from '../components/agents/SportChat';
-import { P2PChat } from '../components/agents/P2PChat';
 import { MerchChat } from '../components/agents/MerchChat';
 import { TriviaChat } from '../components/agents/TriviaChat';
 import { GamesChat } from '../components/agents/GamesChat';
-import { AIChat } from '../components/agents/AIChat';
-import { SellAnythingChat } from '../components/agents/SellAnythingChat';
-import { PokemonChat } from '../components/agents/PokemonChat';
 import { IframeAgent } from '../components/agents/IframeAgent';
 import { WalletPanel } from '../components/wallet/WalletPanel';
 import { WalletRequiredBlocker } from '../components/agents/WalletRequiredBlocker';
-import { agents, getAgentConfig } from '../config/activities';
+import { agents, getAgentConfig, type AgentConfig } from '../config/activities';
+import { useUIState } from '../hooks/useUIState';
 
 const DEFAULT_VISIBLE_AGENTS = 7;
-
-type AnimationPhase = 'idle' | 'exiting' | 'entering';
+const CUSTOM_URL_PRESETS = [
+  { label: 'Sphere Connect Example', url: 'https://unicitynetwork.github.io/sphere-sdk-connect-example/' },
+];
 
 export function AgentPage() {
   const { agentId } = useParams<{ agentId: string }>();
+  const navigate = useNavigate();
   const sliderRef = useRef<HTMLDivElement>(null);
   const [activePanel, setActivePanel] = useState<'chat' | 'wallet'>('chat');
   const [showAllAgents, setShowAllAgents] = useState(false);
-  const [recentAgentIds, setRecentAgentIds] = useState<string[]>([]);
-  const [animatingAgentId, setAnimatingAgentId] = useState<string | null>(null);
-  const [animationPhase, setAnimationPhase] = useState<AnimationPhase>('idle');
-  const prevAgentIdRef = useRef<string | undefined>(undefined);
-  const recentAgentIdsRef = useRef<string[]>([]);
-
-  // Keep ref in sync with state
-  recentAgentIdsRef.current = recentAgentIds;
+  const [visitedIframeIds, setVisitedIframeIds] = useState<string[]>([]);
+  const [customTabs, setCustomTabs] = useState<Array<{ id: string; url: string; name: string }>>([]);
+  const [activeCustomTabId, setActiveCustomTabId] = useState<string | null>(null);
+  const [showCustomUrlPrompt, setShowCustomUrlPrompt] = useState(false);
+  const [customUrlInput, setCustomUrlInput] = useState('');
+  const { isFullscreen, setFullscreen } = useUIState();
 
   const hasMoreAgents = agents.length > DEFAULT_VISIBLE_AGENTS;
-
-  // Track recently selected agents with animation
-  useEffect(() => {
-    if (!agentId) return;
-
-    // Check if this is a new agent selection (not just a re-render)
-    const isNewSelection = prevAgentIdRef.current !== agentId;
-    prevAgentIdRef.current = agentId;
-
-    const currentRecentIds = recentAgentIdsRef.current;
-
-    // If already first, no animation needed
-    if (currentRecentIds[0] === agentId) return;
-
-    if (isNewSelection && currentRecentIds.includes(agentId)) {
-      // Agent exists in visible list - animate the reorder
-      setAnimatingAgentId(agentId);
-      setAnimationPhase('exiting');
-
-      // Phase 1: Exit animation (card disappears)
-      setTimeout(() => {
-        // Phase 2: Update order (others slide)
-        setRecentAgentIds(prev => {
-          const filtered = prev.filter(id => id !== agentId);
-          return [agentId, ...filtered].slice(0, DEFAULT_VISIBLE_AGENTS);
-        });
-        setAnimationPhase('entering');
-
-        // Phase 3: Enter animation (card appears at new position)
-        setTimeout(() => {
-          setAnimationPhase('idle');
-          setAnimatingAgentId(null);
-        }, 450);
-      }, 350);
-    } else {
-      // New agent not in list - just add to front without fancy animation
-      setRecentAgentIds(prev => {
-        const filtered = prev.filter(id => id !== agentId);
-        return [agentId, ...filtered].slice(0, DEFAULT_VISIBLE_AGENTS);
-      });
-    }
-  }, [agentId]);
-
-  // Calculate visible agents - prioritize recently selected agents
-  const visibleAgents = (() => {
-    if (showAllAgents) return agents;
-
-    // Get recent agents that exist in the agents list
-    const recentAgents = recentAgentIds
-      .map(id => agents.find(a => a.id === id))
-      .filter((a): a is typeof agents[0] => a !== undefined);
-
-    // Get remaining agents (not in recent list)
-    const remainingAgents = agents.filter(a => !recentAgentIds.includes(a.id));
-
-    // Combine: recent first, then fill with remaining up to DEFAULT_VISIBLE_AGENTS
-    const combined = [...recentAgents, ...remainingAgents];
-    return combined.slice(0, DEFAULT_VISIBLE_AGENTS);
-  })();
+  const visibleAgents = showAllAgents ? agents : agents.slice(0, DEFAULT_VISIBLE_AGENTS);
 
   const currentAgent = agentId ? getAgentConfig(agentId) : undefined;
+
+  // Iframe agents with a URL get tracked for persistent background rendering
+  // Iframe agents without a URL (custom, astrid, unibot) show the URL prompt
+  const isUrlPromptAgent = currentAgent?.type === 'iframe' && !currentAgent.iframeUrl;
+  const iframeFullscreen = isFullscreen && currentAgent?.type === 'iframe';
+
+  // Escape key exits iframe fullscreen
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFullscreen(false);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen, setFullscreen]);
+
+  useEffect(() => {
+    if (currentAgent?.type === 'iframe' && currentAgent.iframeUrl) {
+      setVisitedIframeIds(prev =>
+        prev.includes(currentAgent.id) ? prev : [...prev, currentAgent.id]
+      );
+    }
+  }, [currentAgent]);
+
+  // When navigating to a URL-prompt iframe agent, show prompt or last active tab
+  useEffect(() => {
+    if (isUrlPromptAgent) {
+      if (customTabs.length === 0) {
+        setShowCustomUrlPrompt(true);
+      } else if (!activeCustomTabId || !customTabs.find(t => t.id === activeCustomTabId)) {
+        setActiveCustomTabId(customTabs[customTabs.length - 1].id);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentId]);
 
   // Handle scroll end to detect active panel (debounced)
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -161,30 +134,246 @@ export function AgentPage() {
     return <Navigate to="/agents/chat" replace />;
   }
 
-  const renderChatComponent = () => {
-    if (currentAgent.type === 'iframe') {
-      return <IframeAgent agent={currentAgent} />;
+  // Create a synthetic AgentConfig for custom tabs
+  const makeCustomAgentConfig = (tab: { id: string; url: string; name: string }): AgentConfig => ({
+    id: tab.id,
+    name: tab.name,
+    description: tab.url,
+    Icon: Globe,
+    category: 'Custom',
+    color: 'from-neutral-500 to-neutral-600',
+    type: 'iframe',
+    iframeUrl: tab.url,
+  });
+
+  // Open a URL as a new custom tab
+  const openCustomUrl = (rawUrl: string) => {
+    let url = rawUrl.trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) {
+      url = 'https://' + url;
     }
+    try {
+      const parsed = new URL(url);
+      const name = parsed.host;
+      const id = `custom-${Date.now()}`;
+      setCustomTabs(prev => [...prev, { id, url, name }]);
+      setActiveCustomTabId(id);
+      setShowCustomUrlPrompt(false);
+      setCustomUrlInput('');
+      if (!isUrlPromptAgent) {
+        navigate('/agents/custom');
+      }
+    } catch {
+      // Invalid URL
+    }
+  };
+
+  // Add a custom tab from URL input
+  const handleCustomUrlSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    openCustomUrl(customUrlInput);
+  };
+
+  // Remove a custom tab
+  const removeCustomTab = (id: string) => {
+    const remaining = customTabs.filter(t => t.id !== id);
+    setCustomTabs(remaining);
+    if (activeCustomTabId === id) {
+      if (remaining.length > 0) {
+        setActiveCustomTabId(remaining[remaining.length - 1].id);
+      } else {
+        setActiveCustomTabId(null);
+        if (isUrlPromptAgent) {
+          setShowCustomUrlPrompt(true);
+        }
+      }
+    }
+  };
+
+  // Remove an iframe agent from the active list (unload it)
+  const removeIframeAgent = (id: string) => {
+    const remaining = visitedIframeIds.filter(v => v !== id);
+    setVisitedIframeIds(remaining);
+    if (id === agentId) {
+      navigate(`/agents/${remaining.length > 0 ? remaining[0] : 'chat'}`);
+    }
+  };
+
+  // Render tab bar + all visited iframe agents persistently (hidden when not active)
+  const renderIframeAgents = () => {
+    const isIframeActive = currentAgent.type === 'iframe';
+    const hasAnyTabs = visitedIframeIds.length > 0 || customTabs.length > 0;
+
+    if (!isIframeActive && !hasAnyTabs) return null;
+
+    return (
+      <div className={`${isIframeActive ? 'h-full' : 'hidden'} flex flex-col ${iframeFullscreen ? 'bg-white dark:bg-neutral-900' : 'bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 lg:shadow-xl dark:lg:shadow-2xl'} overflow-hidden relative theme-transition`}>
+        {/* Active iframe agents tab bar */}
+        <div className="flex items-center gap-1 px-3 py-2 bg-neutral-50/80 dark:bg-neutral-800/40 border-b border-neutral-200 dark:border-neutral-800/50 shrink-0">
+          {/* Static iframe agent tabs */}
+          {visitedIframeIds.map(id => {
+            const iframeAgent = getAgentConfig(id);
+            if (!iframeAgent) return null;
+            const AgentIcon = iframeAgent.Icon;
+            const isActive = id === agentId;
+            return (
+              <button
+                key={id}
+                onClick={() => navigate(`/agents/${id}`)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors duration-150 ${
+                  isActive
+                    ? 'bg-orange-500 text-white shadow-sm'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200/60 dark:hover:bg-neutral-700/40'
+                }`}
+              >
+                <AgentIcon className="w-3.5 h-3.5" />
+                {iframeAgent.name}
+                <span
+                  role="button"
+                  onClick={(e) => { e.stopPropagation(); removeIframeAgent(id); }}
+                  className={`ml-0.5 p-0.5 rounded transition-colors duration-150 ${
+                    isActive
+                      ? 'hover:bg-orange-600/40'
+                      : 'hover:bg-neutral-300/60 dark:hover:bg-neutral-600/40'
+                  }`}
+                  title={`Close ${iframeAgent.name}`}
+                >
+                  <X className="w-3 h-3" />
+                </span>
+              </button>
+            );
+          })}
+          {/* Custom tabs */}
+          {customTabs.map(tab => {
+            const isActive = isUrlPromptAgent && activeCustomTabId === tab.id && !showCustomUrlPrompt;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => { if (!isUrlPromptAgent) navigate('/agents/custom'); setActiveCustomTabId(tab.id); setShowCustomUrlPrompt(false); }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors duration-150 ${
+                  isActive
+                    ? 'bg-orange-500 text-white shadow-sm'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200/60 dark:hover:bg-neutral-700/40'
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5" />
+                {tab.name}
+                <span
+                  role="button"
+                  onClick={(e) => { e.stopPropagation(); removeCustomTab(tab.id); }}
+                  className={`ml-0.5 p-0.5 rounded transition-colors duration-150 ${
+                    isActive
+                      ? 'hover:bg-orange-600/40'
+                      : 'hover:bg-neutral-300/60 dark:hover:bg-neutral-600/40'
+                  }`}
+                  title={`Close ${tab.name}`}
+                >
+                  <X className="w-3 h-3" />
+                </span>
+              </button>
+            );
+          })}
+          {/* Add custom URL button */}
+          <button
+            onClick={() => { if (!isUrlPromptAgent) navigate('/agents/custom'); setShowCustomUrlPrompt(true); setCustomUrlInput(''); }}
+            className="flex items-center justify-center w-7 h-7 rounded-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 hover:bg-neutral-200/60 dark:hover:bg-neutral-700/40 transition-colors duration-150"
+            title="Add custom URL"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+          {/* Fullscreen toggle */}
+          <button
+            onClick={() => setFullscreen(!isFullscreen)}
+            className="flex items-center justify-center w-7 h-7 rounded-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 hover:bg-neutral-200/60 dark:hover:bg-neutral-700/40 transition-colors duration-150 ml-auto"
+            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          >
+            {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+
+        {/* Static iframe containers */}
+        {visitedIframeIds.map(id => {
+          const iframeAgent = getAgentConfig(id);
+          if (!iframeAgent) return null;
+          return (
+            <div key={id} className={id === agentId ? 'flex-1 min-h-0' : 'hidden'}>
+              <IframeAgent agent={iframeAgent} />
+            </div>
+          );
+        })}
+
+        {/* Custom tab iframes */}
+        {customTabs.map(tab => {
+          const isActive = isUrlPromptAgent && activeCustomTabId === tab.id && !showCustomUrlPrompt;
+          return (
+            <div key={tab.id} className={isActive ? 'flex-1 min-h-0' : 'hidden'}>
+              <IframeAgent agent={makeCustomAgentConfig(tab)} />
+            </div>
+          );
+        })}
+
+        {/* URL prompt for URL-prompt iframe agents */}
+        {isUrlPromptAgent && showCustomUrlPrompt && (
+          <div className="flex-1 min-h-0 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-4 p-8 max-w-md w-full">
+              <Globe className="w-12 h-12 text-neutral-400" />
+              <h3 className="text-lg font-semibold text-neutral-900 dark:text-white">Load Custom URL</h3>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 text-center">
+                Quick open or enter any URL
+              </p>
+              <div className="flex items-center gap-2">
+                {CUSTOM_URL_PRESETS.map(preset => (
+                  <button
+                    key={preset.url}
+                    onClick={() => openCustomUrl(preset.url)}
+                    className="px-4 py-2 text-sm font-medium rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-orange-500 hover:text-white transition-colors border border-neutral-200 dark:border-neutral-700"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-3 w-full">
+                <div className="flex-1 h-px bg-neutral-200 dark:bg-neutral-700" />
+                <span className="text-xs text-neutral-400">or</span>
+                <div className="flex-1 h-px bg-neutral-200 dark:bg-neutral-700" />
+              </div>
+              <form onSubmit={handleCustomUrlSubmit} className="w-full flex gap-2">
+                <input
+                  type="text"
+                  value={customUrlInput}
+                  onChange={(e) => setCustomUrlInput(e.target.value)}
+                  placeholder="https://example.com or localhost:5174"
+                  className="flex-1 px-4 py-2.5 text-sm rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-orange-500/50 focus:border-orange-500"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 text-sm font-medium rounded-xl bg-orange-500 text-white hover:bg-orange-600 transition-colors shadow-sm"
+                >
+                  Open
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderChatComponent = () => {
+    // Iframe agents are rendered persistently via renderIframeAgents
+    if (currentAgent.type === 'iframe') return null;
 
     switch (currentAgent.id) {
       case 'chat':
         return <ChatSection />;
-      case 'ai':
-        return <AIChat agent={currentAgent} />;
       case 'trivia':
         return <TriviaChat agent={currentAgent} />;
       case 'games':
         return <GamesChat agent={currentAgent} />;
-      case 'sport':
-        return <SportChat agent={currentAgent} />;
-      case 'p2p':
-        return <P2PChat agent={currentAgent} />;
       case 'merch':
         return <MerchChat agent={currentAgent} />;
-      case 'sell-anything':
-        return <SellAnythingChat agent={currentAgent} />;
-      case 'pokemon':
-        return <PokemonChat agent={currentAgent} />;
       default:
         return <ChatSection />;
     }
@@ -192,92 +381,37 @@ export function AgentPage() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Desktop agent grid - always visible */}
-      <div data-tutorial="agents" className="hidden lg:block mb-8 relative px-8 pt-8 pb-5 rounded-2xl dark:bg-linear-to-br dark:from-neutral-900/40 dark:to-neutral-800/20 backdrop-blur-sm border border-neutral-200 dark:border-neutral-800/50">
+      {/* Desktop agent grid - hidden in iframe fullscreen */}
+      <div data-tutorial="agents" className={`${iframeFullscreen ? 'hidden' : 'hidden lg:block'} mb-8 relative px-8 pt-8 pb-5 rounded-2xl dark:bg-linear-to-br dark:from-neutral-900/40 dark:to-neutral-800/20 backdrop-blur-sm border border-neutral-200 dark:border-neutral-800/50`}>
         <div className="absolute top-0 left-0 w-32 h-32 border-l-2 border-t-2 border-orange-500/50 rounded-tl-2xl" />
         <div className="absolute bottom-0 right-0 w-32 h-32 border-r-2 border-b-2 border-orange-500/50 rounded-br-2xl" />
 
         <div className="relative">
           <div
             className="grid gap-4"
-            style={{ gridTemplateColumns: `repeat(${Math.min(visibleAgents.length, DEFAULT_VISIBLE_AGENTS)}, 1fr)` }}
+            style={{ gridTemplateColumns: `repeat(${Math.min(agents.length, DEFAULT_VISIBLE_AGENTS)}, 1fr)` }}
           >
-            {/* First N agents - with layout animation for reordering */}
-            {visibleAgents.slice(0, DEFAULT_VISIBLE_AGENTS).map((agent, index) => {
-              const isAnimatingAgent = animatingAgentId === agent.id;
-              const isFirstPosition = index === 0;
-              const isExiting = isAnimatingAgent && animationPhase === 'exiting' && !isFirstPosition;
-              const isEntering = isAnimatingAgent && animationPhase === 'entering' && isFirstPosition;
-
-              return (
-                <motion.div
-                  key={agent.id}
-                  layout
-                  initial={false}
-                  animate={{
-                    opacity: isExiting ? 0 : 1,
-                    scale: isExiting ? 0.75 : 1,
-                    y: isExiting ? -15 : 0,
-                  }}
-                  transition={{
-                    layout: {
-                      type: "spring",
-                      stiffness: 250,
-                      damping: 30,
-                    },
-                    opacity: {
-                      duration: 0.35,
-                      ease: "easeOut",
-                    },
-                    scale: {
-                      duration: 0.35,
-                      ease: "easeOut",
-                    },
-                    y: {
-                      duration: 0.35,
-                      ease: "easeOut",
-                    },
-                  }}
-                >
-                  {/* Inner wrapper for enter animation */}
-                  <motion.div
-                    initial={isEntering ? { opacity: 0, scale: 0.8, y: 15 } : false}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    transition={{
-                      duration: 0.4,
-                      ease: [0.34, 1.56, 0.64, 1], // Custom spring-like ease
-                    }}
-                  >
-                    <AgentCard
-                      id={agent.id}
-                      name={agent.name}
-                      Icon={agent.Icon}
-                      category={agent.category}
-                      color={agent.color}
-                      isSelected={agentId === agent.id}
-                    />
-                  </motion.div>
-                </motion.div>
-              );
-            })}
-            {/* Extra agents - with animation */}
+            {/* Fixed agent cards */}
+            {visibleAgents.slice(0, DEFAULT_VISIBLE_AGENTS).map((agent) => (
+              <AgentCard
+                key={agent.id}
+                id={agent.id}
+                name={agent.name}
+                Icon={agent.Icon}
+                category={agent.category}
+                color={agent.color}
+                isSelected={agentId === agent.id}
+              />
+            ))}
+            {/* Extra agents - expand/collapse animation */}
             <AnimatePresence initial={false} mode="sync">
               {showAllAgents && visibleAgents.slice(DEFAULT_VISIBLE_AGENTS).map((agent, index) => (
                 <motion.div
                   key={agent.id}
-                  layout
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.1 } }}
-                  transition={{
-                    layout: {
-                      type: "spring",
-                      stiffness: 400,
-                      damping: 35,
-                    },
-                    duration: 0.15,
-                    delay: index * 0.02,
-                  }}
+                  transition={{ duration: 0.15, delay: index * 0.02 }}
                 >
                   <AgentCard
                     id={agent.id}
@@ -317,12 +451,12 @@ export function AgentPage() {
       </div>
 
       {/* Activity Ticker - desktop only */}
-      <div className="hidden lg:block mb-6">
+      <div className={`${iframeFullscreen ? 'hidden' : 'hidden lg:block'} mb-6`}>
         <ActivityTicker />
       </div>
 
-      {/* Mobile tab switcher with sliding indicator */}
-      <div data-tutorial="mobile-tabs" className="lg:hidden shrink-0 relative flex p-1 mb-3 bg-neutral-100 dark:bg-neutral-800/50 rounded-2xl backdrop-blur-sm border border-neutral-200 dark:border-neutral-700/30 overflow-hidden">
+      {/* Mobile tab switcher - hidden in iframe fullscreen */}
+      <div data-tutorial="mobile-tabs" className={`${iframeFullscreen ? 'hidden' : 'lg:hidden'} shrink-0 relative flex p-1 mb-3 bg-neutral-100 dark:bg-neutral-800/50 rounded-2xl backdrop-blur-sm border border-neutral-200 dark:border-neutral-700/30 overflow-hidden`}>
         {/* Sliding background indicator */}
         <motion.div
           className="absolute top-1 bottom-1 left-1 bg-linear-to-r from-orange-500 to-orange-600 rounded-xl shadow-lg shadow-orange-500/20"
@@ -358,14 +492,15 @@ export function AgentPage() {
         </button>
       </div>
 
-      {/* Mobile swipeable container - takes remaining height */}
+      {/* Mobile swipeable container - hidden in iframe fullscreen */}
       <div
         ref={sliderRef}
         onScroll={handleScroll}
-        className="lg:hidden flex-1 min-h-0 flex overflow-x-auto snap-x snap-mandatory scrollbar-hide py-1"
+        className={`${iframeFullscreen ? 'hidden' : 'lg:hidden'} flex-1 min-h-0 flex overflow-x-auto snap-x snap-mandatory scrollbar-hide py-1`}
       >
         <div data-tutorial="mobile-chat" className="w-full shrink-0 snap-center h-full">
           <WalletRequiredBlocker agentId={agentId!} onOpenWallet={() => scrollToPanel('wallet')}>
+            {renderIframeAgents()}
             {renderChatComponent()}
           </WalletRequiredBlocker>
         </div>
@@ -374,16 +509,19 @@ export function AgentPage() {
         </div>
       </div>
 
-      {/* Desktop grid layout */}
-      <div className="hidden lg:grid lg:grid-cols-3 lg:gap-8 lg:flex-1 lg:min-h-162.5 lg:py-2">
-        <div data-tutorial="chat" className="lg:col-span-2 h-full min-h-0">
+      {/* Desktop grid layout - full width in iframe fullscreen */}
+      <div className={`hidden lg:grid ${iframeFullscreen ? 'lg:grid-cols-1' : 'lg:grid-cols-3 lg:gap-8'} lg:flex-1 lg:min-h-162.5 ${iframeFullscreen ? '' : 'lg:py-2'}`}>
+        <div data-tutorial="chat" className={`${iframeFullscreen ? '' : 'lg:col-span-2'} h-full min-h-0`}>
           <WalletRequiredBlocker agentId={agentId!}>
+            {renderIframeAgents()}
             {renderChatComponent()}
           </WalletRequiredBlocker>
         </div>
-        <div data-tutorial="wallet" className="h-full min-h-0">
-          <WalletPanel />
-        </div>
+        {!iframeFullscreen && (
+          <div data-tutorial="wallet" className="h-full min-h-0">
+            <WalletPanel />
+          </div>
+        )}
       </div>
     </div>
   );

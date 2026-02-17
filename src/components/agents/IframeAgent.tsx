@@ -88,7 +88,7 @@ export function IframeAgent({ agent }: IframeAgentProps) {
   };
 
   return (
-    <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden relative lg:shadow-xl dark:lg:shadow-2xl h-full min-h-0 theme-transition flex flex-col">
+    <div className="h-full min-h-0 flex flex-col overflow-hidden">
       {hasUrlOptions && (
         <div className="flex items-center gap-1 px-3 py-2 border-b border-neutral-200 dark:border-neutral-800/50 bg-neutral-50/80 dark:bg-neutral-800/40 shrink-0">
           {agent.iframeUrls!.map((option) => (

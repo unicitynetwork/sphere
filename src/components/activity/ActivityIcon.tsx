@@ -1,4 +1,4 @@
-import { ShoppingBag, ArrowRightLeft, Wallet, Gamepad2, TrendingUp, Handshake, ShoppingCart, Tag, Sparkles, Wrench, Megaphone } from 'lucide-react';
+import { ShoppingBag, ArrowRightLeft, Wallet, Gamepad2, ShoppingCart, Tag } from 'lucide-react';
 import type { ActivityKind } from '../../types/activity';
 
 interface ActivityIconProps {
@@ -33,24 +33,9 @@ const iconConfig: Record<ActivityKind, { icon: typeof ShoppingBag; bgColor: stri
     bgColor: 'from-red-500 to-orange-500',
     iconColor: 'text-white',
   },
-  bet_placed: {
-    icon: TrendingUp,
-    bgColor: 'from-yellow-500 to-amber-500',
-    iconColor: 'text-white',
-  },
-  otc_purchase: {
-    icon: Handshake,
-    bgColor: 'from-cyan-500 to-teal-500',
-    iconColor: 'text-white',
-  },
   merch_order: {
     icon: ShoppingCart,
     bgColor: 'from-pink-500 to-rose-500',
-    iconColor: 'text-white',
-  },
-  pokemon_purchase: {
-    icon: Sparkles,
-    bgColor: 'from-yellow-400 to-orange-500',
     iconColor: 'text-white',
   },
 };
