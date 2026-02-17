@@ -6,6 +6,9 @@ import { DevelopersPage } from './pages/DevelopersPage';
 import { MineAlphaPage } from './pages/MineAlphaPage';
 import { DocsPage } from './pages/DocsPage';
 import { ConnectPage } from './pages/ConnectPage';
+import { MarketsPage } from './pages/MarketsPage';
+import { AgentsPage } from './pages/AgentsPage';
+import { AboutPage } from './pages/AboutPage';
 import { useSphereEvents } from './sdk';
 
 export default function App() {
@@ -22,6 +25,9 @@ export default function App() {
         <Route path="/developers" element={<DevelopersPage />} />
         <Route path="/mine" element={<MineAlphaPage />} />
         <Route path="/developers/docs" element={<DocsPage />} />
+        <Route path="/markets" element={<MarketsPage />} />
+        <Route path="/explore-agents" element={<AgentsPage />} />
+        <Route path="/about" element={<AboutPage />} />
       </Route>
     </Routes>
   );

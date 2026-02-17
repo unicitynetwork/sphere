@@ -450,9 +450,9 @@ export function AgentPage() {
         </div>
       </div>
 
-      {/* Activity Ticker - hidden in iframe fullscreen */}
+      {/* Activity Ticker - desktop only */}
       <div className={`${iframeFullscreen ? 'hidden' : 'hidden lg:block'} mb-6`}>
-        <ActivityTicker agentId={agentId} />
+        <ActivityTicker />
       </div>
 
       {/* Mobile tab switcher - hidden in iframe fullscreen */}
@@ -510,7 +510,7 @@ export function AgentPage() {
       </div>
 
       {/* Desktop grid layout - full width in iframe fullscreen */}
-      <div className={`hidden lg:grid ${iframeFullscreen ? 'lg:grid-cols-1' : 'lg:grid-cols-3 lg:gap-8'} lg:flex-1 lg:min-h-[650px] ${iframeFullscreen ? '' : 'lg:py-2'}`}>
+      <div className={`hidden lg:grid ${iframeFullscreen ? 'lg:grid-cols-1' : 'lg:grid-cols-3 lg:gap-8'} lg:flex-1 lg:min-h-162.5 ${iframeFullscreen ? '' : 'lg:py-2'}`}>
         <div data-tutorial="chat" className={`${iframeFullscreen ? '' : 'lg:col-span-2'} h-full min-h-0`}>
           <WalletRequiredBlocker agentId={agentId!}>
             {renderIframeAgents()}

@@ -395,10 +395,7 @@ sphere.on.msg(async (msg) => {
         {/* Footer */}
         <footer className="border-t border-neutral-200 dark:border-neutral-700 px-4 sm:px-6 py-8">
           <div className="max-w-6xl mx-auto flex items-center justify-between text-sm text-neutral-500 flex-wrap gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-6 h-6 bg-linear-to-br from-orange-500 to-amber-500 rounded flex items-center justify-center font-bold text-xs text-white">S</div>
-              <span>AgentSphere by Unicity Labs</span>
-            </div>
+            <span>AgentSphere by Unicity Labs</span>
             <div>One SDK. Any marketplace. Let's build.</div>
           </div>
         </footer>

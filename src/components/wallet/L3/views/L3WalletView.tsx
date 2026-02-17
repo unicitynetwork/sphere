@@ -311,8 +311,7 @@ export function L3WalletView({
   const handleLogout = async () => {
     try {
       setIsLoggingOut(true);
-      // Await full cleanup before navigating so IntroPage sees clean state
-      // (WELCOME_ACCEPTED cleared, walletExists=false).
+      // Await full cleanup before navigating so IntroPage sees clean state.
       await deleteWallet();
       navigate('/', { replace: true });
     } catch (err) {
