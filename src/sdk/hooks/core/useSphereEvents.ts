@@ -19,6 +19,17 @@ export function useSphereEvents(): void {
   const queryClient = useQueryClient();
   const invalidateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // When sphere instance changes (new wallet, delete, import) —
+  // immediately sync identity cache so the UI never shows stale data
+  // from the previous wallet.
+  useEffect(() => {
+    if (sphere?.identity) {
+      queryClient.setQueryData(SPHERE_KEYS.identity.current, { ...sphere.identity });
+    } else {
+      queryClient.removeQueries({ queryKey: SPHERE_KEYS.identity.all });
+    }
+  }, [sphere, queryClient]);
+
   useEffect(() => {
     if (!sphere) return;
 
@@ -54,11 +65,22 @@ export function useSphereEvents(): void {
     };
     const handleTransferConfirmed = invalidatePayments;
 
+    // Write sphere.identity directly into the query cache — by the time SDK
+    // fires these events, its internal state is already updated.  Plain
+    // invalidation can race with the SDK update, returning stale data.
+    const refreshIdentityCache = () => {
+      if (sphere.identity) {
+        queryClient.setQueryData(SPHERE_KEYS.identity.current, { ...sphere.identity });
+      }
+    };
+
     const handleNametagChange = () => {
+      refreshIdentityCache();
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.all });
     };
 
     const handleIdentityChange = () => {
+      refreshIdentityCache();
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.all });
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.payments.all });
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.l1.all });

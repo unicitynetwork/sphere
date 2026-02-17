@@ -48,7 +48,7 @@ export function AddressSelector({ compact = true, addressFormat = 'direct' }: Ad
     } catch (e) {
       console.error('[AddressSelector] Failed to get addresses:', e);
     }
-  }, [sphere, currentAddressIndex]);
+  }, [sphere, currentAddressIndex, nametag]);
 
   // Focus nametag input when modal opens
   useEffect(() => {
@@ -81,6 +81,11 @@ export function AddressSelector({ compact = true, addressFormat = 'direct' }: Ad
   const displayNametag = nametag;
 
   const refreshAfterSwitch = useCallback(() => {
+    // Write fresh identity directly — avoids race where resetQueries
+    // refetches before sphere.identity has been updated by the SDK.
+    if (sphere?.identity) {
+      queryClient.setQueryData(SPHERE_KEYS.identity.current, { ...sphere.identity });
+    }
     // Reset queries: clears cached data AND triggers a refetch for active observers.
     // Using resetQueries instead of removeQueries+invalidateQueries because
     // invalidateQueries after removeQueries is a no-op (nothing left to invalidate).
@@ -445,7 +450,7 @@ export function AddressSelector({ compact = true, addressFormat = 'direct' }: Ad
                 <div className="max-h-64 overflow-y-auto custom-scrollbar">
                   {sortedAddresses.map((addr) => {
                     const isSelected = addr.index === currentAddressIndex;
-                    const addrNametag = addr.nametag;
+                    const addrNametag = isSelected ? displayNametag : addr.nametag;
 
                     return (
                       <button
