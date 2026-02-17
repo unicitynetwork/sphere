@@ -261,6 +261,7 @@ export function SphereProvider({
           oracle: providers.oracle,
           tokenStorage: providers.tokenStorage,
           l1: {},
+          groupChat: providers.groupChat,
         });
 
         // Don't setSphere here — the onboarding flow calls finalizeWallet(sphere)

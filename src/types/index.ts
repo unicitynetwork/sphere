@@ -21,42 +21,6 @@ export interface IAgent {
   isSelected?: boolean;
 }
 
-export interface IAsset {
-  id: string;
-  name: string;
-  ticker: string;
-  amount: number;
-  value: number;
-  change: number;
-  color: string;
-}
-
-export interface IProductCard {
-  title: string;
-  image: string;
-  price?: number;
-}
-
-export interface IMessage {
-  id: string;
-  sender: string;
-  avatar: string;
-  content: string;
-  timestamp: string;
-  isOwn: boolean;
-  productCard?: IProductCard;
-  isContextCard?: boolean; // For showing product context at the top
-}
-
-export interface IUserContact {
-  id: string;
-  name: string;
-  avatar: string;
-  status: 'online' | 'offline';
-  lastMessage?: string;
-  unread?: number;
-}
-
 export interface ICryptoPriceData {
   priceUsd: number;
   priceEur: number;

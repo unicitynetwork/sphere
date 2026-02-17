@@ -32,6 +32,16 @@ export function AgentPage() {
   const [customUrlInput, setCustomUrlInput] = useState('');
   const { isFullscreen, setFullscreen } = useUIState();
 
+  // Track viewport size so we render the chat component in only ONE container
+  // (mobile OR desktop), avoiding duplicate hooks, queries, and SDK subscriptions.
+  const [isLg, setIsLg] = useState(() => window.matchMedia('(min-width: 1024px)').matches);
+  useEffect(() => {
+    const mql = window.matchMedia('(min-width: 1024px)');
+    const handler = (e: MediaQueryListEvent) => setIsLg(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
+
   const hasMoreAgents = agents.length > DEFAULT_VISIBLE_AGENTS;
   const visibleAgents = showAllAgents ? agents : agents.slice(0, DEFAULT_VISIBLE_AGENTS);
 
@@ -361,8 +371,10 @@ export function AgentPage() {
     );
   };
 
-  const renderChatComponent = () => {
-    // Iframe agents are rendered persistently via renderIframeAgents
+  // Render the chat component once and reuse in both mobile/desktop containers.
+  // Previously renderChatComponent() was called twice (mobile + desktop), mounting
+  // two independent React trees with duplicate hooks, queries and SDK subscriptions.
+  const chatComponent = (() => {
     if (currentAgent.type === 'iframe') return null;
 
     switch (currentAgent.id) {
@@ -377,7 +389,7 @@ export function AgentPage() {
       default:
         return <ChatSection />;
     }
-  };
+  })();
 
   return (
     <div className="h-full flex flex-col">
@@ -501,7 +513,7 @@ export function AgentPage() {
         <div data-tutorial="mobile-chat" className="w-full shrink-0 snap-center h-full">
           <WalletRequiredBlocker agentId={agentId!} onOpenWallet={() => scrollToPanel('wallet')}>
             {renderIframeAgents()}
-            {renderChatComponent()}
+            {!isLg && chatComponent}
           </WalletRequiredBlocker>
         </div>
         <div data-tutorial="mobile-wallet" className="w-full shrink-0 snap-center h-full">
@@ -514,7 +526,7 @@ export function AgentPage() {
         <div data-tutorial="chat" className={`${iframeFullscreen ? '' : 'lg:col-span-2'} h-full min-h-0`}>
           <WalletRequiredBlocker agentId={agentId!}>
             {renderIframeAgents()}
-            {renderChatComponent()}
+            {isLg && chatComponent}
           </WalletRequiredBlocker>
         </div>
         {!iframeFullscreen && (
