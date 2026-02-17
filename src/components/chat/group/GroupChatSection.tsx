@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Hash, Menu, PanelLeft, ChevronDown, Users, Maximize2, Minimize2, X, Reply, Loader2 } from 'lucide-react';
+import { Hash, Menu, PanelLeft, Users, Maximize2, Minimize2, X, Reply, Loader2 } from 'lucide-react';
 import type { GroupMessageData } from '@unicitylabs/sphere-sdk';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useGroupChat } from '../hooks/useGroupChat';
 import { useUIState } from '../../../hooks/useUIState';
 import { GroupList } from './GroupList';
@@ -22,7 +22,6 @@ interface GroupChatSectionProps {
 }
 
 export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const {
     selectedGroup,
@@ -72,11 +71,9 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showJoinGroup, setShowJoinGroup] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
-  const [showAgentPicker, setShowAgentPicker] = useState(false);
   const [showMemberList, setShowMemberList] = useState(false);
   const [inviteLinkFromUrl, setInviteLinkFromUrl] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<GroupMessageData | null>(null);
-  const pickerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Global fullscreen state
@@ -107,17 +104,6 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     }
   }, [searchParams, setSearchParams]);
 
-  // Close picker when clicking outside
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
-        setShowAgentPicker(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
   // Auto-focus input when message is sent (desktop only)
   useEffect(() => {
     if (!isSending && selectedGroup && window.innerWidth >= 1024) {
@@ -146,11 +132,6 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
   useEffect(() => {
     setReplyingTo(null);
   }, [selectedGroup?.id]);
-
-  const handleAgentSelect = (agentId: string) => {
-    navigate(`/agents/${agentId}`);
-    setShowAgentPicker(false);
-  };
 
   // Get current chat agent config
   const chatAgent = agents.find((a) => a.id === 'chat')!;
@@ -235,54 +216,15 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
               <Menu className="w-5 h-5" />
             </motion.button>
 
-            {/* Mobile & Fullscreen: Agent picker dropdown */}
-            <div ref={pickerRef} className={`relative ${isFullscreen ? '' : 'lg:hidden'}`}>
-              <button
-                onClick={() => setShowAgentPicker(!showAgentPicker)}
-                className="flex items-center gap-2 active:scale-95 transition-transform"
-              >
-                <div className={`p-2.5 rounded-xl bg-linear-to-br ${chatAgent.color}`}>
-                  <chatAgent.Icon className="w-5 h-5 text-white" />
-                </div>
-                <div className="text-left">
-                  <div className="text-lg text-neutral-900 dark:text-white font-medium">{chatAgent.name}</div>
-                  <div className="text-sm text-neutral-500 dark:text-neutral-400">{chatAgent.description}</div>
-                </div>
-                <ChevronDown
-                  className={`w-4 h-4 text-neutral-500 dark:text-neutral-400 transition-transform ${
-                    showAgentPicker ? 'rotate-180' : ''
-                  }`}
-                />
-              </button>
-
-              <AnimatePresence>
-                {showAgentPicker && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="absolute top-full left-0 mt-2 w-56 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700/50 rounded-xl shadow-xl overflow-hidden z-50"
-                  >
-                    {agents.map((a) => (
-                      <button
-                        key={a.id}
-                        onClick={() => handleAgentSelect(a.id)}
-                        className={`w-full flex items-center gap-3 p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/50 transition-colors ${
-                          a.id === 'chat' ? 'bg-neutral-100 dark:bg-neutral-800/80' : ''
-                        }`}
-                      >
-                        <div className={`p-2 rounded-lg bg-linear-to-br ${a.color} shrink-0`}>
-                          <a.Icon className="w-4 h-4 text-white" />
-                        </div>
-                        <div className="text-left min-w-0">
-                          <div className="text-neutral-900 dark:text-white text-sm font-medium">{a.name}</div>
-                          <div className="text-neutral-500 dark:text-neutral-400 text-xs truncate">{a.description}</div>
-                        </div>
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
+            {/* Mobile & Fullscreen: Static agent info */}
+            <div className={`flex items-center gap-2 ${isFullscreen ? '' : 'lg:hidden'}`}>
+              <div className={`p-2.5 rounded-xl bg-linear-to-br ${chatAgent.color}`}>
+                <chatAgent.Icon className="w-5 h-5 text-white" />
+              </div>
+              <div className="text-left">
+                <div className="text-lg text-neutral-900 dark:text-white font-medium">{chatAgent.name}</div>
+                <div className="text-sm text-neutral-500 dark:text-neutral-400">{chatAgent.description}</div>
+              </div>
             </div>
 
             {/* Desktop: Show group or default header (hidden in fullscreen) */}
