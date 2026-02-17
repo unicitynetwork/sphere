@@ -42,7 +42,7 @@ export interface AgentConfig {
 }
 
 // All agents configuration
-export const agents: AgentConfig[] = [
+const allAgents: AgentConfig[] = [
   {
     id: 'chat',
     name: 'Chat',
@@ -228,6 +228,12 @@ export const agents: AgentConfig[] = [
     requiresWallet: true,
   },
 ];
+
+// Filter out developer-only agents unless explicitly enabled via env
+export const agents: AgentConfig[] = allAgents.filter((a) => {
+  if (a.id === 'example' && import.meta.env.VITE_SHOW_EXAMPLE_AGENT !== 'true') return false;
+  return true;
+});
 
 // Get agent by ID
 export function getAgentConfig(agentId: string): AgentConfig | undefined {
