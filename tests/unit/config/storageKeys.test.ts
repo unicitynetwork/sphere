@@ -27,7 +27,6 @@ describe("STORAGE_KEYS", () => {
 
   it("should contain expected UI keys", () => {
     expect(STORAGE_KEYS.THEME).toBe("sphere_theme");
-    expect(STORAGE_KEYS.WELCOME_ACCEPTED).toBe("sphere_welcome_accepted");
   });
 
   it("should contain expected dev keys", () => {

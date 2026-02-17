@@ -16,15 +16,31 @@ export const ServicesProvider: React.FC<{ children: ReactNode }> = ({ children }
       setIsGroupChatConnected(groupChat.getConnectionStatus());
     }).catch((err) => {
       console.error('[ServicesProvider] Group chat connect failed:', err);
-      // Connection events will fire on reconnect
     });
 
-    const unsubscribe = sphere.on('groupchat:connection', (data) => {
-      setIsGroupChatConnected(data.connected);
-    });
+    // On address change, reload group chat data and reconnect.
+    // The SDK now stores groups per-address (STORAGE_KEYS_ADDRESS), so load()
+    // reads the new address's data and connect() restores from relay if needed.
+    const handleIdentityChange = async () => {
+      setIsGroupChatConnected(false);
+      try {
+        await groupChat.load();
+        await groupChat.connect();
+        setIsGroupChatConnected(groupChat.getConnectionStatus());
+      } catch (err) {
+        console.error('[ServicesProvider] Group chat reconnect failed:', err);
+      }
+    };
+
+    const unsubs = [
+      sphere.on('groupchat:connection', (data) => {
+        setIsGroupChatConnected(data.connected);
+      }),
+      sphere.on('identity:changed', handleIdentityChange),
+    ];
 
     return () => {
-      unsubscribe();
+      unsubs.forEach(unsub => unsub());
     };
   }, [groupChat, sphere]);
 

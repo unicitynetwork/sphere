@@ -183,6 +183,27 @@ body {
   background: linear-gradient(180deg, #2563eb, #1d4ed8);
 }
 
+/* Bulletin board diagram animations */
+@keyframes boardPulse {
+  0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
+  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+}
+
+@keyframes linePulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+@keyframes agentFloat {
+  0%, 100% { transform: translate(-50%, -50%) translateY(0); }
+  50% { transform: translate(-50%, -50%) translateY(-4px); }
+}
+
+@keyframes intentFlash {
+  0%, 100% { opacity: 0; transform: translateX(-50%) translateY(4px) scale(0.95); }
+  15%, 85% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
+
 /* Theme transition utility */
 .theme-transition {
   transition: background-color 0.3s ease,

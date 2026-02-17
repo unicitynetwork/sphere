@@ -15,7 +15,7 @@
     "@tailwindcss/vite": "^4.1.16",
     "@tanstack/react-query": "^5.90.10",
     "@types/katex": "^0.16.7",
-    "@unicitylabs/sphere-sdk": "^0.4.3",
+    "@unicitylabs/sphere-sdk": "^0.4.6",
     "crypto-js": "^4.2.0",
     "elliptic": "^6.6.1",
     "framer-motion": "^12.23.24",

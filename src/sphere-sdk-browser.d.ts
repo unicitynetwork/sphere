@@ -27,6 +27,7 @@ declare module '@unicitylabs/sphere-sdk/impl/browser' {
     tokenSync?: Record<string, unknown>;
     price?: Record<string, unknown>;
     groupChat?: Record<string, unknown> | boolean;
+    market?: Record<string, unknown> | boolean;
   }
 
   export interface BrowserProviders {

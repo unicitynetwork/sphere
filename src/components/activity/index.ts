@@ -1,2 +1,2 @@
-export { ActivityIcon } from './ActivityIcon';
+export { ActivityIcon, IntentIcon } from './ActivityIcon';
 export { ActivityTicker } from './ActivityTicker';

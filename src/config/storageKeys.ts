@@ -14,9 +14,6 @@ export const STORAGE_KEYS = {
   // Theme preference (light/dark)
   THEME: 'sphere_theme',
 
-  // Welcome screen acceptance flag
-  WELCOME_ACCEPTED: 'sphere_welcome_accepted',
-
   // Tutorial completion flag
   TUTORIAL_COMPLETED: 'sphere_tutorial_completed',
 

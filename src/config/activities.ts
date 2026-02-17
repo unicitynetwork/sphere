@@ -1,4 +1,4 @@
-import { MessageSquare, Trophy, ShoppingBag, Sparkles, Tag, Zap, Store, Plug } from 'lucide-react';
+import { MessageSquare, Store, Globe, Bot, Cpu } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // Agent types for different UI layouts
@@ -42,7 +42,7 @@ export interface AgentConfig {
 }
 
 // All agents configuration
-export const agents: AgentConfig[] = [
+const allAgents: AgentConfig[] = [
   {
     id: 'chat',
     name: 'Chat',
@@ -52,22 +52,6 @@ export const agents: AgentConfig[] = [
     color: 'from-blue-500 to-cyan-500',
     type: 'chat',
     requiresWallet: true,
-  },
-  {
-    id: 'ai',
-    name: 'Uncensored AI',
-    description: 'Viktor can assist with anything',
-    Icon: Sparkles,
-    category: 'Assistant',
-    color: 'from-orange-500 to-amber-500',
-    type: 'simple-ai',
-    greetingMessage: "Hi! I'm Viktor, your personal assistant.\nI care a great deal about privacy. I don't know you, I don't log you, I don't even know your IP address. You are invisible here and nothing will be recorded about our conversation.\nHow can I help?",
-    backendActivityId: 'ama',
-    quickActions: [
-      { label: 'Research', message: 'Research the latest news' },
-      { label: 'Explain', message: 'Explain how something works' },
-      { label: 'Help', message: 'Help me with a task' },
-    ],
   },
   // {
   //   id: 'trivia',
@@ -107,100 +91,22 @@ export const agents: AgentConfig[] = [
   //   contentType: 'game',
   // },
   {
-    id: 'sport',
-    name: 'P2P Predict',
-    description: 'Sports prediction markets',
-    Icon: Trophy,
-    category: 'Prediction',
-    color: 'from-emerald-500 to-teal-500',
-    type: 'ai-with-sidebar',
-    requiresWallet: true,
-    greetingMessage: "Welcome to the P2P Prediction Marketplace! 🏟️ Right now I'm only able to help you make predictions on sports games. I can help you check odds, make a prediction and show you what your active predictions are. What are we looking at ? English Premier League ? IPL ? Let me know and we can have some fun.",
-    backendActivityId: 'sports',
-    quickActions: [
-      { label: 'Basketball', message: 'Show me basketball' },
-      { label: 'Soccer', message: 'Show me soccer' },
-      { label: 'Tennis', message: 'Show me tennis' },
-      { label: 'Cricket', message: 'Show me cricket' },
-      { label: 'My bets', message: 'Show my bets' },
-    ],
-    contentType: 'match',
-    hasSidebar: true,
+    id: 'astrid',
+    name: 'Astrid',
+    description: 'Astrid AI agent',
+    Icon: Cpu,
+    category: 'Agent',
+    color: 'from-teal-500 to-cyan-600',
+    type: 'iframe',
   },
   {
-    id: 'p2p',
-    name: 'OTC Crypto',
-    description: 'Peer-to-peer trading',
-    Icon: ShoppingBag,
-    category: 'Trading',
-    color: 'from-orange-500 to-red-500',
-    type: 'ai-with-sidebar',
-    requiresWallet: true,
-    greetingMessage: "Welcome to OTC Madness! I'll help you navigate the world of over-the-counter crypto trading. Ready to post an offer or browse available deals?",
-    backendActivityId: 'p2p',
-    quickActions: [
-      { label: 'Buy 20 ALPHA', message: 'Buy 20 ALPHA' },
-      { label: 'Buy 100 ALPHA', message: 'Buy 100 ALPHA' },
-    ],
-    contentType: 'product',
-    hasSidebar: true,
-  },
-  
-  // {
-  //   id: 'merch',
-  //   name: 'Unicity Merch',
-  //   description: 'Merchandise store',
-  //   Icon: Shirt,
-  //   category: 'Shopping',
-  //   color: 'from-yellow-500 to-orange-500',
-  //   type: 'ai-with-sidebar',
-  //   greetingMessage: "Welcome to the Merch Store! Check out our exclusive merchandise. What are you looking for today?",
-  //   backendActivityId: 'merch',
-  //   quickActions: [
-  //     { label: 'All items', message: 'Show all merch' },
-  //     { label: 'Mugs', message: 'Show mugs' },
-  //     { label: 'T-Shirts', message: 'Show t-shirts' },
-  //   ],
-  //   contentType: 'merch',
-  //   hasSidebar: true,
-  // },
-  {
-    id: 'sell-anything',
-    name: 'Buy / Sell Anything',
-    description: 'Get a quote',
-    Icon: Tag,
-    category: 'Trading',
-    color: 'from-teal-500 to-cyan-500',
-    type: 'simple-ai',
-    requiresWallet: true,
-    greetingMessage: "Welcome to the P2P Marketplace! Tell me what you want to buy or sell and I'll help you find the best deals.",
-    quickActions: [
-      { label: 'Gold', message: 'Show me gold listings' },
-      { label: 'Tickets', message: 'Show me event tickets' },
-      { label: 'ASICs', message: 'Show me mining hardware' },
-      { label: 'Browse all', message: 'Show me what\'s available' },
-    ],
-  },
-  {
-    id: 'pokemon',
-    name: 'Pokémon Cards',
-    description: 'Catch em all',
-    Icon: Zap,
-    category: 'Entertainment',
-    color: 'from-yellow-500 to-red-500',
-    type: 'ai-with-sidebar',
-    requiresWallet: true,
-    backendActivityId: 'pokemon',
-    greetingMessage: "Welcome to the Pokémon Card marketplace! I can help you browse Pokémon cards, manage your cart, and complete purchases using Unicity tokens. You can also sell cards! Tell me your Unicity ID to get started, or ask me what cards are available.",
-    placeholder: 'Search for cards, check cart, or ask about selling...',
-    quickActions: [
-      { label: 'Browse cards', message: 'Show me available Pokémon cards' },
-      { label: 'My cart', message: 'Show my cart' },
-      { label: 'Sell cards', message: 'I want to sell some cards' },
-      { label: 'Check order', message: 'Check my order status' },
-    ],
-    contentType: 'product',
-    hasSidebar: true,
+    id: 'unibot',
+    name: 'Unibot',
+    description: 'Unibot assistant',
+    Icon: Bot,
+    category: 'Agent',
+    color: 'from-amber-500 to-orange-600',
+    type: 'iframe',
   },
   {
     id: 'marketplace',
@@ -213,21 +119,17 @@ export const agents: AgentConfig[] = [
     iframeUrl: 'https://market.unicity.network/',
   },
   {
-    id: 'example',
-    name: 'Example',
-    description: 'Test iframe dApp',
-    Icon: Plug,
-    category: 'Developer',
-    color: 'from-blue-500 to-indigo-500',
+    id: 'custom',
+    name: 'Sphere Agents',
+    description: 'Load any URL (e.g. localhost)',
+    Icon: Globe,
+    category: 'Custom',
+    color: 'from-indigo-500 to-violet-600',
     type: 'iframe',
-    iframeUrl: 'https://unicitynetwork.github.io/sphere-sdk-connect-example/',
-    iframeUrls: [
-      { label: 'GitHub Pages', url: 'https://unicitynetwork.github.io/sphere-sdk-connect-example/' },
-      { label: 'Localhost', url: 'http://localhost:5174' },
-    ],
-    requiresWallet: true,
   },
 ];
+
+export const agents: AgentConfig[] = allAgents;
 
 // Get agent by ID
 export function getAgentConfig(agentId: string): AgentConfig | undefined {

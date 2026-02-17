@@ -4,10 +4,7 @@ export type ActivityKind =
   | 'token_transfer'
   | 'wallet_created'
   | 'game_started'
-  | 'bet_placed'
-  | 'otc_purchase'
-  | 'merch_order'
-  | 'pokemon_purchase';
+  | 'merch_order';
 
 export interface Activity {
   id: number;

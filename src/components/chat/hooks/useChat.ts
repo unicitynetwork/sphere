@@ -133,13 +133,30 @@ export const useChat = (): UseChatReturn => {
     };
   }, [queryClient, selectedConversation, sphere]);
 
-  // Query conversations from SDK
+  // Query conversations from SDK, with fallback nametag resolution
   const conversationsQuery = useQuery({
     queryKey: CHAT_KEYS.conversations(addressId),
-    queryFn: () => {
+    queryFn: async () => {
       if (!sphere) return [];
       const sdkConvs = sphere.communications.getConversations();
-      return buildConversations(sdkConvs, sphere.identity!.chainPubkey);
+      const convos = buildConversations(sdkConvs, sphere.identity!.chainPubkey);
+
+      // Resolve missing nametags via transport (parallel, best-effort)
+      const needsResolve = convos.filter(c => !c.peerNametag);
+      if (needsResolve.length > 0) {
+        const resolved = await Promise.all(
+          needsResolve.map(c =>
+            sphere.communications.resolvePeerNametag(c.peerPubkey).catch(() => undefined),
+          ),
+        );
+        for (let i = 0; i < needsResolve.length; i++) {
+          if (resolved[i]) {
+            needsResolve[i].peerNametag = resolved[i];
+          }
+        }
+      }
+
+      return convos;
     },
     enabled: !!sphere,
     staleTime: 30000,
@@ -267,7 +284,7 @@ export const useChat = (): UseChatReturn => {
         localStorage.removeItem(selectedDmKey);
       }
     },
-    [queryClient, sphere, selectedDmKey, addressId],
+    [queryClient, sphere, selectedDmKey],
   );
 
   // Mark as read
@@ -284,7 +301,7 @@ export const useChat = (): UseChatReturn => {
         }
       }
     },
-    [queryClient, sphere, addressId],
+    [queryClient, sphere],
   );
 
   // Send message
