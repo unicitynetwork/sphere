@@ -5,7 +5,7 @@ import {
   useRef,
   type ReactNode,
 } from 'react';
-import { Sphere } from '@unicitylabs/sphere-sdk';
+import { Sphere, TokenRegistry, NETWORKS } from '@unicitylabs/sphere-sdk';
 import {
   createBrowserProviders,
   type BrowserProviders,
@@ -82,6 +82,15 @@ export function SphereProvider({
         ...getIpfsConfig(),
       });
       setProviders(browserProviders);
+
+      // Configure our bundle's TokenRegistry singleton — the SDK configures
+      // its own internal copy during Sphere.init(), but due to separate
+      // bundle entry points the singleton we import is a different instance.
+      const netConfig = NETWORKS[network] ?? NETWORKS.testnet;
+      TokenRegistry.configure({
+        remoteUrl: netConfig.tokenRegistryUrl,
+        storage: browserProviders.storage,
+      });
 
       const exists = await Sphere.exists(browserProviders.storage);
       setWalletExists(exists);

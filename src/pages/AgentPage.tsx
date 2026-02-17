@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, Navigate, useNavigate } from 'react-router-dom';
-import { MessageSquare, Wallet, ChevronDown, ChevronUp, X, Globe, Plus, Maximize2, Minimize2 } from 'lucide-react';
+import { MessageSquare, Wallet, ChevronDown, ChevronUp, X, Globe, Plus, Maximize2, Minimize2, Menu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AgentCard } from '../components/agents/AgentCard';
 import { ActivityTicker } from '../components/activity';
@@ -30,6 +30,8 @@ export function AgentPage() {
   const [activeCustomTabId, setActiveCustomTabId] = useState<string | null>(null);
   const [showCustomUrlPrompt, setShowCustomUrlPrompt] = useState(false);
   const [customUrlInput, setCustomUrlInput] = useState('');
+  const [showIframeAgentPicker, setShowIframeAgentPicker] = useState(false);
+  const iframePickerRef = useRef<HTMLDivElement>(null);
   const { isFullscreen, setFullscreen } = useUIState();
 
   // Track viewport size so we render the chat component in only ONE container
@@ -51,6 +53,17 @@ export function AgentPage() {
   // Iframe agents without a URL (custom, astrid, unibot) show the URL prompt
   const isUrlPromptAgent = currentAgent?.type === 'iframe' && !currentAgent.iframeUrl;
   const iframeFullscreen = isFullscreen && currentAgent?.type === 'iframe';
+
+  // Close iframe agent picker when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (iframePickerRef.current && !iframePickerRef.current.contains(event.target as Node)) {
+        setShowIframeAgentPicker(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Escape key exits iframe fullscreen
   useEffect(() => {
@@ -221,6 +234,44 @@ export function AgentPage() {
       <div className={`${isIframeActive ? 'h-full' : 'hidden'} flex flex-col ${iframeFullscreen ? 'bg-white dark:bg-neutral-900' : 'bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 lg:shadow-xl dark:lg:shadow-2xl'} overflow-hidden relative theme-transition`}>
         {/* Active iframe agents tab bar */}
         <div className="flex items-center gap-1 px-3 py-2 bg-neutral-50/80 dark:bg-neutral-800/40 border-b border-neutral-200 dark:border-neutral-800/50 shrink-0">
+          {/* Mobile agent picker dropdown */}
+          <div ref={iframePickerRef} className={`relative ${isFullscreen ? '' : 'lg:hidden'}`}>
+            <button
+              onClick={() => setShowIframeAgentPicker(!showIframeAgentPicker)}
+              className="flex items-center justify-center w-7 h-7 rounded-lg text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-200/60 dark:hover:bg-neutral-700/40 transition-colors duration-150"
+              title="Switch agent"
+            >
+              <Menu className="w-4 h-4" />
+            </button>
+            <AnimatePresence>
+              {showIframeAgentPicker && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="absolute top-full left-0 mt-2 w-56 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700/50 rounded-xl shadow-xl overflow-hidden z-50"
+                >
+                  {agents.map((a) => (
+                    <button
+                      key={a.id}
+                      onClick={() => { navigate(`/agents/${a.id}`); setShowIframeAgentPicker(false); }}
+                      className={`w-full flex items-center gap-3 p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/50 transition-colors ${
+                        a.id === agentId ? 'bg-neutral-100 dark:bg-neutral-800/80' : ''
+                      }`}
+                    >
+                      <div className={`p-2 rounded-lg bg-linear-to-br ${a.color} shrink-0`}>
+                        <a.Icon className="w-4 h-4 text-white" />
+                      </div>
+                      <div className="text-left min-w-0">
+                        <div className="text-neutral-900 dark:text-white text-sm font-medium">{a.name}</div>
+                        <div className="text-neutral-500 dark:text-neutral-400 text-xs truncate">{a.description}</div>
+                      </div>
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           {/* Static iframe agent tabs */}
           {visitedIframeIds.map(id => {
             const iframeAgent = getAgentConfig(id);
@@ -521,8 +572,8 @@ export function AgentPage() {
         </div>
       </div>
 
-      {/* Desktop grid layout - full width in iframe fullscreen */}
-      <div className={`hidden lg:grid ${iframeFullscreen ? 'lg:grid-cols-1' : 'lg:grid-cols-3 lg:gap-8'} lg:flex-1 lg:min-h-162.5 ${iframeFullscreen ? '' : 'lg:py-2'}`}>
+      {/* Desktop grid layout - full width in iframe fullscreen (also visible on mobile when fullscreen) */}
+      <div className={`${iframeFullscreen ? 'grid grid-cols-1 flex-1 min-h-0' : 'hidden lg:grid lg:grid-cols-3 lg:gap-8 lg:flex-1 lg:min-h-162.5 lg:py-2'}`}>
         <div data-tutorial="chat" className={`${iframeFullscreen ? '' : 'lg:col-span-2'} h-full min-h-0`}>
           <WalletRequiredBlocker agentId={agentId!}>
             {renderIframeAgents()}
