@@ -170,6 +170,26 @@ export function SphereProvider({
         setSphere(instance);
         setWalletExists(true);
 
+        // Notify kbbot of new wallet (fire and forget)
+        const kbbotUrl = import.meta.env.VITE_KBBOT_URL as string | undefined;
+        if (kbbotUrl && instance.identity) {
+          fetch(`${kbbotUrl}/api/notify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              pubkey: instance.identity.chainPubkey,
+              nametag: instance.identity.nametag,
+            }),
+          })
+            .then((res) => {
+              if (!res.ok) console.error(`[kbbot] notify failed: ${res.status} ${res.statusText}`);
+              else console.log('[kbbot] notify sent', { pubkey: instance.identity!.chainPubkey, nametag: instance.identity!.nametag });
+            })
+            .catch((err) => console.error('[kbbot] notify error:', err));
+        } else if (kbbotUrl) {
+          console.warn('[kbbot] notify skipped — no identity on created sphere');
+        }
+
         if (!generatedMnemonic) {
           throw new Error('Failed to generate mnemonic');
         }
@@ -346,6 +366,24 @@ export function SphereProvider({
       }
       sphereRef.current = importedSphere;
       setSphere(importedSphere);
+
+      // Notify kbbot of imported wallet (fire and forget)
+      const kbbotUrl = import.meta.env.VITE_KBBOT_URL as string | undefined;
+      if (kbbotUrl && importedSphere.identity) {
+        fetch(`${kbbotUrl}/api/notify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pubkey: importedSphere.identity.chainPubkey,
+            nametag: importedSphere.identity.nametag,
+          }),
+        })
+          .then((res) => {
+            if (!res.ok) console.error(`[kbbot] notify failed: ${res.status} ${res.statusText}`);
+            else console.log('[kbbot] notify sent', { pubkey: importedSphere.identity!.chainPubkey, nametag: importedSphere.identity!.nametag });
+          })
+          .catch((err) => console.error('[kbbot] notify error:', err));
+      }
     }
     setWalletExists(true);
   }, [providers]);
