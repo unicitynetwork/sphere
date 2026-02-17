@@ -1,4 +1,5 @@
 import type { Activity, ActivityKind } from '../../types/activity';
+import type { FeedListing } from '../../hooks/useMarketFeed';
 
 export function getActivityTitle(kind: ActivityKind): string {
   switch (kind) {
@@ -74,6 +75,29 @@ export function getActivityDescription(activity: Activity): string {
     default:
       return 'Network activity';
   }
+}
+
+// ==========================================
+// Market Feed (IntentType) helpers
+// ==========================================
+
+export function getIntentTitle(type: string): string {
+  switch (type) {
+    case 'sell':
+      return 'Selling';
+    case 'buy':
+      return 'Buying';
+    case 'service':
+      return 'Service';
+    case 'announcement':
+      return 'Announcement';
+    default:
+      return 'Intent';
+  }
+}
+
+export function getIntentDescription(listing: FeedListing): string {
+  return listing.title || listing.descriptionPreview || 'New intent posted';
 }
 
 export function formatTimeAgo(dateString: string): string {

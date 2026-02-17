@@ -318,7 +318,7 @@ export function AgentPage() {
 
       {/* Activity Ticker - desktop only */}
       <div className="hidden lg:block mb-6">
-        <ActivityTicker agentId={agentId} />
+        <ActivityTicker />
       </div>
 
       {/* Mobile tab switcher with sliding indicator */}
@@ -375,7 +375,7 @@ export function AgentPage() {
       </div>
 
       {/* Desktop grid layout */}
-      <div className="hidden lg:grid lg:grid-cols-3 lg:gap-8 lg:flex-1 lg:min-h-[650px] lg:py-2">
+      <div className="hidden lg:grid lg:grid-cols-3 lg:gap-8 lg:flex-1 lg:min-h-162.5 lg:py-2">
         <div data-tutorial="chat" className="lg:col-span-2 h-full min-h-0">
           <WalletRequiredBlocker agentId={agentId!}>
             {renderChatComponent()}

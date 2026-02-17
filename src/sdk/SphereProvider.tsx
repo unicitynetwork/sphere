@@ -78,6 +78,7 @@ export function SphereProvider({
         network,
         price: { platform: 'coingecko', baseUrl: COINGECKO_BASE_URL, cacheTtlMs: 5 * 60_000 },
         groupChat: true,
+        market: true,
         ...getIpfsConfig(),
       });
       setProviders(browserProviders);
