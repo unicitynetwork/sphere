@@ -1,4 +1,4 @@
-import { ShoppingBag, ArrowRightLeft, Wallet, Gamepad2, ShoppingCart, Tag } from 'lucide-react';
+import { ShoppingBag, ArrowRightLeft, Wallet, Gamepad2, ShoppingCart, Tag, Wrench, Megaphone, Sparkles } from 'lucide-react';
 import type { ActivityKind } from '../../types/activity';
 
 interface ActivityIconProps {
