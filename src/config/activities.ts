@@ -1,4 +1,4 @@
-import { MessageCircle, Hash, Store, Globe, Bot, Cpu } from 'lucide-react';
+import { MessageCircle, Hash, Globe } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // Agent types for different UI layouts
@@ -100,34 +100,34 @@ const allAgents: AgentConfig[] = [
   //   ],
   //   contentType: 'game',
   // },
-  {
-    id: 'astrid',
-    name: 'Astrid',
-    description: 'Astrid AI agent',
-    Icon: Cpu,
-    category: 'Agent',
-    color: 'from-teal-500 to-cyan-600',
-    type: 'iframe',
-  },
-  {
-    id: 'unibot',
-    name: 'Unibot',
-    description: 'Unibot assistant',
-    Icon: Bot,
-    category: 'Agent',
-    color: 'from-amber-500 to-orange-600',
-    type: 'iframe',
-  },
-  {
-    id: 'marketplace',
-    name: 'Marketplace',
-    description: 'Unicity Marketplace',
-    Icon: Store,
-    category: 'Trading',
-    color: 'from-violet-500 to-purple-500',
-    type: 'iframe',
-    iframeUrl: 'https://market.unicity.network/',
-  },
+  // {
+  //   id: 'astrid',
+  //   name: 'Astrid',
+  //   description: 'Astrid AI agent',
+  //   Icon: Cpu,
+  //   category: 'Agent',
+  //   color: 'from-teal-500 to-cyan-600',
+  //   type: 'iframe',
+  // },
+  // {
+  //   id: 'unibot',
+  //   name: 'Unibot',
+  //   description: 'Unibot assistant',
+  //   Icon: Bot,
+  //   category: 'Agent',
+  //   color: 'from-amber-500 to-orange-600',
+  //   type: 'iframe',
+  // },
+  // {
+  //   id: 'marketplace',
+  //   name: 'Marketplace',
+  //   description: 'Unicity Marketplace',
+  //   Icon: Store,
+  //   category: 'Trading',
+  //   color: 'from-violet-500 to-purple-500',
+  //   type: 'iframe',
+  //   iframeUrl: 'https://market.unicity.network/',
+  // },
   {
     id: 'custom',
     name: 'Sphere Agents',
