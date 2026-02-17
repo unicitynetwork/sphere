@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, Navigate, useNavigate } from 'react-router-dom';
-import { MessageSquare, Wallet, ChevronDown, ChevronUp, X, Globe, Plus } from 'lucide-react';
+import { MessageSquare, Wallet, ChevronDown, ChevronUp, X, Globe, Plus, Maximize2, Minimize2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AgentCard } from '../components/agents/AgentCard';
 import { ActivityTicker } from '../components/activity';
@@ -12,6 +12,7 @@ import { IframeAgent } from '../components/agents/IframeAgent';
 import { WalletPanel } from '../components/wallet/WalletPanel';
 import { WalletRequiredBlocker } from '../components/agents/WalletRequiredBlocker';
 import { agents, getAgentConfig, type AgentConfig } from '../config/activities';
+import { useUIState } from '../hooks/useUIState';
 
 const DEFAULT_VISIBLE_AGENTS = 7;
 const CUSTOM_URL_PRESETS = [
@@ -29,6 +30,7 @@ export function AgentPage() {
   const [activeCustomTabId, setActiveCustomTabId] = useState<string | null>(null);
   const [showCustomUrlPrompt, setShowCustomUrlPrompt] = useState(false);
   const [customUrlInput, setCustomUrlInput] = useState('');
+  const { isFullscreen, setFullscreen } = useUIState();
 
   const hasMoreAgents = agents.length > DEFAULT_VISIBLE_AGENTS;
   const visibleAgents = showAllAgents ? agents : agents.slice(0, DEFAULT_VISIBLE_AGENTS);
@@ -38,6 +40,17 @@ export function AgentPage() {
   // Iframe agents with a URL get tracked for persistent background rendering
   // Iframe agents without a URL (custom, astrid, unibot) show the URL prompt
   const isUrlPromptAgent = currentAgent?.type === 'iframe' && !currentAgent.iframeUrl;
+  const iframeFullscreen = isFullscreen && currentAgent?.type === 'iframe';
+
+  // Escape key exits iframe fullscreen
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFullscreen(false);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen, setFullscreen]);
 
   useEffect(() => {
     if (currentAgent?.type === 'iframe' && currentAgent.iframeUrl) {
@@ -195,7 +208,7 @@ export function AgentPage() {
     if (!isIframeActive && !hasAnyTabs) return null;
 
     return (
-      <div className={`${isIframeActive ? 'h-full' : 'hidden'} flex flex-col bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden relative lg:shadow-xl dark:lg:shadow-2xl theme-transition`}>
+      <div className={`${isIframeActive ? 'h-full' : 'hidden'} flex flex-col ${iframeFullscreen ? 'bg-white dark:bg-neutral-900' : 'bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 lg:shadow-xl dark:lg:shadow-2xl'} overflow-hidden relative theme-transition`}>
         {/* Active iframe agents tab bar */}
         <div className="flex items-center gap-1 px-3 py-2 bg-neutral-50/80 dark:bg-neutral-800/40 border-b border-neutral-200 dark:border-neutral-800/50 shrink-0">
           {/* Static iframe agent tabs */}
@@ -268,6 +281,14 @@ export function AgentPage() {
             title="Add custom URL"
           >
             <Plus className="w-4 h-4" />
+          </button>
+          {/* Fullscreen toggle */}
+          <button
+            onClick={() => setFullscreen(!isFullscreen)}
+            className="flex items-center justify-center w-7 h-7 rounded-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 hover:bg-neutral-200/60 dark:hover:bg-neutral-700/40 transition-colors duration-150 ml-auto"
+            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          >
+            {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
           </button>
         </div>
 
@@ -360,8 +381,8 @@ export function AgentPage() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Desktop agent grid - always visible */}
-      <div data-tutorial="agents" className="hidden lg:block mb-8 relative px-8 pt-8 pb-5 rounded-2xl dark:bg-linear-to-br dark:from-neutral-900/40 dark:to-neutral-800/20 backdrop-blur-sm border border-neutral-200 dark:border-neutral-800/50">
+      {/* Desktop agent grid - hidden in iframe fullscreen */}
+      <div data-tutorial="agents" className={`${iframeFullscreen ? 'hidden' : 'hidden lg:block'} mb-8 relative px-8 pt-8 pb-5 rounded-2xl dark:bg-linear-to-br dark:from-neutral-900/40 dark:to-neutral-800/20 backdrop-blur-sm border border-neutral-200 dark:border-neutral-800/50`}>
         <div className="absolute top-0 left-0 w-32 h-32 border-l-2 border-t-2 border-orange-500/50 rounded-tl-2xl" />
         <div className="absolute bottom-0 right-0 w-32 h-32 border-r-2 border-b-2 border-orange-500/50 rounded-br-2xl" />
 
@@ -429,13 +450,13 @@ export function AgentPage() {
         </div>
       </div>
 
-      {/* Activity Ticker - desktop only */}
-      <div className="hidden lg:block mb-6">
+      {/* Activity Ticker - hidden in iframe fullscreen */}
+      <div className={`${iframeFullscreen ? 'hidden' : 'hidden lg:block'} mb-6`}>
         <ActivityTicker agentId={agentId} />
       </div>
 
-      {/* Mobile tab switcher with sliding indicator */}
-      <div data-tutorial="mobile-tabs" className="lg:hidden shrink-0 relative flex p-1 mb-3 bg-neutral-100 dark:bg-neutral-800/50 rounded-2xl backdrop-blur-sm border border-neutral-200 dark:border-neutral-700/30 overflow-hidden">
+      {/* Mobile tab switcher - hidden in iframe fullscreen */}
+      <div data-tutorial="mobile-tabs" className={`${iframeFullscreen ? 'hidden' : 'lg:hidden'} shrink-0 relative flex p-1 mb-3 bg-neutral-100 dark:bg-neutral-800/50 rounded-2xl backdrop-blur-sm border border-neutral-200 dark:border-neutral-700/30 overflow-hidden`}>
         {/* Sliding background indicator */}
         <motion.div
           className="absolute top-1 bottom-1 left-1 bg-linear-to-r from-orange-500 to-orange-600 rounded-xl shadow-lg shadow-orange-500/20"
@@ -471,11 +492,11 @@ export function AgentPage() {
         </button>
       </div>
 
-      {/* Mobile swipeable container - takes remaining height */}
+      {/* Mobile swipeable container - hidden in iframe fullscreen */}
       <div
         ref={sliderRef}
         onScroll={handleScroll}
-        className="lg:hidden flex-1 min-h-0 flex overflow-x-auto snap-x snap-mandatory scrollbar-hide py-1"
+        className={`${iframeFullscreen ? 'hidden' : 'lg:hidden'} flex-1 min-h-0 flex overflow-x-auto snap-x snap-mandatory scrollbar-hide py-1`}
       >
         <div data-tutorial="mobile-chat" className="w-full shrink-0 snap-center h-full">
           <WalletRequiredBlocker agentId={agentId!} onOpenWallet={() => scrollToPanel('wallet')}>
@@ -488,17 +509,19 @@ export function AgentPage() {
         </div>
       </div>
 
-      {/* Desktop grid layout */}
-      <div className="hidden lg:grid lg:grid-cols-3 lg:gap-8 lg:flex-1 lg:min-h-[650px] lg:py-2">
-        <div data-tutorial="chat" className="lg:col-span-2 h-full min-h-0">
+      {/* Desktop grid layout - full width in iframe fullscreen */}
+      <div className={`hidden lg:grid ${iframeFullscreen ? 'lg:grid-cols-1' : 'lg:grid-cols-3 lg:gap-8'} lg:flex-1 lg:min-h-[650px] ${iframeFullscreen ? '' : 'lg:py-2'}`}>
+        <div data-tutorial="chat" className={`${iframeFullscreen ? '' : 'lg:col-span-2'} h-full min-h-0`}>
           <WalletRequiredBlocker agentId={agentId!}>
             {renderIframeAgents()}
             {renderChatComponent()}
           </WalletRequiredBlocker>
         </div>
-        <div data-tutorial="wallet" className="h-full min-h-0">
-          <WalletPanel />
-        </div>
+        {!iframeFullscreen && (
+          <div data-tutorial="wallet" className="h-full min-h-0">
+            <WalletPanel />
+          </div>
+        )}
       </div>
     </div>
   );
