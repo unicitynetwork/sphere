@@ -33,25 +33,10 @@ const ACTIVITY_GLOW_COLORS: Record<ActivityKind, { bg: string; glow: string; bor
     glow: 'shadow-[0_4px_12px_-2px_rgba(249,115,22,0.35)]',
     border: 'border-orange-500/30',
   },
-  bet_placed: {
-    bg: 'bg-amber-500/10',
-    glow: 'shadow-[0_4px_12px_-2px_rgba(245,158,11,0.35)]',
-    border: 'border-amber-500/30',
-  },
-  otc_purchase: {
-    bg: 'bg-cyan-500/10',
-    glow: 'shadow-[0_4px_12px_-2px_rgba(6,182,212,0.35)]',
-    border: 'border-cyan-500/30',
-  },
   merch_order: {
     bg: 'bg-pink-500/10',
     glow: 'shadow-[0_4px_12px_-2px_rgba(236,72,153,0.35)]',
     border: 'border-pink-500/30',
-  },
-  pokemon_purchase: {
-    bg: 'bg-yellow-500/10',
-    glow: 'shadow-[0_4px_12px_-2px_rgba(234,179,8,0.35)]',
-    border: 'border-yellow-500/30',
   },
 };
 
@@ -61,17 +46,13 @@ interface ActivityTickerProps {
 
 // Map agent IDs to their relevant activity kinds
 const AGENT_ACTIVITY_MAP: Record<string, ActivityKind[]> = {
-  sport: ['bet_placed'],
-  p2p: ['otc_purchase'],
   merch: ['merch_order'],
   games: ['game_started'],
   trivia: ['game_started'],
-  'sell-anything': ['marketplace_post', 'marketplace_offer'],
-  pokemon: ['pokemon_purchase'],
 };
 
 // Agents that show all activities
-const SHOW_ALL_AGENTS = ['chat', 'ai'];
+const SHOW_ALL_AGENTS = ['chat'];
 
 export function ActivityTicker({ agentId }: ActivityTickerProps) {
   const [realtimeActivities, setRealtimeActivities] = useState<Activity[]>([]);
