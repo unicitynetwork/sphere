@@ -22,7 +22,7 @@ export function useMentionNavigation() {
     const handleMentionClick = (username: string) => {
       // Ensure username has @ prefix for nametag format
       const nametag = username.startsWith('@') ? username : `@${username}`;
-      navigate(`/agents/chat?nametag=${encodeURIComponent(nametag)}`);
+      navigate(`/agents/dm?nametag=${encodeURIComponent(nametag)}`);
     };
 
     setMentionClickHandler(handleMentionClick);

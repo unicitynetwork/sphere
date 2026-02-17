@@ -1,8 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageSquarePlus, Search, X, PanelLeftClose, Sparkles, Hash, User } from 'lucide-react';
+import { MessageSquarePlus, Search, X, PanelLeftClose, Sparkles } from 'lucide-react';
 import type { Conversation } from '../data/chatTypes';
 import { DMConversationItem } from './DMConversationItem';
-import type { ChatModeChangeHandler } from '../../../types';
 
 interface DMConversationListProps {
   conversations: Conversation[];
@@ -16,7 +15,6 @@ interface DMConversationListProps {
   isCollapsed: boolean;
   onCollapse: () => void;
   hasUnread: boolean;
-  onModeChange: ChatModeChangeHandler;
 }
 
 export function DMConversationList({
@@ -31,7 +29,6 @@ export function DMConversationList({
   isCollapsed,
   onCollapse,
   hasUnread,
-  onModeChange,
 }: DMConversationListProps) {
   return (
     <>
@@ -102,28 +99,6 @@ export function DMConversationList({
                 <X className="w-4 h-4" />
               </motion.button>
             </div>
-          </div>
-
-          {/* Mode Toggle */}
-          <div className="grid grid-cols-2 gap-2 relative z-10 mb-3">
-            <motion.button
-              onClick={() => onModeChange('global')}
-              className="px-4 py-3 rounded-xl text-sm transition-all relative overflow-hidden bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-700/50"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Hash className="w-4 h-4 inline mr-2" />
-              <span>Global</span>
-            </motion.button>
-            <motion.button
-              className="px-4 py-3 rounded-xl text-sm transition-all relative overflow-hidden bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <div className="absolute inset-0 bg-linear-to-tr from-white/0 via-white/20 to-white/0" />
-              <User className="w-4 h-4 inline mr-2" />
-              <span className="relative z-10">DM</span>
-            </motion.button>
           </div>
 
           {/* Search */}

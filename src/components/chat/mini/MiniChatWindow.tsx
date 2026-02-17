@@ -115,7 +115,7 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
   const handleExpand = () => {
     closeWindow(conversation.peerPubkey);
     const nametag = conversation.peerNametag || conversation.peerPubkey;
-    navigate(`/agents/chat?nametag=${encodeURIComponent(nametag)}`);
+    navigate(`/agents/dm?nametag=${encodeURIComponent(nametag)}`);
   };
 
   const handleSend = async (content: string) => {

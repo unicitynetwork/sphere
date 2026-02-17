@@ -1,0 +1,173 @@
+import { useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { getAgentConfig } from '../config/activities';
+import { STORAGE_KEYS } from '../config/storageKeys';
+
+const DESKTOP_STATE_KEY = ['desktop', 'state'] as const;
+
+export interface DesktopTab {
+  id: string;
+  appId: string;
+  label: string;
+  url?: string;
+}
+
+interface DesktopState {
+  openTabs: DesktopTab[];
+  activeTabId: string | null;
+}
+
+const defaultState: DesktopState = {
+  openTabs: [],
+  activeTabId: null,
+};
+
+function loadState(): DesktopState {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.DESKTOP_STATE);
+    if (!raw) return defaultState;
+    const parsed = JSON.parse(raw) as DesktopState;
+    // Validate tabs against current agent configs — remove stale entries
+    const validTabs = parsed.openTabs.filter(
+      (tab) => tab.url || getAgentConfig(tab.appId),
+    );
+    const activeStillOpen = validTabs.some((t) => t.id === parsed.activeTabId);
+    return {
+      openTabs: validTabs,
+      activeTabId: activeStillOpen ? parsed.activeTabId : null,
+    };
+  } catch {
+    return defaultState;
+  }
+}
+
+function saveState(state: DesktopState) {
+  localStorage.setItem(STORAGE_KEYS.DESKTOP_STATE, JSON.stringify(state));
+}
+
+export function useDesktopState() {
+  const queryClient = useQueryClient();
+
+  const { data: state = defaultState } = useQuery({
+    queryKey: DESKTOP_STATE_KEY,
+    queryFn: loadState,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+
+  const update = useCallback(
+    (updater: (prev: DesktopState) => DesktopState) => {
+      queryClient.setQueryData<DesktopState>(DESKTOP_STATE_KEY, (prev) => {
+        const next = updater(prev ?? defaultState);
+        saveState(next);
+        return next;
+      });
+    },
+    [queryClient],
+  );
+
+  const openTab = useCallback(
+    (appId: string, opts?: { url?: string; label?: string }) => {
+      update((prev) => {
+        // When opening a URL tab, check if same URL already open
+        if (opts?.url) {
+          const byUrl = prev.openTabs.find((t) => t.url === opts.url);
+          if (byUrl) {
+            return { ...prev, activeTabId: byUrl.id };
+          }
+          // Replace existing prompt tab (same appId, no URL) with the URL version
+          const agent = getAgentConfig(appId);
+          const tab: DesktopTab = {
+            id: `custom-${Date.now()}`,
+            appId,
+            label: opts.label ?? agent?.name ?? appId,
+            url: opts.url,
+          };
+          const filtered = prev.openTabs.filter(
+            (t) => !(t.appId === appId && !t.url),
+          );
+          return {
+            openTabs: [...filtered, tab],
+            activeTabId: tab.id,
+          };
+        }
+        // Non-URL tab — reuse existing if already open
+        const existing = prev.openTabs.find(
+          (t) => t.appId === appId && !t.url,
+        );
+        if (existing) {
+          return { ...prev, activeTabId: existing.id };
+        }
+        const agent = getAgentConfig(appId);
+        const tab: DesktopTab = {
+          id: appId,
+          appId,
+          label: opts?.label ?? agent?.name ?? appId,
+        };
+        return {
+          openTabs: [...prev.openTabs, tab],
+          activeTabId: tab.id,
+        };
+      });
+    },
+    [update],
+  );
+
+  const closeTab = useCallback(
+    (tabId: string) => {
+      update((prev) => {
+        const idx = prev.openTabs.findIndex((t) => t.id === tabId);
+        if (idx === -1) return prev;
+        const next = prev.openTabs.filter((t) => t.id !== tabId);
+        let nextActive = prev.activeTabId;
+        if (prev.activeTabId === tabId) {
+          // Activate the neighbor tab or show desktop
+          const neighbor = next[Math.min(idx, next.length - 1)];
+          nextActive = neighbor?.id ?? null;
+        }
+        return { openTabs: next, activeTabId: nextActive };
+      });
+    },
+    [update],
+  );
+
+  const activateTab = useCallback(
+    (tabId: string) => {
+      update((prev) => {
+        if (prev.activeTabId === tabId) return prev;
+        return { ...prev, activeTabId: tabId };
+      });
+    },
+    [update],
+  );
+
+  const showDesktop = useCallback(() => {
+    update((prev) => {
+      if (prev.activeTabId === null) return prev;
+      return { ...prev, activeTabId: null };
+    });
+  }, [update]);
+
+  const reorderTabs = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      update((prev) => {
+        const tabs = [...prev.openTabs];
+        const [moved] = tabs.splice(fromIndex, 1);
+        tabs.splice(toIndex, 0, moved);
+        return { ...prev, openTabs: tabs };
+      });
+    },
+    [update],
+  );
+
+  return {
+    openTabs: state.openTabs,
+    activeTabId: state.activeTabId,
+    activeTab: state.openTabs.find((t) => t.id === state.activeTabId) ?? null,
+    openTab,
+    closeTab,
+    activateTab,
+    showDesktop,
+    reorderTabs,
+  };
+}

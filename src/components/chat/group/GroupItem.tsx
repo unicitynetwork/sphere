@@ -123,8 +123,8 @@ export function GroupItem({
                       e.stopPropagation();
                       const code = await onCreateInvite();
                       if (code) {
-                        // Copy to clipboard - format: #/agents/chat?join=groupId/inviteCode
-                        const inviteUrl = `${window.location.origin}${window.location.pathname}#/agents/chat?join=${group.id}/${code}`;
+                        // Copy to clipboard - format: #/agents/group-chat?join=groupId/inviteCode
+                        const inviteUrl = `${window.location.origin}${window.location.pathname}#/agents/group-chat?join=${group.id}/${code}`;
                         navigator.clipboard.writeText(inviteUrl);
                         showToast('Invite link copied to clipboard', 'success');
                       }

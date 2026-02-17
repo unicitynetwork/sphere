@@ -19,7 +19,8 @@ export default function App() {
       <Route path="/" element={<IntroPage />} />
       <Route path="/connect" element={<ConnectPage />} />
       <Route element={<DashboardLayout />}>
-        <Route path="/home" element={<Navigate to="/agents/chat" replace />} />
+        <Route path="/home" element={<Navigate to="/agents/dm" replace />} />
+        <Route path="/agents/chat" element={<Navigate to="/agents/dm" replace />} />
         <Route path="/agents/:agentId" element={<AgentPage />} />
         <Route path="/ai" element={<Navigate to="/agents/ai" replace />} />
         <Route path="/developers" element={<DevelopersPage />} />

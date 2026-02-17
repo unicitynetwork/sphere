@@ -98,7 +98,7 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
 
   const handleNewConversation = () => {
     onClose();
-    navigate('/agents/chat?mode=dm&new=true');
+    navigate('/agents/dm?new=true');
   };
 
   return (
@@ -194,7 +194,7 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
         <motion.button
           onClick={() => {
             onClose();
-            navigate('/agents/chat');
+            navigate('/agents/dm');
           }}
           className="w-full py-2 text-sm text-orange-500 hover:text-orange-600 font-medium transition-colors"
           whileHover={{ scale: 1.02 }}

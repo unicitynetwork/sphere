@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { Header } from './Header';
 import { MiniChatBubbles } from '../chat/mini';
 import { useUIState } from '../../hooks/useUIState';
+import { useDesktopState } from '../../hooks/useDesktopState';
 import { TutorialOverlay } from '../tutorial/TutorialOverlay';
 import { useTutorial } from '../../hooks/useTutorial';
 
@@ -9,14 +10,14 @@ export function DashboardLayout() {
   const location = useLocation();
   const isMinePage = location.pathname === '/mine';
   const { isFullscreen } = useUIState();
+  const { activeTabId } = useDesktopState();
   const tutorial = useTutorial();
 
-  // Hide mini chat on the DM chat page (to avoid duplicate UI)
-  // But show it when fullscreen is active
-  const isChatPage = location.pathname === '/agents/chat';
-  const showMiniChat = !isChatPage || isFullscreen;
-
+  // Hide mini chat only when the DM tab is actively open (to avoid duplicate UI)
+  // Show it when fullscreen is active regardless
   const isAgentPage = location.pathname.startsWith('/agents/');
+  const isDmTabActive = isAgentPage && activeTabId === 'dm';
+  const showMiniChat = !isDmTabActive || isFullscreen;
 
   return (
     <div className="h-full flex flex-col bg-neutral-100 dark:bg-linear-to-br dark:from-neutral-950 dark:via-neutral-900 dark:to-neutral-950 theme-transition overflow-y-auto overflow-x-hidden">

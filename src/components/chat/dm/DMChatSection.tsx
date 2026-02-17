@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MessageCircle, Menu, PanelLeft, ChevronDown, Maximize2, Minimize2 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useChat } from '../hooks/useChat';
 import { useUIState } from '../../../hooks/useUIState';
 import { DMConversationList } from './DMConversationList';
@@ -13,16 +13,16 @@ import { agents } from '../../../config/activities';
 import { setMentionClickHandler } from '../../../utils/mentionHandler';
 import { getColorFromPubkey } from '../utils/avatarColors';
 import { getDisplayName, getAvatar } from '../data/chatTypes';
-import type { ChatModeChangeHandler } from '../../../types';
 
 interface DMChatSectionProps {
-  onModeChange: ChatModeChangeHandler;
   pendingRecipient?: string | null;
   onPendingRecipientHandled?: () => void;
 }
 
-export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipientHandled }: DMChatSectionProps) {
+export function DMChatSection({ pendingRecipient, onPendingRecipientHandled }: DMChatSectionProps) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [urlPendingRecipient, setUrlPendingRecipient] = useState<string | null>(null);
   const {
     selectedConversation,
     selectConversation,
@@ -52,6 +52,24 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
 
   // Global fullscreen state
   const { isFullscreen, setFullscreen } = useUIState();
+
+  // Handle ?nametag= URL param for DM navigation
+  useEffect(() => {
+    const nametag = searchParams.get('nametag');
+    if (nametag) {
+      const cleanNametag = nametag.startsWith('@') ? nametag.slice(1) : nametag;
+      const formattedNametag = cleanNametag.toLowerCase().replace(/\s+/g, '-');
+      setUrlPendingRecipient(formattedNametag);
+      setSearchParams((prev) => {
+        prev.delete('nametag');
+        prev.delete('product');
+        prev.delete('image');
+        prev.delete('price');
+        prev.delete('purchased');
+        return prev;
+      });
+    }
+  }, [searchParams, setSearchParams]);
 
   // Handle Escape key to exit fullscreen
   useEffect(() => {
@@ -92,12 +110,12 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
     }
   }, [selectedConversation]);
 
-  // Handle pending recipient from @mention click or P2P DM button
+  // Handle pending recipient from prop, URL param, or @mention click
   // If conversation exists, select it directly; otherwise open modal
+  const effectiveRecipient = pendingRecipient || urlPendingRecipient;
   useEffect(() => {
-    if (pendingRecipient) {
-      const nametag = pendingRecipient.startsWith('@') ? pendingRecipient.slice(1) : pendingRecipient;
-      // Check if conversation already exists
+    if (effectiveRecipient) {
+      const nametag = effectiveRecipient.startsWith('@') ? effectiveRecipient.slice(1) : effectiveRecipient;
       const existingConversation = filteredConversations.find(
         (c) => c.peerNametag?.toLowerCase() === nametag.toLowerCase()
       );
@@ -108,8 +126,9 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
         setShowNewConversation(true);
       }
       onPendingRecipientHandled?.();
+      setUrlPendingRecipient(null);
     }
-  }, [pendingRecipient, onPendingRecipientHandled, filteredConversations, selectConversation]);
+  }, [effectiveRecipient, onPendingRecipientHandled, filteredConversations, selectConversation]);
 
   // Set up mention click handler - clicking @mention in DM
   // If conversation exists, select it directly; otherwise open modal
@@ -136,7 +155,7 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
   };
 
   // Get current chat agent config
-  const chatAgent = agents.find(a => a.id === 'chat')!;
+  const chatAgent = agents.find(a => a.id === 'dm') ?? agents[0];
 
   const handleSend = () => {
     if (messageInput.trim()) {
@@ -172,7 +191,6 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
         isCollapsed={sidebarCollapsed}
         onCollapse={() => setSidebarCollapsed(true)}
         hasUnread={totalUnreadCount > 0}
-        onModeChange={onModeChange}
       />
 
       {/* Main Chat Area */}
@@ -233,7 +251,7 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
                         key={a.id}
                         onClick={() => handleAgentSelect(a.id)}
                         className={`w-full flex items-center gap-3 p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/50 transition-colors ${
-                          a.id === 'chat' ? 'bg-neutral-100 dark:bg-neutral-800/80' : ''
+                          a.id === 'dm' ? 'bg-neutral-100 dark:bg-neutral-800/80' : ''
                         }`}
                       >
                         <div className={`p-2 rounded-lg bg-linear-to-br ${a.color} shrink-0`}>

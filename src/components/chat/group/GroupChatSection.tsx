@@ -15,10 +15,9 @@ import { CreateGroupModal } from './CreateGroupModal';
 import { agents } from '../../../config/activities';
 import { setMentionClickHandler } from '../../../utils/mentionHandler';
 import { getGroupDisplayName, getMessageSenderDisplayName } from '../utils/groupChatHelpers';
-import type { ChatModeChangeHandler } from '../../../types';
 
 interface GroupChatSectionProps {
-  onModeChange: ChatModeChangeHandler;
+  onModeChange?: (mode: string, dmRecipient?: string) => void;
 }
 
 export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
@@ -134,13 +133,17 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     }
   }, [selectedGroup]);
 
-  // Set up mention click handler - clicking @mention switches to DM with that user
+  // Set up mention click handler - clicking @mention navigates to DM with that user
   useEffect(() => {
     setMentionClickHandler((username) => {
-      onModeChange('dm', username);
+      if (onModeChange) {
+        onModeChange('dm', username);
+      } else {
+        navigate(`/agents/dm?nametag=${encodeURIComponent(username)}`);
+      }
     });
     return () => setMentionClickHandler(null);
-  }, [onModeChange]);
+  }, [onModeChange, navigate]);
 
   // Clear reply when switching groups
   useEffect(() => {
@@ -153,7 +156,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
   };
 
   // Get current chat agent config
-  const chatAgent = agents.find((a) => a.id === 'chat')!;
+  const chatAgent = agents.find((a) => a.id === 'group-chat') ?? agents[0];
 
   const handleSend = async () => {
     if (messageInput.trim()) {
@@ -197,7 +200,6 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
         isCollapsed={sidebarCollapsed}
         onCollapse={() => setSidebarCollapsed(true)}
         totalUnreadCount={totalUnreadCount}
-        onModeChange={onModeChange}
         isRelayAdmin={isRelayAdmin}
         isAdminOfGroup={isAdminOfGroup}
         onDeleteGroup={deleteGroup}
@@ -268,7 +270,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
                         key={a.id}
                         onClick={() => handleAgentSelect(a.id)}
                         className={`w-full flex items-center gap-3 p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/50 transition-colors ${
-                          a.id === 'chat' ? 'bg-neutral-100 dark:bg-neutral-800/80' : ''
+                          a.id === 'group-chat' ? 'bg-neutral-100 dark:bg-neutral-800/80' : ''
                         }`}
                       >
                         <div className={`p-2 rounded-lg bg-linear-to-br ${a.color} shrink-0`}>

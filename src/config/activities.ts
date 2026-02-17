@@ -1,4 +1,4 @@
-import { MessageSquare, Store, Globe, Bot, Cpu } from 'lucide-react';
+import { MessageCircle, Hash, Store, Globe, Bot, Cpu } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // Agent types for different UI layouts
@@ -44,12 +44,22 @@ export interface AgentConfig {
 // All agents configuration
 const allAgents: AgentConfig[] = [
   {
-    id: 'chat',
-    name: 'Chat',
-    description: 'DM and group messaging',
-    Icon: MessageSquare,
+    id: 'dm',
+    name: 'Messages',
+    description: 'Private conversations',
+    Icon: MessageCircle,
     category: 'Social',
     color: 'from-blue-500 to-cyan-500',
+    type: 'chat',
+    requiresWallet: true,
+  },
+  {
+    id: 'group-chat',
+    name: 'Group Chat',
+    description: 'Public group channels',
+    Icon: Hash,
+    category: 'Social',
+    color: 'from-indigo-500 to-purple-500',
     type: 'chat',
     requiresWallet: true,
   },

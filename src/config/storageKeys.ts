@@ -31,6 +31,9 @@ export const STORAGE_KEYS = {
   // IPFS
   IPFS_ENABLED: 'sphere_ipfs_enabled',
 
+  // Desktop state (open tabs, active tab)
+  DESKTOP_STATE: 'sphere_desktop_state',
+
   // Dev Settings
   DEV_AGGREGATOR_URL: 'sphere_dev_aggregator_url',
   DEV_SKIP_TRUST_BASE: 'sphere_dev_skip_trust_base',

@@ -21,7 +21,7 @@ const DiscordIcon = ({ className }: { className?: string }) => (
 );
 
 const navItems: { label: string; path: string; external?: boolean }[] = [
-  { label: 'Home', path: '/agents/chat' },
+  { label: 'Home', path: '/agents/dm' },
   { label: 'Markets', path: '/markets' },
   { label: 'Agents', path: '/explore-agents' },
   { label: 'Devs', path: '/developers' },
@@ -70,7 +70,7 @@ export function Header() {
 
   const isActive = (path: string) => {
     if (!path) return false;
-    if (path === '/agents/chat') {
+    if (path === '/agents/dm') {
       return location.pathname.startsWith('/agents/');
     }
     if (path === '/developers') {
@@ -94,7 +94,7 @@ export function Header() {
       <div className="max-w-450 mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-14 lg:h-14 flex items-stretch justify-between relative z-10">
         <div className="flex items-stretch gap-2 sm:gap-4 lg:gap-6">
           {/* Logo with enhanced effects - entire block is clickable */}
-          <Link to="/agents/chat" className="flex items-center gap-2 sm:gap-4 lg:gap-6 group">
+          <Link to="/agents/dm" className="flex items-center gap-2 sm:gap-4 lg:gap-6 group">
             <div className="relative">
               <img
                 src={logoUrl}
