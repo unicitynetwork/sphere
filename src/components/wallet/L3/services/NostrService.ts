@@ -125,9 +125,9 @@ export class NostrService {
 
         // Skip old events
         const currentLastSync = this.getOrInitLastSync();
-        if (event.created_at <= currentLastSync) {
+        if (event.created_at < currentLastSync) {
           console.log(
-            `⏭️ Skipping old event (Time: ${event.created_at} <= Sync: ${currentLastSync})`
+            `⏭️ Skipping old event (Time: ${event.created_at} < Sync: ${currentLastSync})`
           );
           return;
         }
@@ -548,11 +548,40 @@ export class NostrService {
 
     try {
       console.log(`Sending token transfer to ${recipientPubkey}...`);
-      await this.client?.sendTokenTransfer(recipientPubkey, payloadJson, {
-        amount,
-        symbol,
-        replyToEventId,
+
+      // Build the event directly so we can set a unique d-tag.
+      // Kind 31113 is parameterized-replaceable (NIP-01, 30000-39999):
+      // the relay keeps only the latest event per (pubkey, kind, d-tag).
+      // A unique d-tag ensures every transfer is its own slot.
+      const keyManager = this.client!.getKeyManager();
+      const message = "token_transfer:" + payloadJson;
+      const encryptedContent = await keyManager.encryptHex(
+        message,
+        recipientPubkey
+      );
+
+      const tags: string[][] = [
+        ["p", recipientPubkey],
+        ["d", `token-transfer:${uuidv4()}`],
+        ["type", "token_transfer"],
+      ];
+      if (amount !== undefined) {
+        tags.push(["amount", String(amount)]);
+      }
+      if (symbol !== undefined) {
+        tags.push(["symbol", symbol]);
+      }
+      if (replyToEventId !== undefined && replyToEventId.length > 0) {
+        tags.push(["e", replyToEventId, "", "reply"]);
+      }
+
+      const event = Event.create(keyManager, {
+        kind: EventKinds.TOKEN_TRANSFER,
+        tags,
+        content: encryptedContent,
       });
+
+      await this.client!.publishEvent(event);
       return true;
     } catch (error) {
       console.error("Failed to send token transfer", error);
