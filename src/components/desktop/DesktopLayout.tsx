@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Globe } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useDesktopState } from '../../hooks/useDesktopState';
+import { useUIState } from '../../hooks/useUIState';
 import { getAgentConfig, type AgentConfig } from '../../config/activities';
 import { TabBar } from './TabBar';
 import { DesktopShortcuts } from './DesktopShortcuts';
@@ -22,6 +23,7 @@ const CUSTOM_URL_PRESETS = [
 
 export function DesktopLayout() {
   const { openTabs, activeTabId, openTab } = useDesktopState();
+  const { isFullscreen, toggleFullscreen, setFullscreen } = useUIState();
   const [customUrlInput, setCustomUrlInput] = useState('');
   const [walletOpen, setWalletOpen] = useState(() => window.matchMedia('(min-width: 1024px)').matches);
 
@@ -33,6 +35,17 @@ export function DesktopLayout() {
     window.addEventListener('payment-requests-updated', handlePaymentRequest);
     return () => window.removeEventListener('payment-requests-updated', handlePaymentRequest);
   }, []);
+
+  // Escape key exits fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        setFullscreen(false);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen, setFullscreen]);
 
   const toggleWallet = () => setWalletOpen((prev) => !prev);
 
@@ -146,19 +159,28 @@ export function DesktopLayout() {
   );
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* Activity ticker - always visible above tabs */}
-      <div className="shrink-0">
-        <ActivityTicker />
-      </div>
+    <div className={`flex flex-col overflow-hidden bg-white dark:bg-neutral-900 ${
+      isFullscreen ? 'fixed inset-0 z-99999' : 'h-full'
+    }`}>
+      {/* Activity ticker - hidden in fullscreen */}
+      {!isFullscreen && (
+        <div className="shrink-0">
+          <ActivityTicker />
+        </div>
+      )}
 
       {/* Tab bar with wallet toggle */}
-      <TabBar walletOpen={walletOpen} onToggleWallet={toggleWallet} />
+      <TabBar
+        walletOpen={walletOpen}
+        onToggleWallet={toggleWallet}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={toggleFullscreen}
+      />
 
       {/* Content area with optional wallet panel */}
       <div className="flex-1 min-h-0 flex relative">
         {/* Main content */}
-        <div className="flex-1 min-w-0 relative">
+        <div className="flex-1 min-w-0 relative bg-white dark:bg-neutral-900">
           {activeTabId === null && <DesktopShortcuts />}
           {openTabs.map((tab) => (
             <div
@@ -205,7 +227,6 @@ export function DesktopLayout() {
           )}
         </AnimatePresence>
       </div>
-
     </div>
   );
 }

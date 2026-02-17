@@ -82,6 +82,10 @@ export const useChat = (): UseChatReturn => {
   const [messageLimit, setMessageLimit] = useState(20);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
+  // Ref to avoid event listener churn on conversation selection changes
+  const selectedConversationRef = useRef(selectedConversation);
+  selectedConversationRef.current = selectedConversation;
+
   // Address-scoped selected DM key
   const selectedDmKey = `${STORAGE_KEYS.CHAT_SELECTED_DM}_${addressId}`;
 
@@ -95,12 +99,14 @@ export const useChat = (): UseChatReturn => {
   }, [addressId]);
 
   // Listen for real-time DM events and typing indicators
+  // Uses ref for selectedConversation to avoid listener re-registration churn
   useEffect(() => {
     const handleDMReceived = (event: CustomEvent<DmReceivedDetail>) => {
       const { peerPubkey, messageId, isFromMe } = event.detail;
+      const current = selectedConversationRef.current;
 
       // If we're viewing this conversation, auto-mark as read
-      if (selectedConversation && peerPubkey === selectedConversation.peerPubkey) {
+      if (current && peerPubkey === current.peerPubkey) {
         if (sphere && !isFromMe) {
           sphere.communications.markAsRead([messageId]);
         }
@@ -110,13 +116,12 @@ export const useChat = (): UseChatReturn => {
           clearTimeout(typingTimeoutRef.current);
         }
       }
-
-      // Invalidate all chat queries (conversations, messages, unread count)
-      queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
+      // Note: query invalidation is handled by useSphereEvents — no duplicate needed
     };
 
     const handleTyping = (e: CustomEvent) => {
-      if (selectedConversation && e.detail.senderPubkey === selectedConversation.peerPubkey) {
+      const current = selectedConversationRef.current;
+      if (current && e.detail.senderPubkey === current.peerPubkey) {
         setIsRecipientTyping(true);
         clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => setIsRecipientTyping(false), 1500);
@@ -131,7 +136,7 @@ export const useChat = (): UseChatReturn => {
       window.removeEventListener('dm-typing', handleTyping as EventListener);
       clearTimeout(typingTimeoutRef.current);
     };
-  }, [queryClient, selectedConversation, sphere]);
+  }, [sphere]);
 
   // Query conversations from SDK, with fallback nametag resolution
   const conversationsQuery = useQuery({

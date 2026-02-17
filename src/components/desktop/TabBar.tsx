@@ -1,4 +1,4 @@
-import { X, LayoutGrid, Wallet } from 'lucide-react';
+import { X, LayoutGrid, Wallet, Maximize2, Minimize2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useDesktopState } from '../../hooks/useDesktopState';
 import { getAgentConfig } from '../../config/activities';
@@ -6,9 +6,11 @@ import { getAgentConfig } from '../../config/activities';
 interface TabBarProps {
   walletOpen?: boolean;
   onToggleWallet?: () => void;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }
 
-export function TabBar({ walletOpen, onToggleWallet }: TabBarProps) {
+export function TabBar({ walletOpen, onToggleWallet, isFullscreen, onToggleFullscreen }: TabBarProps) {
   const { openTabs, activeTabId, activateTab, closeTab, showDesktop } = useDesktopState();
 
   return (
@@ -74,10 +76,25 @@ export function TabBar({ walletOpen, onToggleWallet }: TabBarProps) {
         );
       })}
 
-      {/* Wallet toggle — pushed to the right */}
-      {onToggleWallet && (
-        <>
-          <div className="ml-auto" />
+      {/* Right side controls — pushed to the right */}
+      <div className="ml-auto flex items-center gap-1">
+        {/* Fullscreen toggle */}
+        {onToggleFullscreen && (
+          <button
+            onClick={onToggleFullscreen}
+            className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors duration-150 shrink-0 ${
+              isFullscreen
+                ? 'bg-orange-500/15 text-orange-500'
+                : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 hover:bg-neutral-200/60 dark:hover:bg-neutral-700/40'
+            }`}
+            title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+          >
+            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
+        )}
+
+        {/* Wallet toggle */}
+        {onToggleWallet && (
           <button
             data-tutorial="wallet-toggle"
             onClick={onToggleWallet}
@@ -90,8 +107,8 @@ export function TabBar({ walletOpen, onToggleWallet }: TabBarProps) {
           >
             <Wallet className="w-4 h-4" />
           </button>
-        </>
-      )}
+        )}
+      </div>
     </div>
   );
 }

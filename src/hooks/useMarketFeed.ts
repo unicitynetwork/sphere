@@ -40,6 +40,7 @@ export function useMarketFeed(): UseMarketFeedReturn {
   const [isConnected, setIsConnected] = useState(false);
   const [newListingIds, setNewListingIds] = useState<Set<string>>(new Set());
   const wsRef = useRef<WebSocket | null>(null);
+  const newListingTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
   // Fetch initial listings via REST — no SDK dependency, starts immediately
   const { data: initialListings } = useQuery({
@@ -68,13 +69,15 @@ export function useMarketFeed(): UseMarketFeedReturn {
 
       // Mark as new for 5 seconds
       setNewListingIds((prev) => new Set(prev).add(msg.listing.id));
-      setTimeout(() => {
+      const timer = setTimeout(() => {
+        newListingTimersRef.current.delete(timer);
         setNewListingIds((prev) => {
           const next = new Set(prev);
           next.delete(msg.listing.id);
           return next;
         });
       }, 5000);
+      newListingTimersRef.current.add(timer);
     }
   }, []);
 
@@ -95,6 +98,9 @@ export function useMarketFeed(): UseMarketFeedReturn {
       ws.close();
       wsRef.current = null;
       setIsConnected(false);
+      // Clear all pending new-listing timers
+      newListingTimersRef.current.forEach(clearTimeout);
+      newListingTimersRef.current.clear();
     };
   }, [handleFeedMessage]);
 

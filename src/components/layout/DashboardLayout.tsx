@@ -13,11 +13,10 @@ export function DashboardLayout() {
   const { activeTabId } = useDesktopState();
   const tutorial = useTutorial();
 
-  // Hide mini chat only when the DM tab is actively open (to avoid duplicate UI)
-  // Show it when fullscreen is active regardless
+  // Hide mini chat when the DM tab is actively open (to avoid duplicate UI)
   const isAgentPage = location.pathname.startsWith('/agents/');
   const isDmTabActive = isAgentPage && activeTabId === 'dm';
-  const showMiniChat = !isDmTabActive || isFullscreen;
+  const showMiniChat = !isDmTabActive;
 
   return (
     <div className="h-full flex flex-col bg-neutral-100 dark:bg-linear-to-br dark:from-neutral-950 dark:via-neutral-900 dark:to-neutral-950 theme-transition overflow-y-auto overflow-x-hidden">
@@ -30,7 +29,7 @@ export function DashboardLayout() {
         </div>
       </div>
 
-      {/* Mini chat bubbles - hidden on chat page unless fullscreen */}
+      {/* Mini chat bubbles - hidden when DM tab is active */}
       {showMiniChat && <MiniChatBubbles />}
 
       {/* Onboarding tutorial overlay */}
