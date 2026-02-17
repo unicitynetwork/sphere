@@ -926,7 +926,7 @@ console.log('ALPHA balance:', alpha?.totalAmount);`}
                 filename="assets.ts"
                 code={`const assets = await sphere.payments.getAssets();
 assets.forEach(a => {
-  console.log(\`\${a.symbol}: \${a.totalAmount} (\$\${a.fiatValueUsd})\`);
+  console.log(\`\${a.symbol}: \${a.totalAmount} ($\${a.fiatValueUsd})\`);
 });`}
               />
             </div>

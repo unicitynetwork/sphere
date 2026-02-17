@@ -44,11 +44,10 @@ export function useTokens(): UseTokensReturn {
     structuralSharing: false,
   });
 
-  const rawTokens = query.data ?? [];
-
   // Enrich tokens with registry data — SDK bakes symbol at creation time
   // before the registry has loaded, so we override here.
   const tokens = useMemo(() => {
+    const rawTokens = query.data ?? [];
     if (!registryReady) return rawTokens;
     const registry = TokenRegistry.getInstance();
     return rawTokens.map((t) => {
@@ -64,7 +63,7 @@ export function useTokens(): UseTokensReturn {
         iconUrl: registry.getIconUrl(t.coinId) || t.iconUrl,
       };
     });
-  }, [rawTokens, registryReady]);
+  }, [query.data, registryReady]);
 
   return {
     tokens,
