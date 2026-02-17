@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, Navigate, useNavigate } from 'react-router-dom';
-import { MessageSquare, Wallet, ChevronDown, ChevronUp, X, Globe, Plus, Maximize2, Minimize2, Menu } from 'lucide-react';
+import { MessageSquare, Wallet, X, Globe, Plus, Maximize2, Minimize2, Menu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AgentCard } from '../components/agents/AgentCard';
 import { ActivityTicker } from '../components/activity';
 import { ChatSection } from '../components/chat/ChatSection';
 import { MerchChat } from '../components/agents/MerchChat';
@@ -14,7 +13,6 @@ import { WalletRequiredBlocker } from '../components/agents/WalletRequiredBlocke
 import { agents, getAgentConfig, type AgentConfig } from '../config/activities';
 import { useUIState } from '../hooks/useUIState';
 
-const DEFAULT_VISIBLE_AGENTS = 7;
 const CUSTOM_URL_PRESETS = [
   { label: 'Sphere Connect Example', url: 'https://unicitynetwork.github.io/sphere-sdk-connect-example/' },
 ];
@@ -24,7 +22,6 @@ export function AgentPage() {
   const navigate = useNavigate();
   const sliderRef = useRef<HTMLDivElement>(null);
   const [activePanel, setActivePanel] = useState<'chat' | 'wallet'>('chat');
-  const [showAllAgents, setShowAllAgents] = useState(false);
   const [visitedIframeIds, setVisitedIframeIds] = useState<string[]>([]);
   const [customTabs, setCustomTabs] = useState<Array<{ id: string; url: string; name: string }>>([]);
   const [activeCustomTabId, setActiveCustomTabId] = useState<string | null>(null);
@@ -43,9 +40,6 @@ export function AgentPage() {
     mql.addEventListener('change', handler);
     return () => mql.removeEventListener('change', handler);
   }, []);
-
-  const hasMoreAgents = agents.length > DEFAULT_VISIBLE_AGENTS;
-  const visibleAgents = showAllAgents ? agents : agents.slice(0, DEFAULT_VISIBLE_AGENTS);
 
   const currentAgent = agentId ? getAgentConfig(agentId) : undefined;
 
@@ -444,75 +438,6 @@ export function AgentPage() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Desktop agent grid - hidden in iframe fullscreen */}
-      <div data-tutorial="agents" className={`${iframeFullscreen ? 'hidden' : 'hidden lg:block'} mb-8 relative px-8 pt-8 pb-5 rounded-2xl dark:bg-linear-to-br dark:from-neutral-900/40 dark:to-neutral-800/20 backdrop-blur-sm border border-neutral-200 dark:border-neutral-800/50`}>
-        <div className="absolute top-0 left-0 w-32 h-32 border-l-2 border-t-2 border-orange-500/50 rounded-tl-2xl" />
-        <div className="absolute bottom-0 right-0 w-32 h-32 border-r-2 border-b-2 border-orange-500/50 rounded-br-2xl" />
-
-        <div className="relative">
-          <div
-            className="grid gap-4"
-            style={{ gridTemplateColumns: `repeat(${Math.min(agents.length, DEFAULT_VISIBLE_AGENTS)}, 1fr)` }}
-          >
-            {/* Fixed agent cards */}
-            {visibleAgents.slice(0, DEFAULT_VISIBLE_AGENTS).map((agent) => (
-              <AgentCard
-                key={agent.id}
-                id={agent.id}
-                name={agent.name}
-                Icon={agent.Icon}
-                category={agent.category}
-                color={agent.color}
-                isSelected={agentId === agent.id}
-              />
-            ))}
-            {/* Extra agents - expand/collapse animation */}
-            <AnimatePresence initial={false} mode="sync">
-              {showAllAgents && visibleAgents.slice(DEFAULT_VISIBLE_AGENTS).map((agent, index) => (
-                <motion.div
-                  key={agent.id}
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.1 } }}
-                  transition={{ duration: 0.15, delay: index * 0.02 }}
-                >
-                  <AgentCard
-                    id={agent.id}
-                    name={agent.name}
-                    Icon={agent.Icon}
-                    category={agent.category}
-                    color={agent.color}
-                    isSelected={agentId === agent.id}
-                  />
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
-
-          {/* View all / Hide all button */}
-          {hasMoreAgents && (
-            <div className="flex justify-center mt-2">
-              <button
-                onClick={() => setShowAllAgents(!showAllAgents)}
-                className="flex items-center gap-1.5 px-4 pt-2 text-sm font-medium text-neutral-600 dark:text-neutral-400 hover:text-orange-500 dark:hover:text-orange-400 transition-colors duration-200"
-              >
-                {showAllAgents ? (
-                  <>
-                    <span>Hide all</span>
-                    <ChevronUp className="w-4 h-4" />
-                  </>
-                ) : (
-                  <>
-                    <span>View all</span>
-                    <ChevronDown className="w-4 h-4" />
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* Activity Ticker - desktop only */}
       <div className={`${iframeFullscreen ? 'hidden' : 'hidden lg:block'} mb-6`}>
         <ActivityTicker />

@@ -23,11 +23,6 @@ const DESKTOP_STEPS: TutorialStep[] = [
       'Here you can create a new or import an existing wallet and manage your assets',
   },
   {
-    target: 'agents',
-    title: 'Agents',
-    description: 'Here you can choose agents to interact with',
-  },
-  {
     target: 'chat',
     title: 'Main Area',
     description:
