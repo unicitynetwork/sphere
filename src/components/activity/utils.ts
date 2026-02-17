@@ -12,14 +12,8 @@ export function getActivityTitle(kind: ActivityKind): string {
       return 'New Wallet';
     case 'game_started':
       return 'Game Started';
-    case 'bet_placed':
-      return 'Bet Placed';
-    case 'otc_purchase':
-      return 'OTC Trade';
     case 'merch_order':
       return 'Merch Order';
-    case 'pokemon_purchase':
-      return 'Card Purchase';
     default:
       return 'Activity';
   }
@@ -51,26 +45,11 @@ export function getActivityDescription(activity: Activity): string {
         return `Someone started playing ${data.gameName}`;
       }
       return 'A game session started';
-    case 'bet_placed':
-      if (data.teams && data.betChoice) {
-        return `Bet on ${data.betChoice} (${data.teams})`;
-      }
-      return 'A prediction was made';
-    case 'otc_purchase':
-      if (data.productName) {
-        return `"${data.productName}" purchased for ${data.price} ALPHA`;
-      }
-      return 'An OTC trade completed';
     case 'merch_order':
       if (data.itemName) {
         return `"${data.itemName}" ordered for ${data.price} ALPHA`;
       }
       return 'Merch was ordered';
-    case 'pokemon_purchase':
-      if (data.card) {
-        return `"${data.card}" (${data.rarity}) from ${data.merchant}`;
-      }
-      return 'A card was purchased';
     default:
       return 'Network activity';
   }
