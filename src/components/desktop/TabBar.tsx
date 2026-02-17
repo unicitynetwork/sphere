@@ -12,7 +12,7 @@ export function TabBar({ walletOpen, onToggleWallet }: TabBarProps) {
   const { openTabs, activeTabId, activateTab, closeTab, showDesktop } = useDesktopState();
 
   return (
-    <div className="flex items-center gap-1 px-2 sm:px-3 py-1.5 bg-white/60 dark:bg-neutral-900/60 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800/50 shrink-0 overflow-x-auto scrollbar-hide">
+    <div className="flex items-center gap-0.5 sm:gap-1 px-1 sm:px-3 py-1 bg-white/60 dark:bg-neutral-900/60 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800/50 shrink-0 overflow-x-auto scrollbar-hide">
       {/* Show Desktop button */}
       <button
         onClick={showDesktop}
@@ -41,21 +41,21 @@ export function TabBar({ walletOpen, onToggleWallet }: TabBarProps) {
             key={tab.id}
             layout
             onClick={() => activateTab(tab.id)}
-            className={`relative flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors duration-150 shrink-0 ${
+            className={`relative flex items-center gap-1 px-1.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg transition-colors duration-150 shrink-0 ${
               isActive
                 ? 'bg-orange-500 text-white shadow-sm'
                 : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200/60 dark:hover:bg-neutral-700/40'
             }`}
           >
             {TabIcon && <TabIcon className="w-3.5 h-3.5" />}
-            <span className="max-w-24 truncate">{tab.label}</span>
+            <span className="max-w-24 truncate hidden sm:inline">{tab.label}</span>
             <span
               role="button"
               onClick={(e) => {
                 e.stopPropagation();
                 closeTab(tab.id);
               }}
-              className={`ml-0.5 p-0.5 rounded transition-colors duration-150 ${
+              className={`p-0.5 rounded transition-colors duration-150 ${
                 isActive
                   ? 'hover:bg-orange-600/40'
                   : 'hover:bg-neutral-300/60 dark:hover:bg-neutral-600/40'
