@@ -17,21 +17,23 @@ const DESKTOP_STEPS: TutorialStep[] = [
       'Use the header to navigate between pages, toggle the theme, and access links',
   },
   {
-    target: 'wallet',
+    target: 'desktop-shortcuts',
+    title: 'Apps',
+    description:
+      'Click an icon to open an app — messages, group chat, games, and more',
+    trigger: 'show-desktop',
+  },
+  {
+    target: 'tab-bar',
+    title: 'Tabs',
+    description:
+      'Open apps appear as tabs here. Switch between them or close with the X button',
+  },
+  {
+    target: 'wallet-toggle',
     title: 'Wallet',
     description:
-      'Here you can create a new or import an existing wallet and manage your assets',
-  },
-  {
-    target: 'agents',
-    title: 'Agents',
-    description: 'Here you can choose agents to interact with',
-  },
-  {
-    target: 'chat',
-    title: 'Main Area',
-    description:
-      'Here the main interaction with the selected agent will happen',
+      'Toggle the wallet panel to create or import a wallet and manage your assets',
   },
 ];
 
@@ -43,23 +45,23 @@ const MOBILE_STEPS: TutorialStep[] = [
       'Use the header to navigate between pages, toggle the theme, and access links',
   },
   {
-    target: 'mobile-tabs',
-    title: 'Switch Panels',
+    target: 'desktop-shortcuts',
+    title: 'Apps',
     description:
-      'Use these tabs to switch between agents and your wallet',
+      'Tap an icon to open an app — messages, group chat, games, and more',
+    trigger: 'show-desktop',
   },
   {
-    target: 'mobile-chat',
-    title: 'Main Area',
+    target: 'tab-bar',
+    title: 'Tabs',
     description:
-      'Here the main interaction with the selected agent will happen',
+      'Open apps appear as tabs here. Switch between them or close with the X button',
   },
   {
-    target: 'mobile-wallet',
+    target: 'wallet-toggle',
     title: 'Wallet',
     description:
-      'Here you can create a new or import an existing wallet and manage your assets',
-    trigger: 'mobile-wallet-tab',
+      'Tap the wallet icon to open the wallet panel and manage your assets',
   },
 ];
 

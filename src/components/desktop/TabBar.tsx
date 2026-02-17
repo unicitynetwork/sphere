@@ -12,9 +12,10 @@ export function TabBar({ walletOpen, onToggleWallet }: TabBarProps) {
   const { openTabs, activeTabId, activateTab, closeTab, showDesktop } = useDesktopState();
 
   return (
-    <div className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 bg-white/60 dark:bg-neutral-900/60 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800/50 shrink-0 overflow-x-auto scrollbar-hide">
+    <div data-tutorial="tab-bar" className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 bg-white/60 dark:bg-neutral-900/60 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800/50 shrink-0 overflow-x-auto scrollbar-hide">
       {/* Show Desktop button */}
       <button
+        data-tutorial="show-desktop"
         onClick={() => {
           showDesktop();
           if (walletOpen && onToggleWallet && !window.matchMedia('(min-width: 1024px)').matches) {
@@ -78,6 +79,7 @@ export function TabBar({ walletOpen, onToggleWallet }: TabBarProps) {
         <>
           <div className="ml-auto" />
           <button
+            data-tutorial="wallet-toggle"
             onClick={onToggleWallet}
             className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors duration-150 shrink-0 ${
               walletOpen

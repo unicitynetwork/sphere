@@ -146,7 +146,7 @@ export function DesktopLayout() {
   );
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col overflow-hidden">
       {/* Activity ticker - always visible above tabs */}
       <div className="shrink-0">
         <ActivityTicker />

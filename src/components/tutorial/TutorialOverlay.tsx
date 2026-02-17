@@ -101,10 +101,17 @@ export function TutorialOverlay({
     : (() => {
         const tooltipBelow = targetRect.top + targetRect.height + tooltipGap;
         const fitsBelow = tooltipBelow < window.innerHeight - 200;
+        const tooltipMaxW = Math.min(400, window.innerWidth - 32);
+        // Clamp left so tooltip doesn't overflow the right edge
+        const idealLeft = targetRect.left;
+        const clampedLeft = Math.min(
+          Math.max(16, idealLeft),
+          window.innerWidth - tooltipMaxW - 16,
+        );
         return {
           top: fitsBelow ? tooltipBelow : targetRect.top - tooltipGap,
-          left: Math.max(16, targetRect.left),
-          maxWidth: Math.min(400, window.innerWidth - 32),
+          left: clampedLeft,
+          maxWidth: tooltipMaxW,
           transformOrigin: fitsBelow ? 'top' : 'bottom',
           ...(fitsBelow ? {} : { transform: 'translateY(-100%)' }),
         };

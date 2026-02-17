@@ -19,7 +19,7 @@ export function ActivityTicker() {
 
   if (listings.length === 0) {
     return (
-      <div className="flex items-center gap-2 px-2 sm:px-3 py-1 bg-neutral-50/80 dark:bg-neutral-900/40 border-b border-neutral-200/50 dark:border-neutral-800/30 shrink-0">
+      <div className="flex items-center gap-2 px-2 sm:px-3 py-1 bg-neutral-50/80 dark:bg-neutral-900/40 border-b border-neutral-200/50 dark:border-neutral-800/30 shrink-0 overflow-hidden">
         <div className="flex items-center gap-1.5 shrink-0">
           <div className="relative flex items-center justify-center">
             <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />
@@ -42,7 +42,7 @@ export function ActivityTicker() {
   };
 
   return (
-    <div className="flex items-center gap-2 px-2 sm:px-3 py-1 bg-neutral-50/80 dark:bg-neutral-900/40 border-b border-neutral-200/50 dark:border-neutral-800/30 shrink-0">
+    <div className="flex items-center gap-2 px-2 sm:px-3 py-1 bg-neutral-50/80 dark:bg-neutral-900/40 border-b border-neutral-200/50 dark:border-neutral-800/30 shrink-0 overflow-hidden">
       {/* Live badge */}
       <div className="flex items-center gap-1.5 shrink-0">
         <div className="relative flex items-center justify-center">
@@ -59,7 +59,7 @@ export function ActivityTicker() {
         ref={scrollContainerRef}
         className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide"
       >
-        <AnimatePresence initial={false} mode="popLayout">
+        <AnimatePresence initial={false}>
           {listings.map((listing) => {
             const isNew = newListingIds.has(listing.id);
             const dotColor = INTENT_DOT[listing.type] || INTENT_DOT.other;
@@ -68,10 +68,10 @@ export function ActivityTicker() {
             return (
               <motion.div
                 key={listing.id}
-                layout
                 initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1, transition: { duration: 0.3 } }}
-                exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.15 } }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={{ duration: 0.25 }}
                 onClick={() => toggleExpand(listing.id)}
                 className="flex items-center gap-1.5 px-2 py-0.5 rounded-full cursor-pointer shrink-0 bg-white/60 dark:bg-neutral-800/50 border border-neutral-200/60 dark:border-neutral-700/40 hover:border-neutral-300 dark:hover:border-neutral-600 transition-colors select-none"
               >
@@ -79,12 +79,11 @@ export function ActivityTicker() {
                 <span className="text-[11px] font-medium text-neutral-700 dark:text-neutral-300 whitespace-nowrap">
                   {getIntentTitle(listing.type)}
                 </span>
-                <motion.span
-                  layout
+                <span
                   className={`text-[11px] text-neutral-500 dark:text-neutral-400 ${isExpanded ? '' : 'max-w-28 truncate'}`}
                 >
                   {getIntentDescription(listing)}
-                </motion.span>
+                </span>
                 <span className="text-[9px] text-neutral-400 dark:text-neutral-500 whitespace-nowrap">
                   {formatTimeAgo(listing.createdAt)}
                 </span>
