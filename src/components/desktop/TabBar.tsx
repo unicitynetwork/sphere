@@ -4,26 +4,19 @@ import { useDesktopState } from '../../hooks/useDesktopState';
 import { getAgentConfig } from '../../config/activities';
 
 interface TabBarProps {
-  walletOpen?: boolean;
-  onToggleWallet?: () => void;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
 }
 
-export function TabBar({ walletOpen, onToggleWallet, isFullscreen, onToggleFullscreen }: TabBarProps) {
-  const { openTabs, activeTabId, activateTab, closeTab, showDesktop } = useDesktopState();
+export function TabBar({ isFullscreen, onToggleFullscreen }: TabBarProps) {
+  const { openTabs, activeTabId, activateTab, closeTab, showDesktop, walletOpen, toggleWallet } = useDesktopState();
 
   return (
     <div data-tutorial="tab-bar" className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 bg-white/60 dark:bg-neutral-900/60 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800/50 shrink-0 overflow-x-auto scrollbar-hide">
       {/* Show Desktop button */}
       <button
         data-tutorial="show-desktop"
-        onClick={() => {
-          showDesktop();
-          if (walletOpen && onToggleWallet && !window.matchMedia('(min-width: 1024px)').matches) {
-            onToggleWallet();
-          }
-        }}
+        onClick={showDesktop}
         className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors duration-150 shrink-0 ${
           activeTabId === null
             ? 'bg-orange-500/15 text-orange-500'
@@ -94,20 +87,18 @@ export function TabBar({ walletOpen, onToggleWallet, isFullscreen, onToggleFulls
         )}
 
         {/* Wallet toggle */}
-        {onToggleWallet && (
-          <button
-            data-tutorial="wallet-toggle"
-            onClick={onToggleWallet}
-            className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors duration-150 shrink-0 ${
-              walletOpen
-                ? 'bg-orange-500/15 text-orange-500'
-                : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 hover:bg-neutral-200/60 dark:hover:bg-neutral-700/40'
-            }`}
-            title={walletOpen ? 'Hide Wallet' : 'Show Wallet'}
-          >
-            <Wallet className="w-4 h-4" />
-          </button>
-        )}
+        <button
+          data-tutorial="wallet-toggle"
+          onClick={toggleWallet}
+          className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors duration-150 shrink-0 ${
+            walletOpen
+              ? 'bg-orange-500/15 text-orange-500'
+              : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 hover:bg-neutral-200/60 dark:hover:bg-neutral-700/40'
+          }`}
+          title={walletOpen ? 'Hide Wallet' : 'Show Wallet'}
+        >
+          <Wallet className="w-4 h-4" />
+        </button>
       </div>
     </div>
   );

@@ -96,7 +96,7 @@ export function Header() {
       <div className="max-w-450 mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-14 lg:h-14 flex items-stretch justify-between relative z-10">
         <div className="flex items-stretch gap-2 sm:gap-4 lg:gap-6">
           {/* Logo with enhanced effects - entire block is clickable */}
-          <button onClick={() => { showDesktop(); window.dispatchEvent(new Event('close-wallet-panel')); }} className="flex items-center gap-2 sm:gap-4 lg:gap-6 group cursor-pointer">
+          <button onClick={showDesktop} className="flex items-center gap-2 sm:gap-4 lg:gap-6 group cursor-pointer">
             <div className="relative">
               <img
                 src={logoUrl}
