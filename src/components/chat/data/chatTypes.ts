@@ -149,6 +149,19 @@ export function buildConversations(
 }
 
 // ==========================================
+// Address ID helper (used as cache key segment)
+// ==========================================
+
+export function buildAddressId(directAddress: string): string {
+  let hash = directAddress;
+  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
+  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
+  const first = hash.slice(0, 6).toLowerCase();
+  const last = hash.slice(-6).toLowerCase();
+  return `DIRECT_${first}_${last}`;
+}
+
+// ==========================================
 // Query Keys
 // ==========================================
 

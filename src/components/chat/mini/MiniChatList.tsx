@@ -5,7 +5,7 @@ import { X, Search, MessageCirclePlus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
 import { useIdentity } from '../../../sdk/hooks/core/useIdentity';
-import { type Conversation, buildConversations, getDisplayName, getAvatar, formatRelativeTime, CHAT_KEYS } from '../data/chatTypes';
+import { type Conversation, buildConversations, buildAddressId, getDisplayName, getAvatar, formatRelativeTime, CHAT_KEYS } from '../data/chatTypes';
 import { useMiniChatStore } from './miniChatStore';
 import { getColorFromPubkey } from '../utils/avatarColors';
 
@@ -15,15 +15,6 @@ interface SDKDirectMessage {
   senderPubkey: string;
   recipientPubkey: string;
   isRead: boolean;
-}
-
-function buildAddressId(directAddress: string): string {
-  let hash = directAddress;
-  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
-  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
-  const first = hash.slice(0, 6).toLowerCase();
-  const last = hash.slice(-6).toLowerCase();
-  return `DIRECT_${first}_${last}`;
 }
 
 interface MiniChatListProps {

@@ -7,15 +7,7 @@ import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
 import { useIdentity } from '../../../sdk/hooks/core/useIdentity';
 import { STORAGE_KEYS } from '../../../config/storageKeys';
 import { getGroupDisplayName } from '../utils/groupChatHelpers';
-
-function buildAddressId(directAddress: string): string {
-  let hash = directAddress;
-  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
-  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
-  const first = hash.slice(0, 6).toLowerCase();
-  const last = hash.slice(-6).toLowerCase();
-  return `DIRECT_${first}_${last}`;
-}
+import { buildAddressId } from '../data/chatTypes';
 
 const groupChatKeys = (addressId: string) => ({
   all: ['groupChat', addressId] as const,

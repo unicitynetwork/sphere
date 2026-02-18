@@ -151,7 +151,6 @@ export function DMChatSection({ pendingRecipient, onPendingRecipientHandled }: D
         onClose={() => setSidebarOpen(false)}
         isCollapsed={sidebarCollapsed}
         onCollapse={() => setSidebarCollapsed(true)}
-        hasUnread={totalUnreadCount > 0}
       />
 
       {/* Main Chat Area */}

@@ -5,7 +5,7 @@ import { X, Minus, Maximize2, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
 import { useIdentity } from '../../../sdk/hooks/core/useIdentity';
-import { type Conversation, type DisplayMessage, type DmReceivedDetail, toDisplayMessage, formatMessageTime, getDisplayName, getAvatar, CHAT_KEYS } from '../data/chatTypes';
+import { type Conversation, type DisplayMessage, type DmReceivedDetail, buildAddressId, toDisplayMessage, formatMessageTime, getDisplayName, getAvatar, CHAT_KEYS } from '../data/chatTypes';
 import { useMiniChatStore } from './miniChatStore';
 import { MiniChatInput } from './MiniChatInput';
 import { MarkdownContent } from '../../../utils/markdown';
@@ -27,15 +27,6 @@ const WINDOW_WIDTH = 328;
 const WINDOW_HEIGHT = 455;
 const WINDOW_GAP = 12;
 const BUBBLES_WIDTH = 88;
-
-function buildAddressId(directAddress: string): string {
-  let hash = directAddress;
-  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
-  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
-  const first = hash.slice(0, 6).toLowerCase();
-  const last = hash.slice(-6).toLowerCase();
-  return `DIRECT_${first}_${last}`;
-}
 
 interface MiniChatWindowProps {
   conversation: Conversation;

@@ -14,7 +14,6 @@ interface DMConversationListProps {
   onClose: () => void;
   isCollapsed: boolean;
   onCollapse: () => void;
-  hasUnread: boolean;
 }
 
 export function DMConversationList({
@@ -28,7 +27,6 @@ export function DMConversationList({
   onClose,
   isCollapsed,
   onCollapse,
-  hasUnread,
 }: DMConversationListProps) {
   return (
     <>
@@ -64,9 +62,6 @@ export function DMConversationList({
             <div className="flex items-center gap-2">
               <h3 className="text-neutral-900 dark:text-white font-medium">Messages</h3>
               <Sparkles className="w-4 h-4 text-orange-500 animate-pulse" />
-              {hasUnread && (
-                <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
-              )}
             </div>
             <div className="flex items-center gap-2">
               {/* New conversation button */}

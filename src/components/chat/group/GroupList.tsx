@@ -81,11 +81,6 @@ export function GroupList({
             <div className="flex items-center gap-2">
               <h3 className="text-neutral-900 dark:text-white font-medium">Groups</h3>
               <Sparkles className="w-4 h-4 text-blue-500 animate-pulse" />
-              {totalUnreadCount > 0 && (
-                <span className="px-1.5 py-0.5 text-xs rounded-full bg-orange-500 text-white">
-                  {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
-                </span>
-              )}
             </div>
             <div className="flex items-center gap-2">
               {/* Create group button - available to all users */}
@@ -99,15 +94,22 @@ export function GroupList({
                 <Hash className="w-4 h-4" />
               </motion.button>
               {/* Join group button */}
-              <motion.button
-                onClick={onJoinGroup}
-                className="p-2 rounded-lg bg-linear-to-br from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/30"
-                title="Browse groups"
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
-              >
-                <Plus className="w-4 h-4" />
-              </motion.button>
+              <div className="relative">
+                <motion.button
+                  onClick={onJoinGroup}
+                  className="p-2 rounded-lg bg-linear-to-br from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/30"
+                  title="Browse groups"
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                >
+                  <Plus className="w-4 h-4" />
+                </motion.button>
+                {totalUnreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-4 h-4 px-0.5 flex items-center justify-center text-[9px] font-bold rounded-full bg-orange-500 text-white border-2 border-white dark:border-neutral-900">
+                    {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
+                  </span>
+                )}
+              </div>
               {/* Collapse button for desktop */}
               <motion.button
                 onClick={onCollapse}
