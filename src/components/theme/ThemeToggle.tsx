@@ -1,11 +1,13 @@
 import { Sun, Moon } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useTheme } from '../../hooks/useTheme';
+import { HeaderTooltip } from '../layout/HeaderTooltip';
 
 export function ThemeToggle() {
   const { isDark, toggleTheme } = useTheme();
 
   return (
+    <HeaderTooltip label={isDark ? 'Light mode' : 'Dark mode'}>
     <motion.button
       onClick={toggleTheme}
       whileHover={{ scale: 1.05, y: -2 }}
@@ -44,5 +46,6 @@ export function ThemeToggle() {
       {/* Glow on hover */}
       <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
     </motion.button>
+    </HeaderTooltip>
   );
 }

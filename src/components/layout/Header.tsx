@@ -6,6 +6,7 @@ import { isMock } from '../../hooks/useAgentChat';
 import { ThemeToggle } from '../theme';
 import { STORAGE_KEYS } from '../../config/storageKeys';
 import { IpfsSyncIndicator } from './IpfsSyncIndicator';
+import { HeaderTooltip } from './HeaderTooltip';
 import { useDesktopState } from '../../hooks/useDesktopState';
 
 function devReset(): void {
@@ -200,31 +201,35 @@ export function Header() {
           <IpfsSyncIndicator />
 
           {/* Social Links */}
-          <motion.a
-            href="https://github.com/unicitynetwork"
-            target="_blank"
-            rel="noopener noreferrer"
-            whileHover={{ scale: 1.05, y: -2 }}
-            whileTap={{ scale: 0.95 }}
-            transition={{ duration: 0.05 }}
-            className="relative p-2 sm:p-2.5 lg:p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg sm:rounded-xl transition-all group"
-          >
-            <Github className="w-4 h-4 sm:w-5 sm:h-5 text-neutral-500 dark:text-neutral-400 group-hover:text-orange-400 transition-colors" />
-            <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
-          </motion.a>
+          <HeaderTooltip label="GitHub">
+            <motion.a
+              href="https://github.com/unicitynetwork"
+              target="_blank"
+              rel="noopener noreferrer"
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              transition={{ duration: 0.05 }}
+              className="relative p-2 sm:p-2.5 lg:p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg sm:rounded-xl transition-all group"
+            >
+              <Github className="w-4 h-4 sm:w-5 sm:h-5 text-neutral-500 dark:text-neutral-400 group-hover:text-orange-400 transition-colors" />
+              <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
+            </motion.a>
+          </HeaderTooltip>
 
-          <motion.a
-            href="https://discord.gg/S9f57ZKdt"
-            target="_blank"
-            rel="noopener noreferrer"
-            whileHover={{ scale: 1.05, y: -2 }}
-            whileTap={{ scale: 0.95 }}
-            transition={{ duration: 0.05 }}
-            className="relative p-2 sm:p-2.5 lg:p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg sm:rounded-xl transition-all group"
-          >
-            <DiscordIcon className="w-4 h-4 sm:w-5 sm:h-5 text-neutral-500 dark:text-neutral-400 group-hover:text-orange-400 transition-colors" />
-            <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
-          </motion.a>
+          <HeaderTooltip label="Discord">
+            <motion.a
+              href="https://discord.gg/S9f57ZKdt"
+              target="_blank"
+              rel="noopener noreferrer"
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              transition={{ duration: 0.05 }}
+              className="relative p-2 sm:p-2.5 lg:p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg sm:rounded-xl transition-all group"
+            >
+              <DiscordIcon className="w-4 h-4 sm:w-5 sm:h-5 text-neutral-500 dark:text-neutral-400 group-hover:text-orange-400 transition-colors" />
+              <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
+            </motion.a>
+          </HeaderTooltip>
 
           {/* Theme Toggle */}
           <ThemeToggle />

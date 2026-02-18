@@ -1,15 +1,7 @@
-import { useState } from 'react';
 import { Cloud, CloudOff, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIpfsSync, useSphereContext } from '../../sdk/hooks';
-
-function formatTime(ts: number): string {
-  const diff = Math.floor((Date.now() - ts) / 1000);
-  if (diff < 10) return 'just now';
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  return `${Math.floor(diff / 3600)}h ago`;
-}
+import { HeaderTooltip } from './HeaderTooltip';
 
 function getStatusText(
   ipfsEnabled: boolean,
@@ -25,9 +17,7 @@ function getStatusText(
 
 export function IpfsSyncIndicator() {
   const { ipfsEnabled, toggleIpfs } = useSphereContext();
-  const { status, lastSynced, lastError } = useIpfsSync();
-  const [showTooltip, setShowTooltip] = useState(false);
-
+  const { status, lastSynced } = useIpfsSync();
   const isSyncing = ipfsEnabled && status === 'syncing';
   const isError = ipfsEnabled && status === 'error';
   const statusText = getStatusText(ipfsEnabled, status, lastSynced);
@@ -35,15 +25,13 @@ export function IpfsSyncIndicator() {
   const iconClass = 'w-4 h-4 sm:w-5 sm:h-5';
 
   return (
-    <div
-      className="relative"
-      onMouseEnter={() => setShowTooltip(true)}
-      onMouseLeave={() => setShowTooltip(false)}
-    >
-      <button
+    <HeaderTooltip label={ipfsEnabled ? 'Disable IPFS sync' : 'Enable IPFS sync'}>
+      <motion.button
         onClick={toggleIpfs}
-        className="flex items-center gap-1.5 px-2 py-1.5 sm:px-2.5 sm:py-2 rounded-lg transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
-        title={ipfsEnabled ? 'Disable IPFS sync' : 'Enable IPFS sync'}
+        whileHover={{ scale: 1.05, y: -2 }}
+        whileTap={{ scale: 0.95 }}
+        transition={{ duration: 0.05 }}
+        className="relative flex items-center gap-1.5 px-2 py-1.5 sm:px-2.5 sm:py-2 rounded-lg sm:rounded-xl transition-all hover:bg-neutral-100 dark:hover:bg-neutral-800/80 cursor-pointer group"
       >
         <AnimatePresence mode="wait">
           {!ipfsEnabled ? (
@@ -54,7 +42,7 @@ export function IpfsSyncIndicator() {
               exit={{ opacity: 0, scale: 0.8 }}
               transition={{ duration: 0.15 }}
             >
-              <CloudOff className={`${iconClass} text-neutral-400 dark:text-neutral-500`} />
+              <CloudOff className={`${iconClass} text-neutral-400 dark:text-neutral-500 group-hover:text-orange-400 transition-colors`} />
             </motion.div>
           ) : isSyncing ? (
             <motion.div
@@ -86,7 +74,7 @@ export function IpfsSyncIndicator() {
               exit={{ opacity: 0, scale: 0.8 }}
               transition={{ duration: 0.15 }}
             >
-              <Cloud className={`${iconClass} ${
+              <Cloud className={`${iconClass} transition-colors group-hover:text-orange-400 ${
                 lastSynced
                   ? 'text-green-500/70 dark:text-green-400/70'
                   : 'text-neutral-400 dark:text-neutral-500'
@@ -104,40 +92,8 @@ export function IpfsSyncIndicator() {
         }`}>
           {statusText}
         </span>
-      </button>
-
-      {/* Tooltip */}
-      <AnimatePresence>
-        {showTooltip && (
-          <motion.div
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 4 }}
-            transition={{ duration: 0.15 }}
-            className="absolute top-full right-0 mt-2 px-3 py-2 rounded-lg text-xs whitespace-nowrap z-50 bg-neutral-900 dark:bg-neutral-800 text-neutral-100 border border-neutral-700 shadow-lg"
-          >
-            <div className="font-medium mb-0.5">
-              {!ipfsEnabled && 'IPFS sync disabled'}
-              {ipfsEnabled && isSyncing && 'IPFS syncing...'}
-              {ipfsEnabled && isError && 'IPFS sync error'}
-              {ipfsEnabled && status === 'idle' && (lastSynced ? 'IPFS synced' : 'IPFS idle')}
-            </div>
-            {lastSynced && ipfsEnabled && (
-              <div className="text-neutral-400">
-                Last sync: {formatTime(lastSynced)}
-              </div>
-            )}
-            {lastError && ipfsEnabled && (
-              <div className="text-red-400 max-w-48 truncate">
-                {lastError}
-              </div>
-            )}
-            <div className="text-neutral-500 mt-1">
-              Click to {ipfsEnabled ? 'disable' : 'enable'}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+        <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
+      </motion.button>
+    </HeaderTooltip>
   );
 }
