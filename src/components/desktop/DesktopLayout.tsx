@@ -36,6 +36,13 @@ export function DesktopLayout() {
     return () => window.removeEventListener('payment-requests-updated', handlePaymentRequest);
   }, []);
 
+  // Close wallet panel when logo/show-desktop is clicked (mobile)
+  useEffect(() => {
+    const handleCloseWallet = () => setWalletOpen(false);
+    window.addEventListener('close-wallet-panel', handleCloseWallet);
+    return () => window.removeEventListener('close-wallet-panel', handleCloseWallet);
+  }, []);
+
   // Escape key exits fullscreen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

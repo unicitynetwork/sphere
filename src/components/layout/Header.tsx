@@ -6,6 +6,7 @@ import { isMock } from '../../hooks/useAgentChat';
 import { ThemeToggle } from '../theme';
 import { STORAGE_KEYS } from '../../config/storageKeys';
 import { IpfsSyncIndicator } from './IpfsSyncIndicator';
+import { useDesktopState } from '../../hooks/useDesktopState';
 
 function devReset(): void {
   localStorage.removeItem(STORAGE_KEYS.DEV_AGGREGATOR_URL);
@@ -31,6 +32,7 @@ const navItems: { label: string; path: string; external?: boolean }[] = [
 export function Header() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { showDesktop } = useDesktopState();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isMinePage = location.pathname === '/mine';
 
@@ -94,7 +96,7 @@ export function Header() {
       <div className="max-w-450 mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-14 lg:h-14 flex items-stretch justify-between relative z-10">
         <div className="flex items-stretch gap-2 sm:gap-4 lg:gap-6">
           {/* Logo with enhanced effects - entire block is clickable */}
-          <Link to="/agents/dm" className="flex items-center gap-2 sm:gap-4 lg:gap-6 group">
+          <button onClick={() => { showDesktop(); window.dispatchEvent(new Event('close-wallet-panel')); }} className="flex items-center gap-2 sm:gap-4 lg:gap-6 group cursor-pointer">
             <div className="relative">
               <img
                 src={logoUrl}
@@ -103,7 +105,7 @@ export function Header() {
               />
             </div>
 
-            <div className="relative">
+            <div className="relative text-left">
               <div className="flex items-center gap-1.5 sm:gap-2">
                 <h1 className="text-base sm:text-lg lg:text-xl bg-clip-text text-neutral-900 dark:text-white">AgentSphere</h1>
                 <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs bg-orange-500/15 text-orange-600 dark:text-orange-400 border border-orange-500/30 font-medium">
@@ -120,7 +122,7 @@ export function Header() {
               {/* Decorative underline */}
               <div className="absolute -bottom-1 left-0 w-16 sm:w-20 h-0.5 bg-linear-to-r from-orange-500 to-transparent rounded-full" />
             </div>
-          </Link>
+          </button>
 
           {/* Navigation Tabs - next to logo */}
           <nav className="hidden lg:flex items-center h-full ml-8 gap-1">
