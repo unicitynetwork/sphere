@@ -30,10 +30,10 @@ const DESKTOP_STEPS: TutorialStep[] = [
       'Open apps appear as tabs here. Switch between them or close with the X button',
   },
   {
-    target: 'wallet-toggle',
+    target: 'wallet-panel',
     title: 'Wallet',
     description:
-      'Toggle the wallet panel to create or import a wallet and manage your assets',
+      'Your wallet panel — create or import a wallet, manage your assets, send and receive tokens, and view transaction history',
   },
 ];
 
@@ -58,10 +58,11 @@ const MOBILE_STEPS: TutorialStep[] = [
       'Open apps appear as tabs here. Switch between them or close with the X button',
   },
   {
-    target: 'wallet-toggle',
+    target: 'wallet-panel-mobile',
     title: 'Wallet',
     description:
-      'Tap the wallet icon to open the wallet panel and manage your assets',
+      'Your wallet — create or import a wallet, manage your assets, send and receive tokens, and view transaction history',
+    trigger: 'wallet-toggle',
   },
 ];
 

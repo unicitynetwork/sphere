@@ -18,7 +18,7 @@ export function WalletRequiredBlocker({ children, agentId, onOpenWallet }: Walle
   }
 
   return (
-    <div className="h-full flex items-center justify-center bg-white/60 dark:bg-neutral-900/90 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50">
+    <div className="h-full flex items-center justify-center bg-white/60 dark:bg-neutral-900/90 backdrop-blur-xl rounded-none md:rounded-3xl lg:rounded-none border-0 md:border md:border-neutral-200 dark:md:border-neutral-800/50 lg:border-0">
       <div className="flex flex-col items-center gap-6 p-8 text-center max-w-sm">
         <div className="relative">
           <div className="absolute inset-0 rounded-2xl blur-xl opacity-30 bg-orange-500" />

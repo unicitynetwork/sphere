@@ -194,8 +194,9 @@ export function DesktopLayout() {
 
         {/* Wallet panel — desktop: inline side panel with slide transition */}
         <div
+          data-tutorial="wallet-panel"
           className={`hidden lg:block shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${
-            walletOpen ? 'w-80 xl:w-96 border-l border-neutral-200 dark:border-neutral-800/50' : 'w-0'
+            walletOpen ? 'w-80 xl:w-96' : 'w-0'
           }`}
         >
           <div className="w-80 xl:w-96 h-full">
@@ -215,6 +216,7 @@ export function DesktopLayout() {
                 onClick={toggleWallet}
               />
               <motion.div
+                data-tutorial="wallet-panel-mobile"
                 initial={{ x: '100%' }}
                 animate={{ x: 0 }}
                 exit={{ x: '100%' }}

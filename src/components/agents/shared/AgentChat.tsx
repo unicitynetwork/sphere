@@ -543,7 +543,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="lg:hidden absolute inset-0 bg-black/50 z-40 rounded-3xl"
+              className="lg:hidden absolute inset-0 bg-black/50 z-40 rounded-none md:rounded-3xl lg:rounded-none"
               onClick={() => setSidebarOpen(false)}
             />
           )}
@@ -969,7 +969,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
       <div className={`overflow-hidden relative lg:grid lg:grid-cols-[auto_1fr] h-full min-h-0 theme-transition ${
         isFullscreen
           ? 'bg-white dark:bg-neutral-900'
-          : 'bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 lg:shadow-xl dark:lg:shadow-2xl'
+          : 'bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-none md:rounded-3xl lg:rounded-none border-0 md:border md:border-neutral-200 dark:md:border-neutral-800/50 lg:border-0 lg:shadow-none'
       }`}>
         <div className={`absolute -top-20 -right-20 w-96 h-96 ${bgGradient.from} rounded-full blur-3xl pointer-events-none`} />
         <div className={`absolute -bottom-20 -left-20 w-96 h-96 ${bgGradient.to} rounded-full blur-3xl pointer-events-none`} />

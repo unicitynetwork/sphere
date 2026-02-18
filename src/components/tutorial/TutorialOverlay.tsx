@@ -50,19 +50,51 @@ export function TutorialOverlay({
     setIsMobile(window.innerWidth < 1024);
   }, [currentStep]);
 
-  // Fire trigger (e.g. click wallet tab) then measure
+  // Fire trigger (e.g. click wallet tab) then measure with retry
   useEffect(() => {
     if (!isActive) return;
 
     let timeout: ReturnType<typeof setTimeout>;
 
     if (currentStep.trigger) {
+      // If the target is already visible, skip the trigger (avoids toggle issues)
+      const existingEl = document.querySelector(
+        `[data-tutorial="${currentStep.target}"]`,
+      );
+      if (existingEl) {
+        const existingRect = existingEl.getBoundingClientRect();
+        if (existingRect.width > 0 && existingRect.height > 0) {
+          measureTarget();
+          window.addEventListener('resize', measureTarget);
+          return () => window.removeEventListener('resize', measureTarget);
+        }
+      }
+
+      // Target not visible — fire trigger and retry measurement
       const triggerEl = document.querySelector<HTMLElement>(
         `[data-tutorial="${currentStep.trigger}"]`,
       );
       triggerEl?.click();
-      // Wait for scroll/animation to finish before measuring
-      timeout = setTimeout(measureTarget, 400);
+
+      // Retry measurement until element is found with non-zero dimensions
+      let retries = 0;
+      const tryMeasure = () => {
+        const el = document.querySelector(
+          `[data-tutorial="${currentStep.target}"]`,
+        );
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            measureTarget();
+            return;
+          }
+        }
+        if (retries < 10) {
+          retries++;
+          timeout = setTimeout(tryMeasure, 200);
+        }
+      };
+      timeout = setTimeout(tryMeasure, 500);
     } else {
       const raf = requestAnimationFrame(() => measureTarget());
       return () => cancelAnimationFrame(raf);

@@ -15,6 +15,7 @@ export interface DesktopTab {
 interface DesktopState {
   openTabs: DesktopTab[];
   activeTabId: string | null;
+  previousActiveTabId?: string | null;
 }
 
 const defaultState: DesktopState = {
@@ -143,8 +144,20 @@ export function useDesktopState() {
 
   const showDesktop = useCallback(() => {
     update((prev) => {
-      if (prev.activeTabId === null) return prev;
-      return { ...prev, activeTabId: null };
+      if (prev.activeTabId === null) {
+        // Already on desktop — toggle back to the previous tab if it's still open
+        const prevId = prev.previousActiveTabId;
+        if (prevId && prev.openTabs.some((t) => t.id === prevId)) {
+          return { ...prev, activeTabId: prevId, previousActiveTabId: null };
+        }
+        // Fallback: activate the last open tab
+        const last = prev.openTabs[prev.openTabs.length - 1];
+        if (last) {
+          return { ...prev, activeTabId: last.id, previousActiveTabId: null };
+        }
+        return prev;
+      }
+      return { ...prev, activeTabId: null, previousActiveTabId: prev.activeTabId };
     });
   }, [update]);
 

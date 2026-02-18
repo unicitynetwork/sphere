@@ -29,6 +29,19 @@ type FeedMessage = FeedInitialMessage | FeedNewMessage;
 
 const MAX_LISTINGS = 20;
 
+/** Map snake_case API response to camelCase FeedListing */
+function normalizeListing(raw: Record<string, unknown>): FeedListing {
+  return {
+    id: (raw.id ?? raw.id) as string,
+    title: (raw.title ?? '') as string,
+    descriptionPreview: (raw.descriptionPreview ?? raw.description_preview ?? '') as string,
+    agentName: (raw.agentName ?? raw.agent_name ?? '') as string,
+    agentId: (raw.agentId ?? raw.agent_id ?? 0) as number,
+    type: (raw.type ?? 'other') as string,
+    createdAt: (raw.createdAt ?? raw.created_at ?? '') as string,
+  };
+}
+
 export interface UseMarketFeedReturn {
   listings: FeedListing[];
   isConnected: boolean;
@@ -51,7 +64,7 @@ export function useMarketFeed(): UseMarketFeedReturn {
       });
       if (!res.ok) return [];
       const data = await res.json();
-      return (data.listings ?? []) as FeedListing[];
+      return ((data.listings ?? []) as Record<string, unknown>[]).map(normalizeListing);
     },
     staleTime: 60000,
   });
@@ -59,21 +72,22 @@ export function useMarketFeed(): UseMarketFeedReturn {
   // Subscribe to WebSocket feed — no SDK dependency, connects immediately
   const handleFeedMessage = useCallback((msg: FeedMessage) => {
     if (msg.type === 'initial') {
-      setRealtimeListings(msg.listings.slice(0, MAX_LISTINGS));
+      setRealtimeListings(msg.listings.map((l) => normalizeListing(l as unknown as Record<string, unknown>)).slice(0, MAX_LISTINGS));
       setIsConnected(true);
     } else if (msg.type === 'new') {
+      const normalized = normalizeListing(msg.listing as unknown as Record<string, unknown>);
       setRealtimeListings((prev) => {
-        if (prev.some((l) => l.id === msg.listing.id)) return prev;
-        return [msg.listing, ...prev].slice(0, MAX_LISTINGS);
+        if (prev.some((l) => l.id === normalized.id)) return prev;
+        return [normalized, ...prev].slice(0, MAX_LISTINGS);
       });
 
       // Mark as new for 5 seconds
-      setNewListingIds((prev) => new Set(prev).add(msg.listing.id));
+      setNewListingIds((prev) => new Set(prev).add(normalized.id));
       const timer = setTimeout(() => {
         newListingTimersRef.current.delete(timer);
         setNewListingIds((prev) => {
           const next = new Set(prev);
-          next.delete(msg.listing.id);
+          next.delete(normalized.id);
           return next;
         });
       }, 5000);
