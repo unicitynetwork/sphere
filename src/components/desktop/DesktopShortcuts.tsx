@@ -20,6 +20,14 @@ export function DesktopShortcuts() {
 
   return (
     <div data-tutorial="desktop-shortcuts" className="absolute inset-0 overflow-auto flex flex-col">
+      {/* Subtle gradient background — orange glow from bottom-left */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          backgroundImage: `radial-gradient(ellipse at 0% 100%, rgba(251, 146, 60, 0.08) 0%, transparent 50%)`,
+        }}
+      />
+
       {/* Watermark — bottom-left, matches header branding */}
       <div className="absolute bottom-8 left-8 sm:bottom-12 sm:left-12 flex items-center gap-3 sm:gap-5 pointer-events-none select-none opacity-[0.06] dark:opacity-[0.07]">
         <img src={logoUrl} alt="" className="w-14 h-14 sm:w-20 sm:h-20" />
