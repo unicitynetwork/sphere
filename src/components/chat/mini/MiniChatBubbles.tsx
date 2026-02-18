@@ -120,7 +120,7 @@ export function MiniChatBubbles() {
           <MessageCircle className="w-5 h-5" />
 
           {totalUnreadCount > 0 && !isListExpanded && (
-            <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-blue-500 text-white shadow-md">
+            <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-orange-500 text-white shadow-md">
               {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
             </span>
           )}

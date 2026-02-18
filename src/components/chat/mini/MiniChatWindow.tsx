@@ -198,7 +198,7 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
                   <div
                     className={`max-w-[80%] rounded-2xl px-3 py-2 ${
                       isOwn
-                        ? 'bg-linear-to-br from-orange-500 to-orange-600 text-white'
+                        ? 'bg-orange-500/15 dark:bg-orange-500/20 text-neutral-900 dark:text-neutral-100'
                         : 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white border border-neutral-200 dark:border-neutral-700'
                     }`}
                   >
@@ -206,7 +206,7 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
                       <MarkdownContent text={message.content} />
                     </div>
                     <div
-                      className={`text-[10px] mt-1 ${isOwn ? 'text-white/60' : 'text-neutral-400'}`}
+                      className="text-[10px] mt-1 text-neutral-400"
                     >
                       {formatMessageTime(message.timestamp)}
                     </div>

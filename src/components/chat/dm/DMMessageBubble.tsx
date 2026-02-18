@@ -14,13 +14,13 @@ export function DMMessageBubble({ message, delay = 0 }: DMMessageBubbleProps) {
   const StatusIcon = () => {
     switch (message.status) {
       case 'SENT':
-        return <Check className="w-3 h-3 text-white/60" />;
+        return <Check className="w-3 h-3 text-neutral-400" />;
       case 'DELIVERED':
-        return <CheckCheck className="w-3 h-3 text-white/60" />;
+        return <CheckCheck className="w-3 h-3 text-neutral-400" />;
       case 'READ':
-        return <CheckCheck className="w-3 h-3 text-blue-300" />;
+        return <CheckCheck className="w-3 h-3 text-blue-500" />;
       default:
-        return <Check className="w-3 h-3 text-white/60" />;
+        return <Check className="w-3 h-3 text-neutral-400" />;
     }
   };
 
@@ -51,7 +51,7 @@ export function DMMessageBubble({ message, delay = 0 }: DMMessageBubbleProps) {
       <div
         className={`max-w-[85%] rounded-2xl p-4 ${
           isOwn
-            ? 'bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/20'
+            ? 'bg-orange-500/15 dark:bg-orange-500/20 text-neutral-900 dark:text-neutral-100'
             : 'bg-neutral-100 dark:bg-neutral-800/80 backdrop-blur-xl border border-neutral-200 dark:border-neutral-700/50 text-neutral-800 dark:text-neutral-200'
         }`}
       >
@@ -71,7 +71,7 @@ export function DMMessageBubble({ message, delay = 0 }: DMMessageBubbleProps) {
         <div className="text-sm leading-relaxed wrap-break-word whitespace-pre-wrap">
           <MarkdownContent
             text={message.content}
-            mentionClassName={isOwn ? 'text-white' : 'text-orange-500'}
+            mentionClassName="text-orange-500"
           />
         </div>
       </div>

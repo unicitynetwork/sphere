@@ -4,10 +4,11 @@ import type { AgentConfig } from '../../config/activities';
 interface DesktopIconProps {
   agent: AgentConfig;
   isOpen?: boolean;
+  badge?: number;
   onClick: () => void;
 }
 
-export function DesktopIcon({ agent, isOpen, onClick }: DesktopIconProps) {
+export function DesktopIcon({ agent, isOpen, badge, onClick }: DesktopIconProps) {
   const { Icon, name, color } = agent;
 
   return (
@@ -37,6 +38,13 @@ export function DesktopIcon({ agent, isOpen, onClick }: DesktopIconProps) {
 
           <Icon className="w-7 h-7 sm:w-8 sm:h-8 text-white drop-shadow-lg relative z-10" />
         </div>
+
+        {/* Badge */}
+        {!!badge && badge > 0 && (
+          <div className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-orange-500 text-white text-[10px] font-bold flex items-center justify-center shadow-md z-10">
+            {badge > 99 ? '99+' : badge}
+          </div>
+        )}
 
         {/* Open indicator dot */}
         {isOpen && (

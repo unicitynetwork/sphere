@@ -82,7 +82,7 @@ export function GroupList({
               <h3 className="text-neutral-900 dark:text-white font-medium">Groups</h3>
               <Sparkles className="w-4 h-4 text-blue-500 animate-pulse" />
               {totalUnreadCount > 0 && (
-                <span className="px-1.5 py-0.5 text-xs rounded-full bg-blue-500 text-white">
+                <span className="px-1.5 py-0.5 text-xs rounded-full bg-orange-500 text-white">
                   {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
                 </span>
               )}

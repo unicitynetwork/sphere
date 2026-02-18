@@ -84,7 +84,7 @@ export function GroupItem({
               {getGroupDisplayName(group)}
             </span>
             {(group.unreadCount ?? 0) > 0 && (
-              <span className="px-1.5 py-0.5 text-xs rounded-full bg-blue-500 text-white shrink-0">
+              <span className="px-1.5 py-0.5 text-xs rounded-full bg-orange-500 text-white shrink-0">
                 {(group.unreadCount ?? 0) > 99 ? '99+' : group.unreadCount}
               </span>
             )}
