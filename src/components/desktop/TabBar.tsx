@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useDesktopState } from '../../hooks/useDesktopState';
 import { getAgentConfig } from '../../config/activities';
 import { useDmUnreadCount } from '../chat/hooks/useDmUnreadCount';
+import { useGroupUnreadCount } from '../chat/hooks/useGroupUnreadCount';
 
 interface TabBarProps {
   isFullscreen?: boolean;
@@ -12,6 +13,7 @@ interface TabBarProps {
 export function TabBar({ isFullscreen, onToggleFullscreen }: TabBarProps) {
   const { openTabs, activeTabId, activateTab, closeTab, showDesktop, walletOpen, toggleWallet } = useDesktopState();
   const dmUnreadCount = useDmUnreadCount();
+  const groupUnreadCount = useGroupUnreadCount();
 
   return (
     <div data-tutorial="tab-bar" className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 bg-white/60 dark:bg-neutral-900/60 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800/50 shrink-0 overflow-x-auto scrollbar-hide">
@@ -57,6 +59,13 @@ export function TabBar({ isFullscreen, onToggleFullscreen }: TabBarProps) {
                 isActive ? 'bg-white/30 text-white' : 'bg-orange-500 text-white'
               }`}>
                 {dmUnreadCount > 99 ? '99+' : dmUnreadCount}
+              </span>
+            )}
+            {tab.appId === 'group-chat' && groupUnreadCount > 0 && (
+              <span className={`min-w-4 h-4 px-0.5 flex items-center justify-center text-[9px] font-bold rounded-full ${
+                isActive ? 'bg-white/30 text-white' : 'bg-orange-500 text-white'
+              }`}>
+                {groupUnreadCount > 99 ? '99+' : groupUnreadCount}
               </span>
             )}
             <span

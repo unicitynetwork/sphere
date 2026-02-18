@@ -40,7 +40,6 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     setMessageInput,
     searchQuery,
     setSearchQuery,
-    totalUnreadCount,
     isConnected,
     // Moderation
     canModerateSelectedGroup,
@@ -161,7 +160,6 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
         onClose={() => setSidebarOpen(false)}
         isCollapsed={sidebarCollapsed}
         onCollapse={() => setSidebarCollapsed(true)}
-        totalUnreadCount={totalUnreadCount}
         isRelayAdmin={isRelayAdmin}
         isAdminOfGroup={isAdminOfGroup}
         onDeleteGroup={deleteGroup}

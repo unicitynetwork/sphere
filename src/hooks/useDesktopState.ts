@@ -209,3 +209,15 @@ export function useDesktopState() {
     setWalletOpen,
   };
 }
+
+/** Lightweight subscription — only re-renders when activeTabId changes */
+export function useActiveTabId(): string | null {
+  const { data } = useQuery({
+    queryKey: DESKTOP_STATE_KEY,
+    queryFn: loadState,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    select: (s) => s.activeTabId,
+  });
+  return data ?? null;
+}

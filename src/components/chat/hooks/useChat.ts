@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
 import { useIdentity } from '../../../sdk/hooks/core/useIdentity';
-import { useDesktopState } from '../../../hooks/useDesktopState';
+import { useActiveTabId } from '../../../hooks/useDesktopState';
 import {
   type Conversation,
   type DisplayMessage,
@@ -66,7 +66,7 @@ export const useChat = (): UseChatReturn => {
   const queryClient = useQueryClient();
   const { sphere } = useSphereContext();
   const { directAddress } = useIdentity();
-  const { activeTabId } = useDesktopState();
+  const activeTabId = useActiveTabId();
   const addressId = directAddress ? buildAddressId(directAddress) : 'default';
 
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
@@ -134,7 +134,7 @@ export const useChat = (): UseChatReturn => {
     };
   }, [sphere]);
 
-  // When the DM tab becomes active again, mark the selected conversation as read
+  // When the DM tab becomes active (or selected conversation changes while active), mark as read
   useEffect(() => {
     if (activeTabId === 'dm' && selectedConversation && sphere) {
       const msgs: SDKDirectMessage[] = sphere.communications.getConversation(selectedConversation.peerPubkey);
@@ -143,8 +143,9 @@ export const useChat = (): UseChatReturn => {
         .map(m => m.id);
       if (unreadIds.length > 0) {
         sphere.communications.markAsRead(unreadIds);
-        queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
       }
+      // Always invalidate to sync query cache with SDK state
+      queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
     }
   }, [activeTabId, selectedConversation, sphere, queryClient]);
 
