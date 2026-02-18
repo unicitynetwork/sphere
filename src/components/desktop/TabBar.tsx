@@ -18,18 +18,17 @@ export function TabBar({ isFullscreen, onToggleFullscreen }: TabBarProps) {
   return (
     <div data-tutorial="tab-bar" className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 bg-white/60 dark:bg-neutral-900/60 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800/50 shrink-0 overflow-x-auto scrollbar-hide">
       {/* Show Desktop button */}
-      <button
+      <motion.button
         data-tutorial="show-desktop"
         onClick={showDesktop}
-        className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors duration-150 shrink-0 ${
-          activeTabId === null
-            ? 'bg-orange-500/15 text-orange-500'
-            : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 hover:bg-neutral-200/60 dark:hover:bg-neutral-700/40'
-        }`}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        className="flex items-center gap-2 px-4 py-2 rounded-full shrink-0 bg-linear-to-r from-orange-500 to-orange-600 text-white text-sm font-medium shadow-md shadow-orange-500/20"
         title="Show Desktop"
       >
-        <LayoutGrid className="w-4 h-4" />
-      </button>
+        <LayoutGrid className="w-3.5 h-3.5" />
+        <span className="hidden sm:inline">Apps</span>
+      </motion.button>
 
       {openTabs.length > 0 && (
         <div className="h-4 w-px bg-neutral-200 dark:bg-neutral-700 mx-0.5" />
