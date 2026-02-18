@@ -258,7 +258,7 @@ export function Header() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.35, ease: 'easeInOut' }}
             onClick={() => setMobileMenuOpen(false)}
-            className="lg:hidden fixed inset-0 top-14 bg-black/20 backdrop-blur-sm z-40"
+            className="lg:hidden fixed inset-0 top-14 bg-black/20 backdrop-blur-sm z-60"
           />
           {/* Menu */}
           <motion.div
@@ -266,7 +266,7 @@ export function Header() {
             animate={{ height: 'auto' }}
             exit={{ height: 0 }}
             transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
-            className="lg:hidden fixed left-0 right-0 top-14 backdrop-blur-xl border-b z-50 shadow-xl overflow-hidden bg-white/95 dark:bg-neutral-900/95 border-neutral-200 dark:border-neutral-800"
+            className="lg:hidden fixed left-0 right-0 top-14 backdrop-blur-xl border-b z-60 shadow-xl overflow-hidden bg-white/95 dark:bg-neutral-900/95 border-neutral-200 dark:border-neutral-800"
           >
           <nav className="px-4 py-3 space-y-1">
             {navItems.map((item) => (

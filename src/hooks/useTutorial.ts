@@ -34,6 +34,7 @@ const DESKTOP_STEPS: TutorialStep[] = [
     title: 'Wallet',
     description:
       'Your wallet panel — create or import a wallet, manage your assets, send and receive tokens, and view transaction history',
+    trigger: 'wallet-toggle',
   },
 ];
 
