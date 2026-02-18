@@ -19,8 +19,16 @@ export function DesktopShortcuts() {
 
   return (
     <div data-tutorial="desktop-shortcuts" className="absolute inset-0 overflow-auto flex flex-col">
+      {/* Subtle gradient background — orange glow from bottom-left */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          backgroundImage: `radial-gradient(ellipse at 0% 100%, rgba(251, 146, 60, 0.08) 0%, transparent 50%)`,
+        }}
+      />
+
       {/* Desktop icons grid */}
-      <div className="flex-1 flex items-start justify-center px-4 pt-6 sm:px-8 sm:pt-10">
+      <div className="relative flex-1 flex items-start justify-center px-4 pt-6 sm:px-8 sm:pt-10">
         <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-4">
           {agents.map((agent) => (
             <DesktopIcon
