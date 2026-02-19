@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Settings, Layers, Download, LogOut, Key, MapPin } from 'lucide-react';
+import { Settings, Layers, Download, LogOut, Key, AtSign } from 'lucide-react';
 import { BaseModal, ModalHeader, MenuButton } from '../../ui';
 import { LookupModal } from './LookupModal';
 import { AddressManagerModal } from './AddressManagerModal';
@@ -29,7 +29,7 @@ export function SettingsModal({
       <BaseModal isOpen={isOpen} onClose={onClose} size="sm" showOrbs={false}>
         <ModalHeader title="Settings" icon={Settings} iconVariant="neutral" onClose={onClose} />
 
-        <div className="p-4 space-y-2">
+        <div className="p-4 space-y-2 overflow-y-auto">
           <MenuButton
             icon={Layers}
             color="blue"
@@ -42,8 +42,8 @@ export function SettingsModal({
           />
 
           <MenuButton
-            icon={MapPin}
-            color="neutral"
+            icon={AtSign}
+            color="purple"
             label="Address Manager"
             onClick={() => {
               onClose();
@@ -53,7 +53,7 @@ export function SettingsModal({
 
           <MenuButton
             icon={Key}
-            color="neutral"
+            color="orange"
             label="My Public Keys"
             onClick={() => {
               onClose();
