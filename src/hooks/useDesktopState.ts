@@ -38,6 +38,7 @@ function loadState(): DesktopState {
     return {
       openTabs: validTabs,
       activeTabId: activeStillOpen ? parsed.activeTabId : null,
+      walletOpen: defaultState.walletOpen,
     };
   } catch {
     return defaultState;
@@ -46,6 +47,7 @@ function loadState(): DesktopState {
 
 function saveState(state: DesktopState) {
   // walletOpen is transient UI state (depends on screen size), don't persist it
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { walletOpen: _, ...persistable } = state;
   localStorage.setItem(STORAGE_KEYS.DESKTOP_STATE, JSON.stringify(persistable));
 }
@@ -92,6 +94,7 @@ export function useDesktopState() {
             (t) => !(t.appId === appId && !t.url),
           );
           return {
+            ...prev,
             openTabs: [...filtered, tab],
             activeTabId: tab.id,
           };
@@ -110,6 +113,7 @@ export function useDesktopState() {
           label: opts?.label ?? agent?.name ?? appId,
         };
         return {
+          ...prev,
           openTabs: [...prev.openTabs, tab],
           activeTabId: tab.id,
         };
@@ -130,7 +134,7 @@ export function useDesktopState() {
           const neighbor = next[Math.min(idx, next.length - 1)];
           nextActive = neighbor?.id ?? null;
         }
-        return { openTabs: next, activeTabId: nextActive };
+        return { ...prev, openTabs: next, activeTabId: nextActive };
       });
     },
     [update],

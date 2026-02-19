@@ -587,6 +587,7 @@ export const useGroupChat = (): UseGroupChatReturn => {
   );
 
   // Identity helpers — addressId forces recomputation on address switch
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const myPubkey = useMemo(() => groupChat?.getMyPublicKey() ?? null, [groupChat, addressId]);
 
   const isAdminOfGroup = useCallback(

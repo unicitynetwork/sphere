@@ -32,7 +32,7 @@ export function DMChatSection({ pendingRecipient, onPendingRecipientHandled }: D
     searchQuery,
     setSearchQuery,
     filteredConversations,
-    totalUnreadCount,
+    // totalUnreadCount - available from useChat() if needed
     isRecipientTyping,
     hasMore,
     loadMore,
