@@ -157,56 +157,52 @@ export function DMChatSection({ pendingRecipient, onPendingRecipientHandled }: D
       {/* Main Chat Area */}
       <div className="grid grid-rows-[auto_1fr_auto] z-10 min-w-0 h-full min-h-0">
         {/* Chat Header */}
-        <div className="shrink-0 p-4 border-b border-neutral-200 dark:border-neutral-800/50 flex items-center justify-between bg-linear-to-br from-white/80 dark:from-neutral-900/80 to-neutral-50/40 dark:to-neutral-800/40 backdrop-blur-sm relative z-20 theme-transition">
-          <div className="absolute bottom-0 left-0 w-32 h-32 bg-orange-500/5 rounded-tr-full" />
-
-          <div className="flex items-center gap-3 relative z-10">
+        <div className="shrink-0 px-3 py-2 border-b border-neutral-200 dark:border-neutral-800/50 flex items-center justify-between bg-linear-to-br from-white/80 dark:from-neutral-900/80 to-neutral-50/40 dark:to-neutral-800/40 backdrop-blur-sm relative z-20 theme-transition">
+          <div className="flex items-center gap-2 relative z-10">
             {/* Desktop expand sidebar button (when collapsed) */}
             {sidebarCollapsed && (
               <motion.button
                 onClick={() => setSidebarCollapsed(false)}
-                className="hidden lg:flex p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
+                className="hidden lg:flex p-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
                 title="Expand sidebar"
               >
-                <PanelLeft className="w-5 h-5" />
+                <PanelLeft className="w-4 h-4" />
               </motion.button>
             )}
             {/* Mobile sidebar button */}
             <motion.button
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
+              className="lg:hidden p-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
               title="Show conversations"
             >
-              <PanelLeft className="w-5 h-5" />
+              <PanelLeft className="w-4 h-4" />
             </motion.button>
 
             {/* Conversation or default header */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               {selectedConversation ? (
                 <>
-                  <motion.div whileHover={{ scale: 1.05 }} className="relative">
-                    <div className={`relative w-12 h-12 rounded-xl bg-linear-to-br ${getColorFromPubkey(selectedConversation.peerPubkey).gradient} flex items-center justify-center shadow-xl text-white font-medium`}>
-                      {getAvatar(selectedConversation.peerPubkey, selectedConversation.peerNametag)}
-                    </div>
-                  </motion.div>
-                  <h3 className="text-neutral-900 dark:text-white font-medium">
+                  <div className={`relative w-8 h-8 rounded-lg bg-linear-to-br ${getColorFromPubkey(selectedConversation.peerPubkey).gradient} flex items-center justify-center text-white text-sm font-medium`}>
+                    {getAvatar(selectedConversation.peerPubkey, selectedConversation.peerNametag)}
+                  </div>
+                  <h3 className="text-sm text-neutral-900 dark:text-white font-medium">
                     {getDisplayName(selectedConversation.peerPubkey, selectedConversation.peerNametag)}
                   </h3>
                 </>
               ) : (
                 <>
-                  <div className="w-12 h-12 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 flex items-center justify-center border border-neutral-200 dark:border-neutral-700/50">
-                    <MessageCircle className="w-6 h-6 text-neutral-400" />
+                  <div className="w-8 h-8 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 flex items-center justify-center border border-neutral-200 dark:border-neutral-700/50">
+                    <MessageCircle className="w-4 h-4 text-neutral-400" />
                   </div>
                   <div>
-                    <h3 className="text-neutral-900 dark:text-white font-medium">
+                    <h3 className="text-sm text-neutral-900 dark:text-white font-medium">
                       Direct Messages
                     </h3>
-                    <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
                       Select a conversation to start
                     </p>
                   </div>
