@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Settings, Layers, Download, LogOut, Key } from 'lucide-react';
+import { Settings, Layers, Download, LogOut, Key, AtSign } from 'lucide-react';
 import { BaseModal, ModalHeader, MenuButton } from '../../ui';
 import { LookupModal } from './LookupModal';
+import { AddressManagerModal } from './AddressManagerModal';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -10,6 +11,7 @@ interface SettingsModalProps {
   onBackupWallet: () => void;
   onLogout: () => void;
   l1Balance?: string;
+  hasMnemonic?: boolean;
 }
 
 export function SettingsModal({
@@ -21,13 +23,14 @@ export function SettingsModal({
   l1Balance,
 }: SettingsModalProps) {
   const [isLookupOpen, setIsLookupOpen] = useState(false);
+  const [isAddressManagerOpen, setIsAddressManagerOpen] = useState(false);
 
   return (
     <>
       <BaseModal isOpen={isOpen} onClose={onClose} size="sm" showOrbs={false}>
         <ModalHeader title="Settings" icon={Settings} iconVariant="neutral" onClose={onClose} />
 
-        <div className="p-4 space-y-2">
+        <div className="p-4 space-y-2 overflow-y-auto">
           <MenuButton
             icon={Layers}
             color="blue"
@@ -40,8 +43,18 @@ export function SettingsModal({
           />
 
           <MenuButton
+            icon={AtSign}
+            color="purple"
+            label="Address Manager"
+            onClick={() => {
+              onClose();
+              setIsAddressManagerOpen(true);
+            }}
+          />
+
+          <MenuButton
             icon={Key}
-            color="neutral"
+            color="orange"
             label="My Public Keys"
             onClick={() => {
               onClose();
@@ -53,6 +66,7 @@ export function SettingsModal({
             icon={Download}
             color="green"
             label="Backup Wallet"
+            subtitle={undefined}
             showChevron={false}
             onClick={() => {
               onClose();
@@ -76,6 +90,11 @@ export function SettingsModal({
       <LookupModal
         isOpen={isLookupOpen}
         onClose={() => setIsLookupOpen(false)}
+      />
+
+      <AddressManagerModal
+        isOpen={isAddressManagerOpen}
+        onClose={() => setIsAddressManagerOpen(false)}
       />
     </>
   );

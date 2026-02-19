@@ -58,6 +58,7 @@ export function useDesktopState() {
   const { data: state = defaultState } = useQuery({
     queryKey: DESKTOP_STATE_KEY,
     queryFn: loadState,
+    initialData: loadState,
     staleTime: Infinity,
     gcTime: Infinity,
   });
@@ -80,6 +81,7 @@ export function useDesktopState() {
         if (opts?.url) {
           const byUrl = prev.openTabs.find((t) => t.url === opts.url);
           if (byUrl) {
+            if (prev.activeTabId === byUrl.id) return prev;
             return { ...prev, activeTabId: byUrl.id };
           }
           // Replace existing prompt tab (same appId, no URL) with the URL version
@@ -104,6 +106,7 @@ export function useDesktopState() {
           (t) => t.appId === appId && !t.url,
         );
         if (existing) {
+          if (prev.activeTabId === existing.id) return prev;
           return { ...prev, activeTabId: existing.id };
         }
         const agent = getAgentConfig(appId);
@@ -219,6 +222,7 @@ export function useActiveTabId(): string | null {
   const { data } = useQuery({
     queryKey: DESKTOP_STATE_KEY,
     queryFn: loadState,
+    initialData: loadState,
     staleTime: Infinity,
     gcTime: Infinity,
     select: (s) => s.activeTabId,

@@ -278,9 +278,10 @@ export function L3WalletView({
     }
   };
 
-  // Check if mnemonic is available
+  // Check if wallet was created from mnemonic (not legacy file import)
   const hasMnemonic = useMemo(() => {
-    return sphere?.getMnemonic() !== null;
+    const source = sphere?.getWalletInfo()?.source;
+    return source !== 'file' && source !== 'unknown';
   }, [sphere]);
 
   // Handle export wallet file (using SDK's exportToJSON)
@@ -541,6 +542,7 @@ export function L3WalletView({
         onBackupWallet={() => setIsBackupOpen(true)}
         onLogout={() => setIsLogoutConfirmOpen(true)}
         l1Balance={formatL1Balance(l1Balance)}
+        hasMnemonic={hasMnemonic}
       />
 
       <BackupWalletModal
@@ -548,6 +550,7 @@ export function L3WalletView({
         onClose={() => setIsBackupOpen(false)}
         onExportWalletFile={handleExportWalletFile}
         onShowRecoveryPhrase={handleShowSeedPhrase}
+        hasMnemonic={hasMnemonic}
       />
 
       <LogoutConfirmModal

@@ -1,5 +1,6 @@
 import { X, LayoutGrid, Wallet, Maximize2, Minimize2 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { useDesktopState } from '../../hooks/useDesktopState';
 import { getAgentConfig } from '../../config/activities';
 import { useDmUnreadCount } from '../chat/hooks/useDmUnreadCount';
@@ -11,16 +12,52 @@ interface TabBarProps {
 }
 
 export function TabBar({ isFullscreen, onToggleFullscreen }: TabBarProps) {
+  const navigate = useNavigate();
   const { openTabs, activeTabId, activateTab, closeTab, showDesktop, walletOpen, toggleWallet } = useDesktopState();
   const dmUnreadCount = useDmUnreadCount();
   const groupUnreadCount = useGroupUnreadCount();
+
+  const handleActivateTab = (tab: { id: string; appId: string; url?: string }) => {
+    activateTab(tab.id);
+    if (tab.url) {
+      navigate(`/agents/custom?url=${encodeURIComponent(tab.url)}`);
+    } else {
+      navigate(`/agents/${tab.appId}`);
+    }
+  };
+
+  const handleShowDesktop = () => {
+    showDesktop();
+    navigate('/home');
+  };
+
+  const handleCloseTab = (e: React.MouseEvent, tabId: string) => {
+    e.stopPropagation();
+    const idx = openTabs.findIndex((t) => t.id === tabId);
+    const isActive = tabId === activeTabId;
+    closeTab(tabId);
+
+    if (isActive) {
+      const remaining = openTabs.filter((t) => t.id !== tabId);
+      const neighbor = remaining[Math.min(idx, remaining.length - 1)];
+      if (neighbor) {
+        if (neighbor.url) {
+          navigate(`/agents/custom?url=${encodeURIComponent(neighbor.url)}`);
+        } else {
+          navigate(`/agents/${neighbor.appId}`);
+        }
+      } else {
+        navigate('/home');
+      }
+    }
+  };
 
   return (
     <div data-tutorial="tab-bar" className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 bg-white/60 dark:bg-neutral-900/60 backdrop-blur-xl border-b border-neutral-200 dark:border-neutral-800/50 shrink-0 overflow-x-auto scrollbar-hide">
       {/* Show Desktop button */}
       <motion.button
         data-tutorial="show-desktop"
-        onClick={showDesktop}
+        onClick={handleShowDesktop}
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
         className="flex items-center gap-2 px-4 py-2 rounded-full shrink-0 bg-linear-to-r from-orange-500 to-orange-600 text-white text-sm font-medium shadow-md shadow-orange-500/20"
@@ -44,7 +81,7 @@ export function TabBar({ isFullscreen, onToggleFullscreen }: TabBarProps) {
           <motion.button
             key={tab.id}
             layout
-            onClick={() => activateTab(tab.id)}
+            onClick={() => handleActivateTab(tab)}
             className={`relative flex items-center gap-1.5 px-2 sm:px-3 py-2 text-xs font-medium rounded-lg transition-colors duration-150 shrink-0 ${
               isActive
                 ? 'bg-orange-500 text-white shadow-sm'
@@ -69,10 +106,7 @@ export function TabBar({ isFullscreen, onToggleFullscreen }: TabBarProps) {
             )}
             <span
               role="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                closeTab(tab.id);
-              }}
+              onClick={(e) => handleCloseTab(e, tab.id)}
               className={`p-0.5 rounded transition-colors duration-150 ${
                 isActive
                   ? 'hover:bg-orange-600/40'

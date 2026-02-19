@@ -3,6 +3,7 @@
  * Uses extracted hooks for state management and screen components for UI
  */
 import { AnimatePresence } from "framer-motion";
+import { useSphereContext } from "../../../sdk/hooks/core/useSphere";
 import { useOnboardingFlow } from "./hooks/useOnboardingFlow";
 
 // Import screen components
@@ -12,7 +13,6 @@ import {
   RestoreMethodScreen,
   ImportFileScreen,
   PasswordPromptScreen,
-  ScanningScreen,
   AddressSelectionScreen,
   NametagScreen,
   ProcessingScreen,
@@ -21,6 +21,9 @@ import {
 export type { OnboardingStep } from "./hooks/useOnboardingFlow";
 
 export function CreateWalletFlow() {
+  const { initProgress } = useSphereContext();
+  const progressMessage = initProgress?.message ?? null;
+
   // Main onboarding flow hook
   const {
     // Step management
@@ -38,17 +41,17 @@ export function CreateWalletFlow() {
 
     // File import state
     selectedFile,
-    scanCount,
-    needsScanning,
     isDragging,
-    scanProgress,
-    showScanModal,
 
     // Nametag state
     nametagInput,
     setNametagInput,
     nametagAvailability,
     processingStatus,
+    processingStep,
+    processingTotalSteps,
+    processingTitle,
+    processingCompleteTitle,
     isProcessingComplete,
     handleCompleteOnboarding,
 
@@ -72,10 +75,8 @@ export function CreateWalletFlow() {
     // File import actions
     handleFileSelect,
     handleClearFile,
-    handleScanCountChange,
     handleFileImport,
     handlePasswordSubmit,
-    handleCancelScan,
     handleDragOver,
     handleDragLeave,
     handleDrop,
@@ -86,7 +87,7 @@ export function CreateWalletFlow() {
   } = useOnboardingFlow();
 
   return (
-    <div className="flex flex-col items-center justify-center h-full p-6 text-center relative">
+    <div className="flex flex-col items-center justify-center min-h-full p-6 text-center relative">
       <AnimatePresence mode="wait">
         {step === "start" && (
           <StartScreen
@@ -95,6 +96,7 @@ export function CreateWalletFlow() {
             isBusy={isBusy}
             ipnsFetchingNametag={false}
             error={error}
+            progressMessage={progressMessage}
             onCreateWallet={handleCreateKeys}
             onContinueSetup={() => setStep("nametag")}
             onRestore={() => setStep("restoreMethod")}
@@ -116,6 +118,7 @@ export function CreateWalletFlow() {
             seedWords={seedWords}
             isBusy={isBusy}
             error={error}
+            progressMessage={progressMessage}
             onSeedWordsChange={setSeedWords}
             onRestore={handleRestoreWallet}
             onBack={() => setStep("restoreMethod")}
@@ -125,14 +128,12 @@ export function CreateWalletFlow() {
         {step === "importFile" && (
           <ImportFileScreen
             selectedFile={selectedFile}
-            scanCount={scanCount}
-            needsScanning={needsScanning}
             isDragging={isDragging}
             isBusy={isBusy}
             error={error}
+            progressMessage={progressMessage}
             onFileSelect={handleFileSelect}
             onClearFile={handleClearFile}
-            onScanCountChange={handleScanCountChange}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
@@ -182,18 +183,15 @@ export function CreateWalletFlow() {
         {step === "processing" && (
           <ProcessingScreen
             status={processingStatus}
+            currentStep={processingStep}
+            totalSteps={processingTotalSteps}
+            title={processingTitle}
+            completeTitle={processingCompleteTitle}
             isComplete={isProcessingComplete}
             onComplete={handleCompleteOnboarding}
           />
         )}
       </AnimatePresence>
-
-      {/* Scan modal rendered outside AnimatePresence to avoid step-transition issues */}
-      <ScanningScreen
-        open={showScanModal}
-        progress={scanProgress}
-        onCancel={handleCancelScan}
-      />
     </div>
   );
 }

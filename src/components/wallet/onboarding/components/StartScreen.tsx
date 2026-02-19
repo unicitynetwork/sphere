@@ -17,6 +17,7 @@ interface StartScreenProps {
   isBusy: boolean;
   ipnsFetchingNametag: boolean;
   error: string | null;
+  progressMessage?: string | null;
   onCreateWallet: () => void;
   onContinueSetup: () => void;
   onRestore: () => void;
@@ -28,6 +29,7 @@ export function StartScreen({
   isBusy,
   ipnsFetchingNametag,
   error,
+  progressMessage,
   onCreateWallet,
   onContinueSetup,
   onRestore,
@@ -142,6 +144,17 @@ export function StartScreen({
           )}
         </span>
       </motion.button>
+
+      {isBusy && progressMessage && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex items-center justify-center gap-2 text-neutral-500 dark:text-neutral-400 text-[11px] mt-2.5"
+        >
+          <Loader2 className="w-3 h-3 animate-spin text-orange-500" />
+          <span>{progressMessage}</span>
+        </motion.div>
+      )}
 
       <motion.button
         onClick={onRestore}

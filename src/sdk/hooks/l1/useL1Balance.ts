@@ -30,7 +30,12 @@ export function useL1Balance(): UseL1BalanceReturn {
       if (!sphere) return null;
       const l1 = sphere.payments.l1;
       if (!l1) return null;
-      const bal = await l1.getBalance();
+      const bal = await Promise.race([
+        l1.getBalance(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('L1 balance timeout')), 15_000),
+        ),
+      ]);
       return {
         confirmed: bal.confirmed,
         unconfirmed: bal.unconfirmed,
@@ -41,6 +46,8 @@ export function useL1Balance(): UseL1BalanceReturn {
     },
     enabled: !!sphere,
     staleTime: 30_000,
+    retry: 1,
+    retryDelay: 2_000,
   });
 
   const balance = query.data ?? null;

@@ -7,6 +7,7 @@ interface BackupWalletModalProps {
   onClose: () => void;
   onExportWalletFile: () => void;
   onShowRecoveryPhrase: () => void;
+  hasMnemonic?: boolean;
 }
 
 export function BackupWalletModal({
@@ -14,6 +15,7 @@ export function BackupWalletModal({
   onClose,
   onExportWalletFile,
   onShowRecoveryPhrase,
+  hasMnemonic = true,
 }: BackupWalletModalProps) {
   return (
     <BaseModal isOpen={isOpen} onClose={onClose} size="sm" showOrbs={false}>
@@ -52,8 +54,9 @@ export function BackupWalletModal({
           icon={Key}
           color="orange"
           label="Show Recovery Phrase"
-          subtitle="View 12-word seed phrase"
+          subtitle={hasMnemonic ? 'View 12-word seed phrase' : 'Not available for legacy wallets'}
           showChevron={false}
+          disabled={!hasMnemonic}
           onClick={() => {
             onClose();
             onShowRecoveryPhrase();

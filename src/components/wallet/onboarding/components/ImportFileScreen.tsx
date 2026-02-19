@@ -14,14 +14,12 @@ import {
 
 interface ImportFileScreenProps {
   selectedFile: File | null;
-  scanCount: number;
-  needsScanning: boolean;
   isDragging: boolean;
   isBusy: boolean;
   error: string | null;
+  progressMessage?: string | null;
   onFileSelect: (file: File) => void;
   onClearFile: () => void;
-  onScanCountChange: (count: number) => void;
   onDragOver: (e: React.DragEvent) => void;
   onDragLeave: (e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent) => void;
@@ -31,14 +29,12 @@ interface ImportFileScreenProps {
 
 export function ImportFileScreen({
   selectedFile,
-  scanCount,
-  needsScanning,
   isDragging,
   isBusy,
   error,
+  progressMessage,
   onFileSelect,
   onClearFile,
-  onScanCountChange,
   onDragOver,
   onDragLeave,
   onDrop,
@@ -142,30 +138,6 @@ export function ImportFileScreen({
               </button>
             </div>
           </div>
-
-          {/* Scan Count (for BIP32/.dat files) */}
-          {needsScanning ? (
-            <div className="p-3 bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 rounded-xl mb-3">
-              <p className="text-xs text-neutral-700 dark:text-neutral-300 mb-2 font-medium">
-                How many addresses to scan?
-              </p>
-              <input
-                type="number"
-                value={scanCount}
-                onChange={(e) =>
-                  onScanCountChange(Math.max(1, parseInt(e.target.value) || 10))
-                }
-                className="w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-600 rounded-lg text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
-                min={1}
-              />
-            </div>
-          ) : (
-            <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl mb-3">
-              <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
-                Addresses will be imported from file
-              </p>
-            </div>
-          )}
         </>
       )}
 
@@ -207,6 +179,17 @@ export function ImportFileScreen({
           </motion.button>
         )}
       </div>
+
+      {isBusy && progressMessage && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex items-center justify-center gap-2 text-neutral-500 dark:text-neutral-400 text-[11px] mt-2.5"
+        >
+          <Loader2 className="w-3 h-3 animate-spin text-orange-500" />
+          <span>{progressMessage}</span>
+        </motion.div>
+      )}
 
       {error && (
         <motion.p

@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { agents } from '../../config/activities';
 import { useDesktopState } from '../../hooks/useDesktopState';
 import { useDmUnreadCount } from '../chat/hooks/useDmUnreadCount';
@@ -6,7 +7,8 @@ import { DesktopIcon } from './DesktopIcon';
 import logoUrl from '/Union.svg';
 
 export function DesktopShortcuts() {
-  const { openTab, openTabs } = useDesktopState();
+  const navigate = useNavigate();
+  const { openTabs } = useDesktopState();
   const dmUnreadCount = useDmUnreadCount();
   const groupUnreadCount = useGroupUnreadCount();
 
@@ -47,7 +49,7 @@ export function DesktopShortcuts() {
               agent={agent}
               isOpen={openAppIds.has(agent.id)}
               badge={getBadge(agent.id)}
-              onClick={() => openTab(agent.id)}
+              onClick={() => navigate(`/agents/${agent.id}`)}
             />
           ))}
         </div>

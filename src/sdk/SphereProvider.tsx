@@ -5,13 +5,15 @@ import {
   useRef,
   type ReactNode,
 } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Sphere, TokenRegistry, NETWORKS } from '@unicitylabs/sphere-sdk';
+import type { InitProgress, NetworkType } from '@unicitylabs/sphere-sdk';
 import {
   createBrowserProviders,
   type BrowserProviders,
 } from '@unicitylabs/sphere-sdk/impl/browser';
-import type { NetworkType } from '@unicitylabs/sphere-sdk';
 import { SphereContext } from './SphereContext';
+import { SPHERE_KEYS } from './queryKeys';
 
 const COINGECKO_BASE_URL = import.meta.env.DEV
   ? '/coingecko'
@@ -46,6 +48,57 @@ function getIpfsConfig() {
   };
 }
 
+// =============================================================================
+// Shared helpers (pure functions, no React state)
+// =============================================================================
+
+/** Disconnect transport so SDK can reconnect with the real identity */
+async function disconnectTransport(providers: BrowserProviders): Promise<void> {
+  if (providers.transport.isConnected()) {
+    await providers.transport.disconnect();
+  }
+}
+
+/** Add IPFS storage provider and trigger initial sync (fire-and-forget) */
+function setupIpfsSync(instance: Sphere, providers: BrowserProviders): void {
+  if (providers.ipfsTokenStorage) {
+    instance.addTokenStorageProvider(providers.ipfsTokenStorage)
+      .then(() => instance.sync())
+      .catch(err => console.warn('[SphereProvider] IPFS sync failed:', err));
+  }
+}
+
+/** Notify kbbot of new/imported wallet (fire-and-forget) */
+function notifyKbbot(instance: Sphere): void {
+  const kbbotUrl = import.meta.env.VITE_KBBOT_URL as string | undefined;
+  if (!kbbotUrl || !instance.identity) return;
+  fetch(`${kbbotUrl}/api/notify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      pubkey: instance.identity.chainPubkey,
+      nametag: instance.identity.nametag,
+    }),
+  })
+    .then(res => {
+      if (!res.ok) console.error(`[kbbot] notify failed: ${res.status}`);
+    })
+    .catch(err => console.error('[kbbot] notify error:', err));
+}
+
+/** Clean up persisted wallet data on creation/import failure */
+async function cleanupOnError(providers: BrowserProviders): Promise<void> {
+  const clearDone = Sphere.clear({
+    storage: providers.storage,
+    tokenStorage: providers.tokenStorage,
+  });
+  await Promise.race([clearDone, new Promise(r => setTimeout(r, 3000))]);
+}
+
+// =============================================================================
+// Provider component
+// =============================================================================
+
 interface SphereProviderProps {
   children: ReactNode;
   network?: NetworkType;
@@ -55,15 +108,18 @@ export function SphereProvider({
   children,
   network = 'testnet',
 }: SphereProviderProps) {
+  const queryClient = useQueryClient();
   const [sphere, setSphere] = useState<Sphere | null>(null);
   const [providers, setProviders] = useState<BrowserProviders | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [walletExists, setWalletExists] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [ipfsEnabled, setIpfsEnabled] = useState(isIpfsEnabled);
+  const [isDiscoveringAddresses, setIsDiscoveringAddresses] = useState(false);
+  const [initProgress, setInitProgress] = useState<InitProgress | null>(null);
   const sphereRef = useRef<Sphere | null>(null);
 
-  const initialize = useCallback(async (attempt = 0) => {
+  const initialize = useCallback(async (attempt = 0, skipLoading = false) => {
     try {
       // Destroy previous instance to release IndexedDB connections
       if (sphereRef.current) {
@@ -71,7 +127,7 @@ export function SphereProvider({
         sphereRef.current = null;
       }
 
-      setIsLoading(true);
+      if (!skipLoading) setIsLoading(true);
       setError(null);
 
       const browserProviders = createBrowserProviders({
@@ -96,16 +152,29 @@ export function SphereProvider({
       setWalletExists(exists);
 
       if (exists) {
+        setInitProgress({ step: 'initializing', message: 'Loading wallet...' });
         const { sphere: instance } = await Sphere.init({
           ...browserProviders,
           l1: {},
+          discoverAddresses: false, // Run separately below for UX
+          onProgress: setInitProgress,
         });
-        if (browserProviders.ipfsTokenStorage) {
-          await instance.addTokenStorageProvider(browserProviders.ipfsTokenStorage);
-          instance.sync().catch(err => console.warn('[SphereProvider] Initial IPFS sync failed:', err));
-        }
+        setupIpfsSync(instance, browserProviders);
+        setInitProgress(null);
         sphereRef.current = instance;
         setSphere(instance);
+
+        // Run address discovery in background after wallet is visible
+        setIsDiscoveringAddresses(true);
+        instance.discoverAddresses({ autoTrack: true, includeL1Scan: false }).then(result => {
+          if (result.addresses.length > 0) {
+            console.log(`[SphereProvider] Discovered ${result.addresses.length} address(es)`);
+          }
+        }).catch(err => {
+          console.warn('[SphereProvider] Address discovery failed:', err);
+        }).finally(() => {
+          setIsDiscoveringAddresses(false);
+        });
       } else {
         // Pre-connect transport for nametag lookups during onboarding
         const transport = browserProviders.transport;
@@ -124,12 +193,13 @@ export function SphereProvider({
       if (message.includes('IndexedDB open timed out') && attempt < 1) {
         console.warn('[SphereProvider] IndexedDB open timed out, retrying in 1s...');
         await new Promise(r => setTimeout(r, 1000));
-        return initialize(attempt + 1);
+        return initialize(attempt + 1, skipLoading);
       }
 
       console.error('[SphereProvider] Initialization failed:', err);
       setError(err instanceof Error ? err : new Error(message));
     } finally {
+      setInitProgress(null);
       setIsLoading(false);
     }
   }, [network]);
@@ -146,63 +216,31 @@ export function SphereProvider({
   const createWallet = useCallback(
     async (options?: CreateWalletOptions) => {
       if (!providers) throw new Error('Providers not initialized');
-
-      // Disconnect transport so Sphere.init can reconnect with the real identity.
-      // Without this, setIdentity() triggers an async reconnect that isn't awaited,
-      // causing "NostrTransportProvider not connected" during nametag registration.
-      if (providers.transport.isConnected()) {
-        await providers.transport.disconnect();
-      }
+      await disconnectTransport(providers);
 
       try {
+        setInitProgress({ step: 'initializing', message: 'Creating wallet...' });
         const { sphere: instance, generatedMnemonic } = await Sphere.init({
           ...providers,
           autoGenerate: true,
           nametag: options?.nametag,
           l1: {},
+          onProgress: setInitProgress,
         });
-        if (providers.ipfsTokenStorage) {
-          await instance.addTokenStorageProvider(providers.ipfsTokenStorage);
-          instance.sync().catch(err => console.warn('[SphereProvider] Initial IPFS sync failed:', err));
-        }
-
-        sphereRef.current = instance;
-        setSphere(instance);
-        setWalletExists(true);
-
-        // Notify kbbot of new wallet (fire and forget)
-        const kbbotUrl = import.meta.env.VITE_KBBOT_URL as string | undefined;
-        if (kbbotUrl && instance.identity) {
-          fetch(`${kbbotUrl}/api/notify`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              pubkey: instance.identity.chainPubkey,
-              nametag: instance.identity.nametag,
-            }),
-          })
-            .then((res) => {
-              if (!res.ok) console.error(`[kbbot] notify failed: ${res.status} ${res.statusText}`);
-              else if (import.meta.env.DEV) console.log('[kbbot] notify sent', { pubkey: instance.identity!.chainPubkey, nametag: instance.identity!.nametag });
-            })
-            .catch((err) => console.error('[kbbot] notify error:', err));
-        } else if (kbbotUrl) {
-          console.warn('[kbbot] notify skipped — no identity on created sphere');
-        }
+        setInitProgress(null);
+        setupIpfsSync(instance, providers);
+        notifyKbbot(instance);
 
         if (!generatedMnemonic) {
           throw new Error('Failed to generate mnemonic');
         }
 
-        return generatedMnemonic;
+        // Don't set walletExists/sphere here — let finalizeWallet() handle it
+        // so the onboarding flow can show the completion screen first.
+        return { mnemonic: generatedMnemonic, sphere: instance };
       } catch (err) {
-        // If nametag was taken or any other error during init,
-        // wallet data may already be persisted — clean it up
-        const clearDone = Sphere.clear({
-          storage: providers.storage,
-          tokenStorage: providers.tokenStorage,
-        });
-        await Promise.race([clearDone, new Promise(r => setTimeout(r, 3000))]);
+        setInitProgress(null);
+        await cleanupOnError(providers);
         sphereRef.current = null;
         setSphere(null);
         setWalletExists(false);
@@ -245,26 +283,20 @@ export function SphereProvider({
   const importWallet = useCallback(
     async (mnemonic: string, options?: ImportWalletOptions): Promise<Sphere> => {
       if (!providers) throw new Error('Providers not initialized');
+      await disconnectTransport(providers);
 
-      // Disconnect transport so Sphere.init can reconnect with the real identity.
-      if (providers.transport.isConnected()) {
-        await providers.transport.disconnect();
-      }
-
-      const { sphere: instance } = await Sphere.init({
+      setInitProgress({ step: 'initializing', message: 'Importing wallet...' });
+      const instance = await Sphere.import({
         ...providers,
         mnemonic,
         nametag: options?.nametag,
         l1: {},
+        onProgress: setInitProgress,
       });
-      if (providers.ipfsTokenStorage) {
-        await instance.addTokenStorageProvider(providers.ipfsTokenStorage);
-        instance.sync().catch(err => console.warn('[SphereProvider] Initial IPFS sync failed:', err));
-      }
+      setInitProgress(null);
 
-      sphereRef.current = instance;
-      setSphere(instance);
-      setWalletExists(true);
+      // Don't setSphere/setWalletExists here — the onboarding flow calls
+      // finalizeWallet(sphere) after address selection / nametag are done.
       return instance;
     },
     [providers],
@@ -273,31 +305,23 @@ export function SphereProvider({
   const importFromFile = useCallback(
     async (options: ImportFromFileOptions): Promise<ImportFromFileResult> => {
       if (!providers) throw new Error('Providers not initialized');
-
-      // Disconnect transport so Sphere can reconnect with the real identity
-      if (providers.transport.isConnected()) {
-        await providers.transport.disconnect();
-      }
+      await disconnectTransport(providers);
 
       try {
+        setInitProgress({ step: 'initializing', message: 'Importing file...' });
         const result = await Sphere.importFromLegacyFile({
+          ...providers,
           fileContent: options.fileContent,
           fileName: options.fileName,
           password: options.password,
           nametag: options.nametag,
-          storage: providers.storage,
-          transport: providers.transport,
-          oracle: providers.oracle,
-          tokenStorage: providers.tokenStorage,
           l1: {},
-          groupChat: providers.groupChat,
+          onProgress: setInitProgress,
         });
+        setInitProgress(null);
 
         // Don't setSphere here — the onboarding flow calls finalizeWallet(sphere)
-        // after scanning / address selection / nametag are done.
-        // Setting sphere eagerly would change the context and cause premature
-        // re-renders that can reset the onboarding step state.
-
+        // after address selection / nametag are done.
         return {
           success: result.success,
           sphere: result.sphere,
@@ -306,12 +330,8 @@ export function SphereProvider({
           error: result.error,
         };
       } catch (err) {
-        // Clean up on failure (with timeout to avoid hanging on blocked IDB)
-        const clearDone = Sphere.clear({
-          storage: providers.storage,
-          tokenStorage: providers.tokenStorage,
-        });
-        await Promise.race([clearDone, new Promise(r => setTimeout(r, 3000))]);
+        setInitProgress(null);
+        await cleanupOnError(providers);
         sphereRef.current = null;
         setSphere(null);
         setWalletExists(false);
@@ -348,42 +368,24 @@ export function SphereProvider({
     // Clear localStorage regardless of whether DB deletion succeeded.
     clearAllSphereData();
 
+    // Clear React Query cache so old balances/tokens don't leak to new wallet
+    queryClient.removeQueries({ queryKey: SPHERE_KEYS.all });
+
     // Reset React state
     setSphere(null);
     setWalletExists(false);
     setError(null);
 
-    // Reinitialize with fresh providers
-    await initialize();
-  }, [providers, initialize]);
+    // Reinitialize with fresh providers (skip loading spinner — onboarding UI is already visible)
+    await initialize(0, true);
+  }, [providers, initialize, queryClient]);
 
   const finalizeWallet = useCallback((importedSphere?: Sphere) => {
     if (importedSphere) {
-      if (providers?.ipfsTokenStorage) {
-        importedSphere.addTokenStorageProvider(providers.ipfsTokenStorage)
-          .then(() => importedSphere.sync())
-          .catch(err => console.warn('[SphereProvider] IPFS sync after import failed:', err));
-      }
+      if (providers) setupIpfsSync(importedSphere, providers);
       sphereRef.current = importedSphere;
       setSphere(importedSphere);
-
-      // Notify kbbot of imported wallet (fire and forget)
-      const kbbotUrl = import.meta.env.VITE_KBBOT_URL as string | undefined;
-      if (kbbotUrl && importedSphere.identity) {
-        fetch(`${kbbotUrl}/api/notify`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            pubkey: importedSphere.identity.chainPubkey,
-            nametag: importedSphere.identity.nametag,
-          }),
-        })
-          .then((res) => {
-            if (!res.ok) console.error(`[kbbot] notify failed: ${res.status} ${res.statusText}`);
-            else if (import.meta.env.DEV) console.log('[kbbot] notify sent', { pubkey: importedSphere.identity!.chainPubkey, nametag: importedSphere.identity!.nametag });
-          })
-          .catch((err) => console.error('[kbbot] notify error:', err));
-      }
+      notifyKbbot(importedSphere);
     }
     setWalletExists(true);
   }, [providers]);
@@ -403,6 +405,8 @@ export function SphereProvider({
     isInitialized: !!sphere,
     walletExists,
     error,
+    isDiscoveringAddresses,
+    initProgress,
     resolveNametag,
     createWallet,
     importWallet,

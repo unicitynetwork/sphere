@@ -32,7 +32,7 @@ export function AddressSelector({ compact = true, addressFormat = 'direct' }: Ad
   const [nametagAvailability, setNametagAvailability] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
   const nametagInputRef = useRef<HTMLInputElement>(null);
 
-  const { sphere, resolveNametag } = useSphereContext();
+  const { sphere, resolveNametag, isDiscoveringAddresses } = useSphereContext();
   const { l1Address, nametag, directAddress } = useIdentity();
   const queryClient = useQueryClient();
 
@@ -43,12 +43,18 @@ export function AddressSelector({ compact = true, addressFormat = 'direct' }: Ad
 
   useEffect(() => {
     if (!sphere) return;
-    try {
-      setAddresses(sphere.getActiveAddresses());
-    } catch (e) {
-      console.error('[AddressSelector] Failed to get addresses:', e);
-    }
-  }, [sphere, currentAddressIndex, nametag]);
+    const refresh = () => {
+      try {
+        setAddresses(sphere.getActiveAddresses());
+      } catch (e) {
+        console.error('[AddressSelector] Failed to get addresses:', e);
+      }
+    };
+    refresh();
+    const unsub1 = sphere.on('address:hidden', refresh);
+    const unsub2 = sphere.on('address:unhidden', refresh);
+    return () => { unsub1(); unsub2(); };
+  }, [sphere, currentAddressIndex, nametag, isDiscoveringAddresses]);
 
   // Focus nametag input when modal opens
   useEffect(() => {
@@ -431,8 +437,8 @@ export function AddressSelector({ compact = true, addressFormat = 'direct' }: Ad
               >
                 <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2">
                   <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 flex items-center gap-1.5">
-                    {isSwitching && <Loader2 className="w-3 h-3 animate-spin" />}
-                    {isSwitching ? 'Switching...' : `Addresses (${sortedAddresses.length})`}
+                    {(isSwitching || isDiscoveringAddresses) && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {isSwitching ? 'Switching...' : isDiscoveringAddresses ? 'Discovering addresses...' : `Addresses (${sortedAddresses.length})`}
                   </span>
                   <motion.button
                     whileHover={{ scale: 1.05 }}
@@ -522,8 +528,9 @@ export function AddressSelector({ compact = true, addressFormat = 'direct' }: Ad
               className="absolute left-0 top-full mt-2 z-50 min-w-75 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-xl overflow-hidden"
             >
               <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
-                <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                  Select Address
+                <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 flex items-center gap-1.5">
+                  {isDiscoveringAddresses && <Loader2 className="w-3 h-3 animate-spin" />}
+                  {isDiscoveringAddresses ? 'Discovering addresses...' : 'Select Address'}
                 </span>
                 <motion.button
                   whileHover={{ scale: 1.05 }}

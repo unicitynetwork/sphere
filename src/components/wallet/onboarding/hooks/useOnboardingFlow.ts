@@ -5,7 +5,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Sphere } from "@unicitylabs/sphere-sdk";
-import type { ScanAddressProgress, LegacyFileType } from "@unicitylabs/sphere-sdk";
+import type { LegacyFileType } from "@unicitylabs/sphere-sdk";
 import { useSphereContext } from "../../../../sdk/hooks/core/useSphere";
 import { SPHERE_KEYS } from "../../../../sdk/queryKeys";
 import { recordActivity } from "../../../../services/ActivityService";
@@ -41,17 +41,17 @@ export interface UseOnboardingFlowReturn {
 
   // File import state
   selectedFile: File | null;
-  scanCount: number;
-  needsScanning: boolean;
   isDragging: boolean;
-  scanProgress: ScanAddressProgress | null;
-  showScanModal: boolean;
 
   // Nametag state
   nametagInput: string;
   setNametagInput: (value: string) => void;
   nametagAvailability: NametagAvailability;
   processingStatus: string;
+  processingStep: number;
+  processingTotalSteps: number;
+  processingTitle: string;
+  processingCompleteTitle: string;
   isProcessingComplete: boolean;
   handleCompleteOnboarding: () => Promise<void>;
 
@@ -76,10 +76,8 @@ export interface UseOnboardingFlowReturn {
   // File import actions
   handleFileSelect: (file: File) => Promise<void>;
   handleClearFile: () => void;
-  handleScanCountChange: (count: number) => void;
   handleFileImport: () => Promise<void>;
   handlePasswordSubmit: (password: string) => Promise<void>;
-  handleCancelScan: () => void;
   handleDragOver: (e: React.DragEvent) => void;
   handleDragLeave: (e: React.DragEvent) => void;
   handleDrop: (e: React.DragEvent) => void;
@@ -92,7 +90,7 @@ export interface UseOnboardingFlowReturn {
 
 export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const queryClient = useQueryClient();
-  const { sphere, createWallet, resolveNametag, importWallet, importFromFile, finalizeWallet, walletExists } = useSphereContext();
+  const { sphere, createWallet, resolveNametag, importWallet, importFromFile, finalizeWallet, walletExists, initProgress } = useSphereContext();
 
   // Step management — start at "nametag" only if wallet is fully finalized but missing nametag
   // (e.g. page refresh after wallet creation without nametag).
@@ -110,15 +108,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
   // File import state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [scanCount, setScanCount] = useState(10);
-  const [needsScanning, setNeedsScanning] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [fileContent, setFileContent] = useState<string | Uint8Array | null>(null);
-  const [detectedFileType, setDetectedFileType] = useState<LegacyFileType>('unknown');
+  const [, setDetectedFileType] = useState<LegacyFileType>('unknown');
   const [isEncrypted, setIsEncrypted] = useState(false);
-  const [scanProgress, setScanProgress] = useState<ScanAddressProgress | null>(null);
-  const [showScanModal, setShowScanModal] = useState(false);
-  const scanAbortRef = useRef<AbortController | null>(null);
   // Holds the imported Sphere instance during the import flow.
   // NOT set in SphereProvider context until finalizeWallet() to avoid premature re-renders.
   const importedSphereRef = useRef<Sphere | null>(null);
@@ -127,6 +120,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const [nametagInput, setNametagInput] = useState("");
   const [nametagAvailability, setNametagAvailability] = useState<NametagAvailability>('idle');
   const [processingStatus, setProcessingStatus] = useState("");
+  const [processingStep, setProcessingStep] = useState(0);
+  const [processingTotalSteps, setProcessingTotalSteps] = useState(3);
+  const [processingTitle, setProcessingTitle] = useState("Setting up Profile...");
+  const [processingCompleteTitle, setProcessingCompleteTitle] = useState("Profile Ready!");
   const [isProcessingComplete, setIsProcessingComplete] = useState(false);
 
   // Debounced nametag availability check with retry on transport failure
@@ -169,6 +166,26 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     };
   }, [nametagInput, resolveNametag]);
 
+  // Sync SDK progress to processing screen status text
+  useEffect(() => {
+    if (!initProgress || step !== 'processing') return;
+    setProcessingStatus(initProgress.message);
+    // Advance step indicator based on SDK progress
+    switch (initProgress.step) {
+      case 'recovering_nametag':
+      case 'syncing_identity':
+      case 'registering_nametag':
+        setProcessingStep(prev => Math.max(prev, 1));
+        break;
+      case 'syncing_tokens':
+      case 'discovering_addresses':
+      case 'finalizing':
+      case 'complete':
+        setProcessingStep(prev => Math.max(prev, 2));
+        break;
+    }
+  }, [initProgress, step]);
+
   // Address selection state (multi-select, using composite keys to distinguish receive vs change)
   const [derivedAddresses, setDerivedAddresses] = useState<DerivedAddressInfo[]>([]);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
@@ -184,13 +201,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setFileContent(null);
     setDetectedFileType('unknown');
     setIsEncrypted(false);
-    setScanCount(10);
-    setNeedsScanning(true);
     setIsDragging(false);
-    setScanProgress(null);
-    setShowScanModal(false);
-    scanAbortRef.current?.abort();
-    scanAbortRef.current = null;
     importedSphereRef.current = null;
     setError(null);
   }, []);
@@ -216,23 +227,6 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setDetectedFileType(fileType);
     const encrypted = Sphere.isLegacyFileEncrypted(file.name, content);
     setIsEncrypted(encrypted);
-
-    // Determine if scanning is needed based on file type and content
-    if (fileType === 'dat' || fileType === 'txt') {
-      setNeedsScanning(true);
-    } else if (fileType === 'json' && typeof content === 'string') {
-      // JSON with BIP32 keys and no mnemonic needs scanning
-      try {
-        const json = JSON.parse(content);
-        const hasBip32 = !!(json.wallet?.chainCode || json.chainCode || json.derivationMode === 'bip32');
-        const hasMnemonic = !!json.mnemonic;
-        setNeedsScanning(hasBip32 && !hasMnemonic);
-      } catch {
-        setNeedsScanning(false);
-      }
-    } else {
-      setNeedsScanning(false);
-    }
   }, []);
 
   const handleClearFile = useCallback(() => {
@@ -240,149 +234,47 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setFileContent(null);
     setDetectedFileType('unknown');
     setIsEncrypted(false);
-    setNeedsScanning(true);
     setError(null);
   }, []);
 
-  const handleScanCountChange = useCallback((count: number) => {
-    setScanCount(count);
-  }, []);
-
-  // Route after successful import: open scan modal or go to nametag.
-  // Uses detectedFileType (from handleFileSelect) and wallet info to decide.
-  // Always stores the sphere in importedSphereRef — it is NOT in context yet.
+  // Route after successful import: show address selection (if multiple addresses discovered)
+  // or go to nametag. SDK's discoverAddresses() already ran during import, so all addresses
+  // are already tracked. We just read them and present the selection UI.
   const routeAfterImport = useCallback((importedSphere: Sphere) => {
     importedSphereRef.current = importedSphere;
 
-    const walletInfo = importedSphere.getWalletInfo();
-    const isMnemonic = detectedFileType === 'mnemonic' || walletInfo.hasMnemonic;
+    // Get all tracked addresses discovered by the SDK during import
+    const allAddresses = importedSphere.getAllTrackedAddresses();
 
-    // Scan BIP32 wallets that weren't imported from mnemonic
-    const shouldScan = !isMnemonic && (
-      detectedFileType === 'dat' ||
-      detectedFileType === 'txt' ||
-      (detectedFileType === 'json' && walletInfo.hasChainCode)
-    );
-
-    if (shouldScan) {
-      // BIP32 wallet — open scan modal. useEffect below will start scanning.
-      setScanProgress(null);
-      setShowScanModal(true);
+    if (allAddresses.length >= 1) {
+      // Show address selection so user can review discovered addresses
+      const addresses: DerivedAddressInfo[] = allAddresses.map(a => ({
+        index: a.index,
+        l1Address: a.l1Address,
+        l3Address: a.directAddress,
+        path: `m/44'/60'/0'/0/${a.index}`,
+        hasNametag: !!a.nametag,
+        existingNametag: a.nametag,
+        isChange: false,
+        l1Balance: 0,
+        balanceLoading: false,
+        ipnsLoading: false,
+      }));
+      setDerivedAddresses(addresses);
+      setSelectedKeys(new Set(addresses.map(a => addrKey(a.index, false))));
+      setStep("addressSelection");
     } else if (importedSphere.identity?.nametag) {
       setStep("processing");
+      setProcessingTitle("Importing Wallet...");
+      setProcessingCompleteTitle("Import Complete!");
+      setProcessingTotalSteps(3);
+      setProcessingStep(2);
       setProcessingStatus("Setup complete!");
       setIsProcessingComplete(true);
     } else {
       setStep("nametag");
     }
-  }, [detectedFileType]);
-
-  // Effect: run blockchain scan when scan modal opens.
-  // Decoupled from import callback to avoid React re-render interference.
-  // Uses a `cancelled` flag so that StrictMode's cleanup-then-remount cycle
-  // doesn't cause the first invocation's catch to clobber state.
-  useEffect(() => {
-    if (!showScanModal || !importedSphereRef.current) return;
-
-    let cancelled = false;
-    const importedSphere = importedSphereRef.current;
-    const controller = new AbortController();
-    scanAbortRef.current = controller;
-
-    (async () => {
-      try {
-        const result = await importedSphere.scanAddresses({
-          maxAddresses: scanCount,
-          gapLimit: 20,
-          includeChange: true,
-          signal: controller.signal,
-          onProgress: (progress) => {
-            if (!cancelled) setScanProgress(progress);
-          },
-        });
-
-        if (cancelled) return;
-
-        // Convert scan results to DerivedAddressInfo (with nametag data)
-        const addresses: DerivedAddressInfo[] = result.addresses.map((a) => ({
-          index: a.index,
-          l1Address: a.address,
-          l3Address: '',
-          path: a.path,
-          hasNametag: !!a.nametag,
-          existingNametag: a.nametag,
-          isChange: a.isChange,
-          l1Balance: a.balance,
-          balanceLoading: false,
-          ipnsLoading: false,
-        }));
-
-        // Always include address 0 if not found in scan
-        if (!addresses.some((a) => a.index === 0 && !a.isChange)) {
-          const addr0 = importedSphere.deriveAddress(0, false);
-          addresses.unshift({
-            index: 0,
-            l1Address: addr0.address,
-            l3Address: '',
-            path: addr0.path,
-            hasNametag: false,
-            isChange: false,
-            l1Balance: 0,
-            balanceLoading: false,
-            ipnsLoading: false,
-          });
-        }
-
-        // Initialize multi-select: all non-change addresses selected
-        const initial = new Set(
-          addresses.filter(a => !a.isChange).map(a => addrKey(a.index, false))
-        );
-        setSelectedKeys(initial);
-
-        setShowScanModal(false);
-        setDerivedAddresses(addresses);
-        setStep("addressSelection");
-      } catch (e) {
-        if (cancelled) return;
-
-        setShowScanModal(false);
-        if (controller.signal.aborted) {
-          // User cancelled — go to address selection with default address
-          const addr0 = importedSphere.deriveAddress(0, false);
-          const fallback: DerivedAddressInfo[] = [{
-            index: 0,
-            l1Address: addr0.address,
-            l3Address: '',
-            path: addr0.path,
-            hasNametag: false,
-            isChange: false,
-            l1Balance: 0,
-            balanceLoading: false,
-            ipnsLoading: false,
-          }];
-          setDerivedAddresses(fallback);
-          setSelectedKeys(new Set(["0"]));
-          setStep("addressSelection");
-        } else {
-          setError(e instanceof Error ? e.message : "Scan failed");
-          setStep("importFile");
-        }
-      } finally {
-        if (!cancelled) {
-          scanAbortRef.current = null;
-          // Do NOT clear importedSphereRef here — post-scan handlers
-          // (handleContinueWithAddress, handleDeriveNewAddress, etc.) still need it.
-          // It's cleared in handleCompleteOnboarding / goToStart.
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showScanModal]);
+  }, []);
 
   const handleFileImport = useCallback(async () => {
     if (!fileContent || !selectedFile) return;
@@ -395,6 +287,15 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
     setIsBusy(true);
     setError(null);
+
+    // Show processing screen during import
+    setStep("processing");
+    setProcessingTitle("Importing Wallet...");
+    setProcessingCompleteTitle("Import Complete!");
+    setProcessingStep(0);
+    setProcessingTotalSteps(3);
+    setProcessingStatus("Importing wallet...");
+    setIsProcessingComplete(false);
 
     try {
       const result = await importFromFile({
@@ -409,6 +310,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
           return;
         }
         setError(result.error || "Import failed");
+        setStep("importFile");
         return;
       }
 
@@ -425,6 +327,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Import failed");
+      setStep("importFile");
     } finally {
       setIsBusy(false);
     }
@@ -436,6 +339,15 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setIsBusy(true);
     setError(null);
 
+    // Show processing screen during import
+    setStep("processing");
+    setProcessingTitle("Importing Wallet...");
+    setProcessingCompleteTitle("Import Complete!");
+    setProcessingStep(0);
+    setProcessingTotalSteps(3);
+    setProcessingStatus("Decrypting and importing wallet...");
+    setIsProcessingComplete(false);
+
     try {
       const result = await importFromFile({
         fileContent,
@@ -446,9 +358,11 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       if (!result.success) {
         if (result.needsPassword) {
           setError("Incorrect password. Please try again.");
+          setStep("passwordPrompt");
           return;
         }
         setError(result.error || "Decryption failed");
+        setStep("passwordPrompt");
         return;
       }
 
@@ -465,14 +379,11 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Decryption failed");
+      setStep("passwordPrompt");
     } finally {
       setIsBusy(false);
     }
   }, [fileContent, selectedFile, importFromFile, routeAfterImport]);
-
-  const handleCancelScan = useCallback(() => {
-    scanAbortRef.current?.abort();
-  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -512,18 +423,42 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setIsBusy(true);
     setError(null);
 
+    // Show processing screen during import
+    setStep("processing");
+    setProcessingTitle("Importing Wallet...");
+    setProcessingCompleteTitle("Import Complete!");
+    setProcessingStep(0);
+    setProcessingTotalSteps(3);
+    setProcessingStatus("Importing wallet...");
+    setIsProcessingComplete(false);
+
     try {
       const mnemonic = words.join(" ");
       const instance = await importWallet(mnemonic);
 
       // Store in ref so handleMintNametag / handleSkipNametag can access it
-      // (setSphere is async — React state isn't updated until next render)
       importedSphereRef.current = instance;
 
-      // SDK recovers nametag from Nostr during import.
-      // Use the returned instance directly (not context `sphere` which is stale).
-      if (instance.identity?.nametag) {
-        setStep("processing");
+      // Route to next screen after import completes
+      const allAddresses = instance.getAllTrackedAddresses();
+      if (allAddresses.length >= 1) {
+        const addresses: DerivedAddressInfo[] = allAddresses.map(a => ({
+          index: a.index,
+          l1Address: a.l1Address,
+          l3Address: a.directAddress,
+          path: `m/44'/60'/0'/0/${a.index}`,
+          hasNametag: !!a.nametag,
+          existingNametag: a.nametag,
+          isChange: false,
+          l1Balance: 0,
+          balanceLoading: false,
+          ipnsLoading: false,
+        }));
+        setDerivedAddresses(addresses);
+        setSelectedKeys(new Set(addresses.map(a => addrKey(a.index, false))));
+        setStep("addressSelection");
+      } else if (instance.identity?.nametag) {
+        setProcessingStep(2);
         setProcessingStatus("Setup complete!");
         setIsProcessingComplete(true);
       } else {
@@ -532,6 +467,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     } catch (e) {
       const message = e instanceof Error ? e.message : "Invalid recovery phrase";
       setError(message);
+      setStep("restore");
     } finally {
       setIsBusy(false);
     }
@@ -547,7 +483,12 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     const cleanTag = nametagInput.trim().replace("@", "");
 
     setStep("processing");
+    setProcessingTitle("Setting up Profile...");
+    setProcessingCompleteTitle("Profile Ready!");
+    setProcessingStep(0);
+    setProcessingTotalSteps(3);
     setProcessingStatus("Checking Unicity ID availability...");
+    setIsProcessingComplete(false);
 
     try {
       // Step 1: Check nametag availability via Nostr (no wallet needed)
@@ -559,21 +500,27 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         return;
       }
 
+      setProcessingStep(1);
+
       const activeSphere = importedSphereRef.current ?? sphere;
       if (activeSphere) {
         // Import flow — wallet already exists (in ref), just register nametag
         setProcessingStatus("Registering Unicity ID...");
         await activeSphere.registerNametag(cleanTag);
         recordActivity("wallet_created", { isPublic: false });
+        setProcessingStep(2);
         setProcessingStatus("Setup complete!");
         setIsProcessingComplete(true);
       } else {
         // Create flow — create wallet with nametag
         setProcessingStatus("Creating wallet and registering Unicity ID...");
-        const mnemonic = await createWallet({ nametag: cleanTag });
-        setGeneratedMnemonic(mnemonic);
+        const result = await createWallet({ nametag: cleanTag });
+        setGeneratedMnemonic(result.mnemonic);
+        importedSphereRef.current = result.sphere;
         recordActivity("wallet_created", { isPublic: false });
-        // WalletPanel will switch from onboarding to wallet UI automatically
+        setProcessingStep(2);
+        setProcessingStatus("Setup complete!");
+        setIsProcessingComplete(true);
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to register Unicity ID";
@@ -592,19 +539,28 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
     try {
       setStep("processing");
+      setProcessingTitle("Setting up Profile...");
+      setProcessingCompleteTitle("Profile Ready!");
+      setProcessingStep(0);
+      setIsProcessingComplete(false);
 
       if (importedSphereRef.current ?? sphere) {
         // Import flow — wallet already exists (in ref), just finalize
+        setProcessingTotalSteps(1);
         setProcessingStatus("Setup complete!");
         setIsProcessingComplete(true);
         recordActivity("wallet_created", { isPublic: false });
       } else {
         // Create flow — create wallet without nametag
+        setProcessingTotalSteps(2);
         setProcessingStatus("Creating wallet...");
-        const mnemonic = await createWallet();
-        setGeneratedMnemonic(mnemonic);
+        const result = await createWallet();
+        setGeneratedMnemonic(result.mnemonic);
+        importedSphereRef.current = result.sphere;
         recordActivity("wallet_created", { isPublic: false });
-        // WalletPanel will switch from onboarding to wallet UI automatically
+        setProcessingStep(1);
+        setProcessingStatus("Setup complete!");
+        setIsProcessingComplete(true);
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to create wallet";
@@ -624,9 +580,9 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     finalizeWallet(importedSphereRef.current ?? undefined);
     importedSphereRef.current = null;
 
-    // Invalidate all queries to refresh with new identity
-    queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.all });
-    queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.payments.all });
+    // Remove all cached query data so old wallet balances don't flash briefly.
+    // removeQueries deletes the cache entirely; the hooks will re-fetch from scratch.
+    queryClient.removeQueries({ queryKey: SPHERE_KEYS.all });
 
     // Signal wallet creation for legacy listeners
     window.dispatchEvent(new Event("wallet-loaded"));
@@ -727,6 +683,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       // Route based on nametag
       if (activeSphere.identity?.nametag) {
         setStep("processing");
+        setProcessingTitle("Importing Wallet...");
+        setProcessingCompleteTitle("Import Complete!");
+        setProcessingTotalSteps(3);
+        setProcessingStep(2);
         setProcessingStatus("Setup complete!");
         setIsProcessingComplete(true);
       } else {
@@ -782,17 +742,17 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
     // File import state
     selectedFile,
-    scanCount,
-    needsScanning,
     isDragging,
-    scanProgress,
-    showScanModal,
 
     // Nametag state
     nametagInput,
     setNametagInput,
     nametagAvailability,
     processingStatus,
+    processingStep,
+    processingTotalSteps,
+    processingTitle,
+    processingCompleteTitle,
     isProcessingComplete,
     handleCompleteOnboarding,
 
@@ -817,10 +777,8 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     // File import actions
     handleFileSelect,
     handleClearFile,
-    handleScanCountChange,
     handleFileImport,
     handlePasswordSubmit,
-    handleCancelScan,
     handleDragOver,
     handleDragLeave,
     handleDrop,
