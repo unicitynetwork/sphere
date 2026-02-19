@@ -218,8 +218,8 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     // Get all tracked addresses discovered by the SDK during import
     const allAddresses = importedSphere.getAllTrackedAddresses();
 
-    if (allAddresses.length > 1) {
-      // Multiple addresses discovered — show address selection
+    if (allAddresses.length >= 1) {
+      // Show address selection so user can review discovered addresses
       const addresses: DerivedAddressInfo[] = allAddresses.map(a => ({
         index: a.index,
         l1Address: a.l1Address,
@@ -376,9 +376,9 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       // (setSphere is async — React state isn't updated until next render)
       importedSphereRef.current = instance;
 
-      // Check if SDK discovered multiple addresses during import
+      // Show address selection so user can see discovered addresses and derive more
       const allAddresses = instance.getAllTrackedAddresses();
-      if (allAddresses.length > 1) {
+      if (allAddresses.length >= 1) {
         const addresses: DerivedAddressInfo[] = allAddresses.map(a => ({
           index: a.index,
           l1Address: a.l1Address,

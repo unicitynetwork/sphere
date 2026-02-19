@@ -269,13 +269,15 @@ export function SphereProvider({
     async (mnemonic: string, options?: ImportWalletOptions): Promise<Sphere> => {
       if (!providers) throw new Error('Providers not initialized');
 
-      // Disconnect transport so Sphere.init can reconnect with the real identity.
+      // Disconnect transport so Sphere.import can reconnect with the real identity.
       if (providers.transport.isConnected()) {
         await providers.transport.disconnect();
       }
 
       setInitProgress({ step: 'initializing', message: 'Importing wallet...' });
-      const { sphere: instance } = await Sphere.init({
+      // Use Sphere.import() — it clears existing storage before importing,
+      // so restoring a mnemonic doesn't load the previous wallet.
+      const instance = await Sphere.import({
         ...providers,
         mnemonic,
         nametag: options?.nametag,
@@ -283,14 +285,10 @@ export function SphereProvider({
         onProgress: setInitProgress,
       });
       setInitProgress(null);
-      if (providers.ipfsTokenStorage) {
-        await instance.addTokenStorageProvider(providers.ipfsTokenStorage);
-        instance.sync().catch(err => console.warn('[SphereProvider] Initial IPFS sync failed:', err));
-      }
 
-      sphereRef.current = instance;
-      setSphere(instance);
-      setWalletExists(true);
+      // Don't setSphere/setWalletExists here — the onboarding flow calls
+      // finalizeWallet(sphere) after address selection / nametag are done.
+      // Setting eagerly would hide the onboarding before the user completes it.
       return instance;
     },
     [providers],

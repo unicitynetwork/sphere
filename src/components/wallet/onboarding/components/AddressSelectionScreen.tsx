@@ -2,6 +2,7 @@
  * AddressSelectionScreen - Multi-select address list with balances and nametags.
  * Receive addresses are selectable (checkbox). Change addresses are shown read-only.
  */
+import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   Wallet,
@@ -72,6 +73,7 @@ export function AddressSelectionScreen({
   onContinue,
   onBack,
 }: AddressSelectionScreenProps) {
+  const [showL1, setShowL1] = useState(false);
   const selectableAddresses = derivedAddresses.filter(a => !a.isChange);
   const selectedCount = selectedKeys.size;
   const allSelected = selectedCount === selectableAddresses.length && selectableAddresses.length > 0;
@@ -106,7 +108,7 @@ export function AddressSelectionScreen({
         </span>
       </p>
 
-      {/* Select All / Deselect All */}
+      {/* Select All / Deselect All + L1/L3 toggle */}
       <div className="flex items-center justify-between mb-3">
         <button
           onClick={allSelected ? onDeselectAll : onSelectAll}
@@ -114,9 +116,17 @@ export function AddressSelectionScreen({
         >
           {allSelected ? "Deselect All" : "Select All"}
         </button>
-        <span className="text-xs text-neutral-400 dark:text-neutral-500">
-          {selectedCount} of {selectableAddresses.length} selected
-        </span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowL1(!showL1)}
+            className="text-[10px] font-medium px-2 py-0.5 rounded-full border transition-colors bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:text-purple-600 dark:hover:text-purple-400 hover:border-purple-300 dark:hover:border-purple-600"
+          >
+            {showL1 ? "Show L3" : "Show L1"}
+          </button>
+          <span className="text-xs text-neutral-400 dark:text-neutral-500">
+            {selectedCount}/{selectableAddresses.length}
+          </span>
+        </div>
       </div>
 
       {/* Address List */}
@@ -169,7 +179,9 @@ export function AddressSelectionScreen({
                       #{addr.index}
                     </span>
                     <span className={`text-xs font-mono truncate ${isChange ? "text-neutral-500 dark:text-neutral-400" : "text-neutral-900 dark:text-white"}`}>
-                      {truncateAddress(addr.l1Address)}
+                      {showL1
+                        ? truncateAddress(addr.l1Address)
+                        : truncateAddress(addr.l3Address, 16, 8)}
                     </span>
                     {isChange && (
                       <span className="px-1 py-0.5 bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[8px] font-bold rounded shrink-0">
