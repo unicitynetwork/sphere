@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { DashboardLayout } from './components/layout/DashboardLayout';
 import { IntroPage } from './pages/IntroPage';
+import { HomePage } from './pages/HomePage';
 import { AgentPage } from './pages/AgentPage';
 import { ConnectPage } from './pages/ConnectPage';
 import { useSphereEvents } from './sdk';
@@ -30,7 +31,7 @@ export default function App() {
       <Route path="/" element={<IntroPage />} />
       <Route path="/connect" element={<ConnectPage />} />
       <Route element={<DashboardLayout />}>
-        <Route path="/home" element={<Navigate to="/agents/dm" replace />} />
+        <Route path="/home" element={<HomePage />} />
         <Route path="/agents/chat" element={<Navigate to="/agents/dm" replace />} />
         <Route path="/agents/:agentId" element={<AgentPage />} />
         <Route path="/ai" element={<Navigate to="/agents/ai" replace />} />

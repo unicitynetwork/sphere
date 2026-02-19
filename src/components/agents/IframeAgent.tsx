@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Globe, ExternalLink } from 'lucide-react';
 import { ConnectHost } from '@unicitylabs/sphere-sdk/connect';
 import type { DAppMetadata, PermissionScope } from '@unicitylabs/sphere-sdk/connect';
 import { PostMessageTransport } from '@unicitylabs/sphere-sdk/connect/browser';
@@ -87,6 +87,13 @@ export function IframeAgent({ agent }: IframeAgentProps) {
     setActiveUrl(url);
   };
 
+  let displayHost = '';
+  try {
+    displayHost = new URL(activeUrl).host;
+  } catch {
+    displayHost = activeUrl;
+  }
+
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       {hasUrlOptions && (
@@ -106,6 +113,25 @@ export function IframeAgent({ agent }: IframeAgentProps) {
           ))}
         </div>
       )}
+
+      {/* Address bar — always visible so user can open in new tab if iframe is blocked */}
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-neutral-200 dark:border-neutral-800/50 bg-neutral-50/50 dark:bg-neutral-800/30 shrink-0">
+        <Globe className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
+        <span className="text-xs text-neutral-500 dark:text-neutral-400 truncate flex-1">
+          {displayHost}
+        </span>
+        <a
+          href={activeUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium text-neutral-500 dark:text-neutral-400 hover:text-orange-500 dark:hover:text-orange-400 rounded-md hover:bg-neutral-200/60 dark:hover:bg-neutral-700/40 transition-colors shrink-0"
+          title="Open in new tab"
+        >
+          <ExternalLink className="w-3 h-3" />
+          <span className="hidden sm:inline">Open</span>
+        </a>
+      </div>
+
       <div className="relative flex-1 min-h-0">
         {isLoading && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80 dark:bg-neutral-900/80">

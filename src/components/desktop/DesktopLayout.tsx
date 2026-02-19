@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Globe } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useDesktopState } from '../../hooks/useDesktopState';
@@ -22,6 +23,7 @@ const CUSTOM_URL_PRESETS = [
 ];
 
 export function DesktopLayout() {
+  const navigate = useNavigate();
   const { openTabs, activeTabId, openTab, walletOpen, toggleWallet, setWalletOpen } = useDesktopState();
   const { isFullscreen, toggleFullscreen, setFullscreen } = useUIState();
   const [customUrlInput, setCustomUrlInput] = useState('');
@@ -52,12 +54,14 @@ export function DesktopLayout() {
       url = url.includes('localhost') || url.match(/^\d/) ? `http://${url}` : `https://${url}`;
     }
     openTab('custom', { url, label: new URL(url).hostname });
+    navigate(`/agents/custom?url=${encodeURIComponent(url)}`);
     setCustomUrlInput('');
   };
 
   const openCustomUrl = (url: string) => {
     const label = new URL(url).hostname;
     openTab('custom', { url, label });
+    navigate(`/agents/custom?url=${encodeURIComponent(url)}`);
   };
 
   const renderTabContent = (tabId: string, appId: string, url?: string) => {

@@ -14,7 +14,7 @@ export function DashboardLayout() {
   const tutorial = useTutorial();
 
   // Hide mini chat when the DM tab is actively open (to avoid duplicate UI)
-  const isAgentPage = location.pathname.startsWith('/agents/');
+  const isAgentPage = location.pathname === '/home' || location.pathname.startsWith('/agents/');
   const isDmTabActive = isAgentPage && activeTabId === 'dm';
   const showMiniChat = !isDmTabActive;
 
