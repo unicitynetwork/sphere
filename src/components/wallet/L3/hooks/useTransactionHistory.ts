@@ -8,7 +8,7 @@ export const useTransactionHistory = () => {
 
   useEffect(() => {
     const handleHistoryUpdate = () => {
-      console.log("♻️ Transaction history update detected! Refreshing...");
+      if (import.meta.env.DEV) console.log("♻️ Transaction history update detected! Refreshing...");
       queryClient.refetchQueries({ queryKey: SPHERE_KEYS.payments.transactions.history });
     };
 

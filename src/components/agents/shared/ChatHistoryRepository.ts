@@ -144,7 +144,7 @@ export class ChatHistoryRepository {
       messageCount: initialMessage ? 1 : 0,
     };
 
-    console.log(`💬 [Repository] createSession: id=${session.id.slice(0, 8)}..., agentId=${agentId}, userId=${userId}`);
+    if (import.meta.env.DEV) console.log(`💬 [Repository] createSession: id=${session.id.slice(0, 8)}..., agentId=${agentId}, userId=${userId}`);
 
     const sessions = this.getAllSessions();
     sessions.unshift(session);
@@ -263,7 +263,7 @@ export class ChatHistoryRepository {
     // Get session info for logging
     const session = this.getSession(sessionId);
     const totalMessageCount = messages.length;
-    console.log(`💬 [Repository] saveMessages: sessionId=${sessionId.slice(0, 8)}..., agentId=${session?.agentId || 'unknown'}, messageCount=${totalMessageCount}`);
+    if (import.meta.env.DEV) console.log(`💬 [Repository] saveMessages: sessionId=${sessionId.slice(0, 8)}..., agentId=${session?.agentId || 'unknown'}, messageCount=${totalMessageCount}`);
 
     // Check storage size before saving
     if (this.getStorageSize() > MAX_STORAGE_SIZE) {
@@ -276,7 +276,7 @@ export class ChatHistoryRepository {
       : messages;
 
     if (messages.length > MAX_MESSAGES_PER_SESSION) {
-      console.log(`💬 [Repository] Trimming ${messages.length} messages to ${MAX_MESSAGES_PER_SESSION} for localStorage`);
+      if (import.meta.env.DEV) console.log(`💬 [Repository] Trimming ${messages.length} messages to ${MAX_MESSAGES_PER_SESSION} for localStorage`);
     }
 
     try {
@@ -374,7 +374,7 @@ export class ChatHistoryRepository {
   // ==========================================
 
   private cleanupOldSessions(): void {
-    console.log('[ChatHistory] Running cleanup...');
+    if (import.meta.env.DEV) console.log('[ChatHistory] Running cleanup...');
     const sessions = this.getAllSessions();
 
     // Group by agent
@@ -407,7 +407,7 @@ export class ChatHistoryRepository {
     const remainingSessions = sessions.filter(s => !toDelete.includes(s.id));
     this.saveSessions(remainingSessions);
 
-    console.log(`[ChatHistory] Cleaned up ${toDelete.length} old sessions`);
+    if (import.meta.env.DEV) console.log(`[ChatHistory] Cleaned up ${toDelete.length} old sessions`);
   }
 
   // ==========================================

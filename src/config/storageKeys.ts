@@ -31,6 +31,9 @@ export const STORAGE_KEYS = {
   // IPFS
   IPFS_ENABLED: 'sphere_ipfs_enabled',
 
+  // Desktop state (open tabs, active tab)
+  DESKTOP_STATE: 'sphere_desktop_state',
+
   // Dev Settings
   DEV_AGGREGATOR_URL: 'sphere_dev_aggregator_url',
   DEV_SKIP_TRUST_BASE: 'sphere_dev_skip_trust_base',
@@ -62,7 +65,7 @@ export function clearAllSphereData(): void {
     }
   }
   keysToRemove.forEach((key) => localStorage.removeItem(key));
-  console.log(`Cleared ${keysToRemove.length} sphere keys from localStorage`);
+  if (import.meta.env.DEV) console.log(`Cleared ${keysToRemove.length} sphere keys from localStorage`);
 }
 
 export type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS];

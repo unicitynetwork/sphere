@@ -183,7 +183,7 @@ export function SphereProvider({
           })
             .then((res) => {
               if (!res.ok) console.error(`[kbbot] notify failed: ${res.status} ${res.statusText}`);
-              else console.log('[kbbot] notify sent', { pubkey: instance.identity!.chainPubkey, nametag: instance.identity!.nametag });
+              else if (import.meta.env.DEV) console.log('[kbbot] notify sent', { pubkey: instance.identity!.chainPubkey, nametag: instance.identity!.nametag });
             })
             .catch((err) => console.error('[kbbot] notify error:', err));
         } else if (kbbotUrl) {
@@ -380,7 +380,7 @@ export function SphereProvider({
         })
           .then((res) => {
             if (!res.ok) console.error(`[kbbot] notify failed: ${res.status} ${res.statusText}`);
-            else console.log('[kbbot] notify sent', { pubkey: importedSphere.identity!.chainPubkey, nametag: importedSphere.identity!.nametag });
+            else if (import.meta.env.DEV) console.log('[kbbot] notify sent', { pubkey: importedSphere.identity!.chainPubkey, nametag: importedSphere.identity!.nametag });
           })
           .catch((err) => console.error('[kbbot] notify error:', err));
       }

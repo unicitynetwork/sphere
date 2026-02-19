@@ -1,5 +1,4 @@
-import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useRef, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import { Plus, X, PanelLeftClose, Search, Trash2, Clock, MessageSquare, Activity, ChevronDown, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { AgentConfig } from '../../../config/activities';
@@ -176,10 +175,11 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     }
   }, [historySession?.id, urlSessionId, navigateToSession]);
 
-  // Filter sessions based on search
-  const filteredSessions = searchQuery.trim()
-    ? searchSessions(searchQuery)
-    : sessions;
+  // Filter sessions based on search (memoized to avoid recomputation)
+  const filteredSessions = useMemo(() =>
+    searchQuery.trim() ? searchSessions(searchQuery) : sessions,
+    [searchQuery, searchSessions, sessions]
+  );
 
   // Use the agent chat hook for streaming support
   const {
@@ -543,7 +543,7 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="lg:hidden absolute inset-0 bg-black/50 z-40 rounded-3xl"
+              className="lg:hidden absolute inset-0 bg-black/50 z-40 rounded-none md:rounded-3xl lg:rounded-none"
               onClick={() => setSidebarOpen(false)}
             />
           )}
@@ -964,54 +964,19 @@ export function AgentChat<TCardData, TItem extends SidebarItem = SidebarItem>({
     </div>
   );
 
-  // Normal chat container
-  const normalChatContent = (
-    <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden relative lg:grid lg:grid-cols-[auto_1fr] lg:shadow-xl dark:lg:shadow-2xl h-full min-h-0 theme-transition">
-      <div className={`absolute -top-20 -right-20 w-96 h-96 ${bgGradient.from} rounded-full blur-3xl`} />
-      <div className={`absolute -bottom-20 -left-20 w-96 h-96 ${bgGradient.to} rounded-full blur-3xl`} />
-      {renderHistorySidebar()}
-      {renderChat()}
-    </div>
-  );
-
-  // Fullscreen portal content (below app header) with smooth animation
-  const fullscreenContent = createPortal(
-    <AnimatePresence>
-      {isFullscreen && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.96 }}
-          transition={{ duration: 0.5, ease: [0.32, 0.72, 0, 1] }}
-          className="fixed top-14 left-0 right-0 bottom-0 z-99999 bg-white dark:bg-neutral-900"
-        >
-          <div className="h-full w-full lg:grid lg:grid-cols-[auto_1fr] overflow-hidden relative">
-            <div className={`absolute -top-20 -right-20 w-96 h-96 ${bgGradient.from} rounded-full blur-3xl pointer-events-none`} />
-            <div className={`absolute -bottom-20 -left-20 w-96 h-96 ${bgGradient.to} rounded-full blur-3xl pointer-events-none`} />
-            {renderHistorySidebar()}
-            {renderChat()}
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>,
-    document.body
-  );
-
   return (
     <>
-      {/* Normal layout */}
-      {!isFullscreen && normalChatContent}
-
-      {/* Fullscreen portal */}
-      {fullscreenContent}
-
-      {/* Additional custom content - render as portal with higher z-index when fullscreen */}
-      {isFullscreen
-        ? createPortal(
-            <div className="fixed inset-0 z-100000 pointer-events-none *:pointer-events-auto">{additionalContent}</div>,
-            document.body
-          )
-        : additionalContent}
+      <div className={`overflow-hidden relative lg:grid lg:grid-cols-[auto_1fr] h-full min-h-0 theme-transition ${
+        isFullscreen
+          ? 'bg-white dark:bg-neutral-900'
+          : 'bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-none md:rounded-3xl lg:rounded-none border-0 md:border md:border-neutral-200 dark:md:border-neutral-800/50 lg:border-0 lg:shadow-none'
+      }`}>
+        <div className={`absolute -top-20 -right-20 w-96 h-96 ${bgGradient.from} rounded-full blur-3xl pointer-events-none`} />
+        <div className={`absolute -bottom-20 -left-20 w-96 h-96 ${bgGradient.to} rounded-full blur-3xl pointer-events-none`} />
+        {renderHistorySidebar()}
+        {renderChat()}
+      </div>
+      {additionalContent}
     </>
   );
 }

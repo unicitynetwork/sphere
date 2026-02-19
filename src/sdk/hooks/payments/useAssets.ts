@@ -37,7 +37,6 @@ export function useAssets(): UseAssetsReturn {
     },
     enabled: !!sphere,
     staleTime: 30_000,
-    structuralSharing: false,
   });
 
   // Enrich assets with registry data — SDK bakes symbol at token creation

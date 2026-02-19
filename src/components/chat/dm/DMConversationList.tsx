@@ -1,8 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageSquarePlus, Search, X, PanelLeftClose, Sparkles, Hash, User } from 'lucide-react';
+import { MessageSquarePlus, Search, X, PanelLeftClose, Sparkles } from 'lucide-react';
 import type { Conversation } from '../data/chatTypes';
 import { DMConversationItem } from './DMConversationItem';
-import type { ChatModeChangeHandler } from '../../../types';
 
 interface DMConversationListProps {
   conversations: Conversation[];
@@ -15,8 +14,6 @@ interface DMConversationListProps {
   onClose: () => void;
   isCollapsed: boolean;
   onCollapse: () => void;
-  hasUnread: boolean;
-  onModeChange: ChatModeChangeHandler;
 }
 
 export function DMConversationList({
@@ -30,8 +27,6 @@ export function DMConversationList({
   onClose,
   isCollapsed,
   onCollapse,
-  hasUnread,
-  onModeChange,
 }: DMConversationListProps) {
   return (
     <>
@@ -42,7 +37,7 @@ export function DMConversationList({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="lg:hidden absolute inset-0 bg-black/50 z-40 rounded-3xl"
+            className="lg:hidden absolute inset-0 bg-black/50 z-40"
             onClick={onClose}
           />
         )}
@@ -56,7 +51,7 @@ export function DMConversationList({
         transform transition-all duration-300 ease-in-out
         ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         ${isCollapsed ? 'lg:w-0 lg:border-0 lg:min-w-0' : 'lg:w-72'}
-        bg-white/95 dark:bg-neutral-900/95 lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none rounded-l-3xl lg:rounded-none
+        bg-white/95 dark:bg-neutral-900/95 lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none
       `}
       >
         {/* Header */}
@@ -67,9 +62,6 @@ export function DMConversationList({
             <div className="flex items-center gap-2">
               <h3 className="text-neutral-900 dark:text-white font-medium">Messages</h3>
               <Sparkles className="w-4 h-4 text-orange-500 animate-pulse" />
-              {hasUnread && (
-                <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
-              )}
             </div>
             <div className="flex items-center gap-2">
               {/* New conversation button */}
@@ -102,28 +94,6 @@ export function DMConversationList({
                 <X className="w-4 h-4" />
               </motion.button>
             </div>
-          </div>
-
-          {/* Mode Toggle */}
-          <div className="grid grid-cols-2 gap-2 relative z-10 mb-3">
-            <motion.button
-              onClick={() => onModeChange('global')}
-              className="px-4 py-3 rounded-xl text-sm transition-all relative overflow-hidden bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-700/50"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Hash className="w-4 h-4 inline mr-2" />
-              <span>Global</span>
-            </motion.button>
-            <motion.button
-              className="px-4 py-3 rounded-xl text-sm transition-all relative overflow-hidden bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/30"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <div className="absolute inset-0 bg-linear-to-tr from-white/0 via-white/20 to-white/0" />
-              <User className="w-4 h-4 inline mr-2" />
-              <span className="relative z-10">DM</span>
-            </motion.button>
           </div>
 
           {/* Search */}

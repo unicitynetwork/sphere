@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Loader2, User, CheckCircle, Coins, Hash } from 'lucide-react';
@@ -161,9 +160,9 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
       });
 
       setStep('success');
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      setRecipientError(e.message || "Transfer failed");
+      setRecipientError(e instanceof Error ? e.message : "Transfer failed");
       setStep('confirm');
     }
   };

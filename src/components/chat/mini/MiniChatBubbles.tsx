@@ -5,22 +5,13 @@ import { AnimatePresence } from 'framer-motion';
 import { MessageCircle } from 'lucide-react';
 import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
 import { useIdentity } from '../../../sdk/hooks/core/useIdentity';
-import { type Conversation, buildConversations, CHAT_KEYS } from '../data/chatTypes';
+import { type Conversation, buildConversations, buildAddressId, CHAT_KEYS } from '../data/chatTypes';
 import { useMiniChatStore } from './miniChatStore';
 import { MiniChatBubble } from './MiniChatBubble';
 import { MiniChatList } from './MiniChatList';
 import { MiniChatWindow } from './MiniChatWindow';
 
 const MAX_VISIBLE_BUBBLES = 5;
-
-function buildAddressId(directAddress: string): string {
-  let hash = directAddress;
-  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
-  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
-  const first = hash.slice(0, 6).toLowerCase();
-  const last = hash.slice(-6).toLowerCase();
-  return `DIRECT_${first}_${last}`;
-}
 
 export function MiniChatBubbles() {
   const queryClient = useQueryClient();
@@ -120,7 +111,7 @@ export function MiniChatBubbles() {
           <MessageCircle className="w-5 h-5" />
 
           {totalUnreadCount > 0 && !isListExpanded && (
-            <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-blue-500 text-white shadow-md">
+            <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-orange-500 text-white shadow-md">
               {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
             </span>
           )}

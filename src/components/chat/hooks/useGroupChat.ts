@@ -5,19 +5,12 @@ import { GroupVisibility } from '@unicitylabs/sphere-sdk';
 import { useServices } from '../../../contexts/useServices';
 import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
 import { useIdentity } from '../../../sdk/hooks/core/useIdentity';
+import { useActiveTabId } from '../../../hooks/useDesktopState';
 import { STORAGE_KEYS } from '../../../config/storageKeys';
 import { getGroupDisplayName } from '../utils/groupChatHelpers';
+import { buildAddressId } from '../data/chatTypes';
 
-function buildAddressId(directAddress: string): string {
-  let hash = directAddress;
-  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
-  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
-  const first = hash.slice(0, 6).toLowerCase();
-  const last = hash.slice(-6).toLowerCase();
-  return `DIRECT_${first}_${last}`;
-}
-
-const groupChatKeys = (addressId: string) => ({
+export const groupChatKeys = (addressId: string) => ({
   all: ['groupChat', addressId] as const,
   groups: ['groupChat', 'groups', addressId] as const,
   messages: (groupId: string) => ['groupChat', 'messages', addressId, groupId] as const,
@@ -101,6 +94,7 @@ export const useGroupChat = (): UseGroupChatReturn => {
   const { groupChat, isGroupChatConnected } = useServices();
   const { sphere } = useSphereContext();
   const { directAddress } = useIdentity();
+  const activeTabId = useActiveTabId();
   const addressId = directAddress ? buildAddressId(directAddress) : 'default';
   const KEYS = useMemo(() => groupChatKeys(addressId), [addressId]);
   const [selectedGroup, setSelectedGroup] = useState<GroupData | null>(null);
@@ -121,9 +115,11 @@ export const useGroupChat = (): UseGroupChatReturn => {
     }
   }, [addressId]);
 
-  // Ref to avoid event subscription churn on group selection changes
+  // Refs to avoid event subscription churn on state changes
   const selectedGroupRef = useRef(selectedGroup);
   selectedGroupRef.current = selectedGroup;
+  const activeTabIdRef = useRef(activeTabId);
+  activeTabIdRef.current = activeTabId;
 
   // Listen for SDK group chat events (stable — no selectedGroup dependency)
   useEffect(() => {
@@ -150,8 +146,10 @@ export const useGroupChat = (): UseGroupChatReturn => {
         queryClient.invalidateQueries({
           queryKey: KEYS.members(current.id),
         });
-        // Auto-mark as read since user is viewing
-        groupChat?.markGroupAsRead(current.id);
+        // Auto-mark as read only if the group-chat tab is in focus
+        if (activeTabIdRef.current === 'group-chat') {
+          groupChat?.markGroupAsRead(current.id);
+        }
       }
       // Always refetch groups for updated last message
       queryClient.invalidateQueries({ queryKey: KEYS.groups });
@@ -181,6 +179,15 @@ export const useGroupChat = (): UseGroupChatReturn => {
       unsubs.forEach((unsub) => unsub());
     };
   }, [sphere, queryClient, groupChat, KEYS]);
+
+  // When the group-chat tab becomes active (or selected group changes while active), mark as read
+  useEffect(() => {
+    if (activeTabId === 'group-chat' && selectedGroup && groupChat) {
+      groupChat.markGroupAsRead(selectedGroup.id);
+      queryClient.invalidateQueries({ queryKey: KEYS.unreadCount });
+      queryClient.invalidateQueries({ queryKey: KEYS.groups });
+    }
+  }, [activeTabId, selectedGroup, groupChat, queryClient, KEYS]);
 
   // Query joined groups
   const groupsQuery = useQuery({
@@ -220,7 +227,7 @@ export const useGroupChat = (): UseGroupChatReturn => {
     if (target) {
       setSelectedGroup(target);
       localStorage.setItem(selectedGroupKey, target.id);
-      groupChat.markGroupAsRead(target.id);
+      // markGroupAsRead is handled by the "tab activate" effect
 
       // Fetch messages from relay if none exist locally (same as selectGroup)
       const localMessages = groupChat.getMessages(target.id);
@@ -580,7 +587,7 @@ export const useGroupChat = (): UseGroupChatReturn => {
   );
 
   // Identity helpers — addressId forces recomputation on address switch
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- addressId forces recomputation on address switch
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const myPubkey = useMemo(() => groupChat?.getMyPublicKey() ?? null, [groupChat, addressId]);
 
   const isAdminOfGroup = useCallback(

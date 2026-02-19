@@ -17,16 +17,24 @@ const DESKTOP_STEPS: TutorialStep[] = [
       'Use the header to navigate between pages, toggle the theme, and access links',
   },
   {
-    target: 'wallet',
-    title: 'Wallet',
+    target: 'desktop-shortcuts',
+    title: 'Apps',
     description:
-      'Here you can create a new or import an existing wallet and manage your assets',
+      'Click an icon to open an app — messages, group chat, games, and more',
+    trigger: 'show-desktop',
   },
   {
-    target: 'chat',
-    title: 'Main Area',
+    target: 'tab-bar',
+    title: 'Tabs',
     description:
-      'Here the main interaction with the selected agent will happen',
+      'Open apps appear as tabs here. Switch between them or close with the X button',
+  },
+  {
+    target: 'wallet-panel',
+    title: 'Wallet',
+    description:
+      'Your wallet panel — create or import a wallet, manage your assets, send and receive tokens, and view transaction history',
+    trigger: 'wallet-toggle',
   },
 ];
 
@@ -38,23 +46,24 @@ const MOBILE_STEPS: TutorialStep[] = [
       'Use the header to navigate between pages, toggle the theme, and access links',
   },
   {
-    target: 'mobile-tabs',
-    title: 'Switch Panels',
+    target: 'desktop-shortcuts',
+    title: 'Apps',
     description:
-      'Use these tabs to switch between agents and your wallet',
+      'Tap an icon to open an app — messages, group chat, games, and more',
+    trigger: 'show-desktop',
   },
   {
-    target: 'mobile-chat',
-    title: 'Main Area',
+    target: 'tab-bar',
+    title: 'Tabs',
     description:
-      'Here the main interaction with the selected agent will happen',
+      'Open apps appear as tabs here. Switch between them or close with the X button',
   },
   {
-    target: 'mobile-wallet',
+    target: 'wallet-panel-mobile',
     title: 'Wallet',
     description:
-      'Here you can create a new or import an existing wallet and manage your assets',
-    trigger: 'mobile-wallet-tab',
+      'Your wallet — create or import a wallet, manage your assets, send and receive tokens, and view transaction history',
+    trigger: 'wallet-toggle',
   },
 ];
 

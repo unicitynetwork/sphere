@@ -59,18 +59,20 @@ export function GroupMessageList({
     loadMore();
   }, [loadMore]);
 
-  // Group messages by date
-  const groupedMessages: { date: string; messages: GroupMessageData[] }[] = [];
-  let currentDate = '';
-
-  messages.forEach((message) => {
-    const messageDate = getMessageFormattedDate(message);
-    if (messageDate !== currentDate) {
-      currentDate = messageDate;
-      groupedMessages.push({ date: messageDate, messages: [] });
-    }
-    groupedMessages[groupedMessages.length - 1].messages.push(message);
-  });
+  // Group messages by date (memoized to avoid recomputation on every render)
+  const groupedMessages = useMemo(() => {
+    const groups: { date: string; messages: GroupMessageData[] }[] = [];
+    let currentDate = '';
+    messages.forEach((message) => {
+      const messageDate = getMessageFormattedDate(message);
+      if (messageDate !== currentDate) {
+        currentDate = messageDate;
+        groups.push({ date: messageDate, messages: [] });
+      }
+      groups[groups.length - 1].messages.push(message);
+    });
+    return groups;
+  }, [messages]);
 
   if (isLoading) {
     return (
@@ -116,7 +118,7 @@ export function GroupMessageList({
               key={message.id ?? `${message.timestamp}-${message.senderPubkey}`}
               message={message}
               isOwnMessage={message.senderPubkey === myPubkey}
-              delay={groupIndex === groupedMessages.length - 1 ? messageIndex * 0.05 : 0}
+              delay={groupIndex === groupedMessages.length - 1 ? (group.messages.length - 1 - messageIndex) * 0.05 : 0}
               canDelete={canDeleteMessages}
               onDelete={onDeleteMessage}
               isDeleting={isDeletingMessage}

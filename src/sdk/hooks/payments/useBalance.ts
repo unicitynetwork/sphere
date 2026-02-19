@@ -40,7 +40,6 @@ export function useBalance(coinId?: string): UseBalanceReturn {
     },
     enabled: !!sphere,
     staleTime: 30_000,
-    structuralSharing: false,
   });
 
   const asset = (coinId && query.data && typeof query.data !== 'number') ? query.data as Asset : null;

@@ -1,26 +1,24 @@
 import { useState, useRef, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import { MessageCircle, Menu, PanelLeft, Maximize2, Minimize2 } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { MessageCircle, PanelLeft } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { useChat } from '../hooks/useChat';
-import { useUIState } from '../../../hooks/useUIState';
 import { DMConversationList } from './DMConversationList';
 import { DMMessageList } from './DMMessageList';
 import { DMChatInput } from './DMChatInput';
 import { NewConversationModal } from './NewConversationModal';
-import { agents } from '../../../config/activities';
 import { setMentionClickHandler } from '../../../utils/mentionHandler';
 import { getColorFromPubkey } from '../utils/avatarColors';
 import { getDisplayName, getAvatar } from '../data/chatTypes';
-import type { ChatModeChangeHandler } from '../../../types';
 
 interface DMChatSectionProps {
-  onModeChange: ChatModeChangeHandler;
   pendingRecipient?: string | null;
   onPendingRecipientHandled?: () => void;
 }
 
-export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipientHandled }: DMChatSectionProps) {
+export function DMChatSection({ pendingRecipient, onPendingRecipientHandled }: DMChatSectionProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [urlPendingRecipient, setUrlPendingRecipient] = useState<string | null>(null);
   const {
     selectedConversation,
     selectConversation,
@@ -34,7 +32,7 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
     searchQuery,
     setSearchQuery,
     filteredConversations,
-    totalUnreadCount,
+    // totalUnreadCount - available from useChat() if needed
     isRecipientTyping,
     hasMore,
     loadMore,
@@ -46,19 +44,23 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
   const [modalInitialValue, setModalInitialValue] = useState<string | undefined>();
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Global fullscreen state
-  const { isFullscreen, setFullscreen } = useUIState();
-
-  // Handle Escape key to exit fullscreen
+  // Handle ?nametag= URL param for DM navigation
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isFullscreen) {
-        setFullscreen(false);
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isFullscreen, setFullscreen]);
+    const nametag = searchParams.get('nametag');
+    if (nametag) {
+      const cleanNametag = nametag.startsWith('@') ? nametag.slice(1) : nametag;
+      const formattedNametag = cleanNametag.toLowerCase().replace(/\s+/g, '-');
+      setUrlPendingRecipient(formattedNametag);
+      setSearchParams((prev) => {
+        prev.delete('nametag');
+        prev.delete('product');
+        prev.delete('image');
+        prev.delete('price');
+        prev.delete('purchased');
+        return prev;
+      });
+    }
+  }, [searchParams, setSearchParams]);
 
   // Auto-focus input when message is sent (desktop only)
   useEffect(() => {
@@ -77,12 +79,12 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
     }
   }, [selectedConversation]);
 
-  // Handle pending recipient from @mention click or P2P DM button
+  // Handle pending recipient from prop, URL param, or @mention click
   // If conversation exists, select it directly; otherwise open modal
+  const effectiveRecipient = pendingRecipient || urlPendingRecipient;
   useEffect(() => {
-    if (pendingRecipient) {
-      const nametag = pendingRecipient.startsWith('@') ? pendingRecipient.slice(1) : pendingRecipient;
-      // Check if conversation already exists
+    if (effectiveRecipient) {
+      const nametag = effectiveRecipient.startsWith('@') ? effectiveRecipient.slice(1) : effectiveRecipient;
       const existingConversation = filteredConversations.find(
         (c) => c.peerNametag?.toLowerCase() === nametag.toLowerCase()
       );
@@ -93,8 +95,9 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
         setShowNewConversation(true);
       }
       onPendingRecipientHandled?.();
+      setUrlPendingRecipient(null);
     }
-  }, [pendingRecipient, onPendingRecipientHandled, filteredConversations, selectConversation]);
+  }, [effectiveRecipient, onPendingRecipientHandled, filteredConversations, selectConversation]);
 
   // Set up mention click handler - clicking @mention in DM
   // If conversation exists, select it directly; otherwise open modal
@@ -114,9 +117,6 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
     });
     return () => setMentionClickHandler(null);
   }, [filteredConversations, selectConversation]);
-
-  // Get current chat agent config
-  const chatAgent = agents.find(a => a.id === 'chat')!;
 
   const handleSend = () => {
     if (messageInput.trim()) {
@@ -151,73 +151,57 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
         onClose={() => setSidebarOpen(false)}
         isCollapsed={sidebarCollapsed}
         onCollapse={() => setSidebarCollapsed(true)}
-        hasUnread={totalUnreadCount > 0}
-        onModeChange={onModeChange}
       />
 
       {/* Main Chat Area */}
       <div className="grid grid-rows-[auto_1fr_auto] z-10 min-w-0 h-full min-h-0">
         {/* Chat Header */}
-        <div className="shrink-0 p-4 border-b border-neutral-200 dark:border-neutral-800/50 flex items-center justify-between bg-linear-to-br from-white/80 dark:from-neutral-900/80 to-neutral-50/40 dark:to-neutral-800/40 backdrop-blur-sm relative z-20 theme-transition">
-          <div className="absolute bottom-0 left-0 w-32 h-32 bg-orange-500/5 rounded-tr-full" />
-
-          <div className="flex items-center gap-3 relative z-10">
+        <div className="shrink-0 px-3 py-2 border-b border-neutral-200 dark:border-neutral-800/50 flex items-center justify-between bg-linear-to-br from-white/80 dark:from-neutral-900/80 to-neutral-50/40 dark:to-neutral-800/40 backdrop-blur-sm relative z-20 theme-transition">
+          <div className="flex items-center gap-2 relative z-10">
             {/* Desktop expand sidebar button (when collapsed) */}
             {sidebarCollapsed && (
               <motion.button
                 onClick={() => setSidebarCollapsed(false)}
-                className="hidden lg:flex p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
+                className="hidden lg:flex p-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
                 title="Expand sidebar"
               >
-                <PanelLeft className="w-5 h-5" />
+                <PanelLeft className="w-4 h-4" />
               </motion.button>
             )}
-            {/* Mobile menu button */}
+            {/* Mobile sidebar button */}
             <motion.button
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-2 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
+              className="lg:hidden p-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
+              title="Show conversations"
             >
-              <Menu className="w-5 h-5" />
+              <PanelLeft className="w-4 h-4" />
             </motion.button>
 
-            {/* Mobile & Fullscreen: Static agent info */}
-            <div className={`flex items-center gap-2 ${isFullscreen ? '' : 'lg:hidden'}`}>
-              <div className={`p-2.5 rounded-xl bg-linear-to-br ${chatAgent.color}`}>
-                <chatAgent.Icon className="w-5 h-5 text-white" />
-              </div>
-              <div className="text-left">
-                <div className="text-lg text-neutral-900 dark:text-white font-medium">{chatAgent.name}</div>
-                <div className="text-sm text-neutral-500 dark:text-neutral-400">{chatAgent.description}</div>
-              </div>
-            </div>
-
-            {/* Desktop: Show conversation or default header (hidden in fullscreen) */}
-            <div className={`${isFullscreen ? 'hidden' : 'hidden lg:flex'} items-center gap-3`}>
+            {/* Conversation or default header */}
+            <div className="flex items-center gap-2">
               {selectedConversation ? (
                 <>
-                  <motion.div whileHover={{ scale: 1.05 }} className="relative">
-                    <div className={`relative w-12 h-12 rounded-xl bg-linear-to-br ${getColorFromPubkey(selectedConversation.peerPubkey).gradient} flex items-center justify-center shadow-xl text-white font-medium`}>
-                      {getAvatar(selectedConversation.peerPubkey, selectedConversation.peerNametag)}
-                    </div>
-                  </motion.div>
-                  <h3 className="text-neutral-900 dark:text-white font-medium">
+                  <div className={`relative w-8 h-8 rounded-lg bg-linear-to-br ${getColorFromPubkey(selectedConversation.peerPubkey).gradient} flex items-center justify-center text-white text-sm font-medium`}>
+                    {getAvatar(selectedConversation.peerPubkey, selectedConversation.peerNametag)}
+                  </div>
+                  <h3 className="text-sm text-neutral-900 dark:text-white font-medium">
                     {getDisplayName(selectedConversation.peerPubkey, selectedConversation.peerNametag)}
                   </h3>
                 </>
               ) : (
                 <>
-                  <div className="w-12 h-12 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 flex items-center justify-center border border-neutral-200 dark:border-neutral-700/50">
-                    <MessageCircle className="w-6 h-6 text-neutral-400" />
+                  <div className="w-8 h-8 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 flex items-center justify-center border border-neutral-200 dark:border-neutral-700/50">
+                    <MessageCircle className="w-4 h-4 text-neutral-400" />
                   </div>
                   <div>
-                    <h3 className="text-neutral-900 dark:text-white font-medium">
+                    <h3 className="text-sm text-neutral-900 dark:text-white font-medium">
                       Direct Messages
                     </h3>
-                    <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
                       Select a conversation to start
                     </p>
                   </div>
@@ -225,21 +209,6 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
               )}
             </div>
           </div>
-
-          {/* Fullscreen toggle */}
-          <motion.button
-            onClick={() => setFullscreen(!isFullscreen)}
-            className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors border border-neutral-200 dark:border-neutral-700/50"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-          >
-            {isFullscreen ? (
-              <Minimize2 className="w-5 h-5" />
-            ) : (
-              <Maximize2 className="w-5 h-5" />
-            )}
-          </motion.button>
         </div>
 
         {/* Messages */}
@@ -302,37 +271,11 @@ export function DMChatSection({ onModeChange, pendingRecipient, onPendingRecipie
     />
   );
 
-  // Normal container
-  const normalContent = (
-    <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-3xl border border-neutral-200 dark:border-neutral-800/50 overflow-hidden grid grid-cols-1 lg:grid-cols-[auto_1fr] relative lg:shadow-xl dark:lg:shadow-2xl h-full min-h-0 theme-transition">
-      {chatContent}
-    </div>
-  );
-
-  // Fullscreen portal content with smooth animation
-  const fullscreenContent = createPortal(
-    <AnimatePresence>
-      {isFullscreen && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.96 }}
-          transition={{ duration: 0.5, ease: [0.32, 0.72, 0, 1] }}
-          className="fixed top-14 left-0 right-0 bottom-0 z-99999 bg-white dark:bg-neutral-900"
-        >
-          <div className="h-full w-full grid grid-cols-1 lg:grid-cols-[auto_1fr] overflow-hidden relative">
-            {chatContent}
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>,
-    document.body
-  );
-
   return (
     <>
-      {!isFullscreen && normalContent}
-      {fullscreenContent}
+      <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-none border-0 overflow-hidden grid grid-cols-1 lg:grid-cols-[auto_1fr] relative lg:shadow-none h-full min-h-0 theme-transition">
+        {chatContent}
+      </div>
       {modalElement}
     </>
   );

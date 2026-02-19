@@ -41,7 +41,6 @@ export function useL1Balance(): UseL1BalanceReturn {
     },
     enabled: !!sphere,
     staleTime: 30_000,
-    refetchInterval: 60_000,
   });
 
   const balance = query.data ?? null;

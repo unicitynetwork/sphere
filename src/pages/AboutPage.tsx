@@ -333,7 +333,7 @@ export function AboutPage() {
             className="flex gap-4 justify-center flex-wrap"
           >
             <Link
-              to="/agents/chat"
+              to="/agents/dm"
               className="bg-linear-to-r from-orange-500 to-amber-500 text-white px-6 py-3 rounded-xl font-semibold hover:opacity-90 transition shadow-lg shadow-orange-500/25"
             >
               Explore the Marketplace

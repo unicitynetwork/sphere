@@ -57,7 +57,7 @@ export function GamesChat({ agent }: GamesChatProps) {
         <div className="mt-4 space-y-3">
           {cardData.games.map((game) => (
             <div key={game.id} className="rounded-xl overflow-hidden border border-neutral-600/50">
-              <img src={game.image} alt={game.name} className="w-full h-28 object-cover" />
+              <img src={game.image} alt={game.name} loading="lazy" className="w-full h-28 object-cover" />
               <div className="p-3 bg-neutral-900/80">
                 <h4 className="font-medium text-white">{game.name}</h4>
                 <p className="text-sm text-neutral-400 mt-1">{game.description}</p>

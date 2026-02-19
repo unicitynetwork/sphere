@@ -2,11 +2,13 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
 import { useIdentity } from '../../../sdk/hooks/core/useIdentity';
+import { useActiveTabId } from '../../../hooks/useDesktopState';
 import {
   type Conversation,
   type DisplayMessage,
   type DmReceivedDetail,
   buildConversations,
+  buildAddressId,
   toDisplayMessage,
   getDisplayName,
   CHAT_KEYS,
@@ -23,15 +25,6 @@ interface SDKDirectMessage {
   content: string;
   timestamp: number;
   isRead: boolean;
-}
-
-function buildAddressId(directAddress: string): string {
-  let hash = directAddress;
-  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
-  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
-  const first = hash.slice(0, 6).toLowerCase();
-  const last = hash.slice(-6).toLowerCase();
-  return `DIRECT_${first}_${last}`;
 }
 
 export interface UseChatReturn {
@@ -73,6 +66,7 @@ export const useChat = (): UseChatReturn => {
   const queryClient = useQueryClient();
   const { sphere } = useSphereContext();
   const { directAddress } = useIdentity();
+  const activeTabId = useActiveTabId();
   const addressId = directAddress ? buildAddressId(directAddress) : 'default';
 
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
@@ -81,6 +75,12 @@ export const useChat = (): UseChatReturn => {
   const [isRecipientTyping, setIsRecipientTyping] = useState(false);
   const [messageLimit, setMessageLimit] = useState(20);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Refs to avoid event listener churn on state changes
+  const selectedConversationRef = useRef(selectedConversation);
+  selectedConversationRef.current = selectedConversation;
+  const activeTabIdRef = useRef(activeTabId);
+  activeTabIdRef.current = activeTabId;
 
   // Address-scoped selected DM key
   const selectedDmKey = `${STORAGE_KEYS.CHAT_SELECTED_DM}_${addressId}`;
@@ -95,13 +95,15 @@ export const useChat = (): UseChatReturn => {
   }, [addressId]);
 
   // Listen for real-time DM events and typing indicators
+  // Uses ref for selectedConversation to avoid listener re-registration churn
   useEffect(() => {
     const handleDMReceived = (event: CustomEvent<DmReceivedDetail>) => {
       const { peerPubkey, messageId, isFromMe } = event.detail;
+      const current = selectedConversationRef.current;
 
-      // If we're viewing this conversation, auto-mark as read
-      if (selectedConversation && peerPubkey === selectedConversation.peerPubkey) {
-        if (sphere && !isFromMe) {
+      // If we're viewing this conversation AND the DM tab is active, auto-mark as read
+      if (current && peerPubkey === current.peerPubkey) {
+        if (sphere && !isFromMe && activeTabIdRef.current === 'dm') {
           sphere.communications.markAsRead([messageId]);
         }
         // Clear typing indicator — they sent their message
@@ -110,13 +112,12 @@ export const useChat = (): UseChatReturn => {
           clearTimeout(typingTimeoutRef.current);
         }
       }
-
-      // Invalidate all chat queries (conversations, messages, unread count)
-      queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
+      // Note: query invalidation is handled by useSphereEvents — no duplicate needed
     };
 
     const handleTyping = (e: CustomEvent) => {
-      if (selectedConversation && e.detail.senderPubkey === selectedConversation.peerPubkey) {
+      const current = selectedConversationRef.current;
+      if (current && e.detail.senderPubkey === current.peerPubkey) {
         setIsRecipientTyping(true);
         clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => setIsRecipientTyping(false), 1500);
@@ -131,7 +132,22 @@ export const useChat = (): UseChatReturn => {
       window.removeEventListener('dm-typing', handleTyping as EventListener);
       clearTimeout(typingTimeoutRef.current);
     };
-  }, [queryClient, selectedConversation, sphere]);
+  }, [sphere]);
+
+  // When the DM tab becomes active (or selected conversation changes while active), mark as read
+  useEffect(() => {
+    if (activeTabId === 'dm' && selectedConversation && sphere) {
+      const msgs: SDKDirectMessage[] = sphere.communications.getConversation(selectedConversation.peerPubkey);
+      const unreadIds = msgs
+        .filter(m => !m.isRead && m.senderPubkey === selectedConversation.peerPubkey)
+        .map(m => m.id);
+      if (unreadIds.length > 0) {
+        sphere.communications.markAsRead(unreadIds);
+      }
+      // Always invalidate to sync query cache with SDK state
+      queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
+    }
+  }, [activeTabId, selectedConversation, sphere, queryClient]);
 
   // Query conversations from SDK, with fallback nametag resolution
   const conversationsQuery = useQuery({

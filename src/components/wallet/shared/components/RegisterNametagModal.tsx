@@ -83,6 +83,19 @@ export function RegisterNametagModal({ isOpen, onClose }: RegisterNametagModalPr
 
       await sphere.registerNametag(cleanTag);
 
+      // Write fresh identity into cache — sphere.identity should be
+      // updated after registerNametag resolves.  Fall back to patching
+      // the nametag onto existing cached data if identity is unavailable.
+      if (sphere.identity) {
+        const fresh = { ...sphere.identity };
+        if (!fresh.nametag) fresh.nametag = cleanTag;
+        queryClient.setQueryData(SPHERE_KEYS.identity.current, fresh);
+      } else {
+        queryClient.setQueryData(SPHERE_KEYS.identity.current, (old: Record<string, unknown> | null | undefined) => {
+          if (!old) return old;
+          return { ...old, nametag: cleanTag };
+        });
+      }
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.all });
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.payments.all });
       window.dispatchEvent(new Event('wallet-updated'));

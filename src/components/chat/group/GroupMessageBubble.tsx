@@ -75,11 +75,7 @@ export function GroupMessageBubble({
         {/* Sender name - clickable to open DM */}
         <button
           onClick={handleNametagClick}
-          className={`text-xs font-medium mb-1 hover:underline cursor-pointer transition-colors ${
-            isOwnMessage
-              ? 'text-white/90 hover:text-white'
-              : senderColor.text
-          }`}
+          className={`text-xs font-medium mb-1 hover:underline cursor-pointer transition-colors ${senderColor.text}`}
         >
           {getMessageSenderDisplayName(message)}
         </button>
@@ -101,13 +97,11 @@ export function GroupMessageBubble({
             whileHover={{ scale: 1.01 }}
             className={`rounded-2xl px-4 py-3 relative overflow-hidden ${
               isOwnMessage
-                ? 'bg-linear-to-br from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/20'
+                ? 'bg-orange-500/15 dark:bg-orange-500/20 text-neutral-900 dark:text-neutral-100'
                 : 'bg-neutral-100 dark:bg-neutral-800/80 backdrop-blur-sm text-neutral-800 dark:text-neutral-100 border border-neutral-200 dark:border-neutral-700/50'
             }`}
           >
-            {isOwnMessage && (
-              <div className="absolute inset-0 bg-linear-to-tr from-white/0 via-white/10 to-white/0" />
-            )}
+            {/* subtle bg tint — no overlay needed */}
 
             <div className="text-sm leading-relaxed relative z-10 wrap-break-word whitespace-pre-wrap">
               <MarkdownContent text={message.content} />

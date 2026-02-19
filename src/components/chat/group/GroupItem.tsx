@@ -84,7 +84,7 @@ export function GroupItem({
               {getGroupDisplayName(group)}
             </span>
             {(group.unreadCount ?? 0) > 0 && (
-              <span className="px-1.5 py-0.5 text-xs rounded-full bg-blue-500 text-white shrink-0">
+              <span className="px-1.5 py-0.5 text-xs rounded-full bg-orange-500 text-white shrink-0">
                 {(group.unreadCount ?? 0) > 99 ? '99+' : group.unreadCount}
               </span>
             )}
@@ -123,8 +123,8 @@ export function GroupItem({
                       e.stopPropagation();
                       const code = await onCreateInvite();
                       if (code) {
-                        // Copy to clipboard - format: #/agents/chat?join=groupId/inviteCode
-                        const inviteUrl = `${window.location.origin}${window.location.pathname}#/agents/chat?join=${group.id}/${code}`;
+                        // Copy to clipboard - format: #/agents/group-chat?join=groupId/inviteCode
+                        const inviteUrl = `${window.location.origin}${window.location.pathname}#/agents/group-chat?join=${group.id}/${code}`;
                         navigator.clipboard.writeText(inviteUrl);
                         showToast('Invite link copied to clipboard', 'success');
                       }

@@ -25,12 +25,9 @@ export function ChatSection() {
   useEffect(() => {
     const nametag = searchParams.get('nametag');
     if (nametag) {
-      // Strip leading @ if present (handles @username format from mentions)
       const cleanNametag = nametag.startsWith('@') ? nametag.slice(1) : nametag;
-      // Convert to nametag format (e.g., "Sarah Williams" → "sarah-williams")
       const formattedNametag = cleanNametag.toLowerCase().replace(/\s+/g, '-');
       setPendingDmRecipient(formattedNametag);
-      // Clear the URL params after reading them
       setSearchParams((prev) => {
         prev.delete('nametag');
         prev.delete('product');
@@ -42,11 +39,11 @@ export function ChatSection() {
     }
   }, [searchParams, setSearchParams]);
 
-  const handleModeChange = (mode: ChatMode, dmRecipient?: string) => {
+  const handleModeChange = (mode: string, dmRecipient?: string) => {
     if (mode === 'dm' && dmRecipient) {
       setPendingDmRecipient(dmRecipient);
     }
-    setChatMode(mode);
+    setChatMode(mode as ChatMode);
   };
 
   const handleDmRecipientHandled = () => {
@@ -57,7 +54,6 @@ export function ChatSection() {
   if (chatMode === 'dm') {
     return (
       <DMChatSection
-        onModeChange={handleModeChange}
         pendingRecipient={pendingDmRecipient}
         onPendingRecipientHandled={handleDmRecipientHandled}
       />

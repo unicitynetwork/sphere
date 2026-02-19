@@ -1,4 +1,4 @@
-import { MessageSquare, Store, Globe, Bot, Cpu } from 'lucide-react';
+import { MessageCircle, Hash, Globe } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // Agent types for different UI layouts
@@ -44,12 +44,22 @@ export interface AgentConfig {
 // All agents configuration
 const allAgents: AgentConfig[] = [
   {
-    id: 'chat',
-    name: 'Chat',
-    description: 'DM and group messaging',
-    Icon: MessageSquare,
+    id: 'dm',
+    name: 'Messages',
+    description: 'Private conversations',
+    Icon: MessageCircle,
     category: 'Social',
     color: 'from-blue-500 to-cyan-500',
+    type: 'chat',
+    requiresWallet: true,
+  },
+  {
+    id: 'group-chat',
+    name: 'Group Chat',
+    description: 'Public group channels',
+    Icon: Hash,
+    category: 'Social',
+    color: 'from-indigo-500 to-purple-500',
     type: 'chat',
     requiresWallet: true,
   },
@@ -90,34 +100,34 @@ const allAgents: AgentConfig[] = [
   //   ],
   //   contentType: 'game',
   // },
-  {
-    id: 'astrid',
-    name: 'Astrid',
-    description: 'Astrid AI agent',
-    Icon: Cpu,
-    category: 'Agent',
-    color: 'from-teal-500 to-cyan-600',
-    type: 'iframe',
-  },
-  {
-    id: 'unibot',
-    name: 'Unibot',
-    description: 'Unibot assistant',
-    Icon: Bot,
-    category: 'Agent',
-    color: 'from-amber-500 to-orange-600',
-    type: 'iframe',
-  },
-  {
-    id: 'marketplace',
-    name: 'Marketplace',
-    description: 'Unicity Marketplace',
-    Icon: Store,
-    category: 'Trading',
-    color: 'from-violet-500 to-purple-500',
-    type: 'iframe',
-    iframeUrl: 'https://market.unicity.network/',
-  },
+  // {
+  //   id: 'astrid',
+  //   name: 'Astrid',
+  //   description: 'Astrid AI agent',
+  //   Icon: Cpu,
+  //   category: 'Agent',
+  //   color: 'from-teal-500 to-cyan-600',
+  //   type: 'iframe',
+  // },
+  // {
+  //   id: 'unibot',
+  //   name: 'Unibot',
+  //   description: 'Unibot assistant',
+  //   Icon: Bot,
+  //   category: 'Agent',
+  //   color: 'from-amber-500 to-orange-600',
+  //   type: 'iframe',
+  // },
+  // {
+  //   id: 'marketplace',
+  //   name: 'Marketplace',
+  //   description: 'Unicity Marketplace',
+  //   Icon: Store,
+  //   category: 'Trading',
+  //   color: 'from-violet-500 to-purple-500',
+  //   type: 'iframe',
+  //   iframeUrl: 'https://market.unicity.network/',
+  // },
   {
     id: 'custom',
     name: 'Sphere Agents',

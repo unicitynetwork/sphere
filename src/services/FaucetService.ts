@@ -15,7 +15,7 @@ export interface FaucetResponse {
 
 export class FaucetService {
   static async requestTokens(unicityId: string, coin: string, amount: number): Promise<FaucetResponse> {
-    console.log(`🌊 Requesting ${amount} ${coin} for @${unicityId}...`);
+    if (import.meta.env.DEV) console.log(`🌊 Requesting ${amount} ${coin} for @${unicityId}...`);
 
     try {
       const requestBody = {
@@ -24,7 +24,7 @@ export class FaucetService {
         amount,
       };
 
-      console.log(`📤 Sending request:`, requestBody);
+      if (import.meta.env.DEV) console.log(`📤 Sending request:`, requestBody);
 
       const response = await fetch(FAUCET_API_URL, {
         method: 'POST',
@@ -34,7 +34,7 @@ export class FaucetService {
         body: JSON.stringify(requestBody),
       });
 
-      console.log(`📥 Response status for ${coin}:`, response.status, response.statusText);
+      if (import.meta.env.DEV) console.log(`📥 Response status for ${coin}:`, response.status, response.statusText);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -43,7 +43,7 @@ export class FaucetService {
       }
 
       const data = await response.json();
-      console.log(`✅ Success for ${coin}:`, data);
+      if (import.meta.env.DEV) console.log(`✅ Success for ${coin}:`, data);
 
       return {
         success: true,
@@ -73,16 +73,16 @@ export class FaucetService {
       { coin: 'unicity-usd', amount: 1000 },
     ];
 
-    console.log(`🚀 Starting parallel faucet requests for @${unicityId}...`);
+    if (import.meta.env.DEV) console.log(`🚀 Starting parallel faucet requests for @${unicityId}...`);
 
     // Request all coins in parallel for better performance
     const results = await Promise.all(
       requests.map(({ coin, amount }) => this.requestTokens(unicityId, coin, amount))
     );
 
-    console.log(`📊 Faucet results:`, results);
+    if (import.meta.env.DEV) console.log(`📊 Faucet results:`, results);
     const successful = results.filter(r => r.success).length;
-    console.log(`✅ ${successful}/${results.length} requests successful`);
+    if (import.meta.env.DEV) console.log(`✅ ${successful}/${results.length} requests successful`);
 
     window.dispatchEvent(new Event("wallet-updated"));
     return results;

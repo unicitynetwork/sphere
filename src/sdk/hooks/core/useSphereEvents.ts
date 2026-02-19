@@ -4,7 +4,7 @@ import { useSphereContext } from './useSphere';
 import { SPHERE_KEYS } from '../../queryKeys';
 import { formatAmount } from '../../index';
 import { showToast } from '../../../components/ui/toast-utils';
-import type { DmReceivedDetail } from '../../../components/chat/data/chatTypes';
+import { CHAT_KEYS, GROUP_CHAT_KEYS, type DmReceivedDetail } from '../../../components/chat/data/chatTypes';
 import type { IncomingTransfer } from '@unicitylabs/sphere-sdk';
 
 // SDK DM shape (local mirror — SDK DTS not always available)
@@ -18,6 +18,17 @@ export function useSphereEvents(): void {
   const { sphere } = useSphereContext();
   const queryClient = useQueryClient();
   const invalidateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // When sphere instance changes (new wallet, delete, import) —
+  // immediately sync identity cache so the UI never shows stale data
+  // from the previous wallet.
+  useEffect(() => {
+    if (sphere?.identity) {
+      queryClient.setQueryData(SPHERE_KEYS.identity.current, { ...sphere.identity });
+    } else {
+      queryClient.removeQueries({ queryKey: SPHERE_KEYS.identity.all });
+    }
+  }, [sphere, queryClient]);
 
   useEffect(() => {
     if (!sphere) return;
@@ -54,17 +65,28 @@ export function useSphereEvents(): void {
     };
     const handleTransferConfirmed = invalidatePayments;
 
+    // Write sphere.identity directly into the query cache — by the time SDK
+    // fires these events, its internal state is already updated.  Plain
+    // invalidation can race with the SDK update, returning stale data.
+    const refreshIdentityCache = () => {
+      if (sphere.identity) {
+        queryClient.setQueryData(SPHERE_KEYS.identity.current, { ...sphere.identity });
+      }
+    };
+
     const handleNametagChange = () => {
+      refreshIdentityCache();
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.all });
     };
 
     const handleIdentityChange = () => {
+      refreshIdentityCache();
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.all });
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.payments.all });
       queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.l1.all });
       // Invalidate all chat queries so UI re-fetches for the new address
-      queryClient.invalidateQueries({ queryKey: ['chat'] });
-      queryClient.invalidateQueries({ queryKey: ['groupChat'] });
+      queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: GROUP_CHAT_KEYS.all });
     };
 
     const handleSyncCompleted = invalidatePayments;
@@ -78,7 +100,7 @@ export function useSphereEvents(): void {
       const peerPubkey = isFromMe ? dm.recipientPubkey : dm.senderPubkey;
 
       // Invalidate chat queries so UI re-reads from SDK
-      queryClient.invalidateQueries({ queryKey: ['chat'] });
+      queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
 
       // Dispatch lightweight event for UI components (useChat, MiniChatWindow)
       const detail: DmReceivedDetail = { peerPubkey, messageId: dm.id, isFromMe };
@@ -92,7 +114,7 @@ export function useSphereEvents(): void {
 
     // Bridge read receipts — SDK already updated isRead, just invalidate
     const handleMessageRead = () => {
-      queryClient.invalidateQueries({ queryKey: ['chat'] });
+      queryClient.invalidateQueries({ queryKey: CHAT_KEYS.all });
     };
 
     // Bridge composing indicators to custom event

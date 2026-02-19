@@ -149,6 +149,19 @@ export function buildConversations(
 }
 
 // ==========================================
+// Address ID helper (used as cache key segment)
+// ==========================================
+
+export function buildAddressId(directAddress: string): string {
+  let hash = directAddress;
+  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
+  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
+  const first = hash.slice(0, 6).toLowerCase();
+  const last = hash.slice(-6).toLowerCase();
+  return `DIRECT_${first}_${last}`;
+}
+
+// ==========================================
 // Query Keys
 // ==========================================
 
@@ -157,4 +170,8 @@ export const CHAT_KEYS = {
   conversations: (addressId: string) => ['chat', 'conversations', addressId] as const,
   messages: (addressId: string, peerPubkey: string) => ['chat', 'messages', addressId, peerPubkey] as const,
   unreadCount: (addressId: string) => ['chat', 'unreadCount', addressId] as const,
+};
+
+export const GROUP_CHAT_KEYS = {
+  all: ['groupChat'] as const,
 };
