@@ -497,9 +497,9 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     finalizeWallet(importedSphereRef.current ?? undefined);
     importedSphereRef.current = null;
 
-    // Invalidate all queries to refresh with new identity
-    queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.identity.all });
-    queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.payments.all });
+    // Remove all cached query data so old wallet balances don't flash briefly.
+    // removeQueries deletes the cache entirely; the hooks will re-fetch from scratch.
+    queryClient.removeQueries({ queryKey: SPHERE_KEYS.all });
 
     // Signal wallet creation for legacy listeners
     window.dispatchEvent(new Event("wallet-loaded"));
