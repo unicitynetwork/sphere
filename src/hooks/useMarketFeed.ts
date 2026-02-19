@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-
-const MARKET_API_URL = 'https://market-api.unicity.network';
-const MARKET_WS_URL = 'wss://market-api.unicity.network/ws/feed';
+import { useSphereContext } from '../sdk/hooks/core/useSphere';
+import { createMarketModule, type MarketModule } from '@unicitylabs/sphere-sdk';
 
 // Local mirror of SDK FeedListing (SDK doesn't export feed types)
 export interface FeedListing {
@@ -29,19 +28,6 @@ type FeedMessage = FeedInitialMessage | FeedNewMessage;
 
 const MAX_LISTINGS = 20;
 
-/** Map snake_case API response to camelCase FeedListing */
-function normalizeListing(raw: Record<string, unknown>): FeedListing {
-  return {
-    id: (raw.id ?? raw.id) as string,
-    title: (raw.title ?? '') as string,
-    descriptionPreview: (raw.descriptionPreview ?? raw.description_preview ?? '') as string,
-    agentName: (raw.agentName ?? raw.agent_name ?? '') as string,
-    agentId: (raw.agentId ?? raw.agent_id ?? 0) as number,
-    type: (raw.type ?? 'other') as string,
-    createdAt: (raw.createdAt ?? raw.created_at ?? '') as string,
-  };
-}
-
 export interface UseMarketFeedReturn {
   listings: FeedListing[];
   isConnected: boolean;
@@ -49,75 +35,86 @@ export interface UseMarketFeedReturn {
 }
 
 export function useMarketFeed(): UseMarketFeedReturn {
+  const { sphere } = useSphereContext();
   const [realtimeListings, setRealtimeListings] = useState<FeedListing[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [newListingIds, setNewListingIds] = useState<Set<string>>(new Set());
-  const wsRef = useRef<WebSocket | null>(null);
-  const newListingTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const unsubRef = useRef<(() => void) | null>(null);
+  const standaloneRef = useRef<MarketModule | null>(null);
 
-  // Fetch initial listings via REST — no SDK dependency, starts immediately
+  // Use sphere.market when available, otherwise create a standalone MarketModule
+  // so the feed works before wallet creation (getRecentListings & subscribeFeed are public)
+  const market = useMemo(() => {
+    if (sphere?.market) return sphere.market;
+    if (!standaloneRef.current) {
+      standaloneRef.current = createMarketModule();
+    }
+    return standaloneRef.current;
+  }, [sphere]);
+
+  // Drop standalone module once sphere takes over
+  useEffect(() => {
+    if (sphere?.market && standaloneRef.current) {
+      standaloneRef.current.destroy();
+      standaloneRef.current = null;
+    }
+  }, [sphere]);
+
+  // Cleanup standalone module on unmount
+  useEffect(() => {
+    return () => {
+      standaloneRef.current?.destroy();
+      standaloneRef.current = null;
+    };
+  }, []);
+
+  // Fetch initial listings via REST
   const { data: initialListings } = useQuery({
     queryKey: ['market', 'feed', 'recent'],
     queryFn: async () => {
-      const res = await fetch(`${MARKET_API_URL}/api/feed/recent`, {
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return ((data.listings ?? []) as Record<string, unknown>[]).map(normalizeListing);
+      return market.getRecentListings() as Promise<FeedListing[]>;
     },
+    enabled: !!market,
     staleTime: 60000,
   });
 
-  // Subscribe to WebSocket feed — no SDK dependency, connects immediately
+  // Subscribe to WebSocket feed
   const handleFeedMessage = useCallback((msg: FeedMessage) => {
     if (msg.type === 'initial') {
-      setRealtimeListings(msg.listings.map((l) => normalizeListing(l as unknown as Record<string, unknown>)).slice(0, MAX_LISTINGS));
+      setRealtimeListings(msg.listings.slice(0, MAX_LISTINGS));
       setIsConnected(true);
     } else if (msg.type === 'new') {
-      const normalized = normalizeListing(msg.listing as unknown as Record<string, unknown>);
       setRealtimeListings((prev) => {
-        if (prev.some((l) => l.id === normalized.id)) return prev;
-        return [normalized, ...prev].slice(0, MAX_LISTINGS);
+        if (prev.some((l) => l.id === msg.listing.id)) return prev;
+        return [msg.listing, ...prev].slice(0, MAX_LISTINGS);
       });
 
       // Mark as new for 5 seconds
-      setNewListingIds((prev) => new Set(prev).add(normalized.id));
-      const timer = setTimeout(() => {
-        newListingTimersRef.current.delete(timer);
+      setNewListingIds((prev) => new Set(prev).add(msg.listing.id));
+      setTimeout(() => {
         setNewListingIds((prev) => {
           const next = new Set(prev);
-          next.delete(normalized.id);
+          next.delete(msg.listing.id);
           return next;
         });
       }, 5000);
-      newListingTimersRef.current.add(timer);
     }
   }, []);
 
   useEffect(() => {
-    const ws = new WebSocket(MARKET_WS_URL);
-    wsRef.current = ws;
-    const timers = newListingTimersRef.current;
+    if (!market) return;
 
-    ws.onopen = () => setIsConnected(true);
-    ws.onmessage = (event) => {
-      try {
-        const raw = JSON.parse(typeof event.data === 'string' ? event.data : event.data.toString());
-        handleFeedMessage(raw as FeedMessage);
-      } catch { /* ignore malformed messages */ }
-    };
-    ws.onclose = () => setIsConnected(false);
+    unsubRef.current = market.subscribeFeed(
+      handleFeedMessage as (msg: unknown) => void,
+    );
+    setIsConnected(true);
 
     return () => {
-      ws.close();
-      wsRef.current = null;
+      unsubRef.current?.();
+      unsubRef.current = null;
       setIsConnected(false);
-      // Clear all pending new-listing timers
-      timers.forEach(clearTimeout);
-      timers.clear();
     };
-  }, [handleFeedMessage]);
+  }, [market, handleFeedMessage]);
 
   // Merge: realtime first, then fill from REST (dedup by id)
   const seenIds = new Set<string>();
