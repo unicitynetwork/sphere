@@ -43,11 +43,17 @@ export function AddressSelector({ compact = true, addressFormat = 'direct' }: Ad
 
   useEffect(() => {
     if (!sphere) return;
-    try {
-      setAddresses(sphere.getActiveAddresses());
-    } catch (e) {
-      console.error('[AddressSelector] Failed to get addresses:', e);
-    }
+    const refresh = () => {
+      try {
+        setAddresses(sphere.getActiveAddresses());
+      } catch (e) {
+        console.error('[AddressSelector] Failed to get addresses:', e);
+      }
+    };
+    refresh();
+    const unsub1 = sphere.on('address:hidden', refresh);
+    const unsub2 = sphere.on('address:unhidden', refresh);
+    return () => { unsub1(); unsub2(); };
   }, [sphere, currentAddressIndex, nametag, isDiscoveringAddresses]);
 
   // Focus nametag input when modal opens
