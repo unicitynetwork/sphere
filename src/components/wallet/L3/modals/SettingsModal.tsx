@@ -21,7 +21,6 @@ export function SettingsModal({
   onBackupWallet,
   onLogout,
   l1Balance,
-  hasMnemonic = true,
 }: SettingsModalProps) {
   const [isLookupOpen, setIsLookupOpen] = useState(false);
   const [isAddressManagerOpen, setIsAddressManagerOpen] = useState(false);
