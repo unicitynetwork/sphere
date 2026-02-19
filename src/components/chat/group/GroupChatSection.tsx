@@ -40,7 +40,6 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
     setMessageInput,
     searchQuery,
     setSearchQuery,
-    totalUnreadCount,
     isConnected,
     // Moderation
     canModerateSelectedGroup,
@@ -161,7 +160,6 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
         onClose={() => setSidebarOpen(false)}
         isCollapsed={sidebarCollapsed}
         onCollapse={() => setSidebarCollapsed(true)}
-        totalUnreadCount={totalUnreadCount}
         isRelayAdmin={isRelayAdmin}
         isAdminOfGroup={isAdminOfGroup}
         onDeleteGroup={deleteGroup}
@@ -370,7 +368,7 @@ export function GroupChatSection({ onModeChange }: GroupChatSectionProps) {
   );
 
   return (
-    <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-none md:rounded-3xl lg:rounded-none border-0 md:border md:border-neutral-200 dark:md:border-neutral-800/50 lg:border-0 overflow-hidden grid grid-cols-1 lg:grid-cols-[auto_1fr] relative lg:shadow-none h-full min-h-0 theme-transition">
+    <div className="bg-white/60 dark:bg-neutral-900/70 backdrop-blur-xl rounded-none border-0 overflow-hidden grid grid-cols-1 lg:grid-cols-[auto_1fr] relative lg:shadow-none h-full min-h-0 theme-transition">
       {chatContent}
     </div>
   );

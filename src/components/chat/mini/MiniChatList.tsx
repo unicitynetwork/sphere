@@ -5,7 +5,7 @@ import { X, Search, MessageCirclePlus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
 import { useIdentity } from '../../../sdk/hooks/core/useIdentity';
-import { type Conversation, buildConversations, getDisplayName, getAvatar, formatRelativeTime, CHAT_KEYS } from '../data/chatTypes';
+import { type Conversation, buildConversations, buildAddressId, getDisplayName, getAvatar, formatRelativeTime, CHAT_KEYS } from '../data/chatTypes';
 import { useMiniChatStore } from './miniChatStore';
 import { getColorFromPubkey } from '../utils/avatarColors';
 
@@ -15,15 +15,6 @@ interface SDKDirectMessage {
   senderPubkey: string;
   recipientPubkey: string;
   isRead: boolean;
-}
-
-function buildAddressId(directAddress: string): string {
-  let hash = directAddress;
-  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
-  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
-  const first = hash.slice(0, 6).toLowerCase();
-  const last = hash.slice(-6).toLowerCase();
-  return `DIRECT_${first}_${last}`;
 }
 
 interface MiniChatListProps {
@@ -178,7 +169,7 @@ export function MiniChatList({ onClose }: MiniChatListProps) {
                         {conversation.lastMessageText || 'No messages yet'}
                       </p>
                       {conversation.unreadCount > 0 && (
-                        <span className="min-w-5 h-5 px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-blue-500 text-white shrink-0">
+                        <span className="min-w-5 h-5 px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-orange-500 text-white shrink-0">
                           {conversation.unreadCount > 99 ? '99+' : conversation.unreadCount}
                         </span>
                       )}

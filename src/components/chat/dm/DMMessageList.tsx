@@ -134,7 +134,7 @@ export function DMMessageList({ messages, isLoading, isRecipientTyping, hasMore,
               <DMMessageBubble
                 key={message.id}
                 message={message}
-                delay={index * 0.05}
+                delay={(dateMessages.length - 1 - index) * 0.05}
               />
             ))}
           </motion.div>

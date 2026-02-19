@@ -16,11 +16,13 @@ interface DesktopState {
   openTabs: DesktopTab[];
   activeTabId: string | null;
   previousActiveTabId?: string | null;
+  walletOpen: boolean;
 }
 
 const defaultState: DesktopState = {
   openTabs: [],
   activeTabId: null,
+  walletOpen: window.matchMedia('(min-width: 1024px)').matches,
 };
 
 function loadState(): DesktopState {
@@ -43,7 +45,9 @@ function loadState(): DesktopState {
 }
 
 function saveState(state: DesktopState) {
-  localStorage.setItem(STORAGE_KEYS.DESKTOP_STATE, JSON.stringify(state));
+  // walletOpen is transient UI state (depends on screen size), don't persist it
+  const { walletOpen: _, ...persistable } = state;
+  localStorage.setItem(STORAGE_KEYS.DESKTOP_STATE, JSON.stringify(persistable));
 }
 
 export function useDesktopState() {
@@ -144,6 +148,7 @@ export function useDesktopState() {
 
   const showDesktop = useCallback(() => {
     update((prev) => {
+      const isMobile = !window.matchMedia('(min-width: 1024px)').matches;
       if (prev.activeTabId === null) {
         // Already on desktop — toggle back to the previous tab if it's still open
         const prevId = prev.previousActiveTabId;
@@ -157,9 +162,26 @@ export function useDesktopState() {
         }
         return prev;
       }
-      return { ...prev, activeTabId: null, previousActiveTabId: prev.activeTabId };
+      return {
+        ...prev,
+        activeTabId: null,
+        previousActiveTabId: prev.activeTabId,
+        // On mobile, close wallet when showing desktop
+        walletOpen: isMobile ? false : prev.walletOpen,
+      };
     });
   }, [update]);
+
+  const toggleWallet = useCallback(() => {
+    update((prev) => ({ ...prev, walletOpen: !prev.walletOpen }));
+  }, [update]);
+
+  const setWalletOpen = useCallback(
+    (open: boolean) => {
+      update((prev) => (prev.walletOpen === open ? prev : { ...prev, walletOpen: open }));
+    },
+    [update],
+  );
 
   const reorderTabs = useCallback(
     (fromIndex: number, toIndex: number) => {
@@ -177,10 +199,25 @@ export function useDesktopState() {
     openTabs: state.openTabs,
     activeTabId: state.activeTabId,
     activeTab: state.openTabs.find((t) => t.id === state.activeTabId) ?? null,
+    walletOpen: state.walletOpen,
     openTab,
     closeTab,
     activateTab,
     showDesktop,
     reorderTabs,
+    toggleWallet,
+    setWalletOpen,
   };
+}
+
+/** Lightweight subscription — only re-renders when activeTabId changes */
+export function useActiveTabId(): string | null {
+  const { data } = useQuery({
+    queryKey: DESKTOP_STATE_KEY,
+    queryFn: loadState,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    select: (s) => s.activeTabId,
+  });
+  return data ?? null;
 }

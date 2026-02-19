@@ -16,7 +16,6 @@ interface GroupListProps {
   onClose: () => void;
   isCollapsed: boolean;
   onCollapse: () => void;
-  totalUnreadCount: number;
   // Admin features
   isRelayAdmin: boolean;
   isAdminOfGroup: (groupId: string) => boolean;
@@ -39,7 +38,6 @@ export function GroupList({
   onClose,
   isCollapsed,
   onCollapse,
-  totalUnreadCount,
   isRelayAdmin,
   isAdminOfGroup,
   onDeleteGroup,
@@ -56,7 +54,7 @@ export function GroupList({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="lg:hidden absolute inset-0 bg-black/50 z-40 rounded-3xl"
+            className="lg:hidden absolute inset-0 bg-black/50 z-40"
             onClick={onClose}
           />
         )}
@@ -70,7 +68,7 @@ export function GroupList({
         transform transition-all duration-300 ease-in-out
         ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         ${isCollapsed ? 'lg:w-0 lg:border-0 lg:min-w-0' : 'lg:w-72'}
-        bg-white/95 dark:bg-neutral-900/95 lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none rounded-l-3xl lg:rounded-none
+        bg-white/95 dark:bg-neutral-900/95 lg:bg-transparent backdrop-blur-xl lg:backdrop-blur-none
       `}
       >
         {/* Header */}
@@ -81,11 +79,6 @@ export function GroupList({
             <div className="flex items-center gap-2">
               <h3 className="text-neutral-900 dark:text-white font-medium">Groups</h3>
               <Sparkles className="w-4 h-4 text-blue-500 animate-pulse" />
-              {totalUnreadCount > 0 && (
-                <span className="px-1.5 py-0.5 text-xs rounded-full bg-blue-500 text-white">
-                  {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
-                </span>
-              )}
             </div>
             <div className="flex items-center gap-2">
               {/* Create group button - available to all users */}

@@ -22,19 +22,16 @@ const CUSTOM_URL_PRESETS = [
 ];
 
 export function DesktopLayout() {
-  const { openTabs, activeTabId, openTab } = useDesktopState();
+  const { openTabs, activeTabId, openTab, walletOpen, toggleWallet, setWalletOpen } = useDesktopState();
   const { isFullscreen, toggleFullscreen, setFullscreen } = useUIState();
   const [customUrlInput, setCustomUrlInput] = useState('');
-  const [walletOpen, setWalletOpen] = useState(() => window.matchMedia('(min-width: 1024px)').matches);
 
   // Auto-open wallet panel when payment request arrives
   useEffect(() => {
-    const handlePaymentRequest = () => {
-      setWalletOpen(true);
-    };
+    const handlePaymentRequest = () => setWalletOpen(true);
     window.addEventListener('payment-requests-updated', handlePaymentRequest);
     return () => window.removeEventListener('payment-requests-updated', handlePaymentRequest);
-  }, []);
+  }, [setWalletOpen]);
 
   // Escape key exits fullscreen
   useEffect(() => {
@@ -46,8 +43,6 @@ export function DesktopLayout() {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isFullscreen, setFullscreen]);
-
-  const toggleWallet = () => setWalletOpen((prev) => !prev);
 
   const handleCustomUrlSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -171,8 +166,6 @@ export function DesktopLayout() {
 
       {/* Tab bar with wallet toggle */}
       <TabBar
-        walletOpen={walletOpen}
-        onToggleWallet={toggleWallet}
         isFullscreen={isFullscreen}
         onToggleFullscreen={toggleFullscreen}
       />

@@ -5,7 +5,7 @@ import { X, Minus, Maximize2, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useSphereContext } from '../../../sdk/hooks/core/useSphere';
 import { useIdentity } from '../../../sdk/hooks/core/useIdentity';
-import { type Conversation, type DisplayMessage, type DmReceivedDetail, toDisplayMessage, formatMessageTime, getDisplayName, getAvatar, CHAT_KEYS } from '../data/chatTypes';
+import { type Conversation, type DisplayMessage, type DmReceivedDetail, buildAddressId, toDisplayMessage, formatMessageTime, getDisplayName, getAvatar, CHAT_KEYS } from '../data/chatTypes';
 import { useMiniChatStore } from './miniChatStore';
 import { MiniChatInput } from './MiniChatInput';
 import { MarkdownContent } from '../../../utils/markdown';
@@ -27,15 +27,6 @@ const WINDOW_WIDTH = 328;
 const WINDOW_HEIGHT = 455;
 const WINDOW_GAP = 12;
 const BUBBLES_WIDTH = 88;
-
-function buildAddressId(directAddress: string): string {
-  let hash = directAddress;
-  if (hash.startsWith('DIRECT://')) hash = hash.slice(9);
-  else if (hash.startsWith('DIRECT:')) hash = hash.slice(7);
-  const first = hash.slice(0, 6).toLowerCase();
-  const last = hash.slice(-6).toLowerCase();
-  return `DIRECT_${first}_${last}`;
-}
 
 interface MiniChatWindowProps {
   conversation: Conversation;
@@ -198,7 +189,7 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
                   <div
                     className={`max-w-[80%] rounded-2xl px-3 py-2 ${
                       isOwn
-                        ? 'bg-linear-to-br from-orange-500 to-orange-600 text-white'
+                        ? 'bg-orange-500/15 dark:bg-orange-500/20 text-neutral-900 dark:text-neutral-100'
                         : 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white border border-neutral-200 dark:border-neutral-700'
                     }`}
                   >
@@ -206,7 +197,7 @@ export function MiniChatWindow({ conversation, index }: MiniChatWindowProps) {
                       <MarkdownContent text={message.content} />
                     </div>
                     <div
-                      className={`text-[10px] mt-1 ${isOwn ? 'text-white/60' : 'text-neutral-400'}`}
+                      className="text-[10px] mt-1 text-neutral-400"
                     >
                       {formatMessageTime(message.timestamp)}
                     </div>

@@ -3,13 +3,8 @@ import { motion } from 'framer-motion';
 import { useDesktopState } from '../../hooks/useDesktopState';
 import { getAgentConfig } from '../../config/activities';
 
-interface TaskbarProps {
-  walletOpen: boolean;
-  onToggleWallet: () => void;
-}
-
-export function Taskbar({ walletOpen, onToggleWallet }: TaskbarProps) {
-  const { openTabs, activeTabId, activateTab, showDesktop } = useDesktopState();
+export function Taskbar() {
+  const { openTabs, activeTabId, activateTab, showDesktop, walletOpen, toggleWallet } = useDesktopState();
 
   return (
     <div className="flex items-center gap-1 px-2 sm:px-3 py-1.5 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-xl border-t border-neutral-200 dark:border-neutral-800/50 shrink-0">
@@ -68,7 +63,7 @@ export function Taskbar({ walletOpen, onToggleWallet }: TaskbarProps) {
       {/* Wallet toggle button */}
       <div className="h-5 w-px bg-neutral-200 dark:bg-neutral-700 mx-1" />
       <button
-        onClick={onToggleWallet}
+        onClick={toggleWallet}
         className={`p-2 rounded-lg transition-colors duration-150 ${
           walletOpen
             ? 'bg-orange-500/15 text-orange-500'

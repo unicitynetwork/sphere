@@ -6,6 +6,8 @@ import { isMock } from '../../hooks/useAgentChat';
 import { ThemeToggle } from '../theme';
 import { STORAGE_KEYS } from '../../config/storageKeys';
 import { IpfsSyncIndicator } from './IpfsSyncIndicator';
+import { HeaderTooltip } from './HeaderTooltip';
+import { useDesktopState } from '../../hooks/useDesktopState';
 
 function devReset(): void {
   localStorage.removeItem(STORAGE_KEYS.DEV_AGGREGATOR_URL);
@@ -31,6 +33,7 @@ const navItems: { label: string; path: string; external?: boolean }[] = [
 export function Header() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { showDesktop } = useDesktopState();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isMinePage = location.pathname === '/mine';
 
@@ -94,7 +97,7 @@ export function Header() {
       <div className="max-w-450 mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-14 lg:h-14 flex items-stretch justify-between relative z-10">
         <div className="flex items-stretch gap-2 sm:gap-4 lg:gap-6">
           {/* Logo with enhanced effects - entire block is clickable */}
-          <Link to="/agents/dm" className="flex items-center gap-2 sm:gap-4 lg:gap-6 group">
+          <button onClick={showDesktop} className="flex items-center gap-2 sm:gap-4 lg:gap-6 group cursor-pointer">
             <div className="relative">
               <img
                 src={logoUrl}
@@ -103,7 +106,7 @@ export function Header() {
               />
             </div>
 
-            <div className="relative">
+            <div className="relative text-left">
               <div className="flex items-center gap-1.5 sm:gap-2">
                 <h1 className="text-base sm:text-lg lg:text-xl bg-clip-text text-neutral-900 dark:text-white">AgentSphere</h1>
                 <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-xs bg-orange-500/15 text-orange-600 dark:text-orange-400 border border-orange-500/30 font-medium">
@@ -120,7 +123,7 @@ export function Header() {
               {/* Decorative underline */}
               <div className="absolute -bottom-1 left-0 w-16 sm:w-20 h-0.5 bg-linear-to-r from-orange-500 to-transparent rounded-full" />
             </div>
-          </Link>
+          </button>
 
           {/* Navigation Tabs - next to logo */}
           <nav className="hidden lg:flex items-center h-full ml-8 gap-1">
@@ -198,31 +201,35 @@ export function Header() {
           <IpfsSyncIndicator />
 
           {/* Social Links */}
-          <motion.a
-            href="https://github.com/unicitynetwork"
-            target="_blank"
-            rel="noopener noreferrer"
-            whileHover={{ scale: 1.05, y: -2 }}
-            whileTap={{ scale: 0.95 }}
-            transition={{ duration: 0.05 }}
-            className="relative p-2 sm:p-2.5 lg:p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg sm:rounded-xl transition-all group"
-          >
-            <Github className="w-4 h-4 sm:w-5 sm:h-5 text-neutral-500 dark:text-neutral-400 group-hover:text-orange-400 transition-colors" />
-            <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
-          </motion.a>
+          <HeaderTooltip label="GitHub">
+            <motion.a
+              href="https://github.com/unicitynetwork"
+              target="_blank"
+              rel="noopener noreferrer"
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              transition={{ duration: 0.05 }}
+              className="relative p-2 sm:p-2.5 lg:p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg sm:rounded-xl transition-all group"
+            >
+              <Github className="w-4 h-4 sm:w-5 sm:h-5 text-neutral-500 dark:text-neutral-400 group-hover:text-orange-400 transition-colors" />
+              <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
+            </motion.a>
+          </HeaderTooltip>
 
-          <motion.a
-            href="https://discord.gg/S9f57ZKdt"
-            target="_blank"
-            rel="noopener noreferrer"
-            whileHover={{ scale: 1.05, y: -2 }}
-            whileTap={{ scale: 0.95 }}
-            transition={{ duration: 0.05 }}
-            className="relative p-2 sm:p-2.5 lg:p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg sm:rounded-xl transition-all group"
-          >
-            <DiscordIcon className="w-4 h-4 sm:w-5 sm:h-5 text-neutral-500 dark:text-neutral-400 group-hover:text-orange-400 transition-colors" />
-            <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
-          </motion.a>
+          <HeaderTooltip label="Discord">
+            <motion.a
+              href="https://discord.gg/S9f57ZKdt"
+              target="_blank"
+              rel="noopener noreferrer"
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              transition={{ duration: 0.05 }}
+              className="relative p-2 sm:p-2.5 lg:p-3 hover:bg-neutral-100 dark:hover:bg-neutral-800/80 rounded-lg sm:rounded-xl transition-all group"
+            >
+              <DiscordIcon className="w-4 h-4 sm:w-5 sm:h-5 text-neutral-500 dark:text-neutral-400 group-hover:text-orange-400 transition-colors" />
+              <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-orange-500/0 group-hover:bg-orange-500/10 transition-colors" />
+            </motion.a>
+          </HeaderTooltip>
 
           {/* Theme Toggle */}
           <ThemeToggle />
@@ -256,7 +263,7 @@ export function Header() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.35, ease: 'easeInOut' }}
             onClick={() => setMobileMenuOpen(false)}
-            className="lg:hidden fixed inset-0 top-14 bg-black/20 backdrop-blur-sm z-40"
+            className="lg:hidden fixed inset-0 top-14 bg-black/20 backdrop-blur-sm z-60"
           />
           {/* Menu */}
           <motion.div
@@ -264,7 +271,7 @@ export function Header() {
             animate={{ height: 'auto' }}
             exit={{ height: 0 }}
             transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
-            className="lg:hidden fixed left-0 right-0 top-14 backdrop-blur-xl border-b z-50 shadow-xl overflow-hidden bg-white/95 dark:bg-neutral-900/95 border-neutral-200 dark:border-neutral-800"
+            className="lg:hidden fixed left-0 right-0 top-14 backdrop-blur-xl border-b z-60 shadow-xl overflow-hidden bg-white/95 dark:bg-neutral-900/95 border-neutral-200 dark:border-neutral-800"
           >
           <nav className="px-4 py-3 space-y-1">
             {navItems.map((item) => (

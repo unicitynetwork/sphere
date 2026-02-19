@@ -118,7 +118,7 @@ export function GroupMessageList({
               key={message.id ?? `${message.timestamp}-${message.senderPubkey}`}
               message={message}
               isOwnMessage={message.senderPubkey === myPubkey}
-              delay={groupIndex === groupedMessages.length - 1 ? messageIndex * 0.05 : 0}
+              delay={groupIndex === groupedMessages.length - 1 ? (group.messages.length - 1 - messageIndex) * 0.05 : 0}
               canDelete={canDeleteMessages}
               onDelete={onDeleteMessage}
               isDeleting={isDeletingMessage}
