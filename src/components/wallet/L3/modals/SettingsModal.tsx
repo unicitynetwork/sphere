@@ -67,7 +67,7 @@ export function SettingsModal({
             icon={Download}
             color="green"
             label="Backup Wallet"
-            subtitle={!hasMnemonic ? 'Legacy wallet — no recovery phrase' : undefined}
+            subtitle={undefined}
             showChevron={false}
             onClick={() => {
               onClose();
