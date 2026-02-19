@@ -541,6 +541,7 @@ export function L3WalletView({
         onBackupWallet={() => setIsBackupOpen(true)}
         onLogout={() => setIsLogoutConfirmOpen(true)}
         l1Balance={formatL1Balance(l1Balance)}
+        hasMnemonic={hasMnemonic}
       />
 
       <BackupWalletModal

@@ -11,6 +11,7 @@ interface SettingsModalProps {
   onBackupWallet: () => void;
   onLogout: () => void;
   l1Balance?: string;
+  hasMnemonic?: boolean;
 }
 
 export function SettingsModal({
@@ -20,6 +21,7 @@ export function SettingsModal({
   onBackupWallet,
   onLogout,
   l1Balance,
+  hasMnemonic = true,
 }: SettingsModalProps) {
   const [isLookupOpen, setIsLookupOpen] = useState(false);
   const [isAddressManagerOpen, setIsAddressManagerOpen] = useState(false);
@@ -65,6 +67,7 @@ export function SettingsModal({
             icon={Download}
             color="green"
             label="Backup Wallet"
+            subtitle={!hasMnemonic ? 'Legacy wallet — no recovery phrase' : undefined}
             showChevron={false}
             onClick={() => {
               onClose();

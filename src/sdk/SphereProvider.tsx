@@ -115,7 +115,7 @@ export function SphereProvider({
 
         // Run address discovery in background after wallet is visible
         setIsDiscoveringAddresses(true);
-        instance.discoverAddresses({ autoTrack: true }).then(result => {
+        instance.discoverAddresses({ autoTrack: true, includeL1Scan: false }).then(result => {
           if (result.addresses.length > 0) {
             console.log(`[SphereProvider] Discovered ${result.addresses.length} address(es)`);
           }
