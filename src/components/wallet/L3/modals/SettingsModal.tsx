@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Settings, Layers, Download, LogOut, Key } from 'lucide-react';
+import { Settings, Layers, Download, LogOut, Key, MapPin } from 'lucide-react';
 import { BaseModal, ModalHeader, MenuButton } from '../../ui';
 import { LookupModal } from './LookupModal';
+import { AddressManagerModal } from './AddressManagerModal';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -21,6 +22,7 @@ export function SettingsModal({
   l1Balance,
 }: SettingsModalProps) {
   const [isLookupOpen, setIsLookupOpen] = useState(false);
+  const [isAddressManagerOpen, setIsAddressManagerOpen] = useState(false);
 
   return (
     <>
@@ -36,6 +38,16 @@ export function SettingsModal({
             onClick={() => {
               onClose();
               onOpenL1Wallet();
+            }}
+          />
+
+          <MenuButton
+            icon={MapPin}
+            color="neutral"
+            label="Address Manager"
+            onClick={() => {
+              onClose();
+              setIsAddressManagerOpen(true);
             }}
           />
 
@@ -76,6 +88,11 @@ export function SettingsModal({
       <LookupModal
         isOpen={isLookupOpen}
         onClose={() => setIsLookupOpen(false)}
+      />
+
+      <AddressManagerModal
+        isOpen={isAddressManagerOpen}
+        onClose={() => setIsAddressManagerOpen(false)}
       />
     </>
   );

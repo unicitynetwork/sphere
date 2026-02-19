@@ -2,7 +2,7 @@ import { Wallet, Clock, Bell, MoreVertical, Tag, Loader2, RefreshCw } from 'luci
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { L3WalletView } from './L3/views/L3WalletView';
-import { useIdentity, useWalletStatus } from '../../sdk';
+import { useIdentity, useWalletStatus, useSphereContext } from '../../sdk';
 import { useIncomingPaymentRequests } from './L3/hooks/useIncomingPaymentRequests';
 import { useUIState } from '../../hooks/useUIState';
 import { L1WalletModal } from './L1/modals/L1WalletModal';
@@ -21,6 +21,7 @@ export function WalletPanel() {
   const [isNametagModalOpen, setIsNametagModalOpen] = useState(false);
   const { isLoading: isWalletLoading, walletExists, error: walletError } = useWalletStatus();
   const { identity, nametag, isLoading: isLoadingIdentity } = useIdentity();
+  const { initProgress } = useSphereContext();
   const { pendingCount, requests, reject, paid, clearProcessed } = useIncomingPaymentRequests();
   const { setFullscreen } = useUIState();
 
@@ -78,8 +79,13 @@ export function WalletPanel() {
   if (isWalletLoading) {
     return (
       <div className={PANEL_SHELL}>
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex-1 flex flex-col items-center justify-center gap-3">
           <Loader2 className="w-6 h-6 text-orange-500 animate-spin" />
+          {initProgress && (
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 animate-pulse">
+              {initProgress.message}
+            </p>
+          )}
         </div>
       </div>
     );
@@ -102,8 +108,13 @@ export function WalletPanel() {
   if (isLoadingIdentity || !identity) {
     return (
       <div className={PANEL_SHELL}>
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex-1 flex flex-col items-center justify-center gap-3">
           <Loader2 className="w-6 h-6 text-orange-500 animate-spin" />
+          {initProgress && (
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 animate-pulse">
+              {initProgress.message}
+            </p>
+          )}
         </div>
       </div>
     );

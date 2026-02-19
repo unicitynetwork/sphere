@@ -5,7 +5,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Sphere } from "@unicitylabs/sphere-sdk";
-import type { ScanAddressProgress, LegacyFileType } from "@unicitylabs/sphere-sdk";
+import type { LegacyFileType } from "@unicitylabs/sphere-sdk";
 import { useSphereContext } from "../../../../sdk/hooks/core/useSphere";
 import { SPHERE_KEYS } from "../../../../sdk/queryKeys";
 import { recordActivity } from "../../../../services/ActivityService";
@@ -41,11 +41,7 @@ export interface UseOnboardingFlowReturn {
 
   // File import state
   selectedFile: File | null;
-  scanCount: number;
-  needsScanning: boolean;
   isDragging: boolean;
-  scanProgress: ScanAddressProgress | null;
-  showScanModal: boolean;
 
   // Nametag state
   nametagInput: string;
@@ -76,10 +72,8 @@ export interface UseOnboardingFlowReturn {
   // File import actions
   handleFileSelect: (file: File) => Promise<void>;
   handleClearFile: () => void;
-  handleScanCountChange: (count: number) => void;
   handleFileImport: () => Promise<void>;
   handlePasswordSubmit: (password: string) => Promise<void>;
-  handleCancelScan: () => void;
   handleDragOver: (e: React.DragEvent) => void;
   handleDragLeave: (e: React.DragEvent) => void;
   handleDrop: (e: React.DragEvent) => void;
@@ -110,15 +104,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
   // File import state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [scanCount, setScanCount] = useState(10);
-  const [needsScanning, setNeedsScanning] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [fileContent, setFileContent] = useState<string | Uint8Array | null>(null);
   const [detectedFileType, setDetectedFileType] = useState<LegacyFileType>('unknown');
   const [isEncrypted, setIsEncrypted] = useState(false);
-  const [scanProgress, setScanProgress] = useState<ScanAddressProgress | null>(null);
-  const [showScanModal, setShowScanModal] = useState(false);
-  const scanAbortRef = useRef<AbortController | null>(null);
   // Holds the imported Sphere instance during the import flow.
   // NOT set in SphereProvider context until finalizeWallet() to avoid premature re-renders.
   const importedSphereRef = useRef<Sphere | null>(null);
@@ -184,13 +173,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setFileContent(null);
     setDetectedFileType('unknown');
     setIsEncrypted(false);
-    setScanCount(10);
-    setNeedsScanning(true);
     setIsDragging(false);
-    setScanProgress(null);
-    setShowScanModal(false);
-    scanAbortRef.current?.abort();
-    scanAbortRef.current = null;
     importedSphereRef.current = null;
     setError(null);
   }, []);
@@ -216,23 +199,6 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setDetectedFileType(fileType);
     const encrypted = Sphere.isLegacyFileEncrypted(file.name, content);
     setIsEncrypted(encrypted);
-
-    // Determine if scanning is needed based on file type and content
-    if (fileType === 'dat' || fileType === 'txt') {
-      setNeedsScanning(true);
-    } else if (fileType === 'json' && typeof content === 'string') {
-      // JSON with BIP32 keys and no mnemonic needs scanning
-      try {
-        const json = JSON.parse(content);
-        const hasBip32 = !!(json.wallet?.chainCode || json.chainCode || json.derivationMode === 'bip32');
-        const hasMnemonic = !!json.mnemonic;
-        setNeedsScanning(hasBip32 && !hasMnemonic);
-      } catch {
-        setNeedsScanning(false);
-      }
-    } else {
-      setNeedsScanning(false);
-    }
   }, []);
 
   const handleClearFile = useCallback(() => {
@@ -240,34 +206,35 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setFileContent(null);
     setDetectedFileType('unknown');
     setIsEncrypted(false);
-    setNeedsScanning(true);
     setError(null);
   }, []);
 
-  const handleScanCountChange = useCallback((count: number) => {
-    setScanCount(count);
-  }, []);
-
-  // Route after successful import: open scan modal or go to nametag.
-  // Uses detectedFileType (from handleFileSelect) and wallet info to decide.
-  // Always stores the sphere in importedSphereRef — it is NOT in context yet.
+  // Route after successful import: show address selection (if multiple addresses discovered)
+  // or go to nametag. SDK's discoverAddresses() already ran during import, so all addresses
+  // are already tracked. We just read them and present the selection UI.
   const routeAfterImport = useCallback((importedSphere: Sphere) => {
     importedSphereRef.current = importedSphere;
 
-    const walletInfo = importedSphere.getWalletInfo();
-    const isMnemonic = detectedFileType === 'mnemonic' || walletInfo.hasMnemonic;
+    // Get all tracked addresses discovered by the SDK during import
+    const allAddresses = importedSphere.getAllTrackedAddresses();
 
-    // Scan BIP32 wallets that weren't imported from mnemonic
-    const shouldScan = !isMnemonic && (
-      detectedFileType === 'dat' ||
-      detectedFileType === 'txt' ||
-      (detectedFileType === 'json' && walletInfo.hasChainCode)
-    );
-
-    if (shouldScan) {
-      // BIP32 wallet — open scan modal. useEffect below will start scanning.
-      setScanProgress(null);
-      setShowScanModal(true);
+    if (allAddresses.length > 1) {
+      // Multiple addresses discovered — show address selection
+      const addresses: DerivedAddressInfo[] = allAddresses.map(a => ({
+        index: a.index,
+        l1Address: a.l1Address,
+        l3Address: a.directAddress,
+        path: `m/44'/60'/0'/0/${a.index}`,
+        hasNametag: !!a.nametag,
+        existingNametag: a.nametag,
+        isChange: false,
+        l1Balance: 0,
+        balanceLoading: false,
+        ipnsLoading: false,
+      }));
+      setDerivedAddresses(addresses);
+      setSelectedKeys(new Set(addresses.map(a => addrKey(a.index, false))));
+      setStep("addressSelection");
     } else if (importedSphere.identity?.nametag) {
       setStep("processing");
       setProcessingStatus("Setup complete!");
@@ -275,114 +242,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     } else {
       setStep("nametag");
     }
-  }, [detectedFileType]);
-
-  // Effect: run blockchain scan when scan modal opens.
-  // Decoupled from import callback to avoid React re-render interference.
-  // Uses a `cancelled` flag so that StrictMode's cleanup-then-remount cycle
-  // doesn't cause the first invocation's catch to clobber state.
-  useEffect(() => {
-    if (!showScanModal || !importedSphereRef.current) return;
-
-    let cancelled = false;
-    const importedSphere = importedSphereRef.current;
-    const controller = new AbortController();
-    scanAbortRef.current = controller;
-
-    (async () => {
-      try {
-        const result = await importedSphere.scanAddresses({
-          maxAddresses: scanCount,
-          gapLimit: 20,
-          includeChange: true,
-          signal: controller.signal,
-          onProgress: (progress) => {
-            if (!cancelled) setScanProgress(progress);
-          },
-        });
-
-        if (cancelled) return;
-
-        // Convert scan results to DerivedAddressInfo (with nametag data)
-        const addresses: DerivedAddressInfo[] = result.addresses.map((a) => ({
-          index: a.index,
-          l1Address: a.address,
-          l3Address: '',
-          path: a.path,
-          hasNametag: !!a.nametag,
-          existingNametag: a.nametag,
-          isChange: a.isChange,
-          l1Balance: a.balance,
-          balanceLoading: false,
-          ipnsLoading: false,
-        }));
-
-        // Always include address 0 if not found in scan
-        if (!addresses.some((a) => a.index === 0 && !a.isChange)) {
-          const addr0 = importedSphere.deriveAddress(0, false);
-          addresses.unshift({
-            index: 0,
-            l1Address: addr0.address,
-            l3Address: '',
-            path: addr0.path,
-            hasNametag: false,
-            isChange: false,
-            l1Balance: 0,
-            balanceLoading: false,
-            ipnsLoading: false,
-          });
-        }
-
-        // Initialize multi-select: all non-change addresses selected
-        const initial = new Set(
-          addresses.filter(a => !a.isChange).map(a => addrKey(a.index, false))
-        );
-        setSelectedKeys(initial);
-
-        setShowScanModal(false);
-        setDerivedAddresses(addresses);
-        setStep("addressSelection");
-      } catch (e) {
-        if (cancelled) return;
-
-        setShowScanModal(false);
-        if (controller.signal.aborted) {
-          // User cancelled — go to address selection with default address
-          const addr0 = importedSphere.deriveAddress(0, false);
-          const fallback: DerivedAddressInfo[] = [{
-            index: 0,
-            l1Address: addr0.address,
-            l3Address: '',
-            path: addr0.path,
-            hasNametag: false,
-            isChange: false,
-            l1Balance: 0,
-            balanceLoading: false,
-            ipnsLoading: false,
-          }];
-          setDerivedAddresses(fallback);
-          setSelectedKeys(new Set(["0"]));
-          setStep("addressSelection");
-        } else {
-          setError(e instanceof Error ? e.message : "Scan failed");
-          setStep("importFile");
-        }
-      } finally {
-        if (!cancelled) {
-          scanAbortRef.current = null;
-          // Do NOT clear importedSphereRef here — post-scan handlers
-          // (handleContinueWithAddress, handleDeriveNewAddress, etc.) still need it.
-          // It's cleared in handleCompleteOnboarding / goToStart.
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showScanModal]);
+  }, []);
 
   const handleFileImport = useCallback(async () => {
     if (!fileContent || !selectedFile) return;
@@ -470,10 +330,6 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     }
   }, [fileContent, selectedFile, importFromFile, routeAfterImport]);
 
-  const handleCancelScan = useCallback(() => {
-    scanAbortRef.current?.abort();
-  }, []);
-
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -520,9 +376,26 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       // (setSphere is async — React state isn't updated until next render)
       importedSphereRef.current = instance;
 
-      // SDK recovers nametag from Nostr during import.
-      // Use the returned instance directly (not context `sphere` which is stale).
-      if (instance.identity?.nametag) {
+      // Check if SDK discovered multiple addresses during import
+      const allAddresses = instance.getAllTrackedAddresses();
+      if (allAddresses.length > 1) {
+        const addresses: DerivedAddressInfo[] = allAddresses.map(a => ({
+          index: a.index,
+          l1Address: a.l1Address,
+          l3Address: a.directAddress,
+          path: `m/44'/60'/0'/0/${a.index}`,
+          hasNametag: !!a.nametag,
+          existingNametag: a.nametag,
+          isChange: false,
+          l1Balance: 0,
+          balanceLoading: false,
+          ipnsLoading: false,
+        }));
+        setDerivedAddresses(addresses);
+        setSelectedKeys(new Set(addresses.map(a => addrKey(a.index, false))));
+        setStep("addressSelection");
+      } else if (instance.identity?.nametag) {
+        // SDK recovers nametag from Nostr during import.
         setStep("processing");
         setProcessingStatus("Setup complete!");
         setIsProcessingComplete(true);
@@ -782,11 +655,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
     // File import state
     selectedFile,
-    scanCount,
-    needsScanning,
     isDragging,
-    scanProgress,
-    showScanModal,
 
     // Nametag state
     nametagInput,
@@ -817,10 +686,8 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     // File import actions
     handleFileSelect,
     handleClearFile,
-    handleScanCountChange,
     handleFileImport,
     handlePasswordSubmit,
-    handleCancelScan,
     handleDragOver,
     handleDragLeave,
     handleDrop,

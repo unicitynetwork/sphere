@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import type { Sphere, PeerInfo } from '@unicitylabs/sphere-sdk';
+import type { Sphere, PeerInfo, InitProgress } from '@unicitylabs/sphere-sdk';
 import type { BrowserProviders } from '@unicitylabs/sphere-sdk/impl/browser';
 
 export interface SphereContextValue {
@@ -10,6 +10,12 @@ export interface SphereContextValue {
   isInitialized: boolean;
   walletExists: boolean;
   error: Error | null;
+
+  /** True while background address discovery is running (post-init) */
+  isDiscoveringAddresses: boolean;
+
+  /** Current SDK initialization progress (null when idle or complete) */
+  initProgress: InitProgress | null;
 
   /** Resolve a nametag via Nostr transport — works without a wallet */
   resolveNametag: (nametag: string) => Promise<PeerInfo | null>;

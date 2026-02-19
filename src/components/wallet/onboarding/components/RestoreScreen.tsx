@@ -8,6 +8,7 @@ interface RestoreScreenProps {
   seedWords: string[];
   isBusy: boolean;
   error: string | null;
+  progressMessage?: string | null;
   onSeedWordsChange: (words: string[]) => void;
   onRestore: () => void;
   onBack: () => void;
@@ -17,6 +18,7 @@ export function RestoreScreen({
   seedWords,
   isBusy,
   error,
+  progressMessage,
   onSeedWordsChange,
   onRestore,
   onBack,
@@ -137,6 +139,17 @@ export function RestoreScreen({
           </span>
         </motion.button>
       </div>
+
+      {isBusy && progressMessage && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex items-center justify-center gap-2 text-neutral-500 dark:text-neutral-400 text-[11px] mt-2.5"
+        >
+          <Loader2 className="w-3 h-3 animate-spin text-blue-500" />
+          <span>{progressMessage}</span>
+        </motion.div>
+      )}
 
       {error && (
         <motion.p

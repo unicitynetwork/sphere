@@ -6,11 +6,11 @@ import {
   type ReactNode,
 } from 'react';
 import { Sphere, TokenRegistry, NETWORKS } from '@unicitylabs/sphere-sdk';
+import type { InitProgress, NetworkType } from '@unicitylabs/sphere-sdk';
 import {
   createBrowserProviders,
   type BrowserProviders,
 } from '@unicitylabs/sphere-sdk/impl/browser';
-import type { NetworkType } from '@unicitylabs/sphere-sdk';
 import { SphereContext } from './SphereContext';
 
 const COINGECKO_BASE_URL = import.meta.env.DEV
@@ -61,6 +61,8 @@ export function SphereProvider({
   const [walletExists, setWalletExists] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [ipfsEnabled, setIpfsEnabled] = useState(isIpfsEnabled);
+  const [isDiscoveringAddresses, setIsDiscoveringAddresses] = useState(false);
+  const [initProgress, setInitProgress] = useState<InitProgress | null>(null);
   const sphereRef = useRef<Sphere | null>(null);
 
   const initialize = useCallback(async (attempt = 0) => {
@@ -96,16 +98,32 @@ export function SphereProvider({
       setWalletExists(exists);
 
       if (exists) {
+        setInitProgress({ step: 'initializing', message: 'Loading wallet...' });
         const { sphere: instance } = await Sphere.init({
           ...browserProviders,
           l1: {},
+          discoverAddresses: false, // Run separately below for UX
+          onProgress: setInitProgress,
         });
         if (browserProviders.ipfsTokenStorage) {
           await instance.addTokenStorageProvider(browserProviders.ipfsTokenStorage);
           instance.sync().catch(err => console.warn('[SphereProvider] Initial IPFS sync failed:', err));
         }
+        setInitProgress(null);
         sphereRef.current = instance;
         setSphere(instance);
+
+        // Run address discovery in background after wallet is visible
+        setIsDiscoveringAddresses(true);
+        instance.discoverAddresses({ autoTrack: true }).then(result => {
+          if (result.addresses.length > 0) {
+            console.log(`[SphereProvider] Discovered ${result.addresses.length} address(es)`);
+          }
+        }).catch(err => {
+          console.warn('[SphereProvider] Address discovery failed:', err);
+        }).finally(() => {
+          setIsDiscoveringAddresses(false);
+        });
       } else {
         // Pre-connect transport for nametag lookups during onboarding
         const transport = browserProviders.transport;
@@ -130,6 +148,7 @@ export function SphereProvider({
       console.error('[SphereProvider] Initialization failed:', err);
       setError(err instanceof Error ? err : new Error(message));
     } finally {
+      setInitProgress(null);
       setIsLoading(false);
     }
   }, [network]);
@@ -155,12 +174,15 @@ export function SphereProvider({
       }
 
       try {
+        setInitProgress({ step: 'initializing', message: 'Creating wallet...' });
         const { sphere: instance, generatedMnemonic } = await Sphere.init({
           ...providers,
           autoGenerate: true,
           nametag: options?.nametag,
           l1: {},
+          onProgress: setInitProgress,
         });
+        setInitProgress(null);
         if (providers.ipfsTokenStorage) {
           await instance.addTokenStorageProvider(providers.ipfsTokenStorage);
           instance.sync().catch(err => console.warn('[SphereProvider] Initial IPFS sync failed:', err));
@@ -196,6 +218,7 @@ export function SphereProvider({
 
         return generatedMnemonic;
       } catch (err) {
+        setInitProgress(null);
         // If nametag was taken or any other error during init,
         // wallet data may already be persisted — clean it up
         const clearDone = Sphere.clear({
@@ -251,12 +274,15 @@ export function SphereProvider({
         await providers.transport.disconnect();
       }
 
+      setInitProgress({ step: 'initializing', message: 'Importing wallet...' });
       const { sphere: instance } = await Sphere.init({
         ...providers,
         mnemonic,
         nametag: options?.nametag,
         l1: {},
+        onProgress: setInitProgress,
       });
+      setInitProgress(null);
       if (providers.ipfsTokenStorage) {
         await instance.addTokenStorageProvider(providers.ipfsTokenStorage);
         instance.sync().catch(err => console.warn('[SphereProvider] Initial IPFS sync failed:', err));
@@ -280,6 +306,7 @@ export function SphereProvider({
       }
 
       try {
+        setInitProgress({ step: 'initializing', message: 'Importing file...' });
         const result = await Sphere.importFromLegacyFile({
           fileContent: options.fileContent,
           fileName: options.fileName,
@@ -291,7 +318,9 @@ export function SphereProvider({
           tokenStorage: providers.tokenStorage,
           l1: {},
           groupChat: providers.groupChat,
+          onProgress: setInitProgress,
         });
+        setInitProgress(null);
 
         // Don't setSphere here — the onboarding flow calls finalizeWallet(sphere)
         // after scanning / address selection / nametag are done.
@@ -306,6 +335,7 @@ export function SphereProvider({
           error: result.error,
         };
       } catch (err) {
+        setInitProgress(null);
         // Clean up on failure (with timeout to avoid hanging on blocked IDB)
         const clearDone = Sphere.clear({
           storage: providers.storage,
@@ -403,6 +433,8 @@ export function SphereProvider({
     isInitialized: !!sphere,
     walletExists,
     error,
+    isDiscoveringAddresses,
+    initProgress,
     resolveNametag,
     createWallet,
     importWallet,
