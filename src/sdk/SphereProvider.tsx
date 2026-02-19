@@ -5,6 +5,7 @@ import {
   useRef,
   type ReactNode,
 } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Sphere, TokenRegistry, NETWORKS } from '@unicitylabs/sphere-sdk';
 import type { InitProgress, NetworkType } from '@unicitylabs/sphere-sdk';
 import {
@@ -12,6 +13,7 @@ import {
   type BrowserProviders,
 } from '@unicitylabs/sphere-sdk/impl/browser';
 import { SphereContext } from './SphereContext';
+import { SPHERE_KEYS } from './queryKeys';
 
 const COINGECKO_BASE_URL = import.meta.env.DEV
   ? '/coingecko'
@@ -106,6 +108,7 @@ export function SphereProvider({
   children,
   network = 'testnet',
 }: SphereProviderProps) {
+  const queryClient = useQueryClient();
   const [sphere, setSphere] = useState<Sphere | null>(null);
   const [providers, setProviders] = useState<BrowserProviders | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -116,7 +119,7 @@ export function SphereProvider({
   const [initProgress, setInitProgress] = useState<InitProgress | null>(null);
   const sphereRef = useRef<Sphere | null>(null);
 
-  const initialize = useCallback(async (attempt = 0) => {
+  const initialize = useCallback(async (attempt = 0, skipLoading = false) => {
     try {
       // Destroy previous instance to release IndexedDB connections
       if (sphereRef.current) {
@@ -124,7 +127,7 @@ export function SphereProvider({
         sphereRef.current = null;
       }
 
-      setIsLoading(true);
+      if (!skipLoading) setIsLoading(true);
       setError(null);
 
       const browserProviders = createBrowserProviders({
@@ -190,7 +193,7 @@ export function SphereProvider({
       if (message.includes('IndexedDB open timed out') && attempt < 1) {
         console.warn('[SphereProvider] IndexedDB open timed out, retrying in 1s...');
         await new Promise(r => setTimeout(r, 1000));
-        return initialize(attempt + 1);
+        return initialize(attempt + 1, skipLoading);
       }
 
       console.error('[SphereProvider] Initialization failed:', err);
@@ -226,17 +229,15 @@ export function SphereProvider({
         });
         setInitProgress(null);
         setupIpfsSync(instance, providers);
-
-        sphereRef.current = instance;
-        setSphere(instance);
-        setWalletExists(true);
         notifyKbbot(instance);
 
         if (!generatedMnemonic) {
           throw new Error('Failed to generate mnemonic');
         }
 
-        return generatedMnemonic;
+        // Don't set walletExists/sphere here — let finalizeWallet() handle it
+        // so the onboarding flow can show the completion screen first.
+        return { mnemonic: generatedMnemonic, sphere: instance };
       } catch (err) {
         setInitProgress(null);
         await cleanupOnError(providers);
@@ -367,14 +368,17 @@ export function SphereProvider({
     // Clear localStorage regardless of whether DB deletion succeeded.
     clearAllSphereData();
 
+    // Clear React Query cache so old balances/tokens don't leak to new wallet
+    queryClient.removeQueries({ queryKey: SPHERE_KEYS.all });
+
     // Reset React state
     setSphere(null);
     setWalletExists(false);
     setError(null);
 
-    // Reinitialize with fresh providers
-    await initialize();
-  }, [providers, initialize]);
+    // Reinitialize with fresh providers (skip loading spinner — onboarding UI is already visible)
+    await initialize(0, true);
+  }, [providers, initialize, queryClient]);
 
   const finalizeWallet = useCallback((importedSphere?: Sphere) => {
     if (importedSphere) {

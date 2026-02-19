@@ -48,6 +48,10 @@ export function CreateWalletFlow() {
     setNametagInput,
     nametagAvailability,
     processingStatus,
+    processingStep,
+    processingTotalSteps,
+    processingTitle,
+    processingCompleteTitle,
     isProcessingComplete,
     handleCompleteOnboarding,
 
@@ -83,7 +87,7 @@ export function CreateWalletFlow() {
   } = useOnboardingFlow();
 
   return (
-    <div className="flex flex-col items-center justify-center h-full p-6 text-center relative">
+    <div className="flex flex-col items-center justify-center min-h-full p-6 text-center relative">
       <AnimatePresence mode="wait">
         {step === "start" && (
           <StartScreen
@@ -179,6 +183,10 @@ export function CreateWalletFlow() {
         {step === "processing" && (
           <ProcessingScreen
             status={processingStatus}
+            currentStep={processingStep}
+            totalSteps={processingTotalSteps}
+            title={processingTitle}
+            completeTitle={processingCompleteTitle}
             isComplete={isProcessingComplete}
             onComplete={handleCompleteOnboarding}
           />

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, AlertTriangle, Download, LogOut, Loader2, Check } from 'lucide-react';
 import { useGlobalSyncStatus } from '../../../../hooks/useGlobalSyncStatus';
@@ -22,6 +22,24 @@ export function LogoutConfirmModal({
   const { isAnySyncing, statusMessage } = useGlobalSyncStatus();
   const [showSyncWarning, setShowSyncWarning] = useState(false);
   const [acceptedRisk, setAcceptedRisk] = useState(false);
+
+  // Logout progress tracking
+  const [logoutStep, setLogoutStep] = useState(0);
+  const [logoutStatus, setLogoutStatus] = useState("Closing connections...");
+  const logoutTotalSteps = 2;
+
+  useEffect(() => {
+    if (!isLoggingOut) {
+      setLogoutStep(0);
+      setLogoutStatus("Closing connections...");
+      return;
+    }
+    const timer = setTimeout(() => {
+      setLogoutStep(1);
+      setLogoutStatus("Clearing wallet data...");
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [isLoggingOut]);
 
   const handleLogoutClick = () => {
     if (isAnySyncing) {
@@ -211,9 +229,62 @@ export function LogoutConfirmModal({
 
             <div className="px-6 pb-6 pt-2 space-y-3">
               {isLoggingOut ? (
-                <div className="flex flex-col items-center gap-3 py-4">
-                  <Loader2 className="w-6 h-6 text-orange-500 animate-spin" />
-                  <span className="text-sm text-neutral-500 dark:text-neutral-400">Logging out...</span>
+                <div className="flex flex-col items-center gap-4 py-4">
+                  {/* Animated spinner */}
+                  <div className="relative w-16 h-16">
+                    <motion.div
+                      className="absolute inset-0 border-3 border-neutral-200 dark:border-neutral-800/50 rounded-full"
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+                    />
+                    <motion.div
+                      className="absolute inset-1.5 border-3 border-orange-500/30 rounded-full border-t-orange-500 border-r-orange-500"
+                      animate={{ rotate: -360 }}
+                      transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                    />
+                    <div className="absolute inset-3 bg-orange-500/20 rounded-full blur-xl" />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <motion.div
+                        animate={{ scale: [1, 1.1, 1], opacity: [0.5, 1, 0.5] }}
+                        transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                      >
+                        <Loader2 className="w-6 h-6 text-orange-500 dark:text-orange-400 animate-spin" />
+                      </motion.div>
+                    </div>
+                  </div>
+
+                  <span className="text-sm font-bold text-neutral-900 dark:text-white">Logging out...</span>
+
+                  {/* Status indicator */}
+                  <motion.div
+                    key={logoutStatus}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="flex items-center gap-2 text-neutral-700 dark:text-neutral-300 bg-orange-50 dark:bg-orange-900/20 px-3 py-2 rounded-lg border border-orange-200 dark:border-orange-700/30 text-xs"
+                  >
+                    <motion.div
+                      animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }}
+                      transition={{ duration: 1.5, repeat: Infinity }}
+                      className="w-2 h-2 rounded-full bg-orange-500 dark:bg-orange-400 shrink-0"
+                    />
+                    <span className="font-medium">{logoutStatus}</span>
+                  </motion.div>
+
+                  {/* Step dots */}
+                  <div className="flex items-center gap-2">
+                    {Array.from({ length: logoutTotalSteps }).map((_, i) => (
+                      <div
+                        key={i}
+                        className={`w-2 h-2 rounded-full transition-colors duration-300 ${
+                          i < logoutStep
+                            ? 'bg-emerald-500'
+                            : i === logoutStep
+                              ? 'bg-orange-500'
+                              : 'bg-neutral-300 dark:bg-neutral-600'
+                        }`}
+                      />
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <>

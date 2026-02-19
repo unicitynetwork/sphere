@@ -79,12 +79,37 @@ export function WalletPanel() {
   if (isWalletLoading) {
     return (
       <div className={PANEL_SHELL}>
-        <div className="flex-1 flex flex-col items-center justify-center gap-3">
-          <Loader2 className="w-6 h-6 text-orange-500 animate-spin" />
+        <div className="flex-1 flex flex-col items-center justify-center gap-4">
+          <div className="relative w-20 h-20">
+            <motion.div
+              className="absolute inset-0 border-3 border-neutral-200 dark:border-neutral-800/50 rounded-full"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+            />
+            <motion.div
+              className="absolute inset-1.5 border-3 border-orange-500/30 rounded-full border-t-orange-500 border-r-orange-500"
+              animate={{ rotate: -360 }}
+              transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+            />
+            <div className="absolute inset-3 bg-orange-500/20 rounded-full blur-xl" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <motion.div
+                animate={{ scale: [1, 1.1, 1], opacity: [0.5, 1, 0.5] }}
+                transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+              >
+                <Loader2 className="w-7 h-7 text-orange-500 dark:text-orange-400 animate-spin" />
+              </motion.div>
+            </div>
+          </div>
           {initProgress && (
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 animate-pulse">
+            <motion.p
+              key={initProgress.message}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="text-xs text-neutral-500 dark:text-neutral-400 font-medium"
+            >
               {initProgress.message}
-            </p>
+            </motion.p>
           )}
         </div>
       </div>
@@ -108,12 +133,37 @@ export function WalletPanel() {
   if (isLoadingIdentity || !identity) {
     return (
       <div className={PANEL_SHELL}>
-        <div className="flex-1 flex flex-col items-center justify-center gap-3">
-          <Loader2 className="w-6 h-6 text-orange-500 animate-spin" />
+        <div className="flex-1 flex flex-col items-center justify-center gap-4">
+          <div className="relative w-20 h-20">
+            <motion.div
+              className="absolute inset-0 border-3 border-neutral-200 dark:border-neutral-800/50 rounded-full"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+            />
+            <motion.div
+              className="absolute inset-1.5 border-3 border-orange-500/30 rounded-full border-t-orange-500 border-r-orange-500"
+              animate={{ rotate: -360 }}
+              transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+            />
+            <div className="absolute inset-3 bg-orange-500/20 rounded-full blur-xl" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <motion.div
+                animate={{ scale: [1, 1.1, 1], opacity: [0.5, 1, 0.5] }}
+                transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+              >
+                <Loader2 className="w-7 h-7 text-orange-500 dark:text-orange-400 animate-spin" />
+              </motion.div>
+            </div>
+          </div>
           {initProgress && (
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 animate-pulse">
+            <motion.p
+              key={initProgress.message}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="text-xs text-neutral-500 dark:text-neutral-400 font-medium"
+            >
               {initProgress.message}
-            </p>
+            </motion.p>
           )}
         </div>
       </div>

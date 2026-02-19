@@ -48,6 +48,10 @@ export interface UseOnboardingFlowReturn {
   setNametagInput: (value: string) => void;
   nametagAvailability: NametagAvailability;
   processingStatus: string;
+  processingStep: number;
+  processingTotalSteps: number;
+  processingTitle: string;
+  processingCompleteTitle: string;
   isProcessingComplete: boolean;
   handleCompleteOnboarding: () => Promise<void>;
 
@@ -86,7 +90,7 @@ export interface UseOnboardingFlowReturn {
 
 export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const queryClient = useQueryClient();
-  const { sphere, createWallet, resolveNametag, importWallet, importFromFile, finalizeWallet, walletExists } = useSphereContext();
+  const { sphere, createWallet, resolveNametag, importWallet, importFromFile, finalizeWallet, walletExists, initProgress } = useSphereContext();
 
   // Step management — start at "nametag" only if wallet is fully finalized but missing nametag
   // (e.g. page refresh after wallet creation without nametag).
@@ -106,7 +110,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [fileContent, setFileContent] = useState<string | Uint8Array | null>(null);
-  const [detectedFileType, setDetectedFileType] = useState<LegacyFileType>('unknown');
+  const [, setDetectedFileType] = useState<LegacyFileType>('unknown');
   const [isEncrypted, setIsEncrypted] = useState(false);
   // Holds the imported Sphere instance during the import flow.
   // NOT set in SphereProvider context until finalizeWallet() to avoid premature re-renders.
@@ -116,6 +120,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
   const [nametagInput, setNametagInput] = useState("");
   const [nametagAvailability, setNametagAvailability] = useState<NametagAvailability>('idle');
   const [processingStatus, setProcessingStatus] = useState("");
+  const [processingStep, setProcessingStep] = useState(0);
+  const [processingTotalSteps, setProcessingTotalSteps] = useState(3);
+  const [processingTitle, setProcessingTitle] = useState("Setting up Profile...");
+  const [processingCompleteTitle, setProcessingCompleteTitle] = useState("Profile Ready!");
   const [isProcessingComplete, setIsProcessingComplete] = useState(false);
 
   // Debounced nametag availability check with retry on transport failure
@@ -157,6 +165,26 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       clearTimeout(timer);
     };
   }, [nametagInput, resolveNametag]);
+
+  // Sync SDK progress to processing screen status text
+  useEffect(() => {
+    if (!initProgress || step !== 'processing') return;
+    setProcessingStatus(initProgress.message);
+    // Advance step indicator based on SDK progress
+    switch (initProgress.step) {
+      case 'recovering_nametag':
+      case 'syncing_identity':
+      case 'registering_nametag':
+        setProcessingStep(prev => Math.max(prev, 1));
+        break;
+      case 'syncing_tokens':
+      case 'discovering_addresses':
+      case 'finalizing':
+      case 'complete':
+        setProcessingStep(prev => Math.max(prev, 2));
+        break;
+    }
+  }, [initProgress, step]);
 
   // Address selection state (multi-select, using composite keys to distinguish receive vs change)
   const [derivedAddresses, setDerivedAddresses] = useState<DerivedAddressInfo[]>([]);
@@ -237,6 +265,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       setStep("addressSelection");
     } else if (importedSphere.identity?.nametag) {
       setStep("processing");
+      setProcessingTitle("Importing Wallet...");
+      setProcessingCompleteTitle("Import Complete!");
+      setProcessingTotalSteps(3);
+      setProcessingStep(2);
       setProcessingStatus("Setup complete!");
       setIsProcessingComplete(true);
     } else {
@@ -256,6 +288,15 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setIsBusy(true);
     setError(null);
 
+    // Show processing screen during import
+    setStep("processing");
+    setProcessingTitle("Importing Wallet...");
+    setProcessingCompleteTitle("Import Complete!");
+    setProcessingStep(0);
+    setProcessingTotalSteps(3);
+    setProcessingStatus("Importing wallet...");
+    setIsProcessingComplete(false);
+
     try {
       const result = await importFromFile({
         fileContent,
@@ -269,6 +310,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
           return;
         }
         setError(result.error || "Import failed");
+        setStep("importFile");
         return;
       }
 
@@ -285,6 +327,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Import failed");
+      setStep("importFile");
     } finally {
       setIsBusy(false);
     }
@@ -296,6 +339,15 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setIsBusy(true);
     setError(null);
 
+    // Show processing screen during import
+    setStep("processing");
+    setProcessingTitle("Importing Wallet...");
+    setProcessingCompleteTitle("Import Complete!");
+    setProcessingStep(0);
+    setProcessingTotalSteps(3);
+    setProcessingStatus("Decrypting and importing wallet...");
+    setIsProcessingComplete(false);
+
     try {
       const result = await importFromFile({
         fileContent,
@@ -306,9 +358,11 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       if (!result.success) {
         if (result.needsPassword) {
           setError("Incorrect password. Please try again.");
+          setStep("passwordPrompt");
           return;
         }
         setError(result.error || "Decryption failed");
+        setStep("passwordPrompt");
         return;
       }
 
@@ -325,6 +379,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Decryption failed");
+      setStep("passwordPrompt");
     } finally {
       setIsBusy(false);
     }
@@ -368,15 +423,23 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setIsBusy(true);
     setError(null);
 
+    // Show processing screen during import
+    setStep("processing");
+    setProcessingTitle("Importing Wallet...");
+    setProcessingCompleteTitle("Import Complete!");
+    setProcessingStep(0);
+    setProcessingTotalSteps(3);
+    setProcessingStatus("Importing wallet...");
+    setIsProcessingComplete(false);
+
     try {
       const mnemonic = words.join(" ");
       const instance = await importWallet(mnemonic);
 
       // Store in ref so handleMintNametag / handleSkipNametag can access it
-      // (setSphere is async — React state isn't updated until next render)
       importedSphereRef.current = instance;
 
-      // Show address selection so user can see discovered addresses and derive more
+      // Route to next screen after import completes
       const allAddresses = instance.getAllTrackedAddresses();
       if (allAddresses.length >= 1) {
         const addresses: DerivedAddressInfo[] = allAddresses.map(a => ({
@@ -395,8 +458,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         setSelectedKeys(new Set(addresses.map(a => addrKey(a.index, false))));
         setStep("addressSelection");
       } else if (instance.identity?.nametag) {
-        // SDK recovers nametag from Nostr during import.
-        setStep("processing");
+        setProcessingStep(2);
         setProcessingStatus("Setup complete!");
         setIsProcessingComplete(true);
       } else {
@@ -405,6 +467,7 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     } catch (e) {
       const message = e instanceof Error ? e.message : "Invalid recovery phrase";
       setError(message);
+      setStep("restore");
     } finally {
       setIsBusy(false);
     }
@@ -420,7 +483,12 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     const cleanTag = nametagInput.trim().replace("@", "");
 
     setStep("processing");
+    setProcessingTitle("Setting up Profile...");
+    setProcessingCompleteTitle("Profile Ready!");
+    setProcessingStep(0);
+    setProcessingTotalSteps(3);
     setProcessingStatus("Checking Unicity ID availability...");
+    setIsProcessingComplete(false);
 
     try {
       // Step 1: Check nametag availability via Nostr (no wallet needed)
@@ -432,21 +500,27 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
         return;
       }
 
+      setProcessingStep(1);
+
       const activeSphere = importedSphereRef.current ?? sphere;
       if (activeSphere) {
         // Import flow — wallet already exists (in ref), just register nametag
         setProcessingStatus("Registering Unicity ID...");
         await activeSphere.registerNametag(cleanTag);
         recordActivity("wallet_created", { isPublic: false });
+        setProcessingStep(2);
         setProcessingStatus("Setup complete!");
         setIsProcessingComplete(true);
       } else {
         // Create flow — create wallet with nametag
         setProcessingStatus("Creating wallet and registering Unicity ID...");
-        const mnemonic = await createWallet({ nametag: cleanTag });
-        setGeneratedMnemonic(mnemonic);
+        const result = await createWallet({ nametag: cleanTag });
+        setGeneratedMnemonic(result.mnemonic);
+        importedSphereRef.current = result.sphere;
         recordActivity("wallet_created", { isPublic: false });
-        // WalletPanel will switch from onboarding to wallet UI automatically
+        setProcessingStep(2);
+        setProcessingStatus("Setup complete!");
+        setIsProcessingComplete(true);
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to register Unicity ID";
@@ -465,19 +539,28 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
 
     try {
       setStep("processing");
+      setProcessingTitle("Setting up Profile...");
+      setProcessingCompleteTitle("Profile Ready!");
+      setProcessingStep(0);
+      setIsProcessingComplete(false);
 
       if (importedSphereRef.current ?? sphere) {
         // Import flow — wallet already exists (in ref), just finalize
+        setProcessingTotalSteps(1);
         setProcessingStatus("Setup complete!");
         setIsProcessingComplete(true);
         recordActivity("wallet_created", { isPublic: false });
       } else {
         // Create flow — create wallet without nametag
+        setProcessingTotalSteps(2);
         setProcessingStatus("Creating wallet...");
-        const mnemonic = await createWallet();
-        setGeneratedMnemonic(mnemonic);
+        const result = await createWallet();
+        setGeneratedMnemonic(result.mnemonic);
+        importedSphereRef.current = result.sphere;
         recordActivity("wallet_created", { isPublic: false });
-        // WalletPanel will switch from onboarding to wallet UI automatically
+        setProcessingStep(1);
+        setProcessingStatus("Setup complete!");
+        setIsProcessingComplete(true);
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to create wallet";
@@ -600,6 +683,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
       // Route based on nametag
       if (activeSphere.identity?.nametag) {
         setStep("processing");
+        setProcessingTitle("Importing Wallet...");
+        setProcessingCompleteTitle("Import Complete!");
+        setProcessingTotalSteps(3);
+        setProcessingStep(2);
         setProcessingStatus("Setup complete!");
         setIsProcessingComplete(true);
       } else {
@@ -662,6 +749,10 @@ export function useOnboardingFlow(): UseOnboardingFlowReturn {
     setNametagInput,
     nametagAvailability,
     processingStatus,
+    processingStep,
+    processingTotalSteps,
+    processingTitle,
+    processingCompleteTitle,
     isProcessingComplete,
     handleCompleteOnboarding,
 

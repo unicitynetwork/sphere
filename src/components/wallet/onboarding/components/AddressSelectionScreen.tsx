@@ -89,16 +89,16 @@ export function AddressSelectionScreen({
     >
       {/* Icon */}
       <motion.div
-        className="relative w-18 h-18 mx-auto mb-6"
+        className="relative w-14 h-14 sm:w-18 sm:h-18 mx-auto mb-4 sm:mb-6"
         whileHover={{ scale: 1.05 }}
       >
         <div className="absolute inset-0 bg-purple-500/30 rounded-2xl blur-xl" />
         <div className="relative w-full h-full rounded-2xl bg-linear-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-xl shadow-purple-500/25">
-          <Wallet className="w-9 h-9 text-white" />
+          <Wallet className="w-7 h-7 sm:w-9 sm:h-9 text-white" />
         </div>
       </motion.div>
 
-      <h2 className="text-2xl font-bold text-neutral-900 dark:text-white mb-2 tracking-tight">
+      <h2 className="text-xl sm:text-2xl font-bold text-neutral-900 dark:text-white mb-2 tracking-tight">
         Select Addresses
       </h2>
       <p className="text-neutral-500 dark:text-neutral-400 text-sm mb-4 mx-auto leading-relaxed">
@@ -130,7 +130,7 @@ export function AddressSelectionScreen({
       </div>
 
       {/* Address List */}
-      <div className="max-h-60 overflow-y-auto rounded-xl border border-neutral-200 dark:border-neutral-700 mb-3">
+      <div className="max-h-44 sm:max-h-60 overflow-y-auto rounded-xl border border-neutral-200 dark:border-neutral-700 mb-3">
         {derivedAddresses.length === 0 ? (
           <div className="py-6 flex items-center justify-center gap-3">
             <Loader2 className="w-4 h-4 animate-spin text-purple-500" />

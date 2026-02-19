@@ -19,7 +19,7 @@ export interface SphereContextValue {
 
   /** Resolve a nametag via Nostr transport — works without a wallet */
   resolveNametag: (nametag: string) => Promise<PeerInfo | null>;
-  createWallet: (options?: CreateWalletOptions) => Promise<string>;
+  createWallet: (options?: CreateWalletOptions) => Promise<{ mnemonic: string; sphere: Sphere }>;
   importWallet: (
     mnemonic: string,
     options?: ImportWalletOptions,

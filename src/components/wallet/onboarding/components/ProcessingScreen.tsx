@@ -1,18 +1,30 @@
 /**
- * ProcessingScreen - Shows progress during nametag minting
+ * ProcessingScreen - Shows progress during wallet creation, import, and logout
  */
 import { motion } from "framer-motion";
 import { Loader2, CheckCircle2 } from "lucide-react";
 
 interface ProcessingScreenProps {
   status: string;
+  currentStep?: number;
+  totalSteps?: number;
+  title?: string;
+  completeTitle?: string;
+  completeButtonText?: string;
   isComplete?: boolean;
   onComplete?: () => void;
 }
 
-export function ProcessingScreen({ status, isComplete = false, onComplete }: ProcessingScreenProps) {
-  if (import.meta.env.DEV) console.log('🖥️ ProcessingScreen render:', { status, isComplete, hasOnComplete: !!onComplete });
-
+export function ProcessingScreen({
+  status,
+  currentStep = 0,
+  totalSteps = 3,
+  title = "Setting up Profile...",
+  completeTitle = "Profile Ready!",
+  completeButtonText = "Let's go!",
+  isComplete = false,
+  onComplete,
+}: ProcessingScreenProps) {
   return (
     <motion.div
       key="processing"
@@ -83,7 +95,7 @@ export function ProcessingScreen({ status, isComplete = false, onComplete }: Pro
         transition={{ delay: 0.2 }}
         className="text-xl font-bold text-neutral-900 dark:text-white mb-5 tracking-tight"
       >
-        {isComplete ? "Profile Ready!" : "Setting up Profile..."}
+        {isComplete ? completeTitle : title}
       </motion.h3>
 
       {/* Dynamic Progress Status */}
@@ -118,31 +130,20 @@ export function ProcessingScreen({ status, isComplete = false, onComplete }: Pro
 
         {/* Step indicators */}
         <div className="flex items-center justify-center gap-2 mt-4">
-          <div
-            className={`w-2 h-2 rounded-full transition-colors ${
-              status.includes("Minting")
-                ? "bg-orange-500"
-                : status.includes("Syncing") || status.includes("Verifying")
-                  ? "bg-emerald-500"
-                  : "bg-neutral-300 dark:bg-neutral-600"
-            }`}
-          />
-          <div
-            className={`w-2 h-2 rounded-full transition-colors ${
-              status.includes("Syncing")
-                ? "bg-orange-500"
-                : status.includes("Verifying")
-                  ? "bg-emerald-500"
-                  : "bg-neutral-300 dark:bg-neutral-600"
-            }`}
-          />
-          <div
-            className={`w-2 h-2 rounded-full transition-colors ${
-              status.includes("Verifying")
-                ? "bg-orange-500"
-                : "bg-neutral-300 dark:bg-neutral-600"
-            }`}
-          />
+          {Array.from({ length: totalSteps }).map((_, i) => (
+            <div
+              key={i}
+              className={`w-2 h-2 rounded-full transition-colors duration-300 ${
+                isComplete
+                  ? 'bg-emerald-500'
+                  : i < currentStep
+                    ? 'bg-emerald-500'
+                    : i === currentStep
+                      ? 'bg-orange-500'
+                      : 'bg-neutral-300 dark:bg-neutral-600'
+              }`}
+            />
+          ))}
         </div>
       </motion.div>
 
@@ -152,29 +153,10 @@ export function ProcessingScreen({ status, isComplete = false, onComplete }: Pro
         transition={{ delay: 1 }}
         className="mt-4 text-[10px] text-neutral-400 dark:text-neutral-500"
       >
-        {status.includes("Verifying")
-          ? "Verifying IPFS storage (up to 60 seconds)..."
-          : "This may take a few moments..."}
+        This may take a few moments...
       </motion.p>
 
-      {/* Warning about closing during sync */}
-      {!isComplete && (status.includes("Syncing") || status.includes("Verifying")) && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1.5 }}
-          className="mt-4 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/30 rounded-lg"
-        >
-          <p className="text-[10px] text-amber-700 dark:text-amber-300 font-medium">
-            Don't close this page until sync completes
-          </p>
-          <p className="text-[9px] text-amber-600 dark:text-amber-400 mt-1">
-            Your Unicity ID needs to be saved to decentralized storage for recovery on other devices
-          </p>
-        </motion.div>
-      )}
-
-      {/* Let's Go Button */}
+      {/* Complete Button */}
       {isComplete && onComplete && (
         <motion.button
           initial={{ opacity: 0, y: 20 }}
@@ -183,7 +165,7 @@ export function ProcessingScreen({ status, isComplete = false, onComplete }: Pro
           onClick={onComplete}
           className="mt-6 w-full px-5 py-3.5 bg-linear-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-bold text-sm rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98]"
         >
-          Let's go!
+          {completeButtonText}
         </motion.button>
       )}
     </motion.div>
