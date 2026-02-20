@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useSphereContext } from './useSphere';
 import { SPHERE_KEYS } from '../../queryKeys';
 import { formatAmount } from '../../index';
-import { showToast } from '../../../components/ui/toast-utils';
+import { showTransferToast } from '../../../components/ui/toast-utils';
 import { CHAT_KEYS, GROUP_CHAT_KEYS, type DmReceivedDetail } from '../../../components/chat/data/chatTypes';
 import type { IncomingTransfer } from '@unicitylabs/sphere-sdk';
 
@@ -49,19 +49,18 @@ export function useSphereEvents(): void {
     const handleIncomingTransfer = (transfer: IncomingTransfer) => {
       invalidatePayments();
 
-      // Build toast message
       const sender = transfer.senderNametag ? `@${transfer.senderNametag}` : 'Someone';
-      const tokenSummary = transfer.tokens.map(t => {
-        const amt = formatAmount(t.amount, t.decimals);
-        return `${amt} ${t.symbol}`;
-      }).join(', ');
+      const firstToken = transfer.tokens[0];
+      const amount = firstToken ? formatAmount(firstToken.amount, firstToken.decimals) : '?';
+      const symbol = firstToken?.symbol ?? '?';
 
-      let message = `${sender} sent you ${tokenSummary}`;
-      if (transfer.memo) {
-        message += `\n"${transfer.memo}"`;
-      }
-
-      showToast(message, 'success', 6000);
+      showTransferToast({
+        sender,
+        amount,
+        symbol,
+        iconUrl: firstToken?.iconUrl,
+        memo: transfer.memo,
+      });
     };
     const handleTransferConfirmed = invalidatePayments;
 

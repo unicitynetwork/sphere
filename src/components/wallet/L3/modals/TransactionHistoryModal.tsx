@@ -180,6 +180,11 @@ export function TransactionHistoryModal({ isOpen, onClose }: TransactionHistoryM
                       <div className="text-[11px] text-neutral-400/70 dark:text-neutral-500/60">
                         {entry.date} • {entry.time}
                       </div>
+                      {entry.memo && (
+                        <div className="text-[11px] text-neutral-500 dark:text-neutral-400 italic truncate mt-0.5">
+                          &ldquo;{entry.memo}&rdquo;
+                        </div>
+                      )}
                     </div>
 
                     {/* Amount + chevron */}
@@ -233,6 +238,16 @@ export function TransactionHistoryModal({ isOpen, onClose }: TransactionHistoryM
                                   <DetailRow label="Pubkey" value={entry.recipientPubkey} copyKey={`${entry.id}-pubkey`} copiedKey={copiedKey} onCopy={copy} />
                                 )}
                               </>
+                            )}
+
+                            {/* Memo */}
+                            {entry.memo && (
+                              <div className="py-1">
+                                <span className="text-[11px] text-neutral-500 dark:text-neutral-400">Memo</span>
+                                <div className="text-[11px] text-neutral-700 dark:text-neutral-300 italic mt-0.5">
+                                  &ldquo;{entry.memo}&rdquo;
+                                </div>
+                              </div>
                             )}
 
                             {/* Common fields */}

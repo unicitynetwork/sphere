@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Loader2, User, CheckCircle, Coins, Hash } from 'lucide-react';
+import { ArrowRight, Loader2, User, CheckCircle, Coins, Hash, Copy, Check } from 'lucide-react';
 import type { Asset } from '@unicitylabs/sphere-sdk';
 import { toSmallestUnit } from '@unicitylabs/sphere-sdk';
 import { useAssets, useTransfer, formatAmount } from '../../../../sdk';
@@ -29,12 +29,22 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
 
   const assets = sdkAssets;
 
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const copyToClipboard = useCallback((text: string, key: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2000);
+    }).catch(() => {});
+  }, []);
+
   // State
   const [step, setStep] = useState<Step>('recipient');
   const [recipientMode, setRecipientMode] = useState<'nametag' | 'direct'>('nametag');
   const [recipient, setRecipient] = useState('');
   const [isCheckingRecipient, setIsCheckingRecipient] = useState(false);
   const [recipientError, setRecipientError] = useState<string | null>(null);
+
+  const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
 
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [amountInput, setAmountInput] = useState('');
@@ -84,6 +94,7 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
     setStep('recipient');
     setRecipientMode('nametag');
     setRecipient('');
+    setResolvedAddress(null);
     setSelectedAsset(null);
     setAmountInput('');
     setMemoInput('');
@@ -110,15 +121,16 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
           return;
         }
         setRecipient(addr);
+        setResolvedAddress(addr);
         setStep('asset');
       } else {
         const cleanTag = recipient.replace('@', '').replace('@unicity', '').trim();
-        const transport = sphere?.getTransport();
 
-        if (transport?.resolveNametag) {
-          const pubkey = await transport.resolveNametag(cleanTag);
-          if (pubkey) {
+        if (sphere?.resolve) {
+          const peerInfo = await sphere.resolve(`@${cleanTag}`);
+          if (peerInfo) {
             setRecipient(cleanTag);
+            setResolvedAddress(peerInfo.directAddress || null);
             setStep('asset');
           } else {
             setRecipientError(`User @${cleanTag} not found`);
@@ -316,22 +328,69 @@ export function SendModal({ isOpen, onClose, prefill }: SendModalProps) {
               {/* Summary Card */}
               <div className="bg-neutral-100 dark:bg-neutral-900 rounded-2xl p-5 mb-6 border border-neutral-200 dark:border-white/10 text-center">
                 <div className="text-sm text-neutral-500 dark:text-neutral-400 mb-1">You are sending</div>
-                <div className="text-3xl font-bold text-neutral-900 dark:text-white mb-4">
+                <div className="text-3xl font-bold text-neutral-900 dark:text-white">
                   {amountInput} <span className="text-orange-500">{selectedAsset.symbol}</span>
                 </div>
+                {selectedAsset.priceUsd != null && (
+                  <div className="text-xs text-neutral-400 dark:text-neutral-500 mb-3">
+                    ≈ ${(parseFloat(amountInput) * selectedAsset.priceUsd).toFixed(2)} USD
+                  </div>
+                )}
+                {selectedAsset.priceUsd == null && <div className="mb-4" />}
 
-                <div className="flex items-center justify-center gap-2 text-sm bg-neutral-200 dark:bg-neutral-800/50 p-2 rounded-lg mx-auto max-w-max">
-                  {recipientMode === 'direct' ? (
-                    <Hash className="w-4 h-4 text-neutral-500 dark:text-neutral-400" />
-                  ) : (
-                    <User className="w-4 h-4 text-neutral-500 dark:text-neutral-400" />
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-2 text-sm bg-neutral-200 dark:bg-neutral-800/50 p-2 rounded-lg">
+                      {recipientMode === 'direct' ? (
+                        <Hash className="w-4 h-4 text-neutral-500 dark:text-neutral-400" />
+                      ) : (
+                        <User className="w-4 h-4 text-neutral-500 dark:text-neutral-400" />
+                      )}
+                      <span className={`text-neutral-700 dark:text-neutral-300 ${recipientMode === 'direct' ? 'font-mono text-xs break-all' : ''}`}>
+                        {recipientMode === 'direct' ? recipient : `@${recipient}`}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(
+                        recipientMode === 'direct' ? recipient : `@${recipient}`,
+                        'recipient'
+                      )}
+                      className="p-1.5 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-lg transition-colors"
+                      title="Copy"
+                    >
+                      {copiedKey === 'recipient'
+                        ? <Check className="w-3.5 h-3.5 text-emerald-500" />
+                        : <Copy className="w-3.5 h-3.5 text-neutral-400" />
+                      }
+                    </button>
+                  </div>
+                  {recipientMode === 'nametag' && resolvedAddress && (
+                    <div className="flex items-center gap-1">
+                      <span
+                        className="text-[10px] font-mono text-neutral-400/40 dark:text-neutral-600/50 truncate max-w-52"
+                        title={resolvedAddress}
+                      >
+                        {resolvedAddress.length > 30
+                          ? `${resolvedAddress.slice(0, 18)}...${resolvedAddress.slice(-8)}`
+                          : resolvedAddress}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(resolvedAddress, 'address')}
+                        className="p-0.5 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded transition-colors"
+                        title="Copy address"
+                      >
+                        {copiedKey === 'address'
+                          ? <Check className="w-3 h-3 text-emerald-500" />
+                          : <Copy className="w-3 h-3 text-neutral-500/40" />
+                        }
+                      </button>
+                    </div>
                   )}
-                  <span className={`text-neutral-700 dark:text-neutral-300 ${recipientMode === 'direct' ? 'font-mono text-xs break-all' : ''}`}>
-                    {recipientMode === 'direct' ? recipient : `@${recipient}`}
-                  </span>
                 </div>
                 {memoInput && (
-                  <div className="text-xs text-neutral-400 dark:text-neutral-500 mt-3 italic">
+                  <div className="text-sm text-neutral-300 dark:text-neutral-400 mt-3 italic">
                     &ldquo;{memoInput}&rdquo;
                   </div>
                 )}
