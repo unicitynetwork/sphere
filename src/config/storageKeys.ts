@@ -17,9 +17,6 @@ export const STORAGE_KEYS = {
   // Tutorial completion flag
   TUTORIAL_COMPLETED: 'sphere_tutorial_completed',
 
-  // Transaction history
-  TRANSACTION_HISTORY: 'sphere_transaction_history',
-
   // Chat UI State
   CHAT_MODE: 'sphere_chat_mode',
   CHAT_SELECTED_GROUP: 'sphere_chat_selected_group',

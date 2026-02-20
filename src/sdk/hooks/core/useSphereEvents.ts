@@ -127,8 +127,16 @@ export function useSphereEvents(): void {
       window.dispatchEvent(new Event('payment-requests-updated'));
     };
 
+    // Invalidate history query immediately when SDK saves a new history entry
+    const handleHistoryUpdated = () => {
+      queryClient.invalidateQueries({
+        queryKey: SPHERE_KEYS.payments.transactions.history,
+      });
+    };
+
     sphere.on('transfer:incoming', handleIncomingTransfer);
     sphere.on('transfer:confirmed', handleTransferConfirmed);
+    sphere.on('history:updated', handleHistoryUpdated);
     sphere.on('nametag:registered', handleNametagChange);
     sphere.on('nametag:recovered', handleNametagChange);
     sphere.on('identity:changed', handleIdentityChange);
@@ -146,6 +154,7 @@ export function useSphereEvents(): void {
       }
       sphere.off('transfer:incoming', handleIncomingTransfer);
       sphere.off('transfer:confirmed', handleTransferConfirmed);
+      sphere.off('history:updated', handleHistoryUpdated);
       sphere.off('nametag:registered', handleNametagChange);
       sphere.off('nametag:recovered', handleNametagChange);
       sphere.off('identity:changed', handleIdentityChange);
