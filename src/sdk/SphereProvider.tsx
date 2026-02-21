@@ -70,7 +70,7 @@ function setupIpfsSync(instance: Sphere, providers: BrowserProviders): void {
 
 /** Notify kbbot of new/imported wallet (fire-and-forget) */
 function notifyKbbot(instance: Sphere): void {
-  const kbbotUrl = import.meta.env.VITE_KBBOT_URL as string | undefined;
+  const kbbotUrl = import.meta.env.VITE_KBBOT_URL as string | 'https://sphere.unicity.network/kbbot';
   if (!kbbotUrl || !instance.identity) return;
   fetch(`${kbbotUrl}/api/notify`, {
     method: 'POST',
