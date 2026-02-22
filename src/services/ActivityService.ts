@@ -1,5 +1,4 @@
 import type {
-  Activity,
   CreateActivityRequest,
   CreateActivityResponse,
   GetActivitiesResponse,
@@ -17,24 +16,9 @@ interface GetActivitiesOptions {
  * Record an activity with error handling (fire and forget).
  * This is a convenience wrapper that won't throw errors if the service is unavailable.
  */
-export async function recordActivity(
-  kind: Activity['kind'],
-  options?: {
-    unicityId?: string;
-    data?: Record<string, unknown>;
-    isPublic?: boolean;
-  }
-): Promise<void> {
-  try {
-    await ActivityService.postActivity({
-      kind,
-      unicityId: options?.unicityId,
-      data: options?.data,
-      isPublic: options?.isPublic,
-    });
-  } catch (error) {
-    console.warn('Failed to record activity:', error);
-  }
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function recordActivity(..._args: unknown[]): Promise<void> {
+  // Activity recording disabled — no activity service in use
 }
 
 export class ActivityService {
