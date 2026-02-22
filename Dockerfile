@@ -5,6 +5,7 @@ RUN npm ci
 COPY . .
 
 ARG VITE_AGGREGATOR_URL=https://goggregator-test.unicity.network
+ARG VITE_KBBOT_URL=https://sphere.unicity.network
 
 RUN npm run build
 
