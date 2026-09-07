@@ -107,6 +107,7 @@ describe('mainnet, now that the SDK has onboarded it', () => {
         active: mod.SPHERE_NETWORK,
         networks: mod.SUPPORTED_NETWORKS,
         announced: false,
+        defaultNetwork: mod.DEFAULT_NETWORK,
       }),
     ).toBe(true);
   });

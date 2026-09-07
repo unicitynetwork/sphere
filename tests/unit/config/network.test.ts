@@ -350,7 +350,7 @@ describe('shouldAnnounceMainnet — invite once, never move anyone', () => {
   it('invites a test-network wallet once mainnet is live', async () => {
     const mod = await loadNetworkModule();
     expect(
-      mod.shouldAnnounceMainnet({ active: 'testnet2', networks: LIVE, announced: false }),
+      mod.shouldAnnounceMainnet({ active: 'testnet2', networks: LIVE, announced: false, defaultNetwork: 'testnet2' }),
     ).toBe(true);
   });
 
@@ -358,20 +358,36 @@ describe('shouldAnnounceMainnet — invite once, never move anyone', () => {
     // Never advertise what this deployment cannot actually switch to.
     const mod = await loadNetworkModule();
     expect(
-      mod.shouldAnnounceMainnet({ active: 'testnet2', networks: NOT_LIVE, announced: false }),
+      mod.shouldAnnounceMainnet({ active: 'testnet2', networks: NOT_LIVE, announced: false, defaultNetwork: 'testnet2' }),
+    ).toBe(false);
+  });
+
+  it('stays quiet when mainnet IS the deployment default', async () => {
+    // Nobody is left to invite. A wallet with no persisted choice already boots
+    // on mainnet, so the only way to be on a test network is to have chosen it
+    // deliberately — and inviting someone back to the network they just left is
+    // exactly the nag this function exists to prevent.
+    const mod = await loadNetworkModule();
+    expect(
+      mod.shouldAnnounceMainnet({
+        active: 'testnet2',
+        networks: LIVE,
+        announced: false,
+        defaultNetwork: 'mainnet',
+      }),
     ).toBe(false);
   });
 
   it('never asks a wallet already on mainnet', async () => {
     const mod = await loadNetworkModule();
-    expect(mod.shouldAnnounceMainnet({ active: 'mainnet', networks: LIVE, announced: false })).toBe(
+    expect(mod.shouldAnnounceMainnet({ active: 'mainnet', networks: LIVE, announced: false, defaultNetwork: 'testnet2' })).toBe(
       false,
     );
   });
 
   it('never asks twice — declining is a real answer, not a postponement', async () => {
     const mod = await loadNetworkModule();
-    expect(mod.shouldAnnounceMainnet({ active: 'testnet2', networks: LIVE, announced: true })).toBe(
+    expect(mod.shouldAnnounceMainnet({ active: 'testnet2', networks: LIVE, announced: true, defaultNetwork: 'testnet2' })).toBe(
       false,
     );
   });

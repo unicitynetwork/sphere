@@ -249,8 +249,17 @@ export function shouldAnnounceMainnet(opts: {
   active: NetworkType;
   networks: readonly SupportedNetwork[];
   announced: boolean;
+  defaultNetwork: NetworkType;
 }): boolean {
   if (opts.announced) return false;
+  // A deployment whose DEFAULT is mainnet has nobody left to invite: a wallet
+  // with no persisted choice already boots there, so the only way to be on a
+  // test network is to have chosen it deliberately — and inviting someone back
+  // to the network they just left is precisely the nag this function exists to
+  // prevent. Checked against the default rather than the active network because
+  // the question is about the deployment, not this session: the two other exits
+  // below stay for the deployment that still starts on a test network.
+  if (opts.defaultNetwork === 'mainnet') return false;
   if (opts.active === 'mainnet') return false;
   return opts.networks.some((n) => n.id === 'mainnet' && n.available);
 }
