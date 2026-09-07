@@ -815,8 +815,6 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     resetPurchase();
     setPending(null);
     resumedRef.current = null;
-    // resetPurchase only touches this component's own state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [network, rootPubkey]);
   useEffect(() => {
     if (!isOpen) {
