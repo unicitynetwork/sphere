@@ -14,9 +14,24 @@ export function UpgradeProvider({ children }: { children: ReactNode }) {
     setIsOpen(true);
   }, []);
 
-  // An unprompted opener may win at most once per page load.
+  // Two unprompted openers, one screen — but they are not equals, so they do
+  // not share one latch. A lapsed plan is a state change the user has to learn
+  // about, and PlanDowngradeWatcher marks the plan as seen whether or not the
+  // screen actually opened, so a swallowed notice is lost for good. The network
+  // offer is a one-time courtesy and can always be the one to yield.
   const autoOpenedRef = useRef(false);
-  const openAutomatically = useCallback(
+
+  /** Priority opener: always shows, and claims the slot so nothing overwrites it. */
+  const openNotice = useCallback(
+    (r?: UpgradeReason) => {
+      autoOpenedRef.current = true;
+      openUpgrade(r);
+    },
+    [openUpgrade],
+  );
+
+  /** Courtesy opener: skips if anything unprompted already used this load. */
+  const openCourtesy = useCallback(
     (r?: UpgradeReason) => {
       if (autoOpenedRef.current) return;
       autoOpenedRef.current = true;
@@ -31,12 +46,8 @@ export function UpgradeProvider({ children }: { children: ReactNode }) {
   return (
     <UpgradeContext.Provider value={value}>
       {children}
-      {/* Two automatic openers, one screen. openUpgrade is setReason +
-          setIsOpen, so a second automatic call would silently rewrite the
-          banner under a user already reading the first. Whichever fires first
-          on this page owns the screen; the user's own calls are unaffected. */}
-      <PlanDowngradeWatcher openUpgrade={openAutomatically} />
-      <NetworkSwitchPlanOffer openUpgrade={openAutomatically} />
+      <PlanDowngradeWatcher openUpgrade={openNotice} />
+      <NetworkSwitchPlanOffer openUpgrade={openCourtesy} />
 
       <AddressKeyPromptModal />
       {/* Same component onboarding renders — here in its dialog mode. */}

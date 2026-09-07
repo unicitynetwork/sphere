@@ -50,7 +50,19 @@ export function NetworkSwitchPlanOffer({
       return;
     }
 
-    if (!walletExists || isLocked) return;
+    // A locked boot disarms too, and not only while it is locked. The escape
+    // from the unlock screen — "forgot password, restore from recovery phrase"
+    // — renders onboarding INSIDE the locked branch, so walletExists is already
+    // true there and the disarm above never sees it; that onboarding shows its
+    // own plan step, and firing after it asks the same question twice. The cost
+    // is a missed offer for someone who simply unlocks with their password, and
+    // silence is the right side to err on for a screen the app opens itself.
+    if (isLocked) {
+      armedRef.current = false;
+      return;
+    }
+    if (!walletExists) return;
+
     // The key is per network: until the new network's own key is live, the plan
     // on screen still belongs to the network the user just left.
     if (subscriptionKeyStatus !== 'ready') return;

@@ -6,6 +6,7 @@ import { ModalHeader, Button, EmptyState, AlertMessage } from '../../ui';
 import { usePlans, useUtilization } from '../../../../sdk/hooks/subscription';
 import { PAID_PLANS_ENABLED } from '../../../../config/subscription';
 import { hasPaidOffers } from '../../../subscription/planFeatures';
+import { hasStoredOrders } from '../../../../sdk/subscription/pendingOrder';
 import { usagePercent, formatExpiry, msUntil, formatCountdown } from '../../../../sdk/subscription/usage';
 import { getStoredSubscriptionKey } from '../../../../config/subscriptionKeyCache';
 import { useSphereContext } from '../../../../sdk/hooks/core/useSphere';
@@ -26,14 +27,19 @@ export function SubscriptionModal({ isOpen, onClose, onUpgrade }: SubscriptionMo
   // keyed the same so the two share one cached catalogue.
   const plans = usePlans(isOpen);
   const data = util.data;
+  const plan = data?.plan ?? null;
+  const apiKey = getStoredSubscriptionKey();
+  const { sphere, network, applySubscriptionKey } = useSphereContext();
   // Whether an upgrade is a thing that can happen here at all. Passing
   // `plans.data` UNCHANGED is deliberate: undefined means the catalogue has not
   // resolved, and hasPaidOffers fails open on it (see its doc).
-  const canUpgrade = !!onUpgrade && hasPaidOffers(plans.data, PAID_PLANS_ENABLED);
-
-  const plan = data?.plan ?? null;
-  const apiKey = getStoredSubscriptionKey();
-  const { sphere, applySubscriptionKey } = useSphereContext();
+  //
+  // The plan screen is not only a shop: it is the only place a paid order whose
+  // key was never delivered can be resumed from. So an unfinished order keeps
+  // the way in open even where there is nothing left to sell — an operator
+  // pausing sales overnight must not strand a purchase already paid for.
+  const canUpgrade =
+    !!onUpgrade && (hasPaidOffers(plans.data, PAID_PLANS_ENABLED) || hasStoredOrders(network));
   const queryClient = useQueryClient();
   const [activating, setActivating] = useState(false);
   const [activateError, setActivateError] = useState<string | null>(null);
@@ -99,7 +105,17 @@ export function SubscriptionModal({ isOpen, onClose, onUpgrade }: SubscriptionMo
         )}
 
         {data?.status === 'inactive' && !util.isLoading && (
-          <EmptyState icon={Sparkles} title="No active plan" description="Get a plan to raise your commitment limits." />
+          <EmptyState
+            icon={Sparkles}
+            title="No active plan"
+            // Never point at a button that is not on screen.
+            description={
+              canUpgrade
+                ? 'Get a plan to raise your commitment limits.'
+                : 'No plans are on sale on this network right now.'
+            }
+          />
+
         )}
 
         {plan && (

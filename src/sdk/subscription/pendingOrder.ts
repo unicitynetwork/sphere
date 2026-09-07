@@ -80,6 +80,31 @@ function slot(network: string, walletPubkey: string): string {
  */
 export const MAX_RECORDS = 5;
 
+/**
+ * Whether ANY order record exists for this network, without needing the
+ * wallet's pubkey.
+ *
+ * Exists for one job: deciding whether a surface that leads to the plan screen
+ * must stay reachable. The plan screen is the only place a paid-but-undelivered
+ * order can be resumed from, so hiding the way in — because the store flag went
+ * off or the catalogue came back empty — would strand a purchase someone paid
+ * real money for. Deliberately coarse: it does not parse, validate or TTL-check
+ * the records, because every inaccuracy it can have errs toward keeping a door
+ * open rather than closing one.
+ */
+export function hasStoredOrders(network: string): boolean {
+  const prefix = `${SLOT_PREFIX}${network}.`;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(prefix)) return true;
+    }
+  } catch {
+    // Storage blocked — nothing to resume from anyway.
+  }
+  return false;
+}
+
 /** All live records, newest last. Expired ones are dropped as they are read. */
 function readAll(network: string, walletPubkey: string, now: number): PendingOrderRecord[] {
   let raw: string | null;

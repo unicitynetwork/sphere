@@ -12,6 +12,7 @@ const ctx = vi.hoisted(() => ({
   paidPlansEnabled: true,
   plans: undefined as unknown,
   status: 'active' as 'active' | 'expired' | 'inactive',
+  hasStoredOrders: false,
 }));
 
 vi.mock('../../../src/config/subscription', async (orig) => ({
@@ -40,12 +41,16 @@ vi.mock('../../../src/sdk/hooks/subscription', () => ({
   }),
 }));
 
+vi.mock('../../../src/sdk/subscription/pendingOrder', () => ({
+  hasStoredOrders: () => ctx.hasStoredOrders,
+}));
+
 vi.mock('../../../src/config/subscriptionKeyCache', () => ({
   getStoredSubscriptionKey: () => `sk_${'e'.repeat(32)}`,
 }));
 
 vi.mock('../../../src/sdk/hooks/core/useSphere', () => ({
-  useSphereContext: () => ({ sphere: {}, applySubscriptionKey: vi.fn() }),
+  useSphereContext: () => ({ sphere: {}, network: 'mainnet', applySubscriptionKey: vi.fn() }),
 }));
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -76,6 +81,7 @@ beforeEach(() => {
   ctx.paidPlansEnabled = true;
   ctx.plans = [paid];
   ctx.status = 'active';
+  ctx.hasStoredOrders = false;
 });
 
 describe('Settings → Subscription upgrade button', () => {
@@ -105,7 +111,19 @@ describe('Settings → Subscription upgrade button', () => {
     expect(upgradeButton()).toBeNull();
   });
 
+  it('keeps the door open when an unfinished order is still recoverable', () => {
+    // The plan screen is also the ONLY way back to a paid order whose key was
+    // never delivered: its resume lives there. Hiding the button because the
+    // operator paused sales overnight would strand a purchase the buyer paid
+    // real money for.
+    ctx.paidPlansEnabled = false;
+    ctx.hasStoredOrders = true;
+    renderModal();
+    expect(upgradeButton()).not.toBeNull();
+  });
+
   it('keeps the button while the catalogue has not resolved', () => {
+
     // Fail open: a slow or broken gateway must not hide a real purchase path.
     ctx.plans = undefined;
     renderModal();

@@ -123,6 +123,44 @@ describe('NetworkSwitchPlanOffer', () => {
     expect(openUpgrade).not.toHaveBeenCalled();
   });
 
+  it('disarms for the lock-escape restore, which runs with a wallet that exists', () => {
+    // "forgot password -> restore from recovery phrase" renders onboarding
+    // INSIDE the locked branch, so walletExists is already true and the
+    // !walletExists disarm never sees it. That onboarding shows its own plan
+    // step; firing afterwards asks the same question twice in a row.
+    ctx.isLocked = true;
+    const openUpgrade = vi.fn();
+    const { rerender } = render(<NetworkSwitchPlanOffer openUpgrade={openUpgrade} />);
+    ctx.isLocked = false;
+    rerender(<NetworkSwitchPlanOffer openUpgrade={openUpgrade} />);
+    expect(openUpgrade).not.toHaveBeenCalled();
+  });
+
+  it('survives the first render of a boot, where nothing is read yet', () => {
+    // Every boot starts with walletExists false while storage is still being
+    // read. Disarming on that would kill the feature for everyone.
+    ctx.isLoading = true;
+    ctx.walletExists = false;
+    const openUpgrade = vi.fn();
+    const { rerender } = render(<NetworkSwitchPlanOffer openUpgrade={openUpgrade} />);
+    expect(openUpgrade).not.toHaveBeenCalled();
+
+    ctx.isLoading = false;
+    ctx.walletExists = true;
+    rerender(<NetworkSwitchPlanOffer openUpgrade={openUpgrade} />);
+    expect(openUpgrade).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays silent while the catalogue has not resolved', () => {
+    // hasPaidOffers fails OPEN by design, and this surface deliberately
+    // inverts that: an unprompted full-screen takeover must never appear over
+    // a catalogue that may never load.
+    ctx.plans = undefined;
+    const openUpgrade = vi.fn();
+    render(<NetworkSwitchPlanOffer openUpgrade={openUpgrade} />);
+    expect(openUpgrade).not.toHaveBeenCalled();
+  });
+
   it('does not re-open on a later render', () => {
     // useUtilization refetches every 30s and hands back a new object identity
     // each time; without a latch the screen would reopen after every refetch.
