@@ -642,3 +642,35 @@ describe('the in-memory fallback is scoped to its wallet', () => {
     }
   });
 });
+
+describe('orders that exist server-side before the wallet knows it', () => {
+  it('records an order whose creation finished after the dialog closed', async () => {
+    // Paymento has emailed the payable link by then. A wallet with no record of
+    // that order cannot resume the key it buys.
+    let release: (v: { orderId: string; redirectUrl: string }) => void = () => {};
+    h.checkout = vi.fn(() => new Promise((resolve) => { release = resolve; }));
+    h.orderStatus = vi.fn(async () => stillOpen());
+    h.poll = vi.fn(async () => new Promise(() => {}));
+    renderDialog();
+    await buy();
+    // The key resolution runs before the checkout call, so wait for the call
+    // itself — releasing earlier would resolve nothing.
+    await waitFor(() => expect(h.checkout).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: /^close$/i }));
+    release({ orderId: 'ssc-late', redirectUrl: 'https://pay.example/ssc-late' });
+
+    await waitFor(() => expect(readPendingOrder('mainnet', ROOT_PUBKEY)?.orderId).toBe('ssc-late'));
+  });
+
+  it('keeps an abandoned upgrade whose key the wallet no longer has', async () => {
+    h.walletKey = vi.fn(async () => 'sk_' + 'd'.repeat(28) + 'dead');
+    h.orderStatus = vi.fn(async () => paid({ upgrade: true, maskedKey: 'sk_...cbe1', planName: 'premium' }));
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ upgradeMasked: 'sk_...cbe1', abandonedAt: Date.now() }));
+    renderDialog();
+
+    await waitFor(() => expect(h.orderStatus).toHaveBeenCalled());
+    // Not cleared: the record carries the mask that says which key to restore.
+    await waitFor(() => expect(readSettlableOrders('mainnet', ROOT_PUBKEY)).toHaveLength(1));
+  });
+});

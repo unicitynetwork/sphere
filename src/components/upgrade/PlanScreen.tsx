@@ -597,6 +597,17 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
         await refreshSubscriptionThroughCache();
         const key = await resolveMatchingUpgradeKey(record.upgradeMasked);
         const planName = action.planName ?? record.plan.name;
+        if (record.upgradeMasked !== null && key === null) {
+          // Same as the foreground path: the plan is on a key this wallet can
+          // no longer produce. Keep the record — it holds the mask that
+          // explains which key to restore — and do not call it a success.
+          showToast(
+            `A plan you paid for was applied to key ${record.upgradeMasked}, which this wallet no longer uses — restore it in Settings → Subscription.`,
+            'error',
+            8000,
+          );
+          return;
+        }
         if (key) rememberPlan(key, planName);
         clearPendingOrder(network, rootPubkey, record.orderId);
         showToast(`Upgraded to ${planName}`, 'success', 4000);
@@ -686,13 +697,12 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
         email,
         upgradeApiKey: upgradeApiKey ?? undefined,
       });
-      // Closed (or superseded) during order creation — don't pop a payment tab
-      // or strand the modal on 'awaiting' after the user cancelled.
-      if (abort.signal.aborted) return;
-
       // Record the order BEFORE anything can go wrong with watching it: from
       // here on, closing the dialog, reloading or a payment slower than the
-      // window must all be recoverable.
+      // window must all be recoverable. This happens even if the dialog was
+      // closed mid-creation: the order exists on the server and Paymento has
+      // emailed its payable link, so a wallet with no record of it could not
+      // resume the key that link buys.
       const record: PendingOrderRecord = {
         orderId,
         redirectUrl,
@@ -707,6 +717,12 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
       // rootPubkey is non-null here: a checkout needs a wallet to resolve its
       // upgrade key and its scope from.
       if (rootPubkey !== null) savePendingOrder(network, rootPubkey, record);
+
+      // Closed (or superseded) during creation — the order is now recorded, so
+      // only the UI work is suppressed: no payment tab, no 'awaiting' screen on
+      // a dialog the user cancelled, no poll.
+      if (abort.signal.aborted) return;
+
       setPending(record);
       setPaymentUrl(redirectUrl);
       window.open(redirectUrl, '_blank', 'noopener,noreferrer');
