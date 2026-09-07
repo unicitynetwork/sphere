@@ -60,7 +60,7 @@ import {
 import { getActiveOracleApiKey } from './oracleKey';
 import { SUBSCRIPTION_ENABLED } from '../config/subscription';
 import { allowsSharedAggregatorKey } from '../config/networkCapabilities';
-import { resolveActiveKey, saveWalletKey, saveAddressKey, loadWalletKey } from './subscription/keyVault';
+import { resolveActiveKey, saveWalletKey, saveAddressKey, loadWalletKey, persistKeyDurably } from './subscription/keyVault';
 import { validatePastedKey } from './subscription/keyCheck';
 import { isPaidPlan } from './subscription/usage';
 import type { SubscriptionKeyStatus } from './subscription/keyStatus';
@@ -1280,6 +1280,9 @@ export function SphereProvider({ children, network }: SphereProviderProps) {
   const applySubscriptionKey = useCallback(async (apiKey: string, opts?: { walletWide?: boolean }) => {
     setStoredSubscriptionKey(apiKey);
     const instance = sphereRef.current;
+    // No instance (locked, or not initialised yet) means the key lives ONLY in
+    // the plaintext boot cache: not durable, and the caller must be told so.
+    let durable = false;
     if (instance) {
       // Supersede any in-flight reconcile (bump the generation) so a stale
       // reconcile can't clobber this explicit, user-chosen key.
@@ -1292,17 +1295,15 @@ export function SphereProvider({ children, network }: SphereProviderProps) {
         try { return getPublicKey(instance.deriveAddress(0).privateKey); } catch { return null; }
       })();
       const walletWide = opts?.walletWide ?? (rootPubkey !== null && instance.identity?.chainPubkey === rootPubkey);
-      await (walletWide
-        ? saveWalletKey(instance, network, apiKey)
-        : saveAddressKey(instance, network, apiKey)
-      ).catch(() => {});
+      durable = await persistKeyDurably(instance, network, apiKey, walletWide);
       // Apply the new key to the LIVE oracle (serialized apply chain — no full
       // re-init, rebuilds only the token engine). Flip 'ready' only once the
       // engine actually carries it.
       await applyOracleKey(instance, apiKey, gen);
-      if (gen !== subKeyGenRef.current) return; // a newer reconcile/apply superseded us
+      if (gen !== subKeyGenRef.current) return { durable }; // a newer reconcile/apply superseded us
       if (appliedOracleKeyRef.current === apiKey) setSubscriptionKeyStatus('ready');
     }
+    return { durable };
   }, [network, applyOracleKey]);
 
   const value: SphereContextValue = {

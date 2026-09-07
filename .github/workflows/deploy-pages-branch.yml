@@ -154,6 +154,16 @@ jobs:
           # UNSET here on purpose: the testnet2 network preset supplies the
           # real gateway + the trustbase it serves — never mix trustbases.
           VITE_WALLET_API_URL: https://wallet-api.staging.unicity.network
+          # Per-network wallet-api bases, mirroring what staging serves in its
+          # container runtime config. The legacy single VITE_WALLET_API_URL above
+          # only ever described testnet2, so mainnet needs its own — without it
+          # walletApiUrlFor('mainnet') returns null and the network is not
+          # selectable, which is exactly the switch a subscription/payment fix
+          # has to be tested through. Baking the REAL values is the sanctioned
+          # use for a non-Docker build (see the warning in walletApiNetworks.ts);
+          # never give these a __RUNTIME_*__ placeholder.
+          VITE_WALLET_API_URL_TESTNET2: https://wallet-api.staging.unicity.network
+          VITE_WALLET_API_URL_MAINNET: https://wallet-api.mainnet.unicity.network
           # #351 composition assert: this deploy INTENDS wallet-api custody —
           # if VITE_WALLET_API_URL ever goes missing from a bundle (stale CDN
           # rebuild, env drift), the app fails fast at provider composition
@@ -175,7 +185,21 @@ jobs:
           # subscription settings AND funnel every visitor through the one
           # shared static key above — which is what 429s the gateway.
           VITE_SUBSCRIPTION_ENABLED: 'true'
-          VITE_PAID_PLANS_ENABLED: 'false'
+          # Paid plans ON, mirroring live staging (its runtime config serves
+          # PAID_PLANS_ENABLED=true). A branch preview is where subscription and
+          # payment fixes get tested, and with this off the plan grid renders
+          # "Coming on Mainnet" and no purchase path exists to test.
+          #
+          # This does NOT make previews charge testnet users: PAID_PLANS_ENABLED
+          # is ANDed with chargesRealMoney(activeNetwork) (#497 item 2), so paid
+          # plans only appear once the user deliberately switches to mainnet —
+          # where a purchase is a REAL payment, on a preview URL that is public.
+          # Same exposure staging already carries, deliberately matched.
+          VITE_PAID_PLANS_ENABLED: 'true'
+          # Mainnet selectable in the network switcher, as on staging
+          # (DEFAULT_MAINNET_ROLLOUT=true there). Without it network.ts reports
+          # 'not-rolled-out' and mainnet cannot be selected at all.
+          VITE_MAINNET_ROLLOUT_ENABLED: 'true'
           # Sentry stays OFF in branch previews: an empty DSN skips init
           # (src/config/sentry.ts). Previews are PROD builds, so without this
           # every branch push would report errors/replays against the shared
