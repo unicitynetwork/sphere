@@ -102,24 +102,26 @@ describe('isWithinPaymentWindow', () => {
 describe('claimPendingOrder', () => {
   beforeEach(() => localStorage.clear());
 
-  it('lets the first caller take the order and refuses the second', () => {
+  it('lets the first caller take the order and holds off the second', () => {
     savePendingOrder('mainnet', WALLET, record());
-    expect(claimPendingOrder('mainnet', WALLET, 'ssc-1', 1_000_000)).toBe(true);
-    expect(claimPendingOrder('mainnet', WALLET, 'ssc-1', 1_000_010)).toBe(false);
+    expect(claimPendingOrder('mainnet', WALLET, 'ssc-1', 1_000_000)).toBe('taken');
+    expect(claimPendingOrder('mainnet', WALLET, 'ssc-1', 1_000_010)).toBe('held');
   });
 
-  it('refuses a claim on a different order than the one stored', () => {
+  it('reports a different order than the one stored as absent, not held', () => {
     savePendingOrder('mainnet', WALLET, record());
-    expect(claimPendingOrder('mainnet', WALLET, 'ssc-other', 1_000_000)).toBe(false);
+    expect(claimPendingOrder('mainnet', WALLET, 'ssc-other', 1_000_000)).toBe('absent');
   });
 
   it('lets a stale lease be retaken (the holder died)', () => {
     savePendingOrder('mainnet', WALLET, record());
-    expect(claimPendingOrder('mainnet', WALLET, 'ssc-1', 1_000_000)).toBe(true);
-    expect(claimPendingOrder('mainnet', WALLET, 'ssc-1', 1_000_000 + 120_000)).toBe(true);
+    expect(claimPendingOrder('mainnet', WALLET, 'ssc-1', 1_000_000)).toBe('taken');
+    expect(claimPendingOrder('mainnet', WALLET, 'ssc-1', 1_000_000 + 120_000)).toBe('taken');
   });
 
-  it('refuses when no order is stored', () => {
-    expect(claimPendingOrder('mainnet', WALLET, 'ssc-1', 1_000_000)).toBe(false);
+  it('reports an unstored order as absent — nobody can be colliding with it', () => {
+    // A live checkout whose record failed to persist must still be able to
+    // settle: 'absent' means no rival, not "refuse".
+    expect(claimPendingOrder('mainnet', WALLET, 'ssc-1', 1_000_000)).toBe('absent');
   });
 });

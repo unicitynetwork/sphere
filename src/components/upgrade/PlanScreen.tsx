@@ -427,13 +427,22 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
         // the loser's post-ack read (paid, no key) strands it on the paste
         // step. Reads themselves are idempotent and stay unclaimed, so a reopen
         // is never left watching an order it may not touch.
-        // The claim is a read-modify-write on shared storage with no CAS, so
-        // two tabs could in principle both win it. Harmless here by
-        // construction: canAdoptFor above already requires both to be the same
-        // wallet AND (for an address-scoped key) the same active address, so a
-        // double adoption writes the same slot with the same key, and the
-        // gateway treats a repeated ack as a 200.
-        if (record && rootPubkey !== null && !claimPendingOrder(network, rootPubkey, record.orderId)) {
+        // Only an order ANOTHER tab is actively settling is left alone. An
+        // absent record is not a refusal: a live checkout whose record failed to
+        // persist (storage at quota) still has a paid order and a delivered key,
+        // and dropping it here would lose what the buyer just paid for.
+        //
+        // The claim is a read-modify-write on shared storage with no CAS, so two
+        // tabs could in principle both win it. Harmless by construction:
+        // canAdoptFor above already requires both to be the same wallet AND (for
+        // an address-scoped key) the same active address, so a double adoption
+        // writes the same slot with the same key, and the gateway treats a
+        // repeated ack as a 200.
+        if (
+          record &&
+          rootPubkey !== null &&
+          claimPendingOrder(network, rootPubkey, record.orderId) === 'held'
+        ) {
           setStep('plans');
           return;
         }
@@ -863,9 +872,19 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
               <div className="flex flex-col items-center gap-3 py-24 text-center">
                 <Loader2 className="h-8 w-8 animate-spin text-orange-500" />
                 <p className="text-sm">
+                  {/*
+                    States what was REQUESTED, not what will happen: the gateway
+                    decides whether the existing key is upgraded or a fresh one
+                    is minted, and a fresh one is shown on the payment page only
+                    once — hence "keep it open".
+                  */}
                   {upgradeMasked
-                    ? `Complete the payment in the new tab — your key ${upgradeMasked} moves to the new plan automatically.`
+                    ? `Complete the payment in the new tab — we've asked for your key ${upgradeMasked} to move to the new plan, and we'll pick up the result automatically.`
                     : "Complete the payment in the new tab — we'll pick up your new API key automatically."}
+                </p>
+                <p className="max-w-sm text-xs text-neutral-500 dark:text-white/45">
+                  Keep the payment page open until this finishes — if a new key is issued, that page
+                  shows it once.
                 </p>
                 {paymentUrl && (
                   <a href={paymentUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-orange-500 underline">
@@ -926,10 +945,16 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
               <div className="flex flex-col items-center gap-4 py-24 text-center">
                 <AlertTriangle className="h-8 w-8 text-yellow-500" />
                 <p className="max-w-md text-sm">
+                  {/*
+                    Deliberately says nothing about an in-place upgrade. Sending
+                    an upgrade key is a REQUEST: a pre-upgrade gateway ignores it
+                    and mints a fresh key whose only copy is on the return page.
+                    Nothing here has observed `order-status.upgrade`, so telling
+                    the buyer their existing key is being upgraded — that nothing
+                    else is needed — is what would get that page closed.
+                  */}
                   {windowClosed
-                    ? upgradeMasked
-                      ? `The payment window for this order has closed. If you did pay, nothing else is needed — your key ${upgradeMasked} moves to the new plan on its own once the payment confirms, and reopening this dialog will show it.`
-                      : "The payment window for this order has closed. If you did pay, the order is still being settled — reopen this dialog and we'll check again."
+                    ? "The payment window for this order has closed. If you did pay, the order can still be settled — reopen this dialog and we'll check again. Keep the payment page until then: some gateways show a new key there once, and that copy is the only one."
                     : error}
                 </p>
                 {/*

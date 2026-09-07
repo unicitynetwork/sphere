@@ -181,12 +181,40 @@ describe('a checkout that outlives the dialog (#501)', () => {
     expect(screen.queryByPlaceholderText(/sk_/)).toBeNull();
   });
 
-  it('says an in-place upgrade needs nothing from the user when it times out', async () => {
+  it('does not promise an in-place upgrade the gateway never confirmed', async () => {
+    // Sending an upgrade key is a REQUEST, not an outcome: a pre-upgrade
+    // gateway ignores the field and mints a fresh key whose only copy is on the
+    // return page. Telling the buyer nothing else is needed invites them to
+    // close that page, and the later paid-but-keyless order can then only offer
+    // a paste field for a key they no longer have.
     h.orderStatus = vi.fn(async () => stillOpen());
     h.poll = vi.fn(async () => ({ outcome: 'timeout' }));
     renderDialog();
     await buy();
-    expect(await screen.findByText(/moves to the new plan on its own/i)).toBeTruthy();
+
+    await screen.findByText(/payment window/i);
+    expect(screen.queryByText(/moves to the new plan/i)).toBeNull();
+    // ...and it says what actually protects them.
+    expect(screen.queryByText(/keep the payment page/i)).not.toBeNull();
+  });
+
+  it('still applies a delivered key when the order could not be persisted', async () => {
+    // Storage at quota: the record never lands, but the buyer has still paid
+    // and the gateway has still handed over the key. Requiring a storage-backed
+    // claim before adopting would drop it on the floor.
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    try {
+      h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
+      renderDialog();
+      await buy();
+      await waitFor(() =>
+        expect(h.applySubscriptionKey).toHaveBeenCalledWith('sk_' + 'f'.repeat(32), { walletWide: true }),
+      );
+    } finally {
+      setItem.mockRestore();
+    }
   });
 });
 

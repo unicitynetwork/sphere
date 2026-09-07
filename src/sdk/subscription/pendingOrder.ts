@@ -158,6 +158,19 @@ export function isWithinPaymentWindow(record: PendingOrderRecord, now: number = 
 }
 
 /**
+ * Outcome of asking to settle an order:
+ * - `taken`  — this caller now holds the lease;
+ * - `held`   — someone else holds a fresh one, so leave the order alone;
+ * - `absent` — nothing is stored for it, so there is no one to collide with.
+ *
+ * `absent` must not be conflated with `held`. A live checkout whose record
+ * failed to persist (storage at quota, private-window quirks) has no stored
+ * order, and refusing to settle there would drop a key the buyer already paid
+ * for.
+ */
+export type OrderClaim = 'taken' | 'held' | 'absent';
+
+/**
  * Single-flight across tabs: the winner settles the order, the losers leave it
  * alone. Without it two tabs can both read a deliverable fresh key and adopt it
  * into two different address slots, and the loser's post-ack read (paid, no
@@ -168,10 +181,10 @@ export function claimPendingOrder(
   walletPubkey: string,
   orderId: string,
   now: number = Date.now(),
-): boolean {
+): OrderClaim {
   const record = readPendingOrder(network, walletPubkey, now);
-  if (record === null || record.orderId !== orderId) return false;
-  if (record.claimedAt !== undefined && now - record.claimedAt < CLAIM_LEASE_MS) return false;
+  if (record === null || record.orderId !== orderId) return 'absent';
+  if (record.claimedAt !== undefined && now - record.claimedAt < CLAIM_LEASE_MS) return 'held';
   savePendingOrder(network, walletPubkey, { ...record, claimedAt: now });
-  return true;
+  return 'taken';
 }
