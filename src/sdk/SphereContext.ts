@@ -101,7 +101,14 @@ export interface SphereContextValue {
 
 
   /** Persist a per-wallet subscription API key and re-init the SDK oracle with it. */
-  applySubscriptionKey: (apiKey: string, opts?: { walletWide?: boolean }) => Promise<void>;
+  /**
+   * Applies a key to the live session and the encrypted vault. `durable` is
+   * false when the vault write failed or there was no wallet to write to (a
+   * locked session leaves only the plaintext boot cache) — a caller holding a
+   * PURCHASED key must not acknowledge its delivery on that, or the gateway
+   * stops redelivering the only copy (sphere#501).
+   */
+  applySubscriptionKey: (apiKey: string, opts?: { walletWide?: boolean }) => Promise<{ durable: boolean }>;
 
   /**
    * Readiness of the subscription key on the LIVE oracle. When subscriptions

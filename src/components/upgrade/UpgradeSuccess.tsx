@@ -55,10 +55,17 @@ interface UpgradeSuccessProps {
    * carries the new plan — renders the "same key" note instead of a key box.
    */
   upgradedMaskedKey?: string | null;
+  /**
+   * The key reached the live session but NOT durable storage (vault write
+   * refused, or no wallet to write to). Saying "upgrade complete" over that is
+   * how a purchased key disappears on the next reload — the copy has to ask the
+   * buyer to save it themselves.
+   */
+  notDurable?: boolean;
   onDone: () => void;
 }
 
-export function UpgradeSuccess({ plan, apiKey, upgradedMaskedKey, onDone }: UpgradeSuccessProps) {
+export function UpgradeSuccess({ plan, apiKey, upgradedMaskedKey, notDurable, onDone }: UpgradeSuccessProps) {
   const [copied, setCopied] = useState(false);
   const copyKey = async () => {
     if (!apiKey) return;
@@ -135,6 +142,18 @@ export function UpgradeSuccess({ plan, apiKey, upgradedMaskedKey, onDone }: Upgr
             </li>
           ))}
         </motion.ul>
+      )}
+
+      {notDurable && (
+        <div className="mx-auto w-full max-w-sm rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-left text-sm">
+          <p className="font-medium text-red-600 dark:text-red-400">
+            This key could not be saved on this device.
+          </p>
+          <p className="mt-1 text-[13px] leading-snug text-red-700/80 dark:text-red-300/70">
+            It is active for this session only. Copy it now and paste it back in Settings →
+            Subscription — a reload can lose it otherwise.
+          </p>
+        </div>
       )}
 
       {apiKey && (
