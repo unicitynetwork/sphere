@@ -411,8 +411,15 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
         // A purchased key is filed against whoever is active NOW, so a record
         // this wallet/address cannot own is left for the one that can.
         if (record && !canAdoptFor(record)) {
-          setPending(null);
-          setStep('plans');
+          // Keep the record ON SCREEN rather than dropping to the plan grid.
+          // It still blocks a new checkout, so hiding it here left no way out
+          // but switching addresses or waiting out the 24h horizon.
+          setPending(record);
+          setWindowClosed(false);
+          setError(
+            'This payment was started on a different address of this wallet. Switch back to that address to finish it, or cancel it and start over here.',
+          );
+          setStep('error');
           return;
         }
         // Single-flight the ONE dangerous step. Two tabs can each read a

@@ -248,8 +248,24 @@ describe('resuming a stored order (#501)', () => {
     savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ walletWide: false, addressPubkey: ROOT_PUBKEY, upgradeMasked: null }));
     renderDialog();
 
-    await waitFor(() => expect(screen.queryByRole('button', { name: /choose plan/i })).not.toBeNull());
+    expect(await screen.findByText(/started on a different address/i)).toBeTruthy();
     expect(h.applySubscriptionKey).not.toHaveBeenCalled();
+  });
+
+  it('leaves a way out of an order the active address cannot adopt', async () => {
+    // The record still blocks a new checkout, so the screen that reports it
+    // must also be the screen that can abandon it — otherwise the buyer is
+    // stuck until they switch addresses or the record ages out.
+    h.activePubkey = OTHER_PUBKEY;
+    h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ walletWide: false, addressPubkey: ROOT_PUBKEY, upgradeMasked: null }));
+    renderDialog();
+
+    // Wait for the explanation first: the waiting screen carries a button of
+    // the same name, and clicking that one hits a node already replaced.
+    await screen.findByText(/started on a different address/i);
+    fireEvent.click(screen.getByRole('button', { name: /cancel this payment/i }));
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull();
   });
 
   it('does not acknowledge delivery when the key could not be durably stored', async () => {
