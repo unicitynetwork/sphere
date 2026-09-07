@@ -33,17 +33,15 @@ describe('WalletActions — self-mint gating', () => {
     expect(swap.disabled).toBe(false);
   });
 
-  it('hides Top Up and disables Swap on mainnet', () => {
+  it('hides Top Up and Swap on mainnet', () => {
     ctx.network = 'mainnet';
     renderActions();
 
     expect(screen.queryByText('Top Up')).toBeNull();
-    const swap = screen.getByRole('button', { name: /Swap/ }) as HTMLButtonElement;
-    expect(swap.disabled).toBe(true);
-    // Copy changed from 'Not available on Mainnet': the gate is canSelfMint,
-    // a fail-closed TEST-network allowlist, so it also denies the dev hatch and
-    // every future network name — the tooltip must not name mainnet.
-    expect(swap.getAttribute('title')).toBe('Not available on this network');
+    // Gone, not greyed out: a disabled Swap still advertises a swap the wallet
+    // cannot do here, and its mint leg would create real coinIds for free.
+    expect(screen.queryByRole('button', { name: /Swap/ })).toBeNull();
+    expect(screen.queryByText('Swap')).toBeNull();
   });
 
   it('fails closed on an unknown network', () => {
@@ -51,11 +49,7 @@ describe('WalletActions — self-mint gating', () => {
     renderActions();
 
     expect(screen.queryByText('Top Up')).toBeNull();
-    const swap = screen.getByRole('button', { name: /Swap/ }) as HTMLButtonElement;
-    expect(swap.disabled).toBe(true);
-    // The tooltip must describe the gate, not one network: this case is why
-    // hardcoding 'Mainnet' was a copy bug.
-    expect(swap.getAttribute('title')).toBe('Not available on this network');
+    expect(screen.queryByRole('button', { name: /Swap/ })).toBeNull();
   });
 
   it('keeps Send available regardless of the network', () => {
