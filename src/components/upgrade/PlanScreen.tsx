@@ -261,17 +261,14 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
   }, [sphere, rootPubkey]);
 
   /**
-   * Whether THIS wallet may adopt what the record bought. A key is filed
-   * against whatever identity is active when it is adopted, so a record from
-   * another wallet — or an address-scoped one whose address is no longer
-   * active — must be left alone rather than written into the wrong vault slot.
-   * The record survives; its owner can settle it.
+   * Whether this ADDRESS may adopt what the record bought. The wallet dimension
+   * is already settled — a record is stored under its buying wallet's own slot,
+   * so one can never be read against another wallet. What remains is the
+   * address: an address-scoped key is filed against whatever identity is active
+   * at adoption, so it must only be adopted back on the address that bought it.
    */
-  const ownsRecord = (record: PendingOrderRecord): boolean =>
-    rootPubkey !== null && rootPubkey === record.walletPubkey;
-
   const canAdoptFor = (record: PendingOrderRecord): boolean =>
-    ownsRecord(record) && (record.walletWide || sphere?.identity?.chainPubkey === record.addressPubkey);
+    record.walletWide || sphere?.identity?.chainPubkey === record.addressPubkey;
 
   const currentPlanName = util.data?.plan?.name ?? null;
   // Onboarding can render before utilization resolves — fall back to the plan
@@ -305,10 +302,10 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     const scope = record ? record.walletWide : onRootAddress || walletWide;
     const { durable } = await applySubscriptionKey(key, { walletWide: scope });
     await queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.subscription.all });
-    if (record && durable) {
+    if (record && durable && rootPubkey !== null) {
       // Fire-and-forget: an unsent ack only leaves the key deliverable.
       void ackOrderKeyDelivery(record.orderId);
-      clearPendingOrder(network);
+      clearPendingOrder(network, rootPubkey);
       setPending(null);
     }
     setNewApiKey(key);
@@ -390,8 +387,8 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
         const key = fullUpgradeKey ?? (record ? await resolveMatchingUpgradeKey(record.upgradeMasked) : null);
         if (key) rememberPlan(key, planName);
         setUpgradedMaskedKey(action.maskedKey ?? record?.upgradeMasked ?? (fullUpgradeKey ? maskKey(fullUpgradeKey) : null));
-        if (record) {
-          clearPendingOrder(network);
+        if (record && rootPubkey !== null) {
+          clearPendingOrder(network, rootPubkey);
           setPending(null);
         }
         setStep('success');
@@ -417,7 +414,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
         // wallet AND (for an address-scoped key) the same active address, so a
         // double adoption writes the same slot with the same key, and the
         // gateway treats a repeated ack as a 200.
-        if (record && !claimPendingOrder(network, record.orderId)) {
+        if (record && rootPubkey !== null && !claimPendingOrder(network, rootPubkey, record.orderId)) {
           setStep('plans');
           return;
         }
@@ -431,8 +428,8 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
         setStep('claim');
         return;
       case 'failed':
-        if (record) {
-          clearPendingOrder(network);
+        if (record && rootPubkey !== null) {
+          clearPendingOrder(network, rootPubkey);
           setPending(null);
         }
         setStep('error');
@@ -539,8 +536,8 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     // every checkout call and dedupes nothing, so a second one here is a second
     // payable link for the same purchase — pay both and the buyer is charged
     // twice for one 30-day window. Continue the live one instead.
-    const live = readPendingOrder(network);
-    if (live && isWithinPaymentWindow(live) && ownsRecord(live)) {
+    const live = rootPubkey === null ? null : readPendingOrder(network, rootPubkey);
+    if (live && isWithinPaymentWindow(live)) {
       await resumeOrder(live);
       return;
     }
@@ -575,14 +572,15 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
         redirectUrl,
         plan: selectedPlan,
         createdAt: Date.now(),
-        walletPubkey: rootPubkey ?? '',
         addressPubkey: sphere?.identity?.chainPubkey ?? rootPubkey ?? '',
         // The EFFECTIVE scope, not the checkbox: a root-address purchase is
         // wallet-wide whether or not the box was ticked.
         walletWide: onRootAddress || walletWide,
         upgradeMasked: upgradeApiKey ? maskKey(upgradeApiKey) : null,
       };
-      savePendingOrder(network, record);
+      // rootPubkey is non-null here: a checkout needs a wallet to resolve its
+      // upgrade key and its scope from.
+      if (rootPubkey !== null) savePendingOrder(network, rootPubkey, record);
       setPending(record);
       setPaymentUrl(redirectUrl);
       window.open(redirectUrl, '_blank', 'noopener,noreferrer');
@@ -614,7 +612,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
    */
   const abandonOrder = () => {
     checkoutAbortRef.current?.abort();
-    clearPendingOrder(network);
+    if (rootPubkey !== null) clearPendingOrder(network, rootPubkey);
     setPending(null);
     resetPurchase();
   };
@@ -667,10 +665,11 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
       resumedRef.current = null;
       return;
     }
-    const record = readPendingOrder(network);
-    // Not ours to settle: a record belongs to the wallet that bought it, and
-    // adopting its key here would file it against this identity instead.
-    if (!record || !ownsRecord(record)) return;
+    // No wallet, no slot to look in: a record lives under its buying wallet's
+    // own key, so a locked or uninitialised session simply has nothing to read.
+    if (rootPubkey === null) return;
+    const record = readPendingOrder(network, rootPubkey);
+    if (!record) return;
     if (resumedRef.current === record.orderId) return;
     resumedRef.current = record.orderId;
     void resumeOrder(record);

@@ -100,7 +100,6 @@ const pendingOrder = (over: Partial<PendingOrderRecord> = {}): PendingOrderRecor
   redirectUrl: 'https://pay.example/ssc-1',
   plan: PLAN,
   createdAt: Date.now(),
-  walletPubkey: ROOT_PUBKEY,
   addressPubkey: ROOT_PUBKEY,
   walletWide: true,
   upgradeMasked: 'sk_...cbe1',
@@ -149,9 +148,9 @@ describe('a checkout that outlives the dialog (#501)', () => {
     h.poll = vi.fn(async () => new Promise(() => {})); // the buyer is still paying
     renderDialog();
     await buy();
-    await waitFor(() => expect(readPendingOrder('mainnet')).not.toBeNull());
-    expect(readPendingOrder('mainnet')!.orderId).toBe('ssc-1');
-    expect(readPendingOrder('mainnet')!.redirectUrl).toBe('https://pay.example/ssc-1');
+    await waitFor(() => expect(readPendingOrder('mainnet', ROOT_PUBKEY)).not.toBeNull());
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)!.orderId).toBe('ssc-1');
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)!.redirectUrl).toBe('https://pay.example/ssc-1');
   });
 
   it('keeps the record when the dialog is closed — closing is not abandoning', async () => {
@@ -159,10 +158,10 @@ describe('a checkout that outlives the dialog (#501)', () => {
     h.poll = vi.fn(async () => new Promise(() => {}));
     const { unmount } = renderDialog();
     await buy();
-    await waitFor(() => expect(readPendingOrder('mainnet')).not.toBeNull());
+    await waitFor(() => expect(readPendingOrder('mainnet', ROOT_PUBKEY)).not.toBeNull());
     fireEvent.click(screen.getByRole('button', { name: /^close$/i }));
     unmount();
-    expect(readPendingOrder('mainnet')).not.toBeNull();
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).not.toBeNull();
   });
 
   it('offers no key-paste step when the payment window closes', async () => {
@@ -186,50 +185,63 @@ describe('a checkout that outlives the dialog (#501)', () => {
 
 describe('resuming a stored order (#501)', () => {
   it('settles a paid upgrade with one status read — no paste anywhere', async () => {
-    savePendingOrder('mainnet', pendingOrder());
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder());
     renderDialog();
 
     expect(await screen.findByText(/upgrade complete/i)).toBeTruthy();
     expect(h.orderStatus).toHaveBeenCalledWith('ssc-1');
     expect(screen.queryByPlaceholderText(/sk_/)).toBeNull();
-    expect(readPendingOrder('mainnet')).toBeNull(); // settled, so the handle goes
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull(); // settled, so the handle goes
   });
 
   it('clears a failed order instead of leaving it to be resumed forever', async () => {
     h.orderStatus = vi.fn(async () => ({ ...paid(), status: 'failed' as const, fulfilled: false }));
-    savePendingOrder('mainnet', pendingOrder());
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder());
     renderDialog();
 
-    await waitFor(() => expect(readPendingOrder('mainnet')).toBeNull());
+    await waitFor(() => expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull());
   });
 
   it('keeps waiting — and re-offers the payment link — while the order is still open', async () => {
     h.orderStatus = vi.fn(async () => stillOpen());
     h.poll = vi.fn(async () => new Promise(() => {})); // never settles
-    savePendingOrder('mainnet', pendingOrder());
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder());
     renderDialog();
 
     expect(await screen.findByRole('link', { name: /open it here/i })).toHaveProperty(
       'href',
       'https://pay.example/ssc-1',
     );
-    expect(readPendingOrder('mainnet')).not.toBeNull();
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).not.toBeNull();
   });
 
-  it('refuses to adopt a key bought by a DIFFERENT wallet', async () => {
+  it('never sees — let alone adopts — a key bought by a DIFFERENT wallet', async () => {
     h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
-    savePendingOrder('mainnet', pendingOrder({ walletPubkey: OTHER_PUBKEY, upgradeMasked: null }));
+    savePendingOrder('mainnet', OTHER_PUBKEY, pendingOrder({ upgradeMasked: null }));
     renderDialog();
 
     await waitFor(() => expect(screen.queryByRole('button', { name: /choose plan/i })).not.toBeNull());
     expect(h.applySubscriptionKey).not.toHaveBeenCalled();
-    expect(readPendingOrder('mainnet')).not.toBeNull(); // still recoverable by its owner
+    expect(h.orderStatus).not.toHaveBeenCalled();
+    // Untouched, so its own wallet can still recover it.
+    expect(readPendingOrder('mainnet', OTHER_PUBKEY)).not.toBeNull();
+  });
+
+  it('does not overwrite another wallet\'s pending order when buying here', async () => {
+    savePendingOrder('mainnet', OTHER_PUBKEY, pendingOrder({ orderId: 'ssc-theirs', upgradeMasked: null }));
+    h.orderStatus = vi.fn(async () => stillOpen());
+    h.poll = vi.fn(async () => new Promise(() => {}));
+    renderDialog();
+    await buy();
+
+    await waitFor(() => expect(readPendingOrder('mainnet', ROOT_PUBKEY)).not.toBeNull());
+    expect(readPendingOrder('mainnet', OTHER_PUBKEY)!.orderId).toBe('ssc-theirs');
   });
 
   it('refuses to adopt an address-scoped key into a different active address', async () => {
     h.activePubkey = OTHER_PUBKEY;
     h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
-    savePendingOrder('mainnet', pendingOrder({ walletWide: false, addressPubkey: ROOT_PUBKEY, upgradeMasked: null }));
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ walletWide: false, addressPubkey: ROOT_PUBKEY, upgradeMasked: null }));
     renderDialog();
 
     await waitFor(() => expect(screen.queryByRole('button', { name: /choose plan/i })).not.toBeNull());
@@ -239,38 +251,38 @@ describe('resuming a stored order (#501)', () => {
   it('does not acknowledge delivery when the key could not be durably stored', async () => {
     h.applySubscriptionKey = vi.fn(async () => ({ durable: false }));
     h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
-    savePendingOrder('mainnet', pendingOrder({ upgradeMasked: null }));
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ upgradeMasked: null }));
     renderDialog();
 
     await waitFor(() => expect(h.applySubscriptionKey).toHaveBeenCalled());
     expect(h.ack).not.toHaveBeenCalled();
-    expect(readPendingOrder('mainnet')).not.toBeNull(); // the key is still recoverable
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).not.toBeNull(); // the key is still recoverable
   });
 
   it('acknowledges and drops the record once the key IS durably stored', async () => {
     h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
-    savePendingOrder('mainnet', pendingOrder({ upgradeMasked: null }));
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ upgradeMasked: null }));
     renderDialog();
 
     await waitFor(() => expect(h.ack).toHaveBeenCalledWith('ssc-1'));
-    expect(readPendingOrder('mainnet')).toBeNull();
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull();
   });
 
   it('leaves a delivered key to the tab already adopting it', async () => {
     // Reading the status in both tabs is fine; filing the key twice is not.
     h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
-    savePendingOrder('mainnet', pendingOrder({ upgradeMasked: null, claimedAt: Date.now() }));
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ upgradeMasked: null, claimedAt: Date.now() }));
     renderDialog();
 
     await waitFor(() => expect(h.orderStatus).toHaveBeenCalled());
     expect(h.applySubscriptionKey).not.toHaveBeenCalled();
     expect(h.ack).not.toHaveBeenCalled();
-    expect(readPendingOrder('mainnet')).not.toBeNull();
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).not.toBeNull();
   });
 
   it('adopts once the other tab\'s lease has expired', async () => {
     h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
-    savePendingOrder('mainnet', pendingOrder({ upgradeMasked: null, claimedAt: Date.now() - 120_000 }));
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ upgradeMasked: null, claimedAt: Date.now() - 120_000 }));
     renderDialog();
 
     await waitFor(() => expect(h.applySubscriptionKey).toHaveBeenCalled());
@@ -279,7 +291,7 @@ describe('resuming a stored order (#501)', () => {
 
 describe('one order at a time (#503)', () => {
   it('does not mint a second order while one is live', async () => {
-    savePendingOrder('mainnet', pendingOrder());
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder());
     h.orderStatus = vi.fn(async () => stillOpen());
     h.poll = vi.fn(async () => new Promise(() => {}));
     renderDialog();
@@ -289,13 +301,13 @@ describe('one order at a time (#503)', () => {
   });
 
   it('lets the buyer abandon the pending order and start over', async () => {
-    savePendingOrder('mainnet', pendingOrder());
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder());
     h.orderStatus = vi.fn(async () => stillOpen());
     h.poll = vi.fn(async () => new Promise(() => {}));
     renderDialog();
 
     fireEvent.click(await screen.findByRole('button', { name: /cancel this payment/i }));
-    expect(readPendingOrder('mainnet')).toBeNull();
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull();
     expect(await screen.findByRole('button', { name: /choose plan|get started|upgrade/i })).toBeTruthy();
   });
 });
@@ -315,7 +327,7 @@ describe('failure modes the happy path hides', () => {
     fireEvent.click(go);
     fireEvent.click(go);
 
-    await waitFor(() => expect(readPendingOrder('mainnet')).not.toBeNull());
+    await waitFor(() => expect(readPendingOrder('mainnet', ROOT_PUBKEY)).not.toBeNull());
     expect(h.checkout).toHaveBeenCalledTimes(1);
   });
 
@@ -324,7 +336,7 @@ describe('failure modes the happy path hides', () => {
     // dialog would sit on the awaiting spinner with nothing to click.
     h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
     h.applySubscriptionKey = vi.fn(async () => { throw new Error('storage blocked'); });
-    savePendingOrder('mainnet', pendingOrder({ upgradeMasked: null }));
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ upgradeMasked: null }));
     renderDialog();
 
     expect(await screen.findByText(/storage blocked/i)).toBeTruthy();

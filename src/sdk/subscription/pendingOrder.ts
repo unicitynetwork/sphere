@@ -20,7 +20,11 @@
  * order away.
  *
  * Slot carries the `sphere_` prefix so `clearAllSphereData()` wipes it on
- * wallet deletion, and is scoped per network: orders belong to one gateway.
+ * wallet deletion, and is scoped per (network, wallet): orders belong to one
+ * gateway and to the wallet that bought them. Scoping by network alone let a
+ * second wallet's checkout overwrite the first's handle, losing its recovery
+ * and re-opening the duplicate-order path it exists to prevent — and the slot
+ * IS the wallet binding, so a record can never be read against the wrong one.
  */
 import { STORAGE_KEYS } from '../../config/storageKeys';
 import { PAYMENT_WINDOW_MS } from './pollOrder';
@@ -45,8 +49,6 @@ export interface PendingOrderRecord {
   /** The whole plan, not just its id: the success view renders its features. */
   plan: PlanInfo;
   createdAt: number;
-  /** Index-0 pubkey — the wallet that bought this. A different wallet must not adopt it. */
-  walletPubkey: string;
   /** The address active at checkout, which is where an address-scoped key belongs. */
   addressPubkey: string;
   /** EFFECTIVE scope (`onRootAddress || walletWide`), never the raw checkbox. */
@@ -57,8 +59,9 @@ export interface PendingOrderRecord {
   claimedAt?: number;
 }
 
-function slot(network: string): string {
-  return SLOT_PREFIX + network;
+/** @param walletPubkey the wallet's index-0 pubkey — its subscription identity. */
+function slot(network: string, walletPubkey: string): string {
+  return `${SLOT_PREFIX}${network}.${walletPubkey}`;
 }
 
 function isPlan(v: unknown): v is PlanInfo {
@@ -94,25 +97,29 @@ function parse(raw: string): PendingOrderRecord | null {
   if (typeof r.redirectUrl !== 'string') return null;
   if (!isPlan(r.plan)) return null;
   if (typeof r.createdAt !== 'number' || !Number.isFinite(r.createdAt)) return null;
-  if (typeof r.walletPubkey !== 'string' || typeof r.addressPubkey !== 'string') return null;
+  if (typeof r.addressPubkey !== 'string') return null;
   if (typeof r.walletWide !== 'boolean') return null;
   if (r.upgradeMasked !== null && typeof r.upgradeMasked !== 'string') return null;
   if (r.claimedAt !== undefined && typeof r.claimedAt !== 'number') return null;
   return r;
 }
 
-export function savePendingOrder(network: string, record: PendingOrderRecord): void {
+export function savePendingOrder(network: string, walletPubkey: string, record: PendingOrderRecord): void {
   try {
-    localStorage.setItem(slot(network), JSON.stringify(record));
+    localStorage.setItem(slot(network, walletPubkey), JSON.stringify(record));
   } catch {
     // Storage full or blocked: the flow still works, it just cannot resume.
   }
 }
 
-export function readPendingOrder(network: string, now: number = Date.now()): PendingOrderRecord | null {
+export function readPendingOrder(
+  network: string,
+  walletPubkey: string,
+  now: number = Date.now(),
+): PendingOrderRecord | null {
   let raw: string | null;
   try {
-    raw = localStorage.getItem(slot(network));
+    raw = localStorage.getItem(slot(network, walletPubkey));
   } catch {
     return null;
   }
@@ -120,20 +127,20 @@ export function readPendingOrder(network: string, now: number = Date.now()): Pen
 
   const record = parse(raw);
   if (record === null) {
-    clearPendingOrder(network);
+    clearPendingOrder(network, walletPubkey);
     return null;
   }
   if (now - record.createdAt >= RECORD_TTL_MS) {
     // Past the gateway's own recovery window: nothing can settle it any more.
-    clearPendingOrder(network);
+    clearPendingOrder(network, walletPubkey);
     return null;
   }
   return record;
 }
 
-export function clearPendingOrder(network: string): void {
+export function clearPendingOrder(network: string, walletPubkey: string): void {
   try {
-    localStorage.removeItem(slot(network));
+    localStorage.removeItem(slot(network, walletPubkey));
   } catch {
     // nothing to do — a stale record expires on its own at the horizon
   }
@@ -156,10 +163,15 @@ export function isWithinPaymentWindow(record: PendingOrderRecord, now: number = 
  * into two different address slots, and the loser's post-ack read (paid, no
  * key) would strand it on the unsatisfiable paste step.
  */
-export function claimPendingOrder(network: string, orderId: string, now: number = Date.now()): boolean {
-  const record = readPendingOrder(network, now);
+export function claimPendingOrder(
+  network: string,
+  walletPubkey: string,
+  orderId: string,
+  now: number = Date.now(),
+): boolean {
+  const record = readPendingOrder(network, walletPubkey, now);
   if (record === null || record.orderId !== orderId) return false;
   if (record.claimedAt !== undefined && now - record.claimedAt < CLAIM_LEASE_MS) return false;
-  savePendingOrder(network, { ...record, claimedAt: now });
+  savePendingOrder(network, walletPubkey, { ...record, claimedAt: now });
   return true;
 }
