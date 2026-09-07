@@ -298,13 +298,25 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
    * write would leave the purchased key in a plaintext boot cache and nowhere
    * else.
    */
-  const adoptKey = async (key: string, record?: PendingOrderRecord | null) => {
+  const adoptKey = async (
+    key: string,
+    record?: PendingOrderRecord | null,
+    /**
+     * True only when the GATEWAY delivered this key for `record`. A key typed
+     * in by hand proves nothing about which order it belongs to — the paste
+     * check only asks whether the gateway knows it — and acknowledging on one
+     * would end redelivery of the key the buyer actually paid for.
+     */
+    delivered = false,
+  ) => {
     const scope = record ? record.walletWide : onRootAddress || walletWide;
     const { durable } = await applySubscriptionKey(key, { walletWide: scope });
     await queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.subscription.all });
     if (record && durable && rootPubkey !== null) {
       // Fire-and-forget: an unsent ack only leaves the key deliverable.
-      void ackOrderKeyDelivery(record.orderId);
+      if (delivered) void ackOrderKeyDelivery(record.orderId);
+      // Settled either way from the buyer's side: without this, every reopen
+      // drops them back onto the same paste step.
       clearPendingOrder(network, rootPubkey);
       setPending(null);
     }
@@ -418,7 +430,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
           setStep('plans');
           return;
         }
-        await adoptKey(action.apiKey, record);
+        await adoptKey(action.apiKey, record, true);
         return;
       }
       case 'claim':

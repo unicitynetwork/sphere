@@ -83,6 +83,10 @@ vi.mock('../../../src/sdk/subscription/keyVault', async (orig) => ({
   loadWalletKey: () => h.walletKey(),
 }));
 
+vi.mock('../../../src/sdk/subscription/keyCheck', () => ({
+  validatePastedKey: async () => ({ valid: true }),
+}));
+
 vi.mock('../../../src/sdk/subscription/pollOrder', async (orig) => {
   const actual = await orig<typeof import('../../../src/sdk/subscription/pollOrder')>();
   return { ...actual, pollOrderStatus: (...args: unknown[]) => h.poll(...args) };
@@ -341,5 +345,27 @@ describe('failure modes the happy path hides', () => {
 
     expect(await screen.findByText(/storage blocked/i)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /back to plans/i })).not.toBeNull();
+  });
+});
+
+describe('the paste step, when a paid order delivered no key', () => {
+  it('adopts a hand-pasted key WITHOUT acknowledging a delivery that never happened', async () => {
+    // Any valid key passes the paste check — it is not proof the key belongs to
+    // this order. Acking on it would end the gateway's redelivery of the key
+    // the buyer actually paid for.
+    h.orderStatus = vi.fn(async () => paid()); // paid, not an upgrade, no key
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ upgradeMasked: null }));
+    renderDialog();
+
+    fireEvent.change(await screen.findByPlaceholderText(/sk_/), {
+      target: { value: 'sk_' + 'a'.repeat(32) },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /activate/i }));
+
+    await waitFor(() => expect(h.applySubscriptionKey).toHaveBeenCalledWith('sk_' + 'a'.repeat(32), { walletWide: true }));
+    expect(h.ack).not.toHaveBeenCalled();
+    // The order is still settled from the buyer's side — otherwise every
+    // reopen drops them back on the same paste step.
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull();
   });
 });
