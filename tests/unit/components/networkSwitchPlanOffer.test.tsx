@@ -19,6 +19,7 @@ const ctx = vi.hoisted(() => ({
   plans: [
     { planId: 2, name: 'basic', requestsPerMinute: 300, requestsPerDay: 50000, priceCents: 500, fiatCurrency: 'USD' },
   ] as unknown,
+  plansError: false,
 }));
 
 vi.mock('../../../src/config/network', async (orig) => ({
@@ -37,7 +38,7 @@ vi.mock('../../../src/config/subscription', async (orig) => ({
 }));
 
 vi.mock('../../../src/sdk/hooks/subscription', () => ({
-  usePlans: () => ({ data: ctx.plans, isLoading: false, isError: false }),
+  usePlans: () => ({ data: ctx.plans, isLoading: false, isError: ctx.plansError }),
   useUtilization: () => ({
     data: ctx.plan === null ? null : { status: 'active', plan: ctx.plan, activeUntil: null, utilization: {} },
     isLoading: false,
@@ -67,6 +68,7 @@ beforeEach(() => {
   ctx.plans = [
     { planId: 2, name: 'basic', requestsPerMinute: 300, requestsPerDay: 50000, priceCents: 500, fiatCurrency: 'USD' },
   ];
+  ctx.plansError = false;
 });
 
 describe('NetworkSwitchPlanOffer', () => {
@@ -159,6 +161,55 @@ describe('NetworkSwitchPlanOffer', () => {
     const openUpgrade = vi.fn();
     render(<NetworkSwitchPlanOffer openUpgrade={openUpgrade} />);
     expect(openUpgrade).not.toHaveBeenCalled();
+  });
+
+  it('answers once per boot: a paid plan closes the question for the session', () => {
+    // The offer belongs to the load that followed the switch, not to the first
+    // later moment when the gates happen to align. Twenty minutes on, an
+    // address switch can hand this wallet a DIFFERENT, free key — and firing
+    // then shows "You've switched networks" to someone who switched address.
+    ctx.plan = { name: 'premium', requestsPerMinute: 900, requestsPerDay: 200000 };
+    const openUpgrade = vi.fn();
+    const { rerender } = render(<NetworkSwitchPlanOffer openUpgrade={openUpgrade} />);
+    ctx.plan = { name: 'free', requestsPerMinute: 10, requestsPerDay: 1000 };
+    rerender(<NetworkSwitchPlanOffer openUpgrade={openUpgrade} />);
+    expect(openUpgrade).not.toHaveBeenCalled();
+  });
+
+  it('answers once per boot: an empty catalogue closes it too', () => {
+    ctx.plans = [];
+    const openUpgrade = vi.fn();
+    const { rerender } = render(<NetworkSwitchPlanOffer openUpgrade={openUpgrade} />);
+    ctx.plans = [
+      { planId: 2, name: 'basic', requestsPerMinute: 300, requestsPerDay: 50000, priceCents: 500, fiatCurrency: 'USD' },
+    ];
+    rerender(<NetworkSwitchPlanOffer openUpgrade={openUpgrade} />);
+    expect(openUpgrade).not.toHaveBeenCalled();
+  });
+
+  it('answers once per boot: failed provisioning is an answer, not a pause', () => {
+    // The user may fix it later from Settings ("Activate free plan"). The screen
+    // must not then slam over the Settings modal they are standing in.
+    ctx.keyStatus = 'failed';
+    const openUpgrade = vi.fn();
+    const { rerender } = render(<NetworkSwitchPlanOffer openUpgrade={openUpgrade} />);
+    ctx.keyStatus = 'ready';
+    rerender(<NetworkSwitchPlanOffer openUpgrade={openUpgrade} />);
+    expect(openUpgrade).not.toHaveBeenCalled();
+  });
+
+  it('keeps waiting while the catalogue is still in flight, then offers', () => {
+    // The distinction that makes the above safe: PENDING is not an answer.
+    ctx.plans = undefined;
+    const openUpgrade = vi.fn();
+    const { rerender } = render(<NetworkSwitchPlanOffer openUpgrade={openUpgrade} />);
+    expect(openUpgrade).not.toHaveBeenCalled();
+
+    ctx.plans = [
+      { planId: 2, name: 'basic', requestsPerMinute: 300, requestsPerDay: 50000, priceCents: 500, fiatCurrency: 'USD' },
+    ];
+    rerender(<NetworkSwitchPlanOffer openUpgrade={openUpgrade} />);
+    expect(openUpgrade).toHaveBeenCalledTimes(1);
   });
 
   it('does not re-open on a later render', () => {

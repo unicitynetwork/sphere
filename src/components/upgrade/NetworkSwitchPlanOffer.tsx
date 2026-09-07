@@ -63,18 +63,41 @@ export function NetworkSwitchPlanOffer({
     }
     if (!walletExists) return;
 
-    // The key is per network: until the new network's own key is live, the plan
-    // on screen still belongs to the network the user just left.
-    if (subscriptionKeyStatus !== 'ready') return;
+    // PENDING is not an answer, and it is the ONLY thing that keeps the offer
+    // armed. The key is per network: until the new network's own key is live,
+    // the plan on screen still belongs to the network the user just left.
+    if (subscriptionKeyStatus === 'provisioning') return;
+    const pending = (q: { data: unknown; isError: boolean }) => q.data === undefined && !q.isError;
+    if (subscriptionKeyStatus === 'ready' && (pending(util) || pending(plans))) return;
 
+    // From here this boot HAS an answer, and it gets exactly one. Disarming at
+    // the DECISION rather than at the fire is what binds the offer to the load
+    // that followed the switch: every gate below used to leave it armed, so a
+    // paid plan at boot, a failed provisioning, or a catalogue that resolved
+    // late all left it waiting for the first later moment when the gates happen
+    // to line up. The loudest version of that is an ADDRESS switch twenty
+    // minutes on — it hands the wallet a different, free key, and the screen
+    // would open saying "You've switched networks" to someone who did not.
+    armedRef.current = false;
+
+    if (subscriptionKeyStatus !== 'ready') return;
     const plan = util.data?.plan;
     if (!plan || !isFreePlanName(plan.name)) return;
     // Resolved catalogue required — see the fail-closed note at the top.
     if (!plans.data || !hasPaidOffers(plans.data, PAID_PLANS_ENABLED)) return;
 
-    armedRef.current = false;
     openUpgrade('network');
-  }, [subscriptionKeyStatus, walletExists, isLocked, isLoading, util.data, plans.data, openUpgrade]);
+  }, [
+    subscriptionKeyStatus,
+    walletExists,
+    isLocked,
+    isLoading,
+    util.data,
+    util.isError,
+    plans.data,
+    plans.isError,
+    openUpgrade,
+  ]);
 
   return null;
 }

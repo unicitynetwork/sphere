@@ -76,12 +76,6 @@ interface PlanScreenProps {
 }
 
 /**
- * Banner shown above the plans grid, keyed off why the upgrade modal was
- * opened. Extracted from UpgradeModal's render body so it can be unit-tested
- * without mounting the full modal (which pulls in usePlans/useUtilization/
- * useCheckout/useSphereContext). 'settings' and undefined render nothing.
- */
-/**
  * Which network this plan belongs to, on every step and in both modes.
  *
  * The same grid sells worthless test tokens and real-money mainnet plans, and
@@ -89,6 +83,11 @@ interface PlanScreenProps {
  * header rather than the hero because the hero is absent in the dialog while
  * the store is off — exactly the case where the distinction matters most — and
  * because the header stays on screen while the buyer is paying.
+ *
+ * Colour follows NetworkBadge's rule rather than inventing one: the signal is
+ * deliberately asymmetric, because believing you are on a test network while
+ * actually on a live one is the expensive mistake — so "this is not real money"
+ * is what gets the amber, and grey would have muted exactly the wrong half.
  */
 export function PlanNetworkChip() {
   const label = NETWORKS[SPHERE_NETWORK].name;
@@ -102,19 +101,25 @@ export function PlanNetworkChip() {
       }
       className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 font-mono text-[11px] tracking-wide ${
         testMoney
-          ? 'bg-neutral-200/70 text-neutral-600 dark:bg-white/10 dark:text-white/60'
+          ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
           : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
       }`}
     >
       <span
         aria-hidden
-        className={`h-1.5 w-1.5 rounded-full ${testMoney ? 'bg-neutral-400 dark:bg-white/40' : 'bg-emerald-500'}`}
+        className={`h-1.5 w-1.5 rounded-full ${testMoney ? 'bg-amber-500' : 'bg-emerald-500'}`}
       />
       {label}
     </span>
   );
 }
 
+/**
+ * Banner shown above the plans grid, keyed off why the upgrade modal was
+ * opened. Extracted from UpgradeModal's render body so it can be unit-tested
+ * without mounting the full modal (which pulls in usePlans/useUtilization/
+ * useCheckout/useSphereContext). 'settings' and undefined render nothing.
+ */
 export function UpgradeReasonBanner({ reason }: { reason?: UpgradeReason }) {
   if (reason === 'quota') {
     return (
