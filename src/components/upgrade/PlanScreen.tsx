@@ -227,6 +227,14 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
   const [pending, setPending] = useState<PendingOrderRecord | null>(null);
   /** The payment window closed on this order (distinct from "not detected yet"). */
   const [windowClosed, setWindowClosed] = useState(false);
+  /**
+   * The order is PAID and its key is waiting for the address that bought it.
+   * Nothing here may discard it: cancelling refunds nothing and unsubscribes
+   * nothing, it only deletes the last handle on a key the buyer owns.
+   */
+  const [awaitingBuyingAddress, setAwaitingBuyingAddress] = useState(false);
+  /** The adopted key reached the live session but not durable storage. */
+  const [notDurable, setNotDurable] = useState(false);
 
   // Cancels the in-flight checkout poll when the modal closes (or a newer
   // checkout starts). Without this the poll outlives the modal and can
@@ -312,17 +320,27 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     const scope = record ? record.walletWide : onRootAddress || walletWide;
     const { durable } = await applySubscriptionKey(key, { walletWide: scope });
     await queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.subscription.all });
-    if (record && durable && rootPubkey !== null) {
+    if (record && durable && delivered && rootPubkey !== null) {
       // Fire-and-forget: an unsent ack only leaves the key deliverable.
-      if (delivered) void ackOrderKeyDelivery(record.orderId);
-      // Settled either way from the buyer's side: without this, every reopen
-      // drops them back onto the same paste step.
+      void ackOrderKeyDelivery(record.orderId);
       clearPendingOrder(network, rootPubkey);
       setPending(null);
     }
+    // A key that was NOT delivered for this order (a hand-paste) settles
+    // nothing: the paste check accepts any key the gateway knows and fails open
+    // on lookup errors, so it may be unrelated to the purchase. The record is
+    // the last handle on the key actually bought — the buyer dismisses it
+    // deliberately instead.
+    setNotDurable(!durable);
     setNewApiKey(key);
     setStep('success');
-    showToast(`Upgraded to ${record?.plan.name ?? selectedPlan?.name ?? 'new plan'}`, 'success', 4000);
+    // Only name the plan when this key IS the purchase; a pasted key may be any
+    // key the buyer happened to have.
+    showToast(
+      delivered ? `Upgraded to ${record?.plan.name ?? selectedPlan?.name ?? 'new plan'}` : 'API key applied',
+      'success',
+      4000,
+    );
   };
 
   // Claim-step activation: the pasted key is first sanity-checked against the
@@ -411,13 +429,16 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
         // A purchased key is filed against whoever is active NOW, so a record
         // this wallet/address cannot own is left for the one that can.
         if (record && !canAdoptFor(record)) {
-          // Keep the record ON SCREEN rather than dropping to the plan grid.
-          // It still blocks a new checkout, so hiding it here left no way out
-          // but switching addresses or waiting out the 24h horizon.
+          // Keep the record ON SCREEN rather than dropping to the plan grid: it
+          // still blocks a new checkout, and hiding it left no way out but
+          // waiting the record out. The way out is switching back, which
+          // retries settlement on its own — NOT cancelling, which would discard
+          // a key that has already been paid for.
           setPending(record);
           setWindowClosed(false);
+          setAwaitingBuyingAddress(true);
           setError(
-            'This payment was started on a different address of this wallet. Switch back to that address to finish it, or cancel it and start over here.',
+            'This payment was made on a different address of this wallet, and its key belongs there. Switch back to that address and it will finish on its own.',
           );
           setStep('error');
           return;
@@ -570,7 +591,10 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     // expiry can still confirm for the rest of the day. Replacing it here would
     // discard the handle to a key that is about to exist. The way out is
     // deliberate — "cancel this payment and start over" — never implicit.
-    const live = rootPubkey === null ? null : readPendingOrder(network, rootPubkey);
+    // `pending` as well as storage: a record that failed to persist (quota,
+    // blocked storage) exists only in memory, and consulting storage alone
+    // would mint a second payable order for the same purchase.
+    const live = (rootPubkey === null ? null : readPendingOrder(network, rootPubkey)) ?? pending;
     if (live) {
       await resumeOrder(live);
       return;
@@ -674,6 +698,8 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     setUpgradedMaskedKey(null);
     setUpgradeRejected(false);
     setWindowClosed(false);
+    setAwaitingBuyingAddress(false);
+    setNotDurable(false);
   };
 
   const handleClose = () => {
@@ -934,11 +960,30 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
                 >
                   Activate
                 </Button>
+                {pending && (
+                  // Pasting a key does not settle this order (it cannot be tied
+                  // to it), so the record stays until the buyer says they are
+                  // done with it. Without this they would meet this step again
+                  // on every visit.
+                  <button
+                    type="button"
+                    className="text-sm text-neutral-500 underline dark:text-white/45"
+                    onClick={abandonOrder}
+                  >
+                    Dismiss this order
+                  </button>
+                )}
               </div>
             )}
 
             {step === 'success' && (
-              <UpgradeSuccess plan={selectedPlan} apiKey={newApiKey} upgradedMaskedKey={upgradedMaskedKey} onDone={finishSuccess} />
+              <UpgradeSuccess
+                plan={selectedPlan}
+                apiKey={newApiKey}
+                upgradedMaskedKey={upgradedMaskedKey}
+                notDurable={notDurable}
+                onDone={finishSuccess}
+              />
             )}
 
             {step === 'error' && (
@@ -974,10 +1019,12 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
                     </Button>
                   )}
                 </div>
-                {pending && (
+                {pending && !awaitingBuyingAddress && (
                   // A stored order blocks a new purchase until it settles, so
                   // giving up on it has to be possible from here, not only from
-                  // the waiting screen.
+                  // the waiting screen. NOT while a paid order waits for its
+                  // buying address though — there the record is the last handle
+                  // on a key the buyer already owns.
                   <button
                     type="button"
                     className="text-sm text-neutral-500 underline dark:text-white/45"

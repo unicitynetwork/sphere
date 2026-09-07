@@ -279,7 +279,7 @@ describe('resuming a stored order (#501)', () => {
     savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ walletWide: false, addressPubkey: ROOT_PUBKEY, upgradeMasked: null }));
     renderDialog();
 
-    expect(await screen.findByText(/started on a different address/i)).toBeTruthy();
+    expect(await screen.findByText(/on a different address of this wallet/i)).toBeTruthy();
     expect(h.applySubscriptionKey).not.toHaveBeenCalled();
   });
 
@@ -290,7 +290,7 @@ describe('resuming a stored order (#501)', () => {
     h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
     savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ walletWide: false, addressPubkey: ROOT_PUBKEY, upgradeMasked: null }));
     const { refresh } = renderDialog();
-    await screen.findByText(/started on a different address/i);
+    await screen.findByText(/on a different address of this wallet/i);
 
     h.activePubkey = ROOT_PUBKEY;
     refresh();
@@ -298,20 +298,19 @@ describe('resuming a stored order (#501)', () => {
     await waitFor(() => expect(h.applySubscriptionKey).toHaveBeenCalled());
   });
 
-  it('leaves a way out of an order the active address cannot adopt', async () => {
-    // The record still blocks a new checkout, so the screen that reports it
-    // must also be the screen that can abandon it — otherwise the buyer is
-    // stuck until they switch addresses or the record ages out.
+  it('offers no way to DISCARD an order that has already been paid', async () => {
+    // This screen is only ever reached from a paid order whose key this address
+    // may not adopt. Cancelling refunds nothing and unsubscribes nothing — it
+    // would only delete the last handle on a key the buyer owns. Switching back
+    // is the way out, and that retries on its own.
     h.activePubkey = OTHER_PUBKEY;
     h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
     savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ walletWide: false, addressPubkey: ROOT_PUBKEY, upgradeMasked: null }));
     renderDialog();
 
-    // Wait for the explanation first: the waiting screen carries a button of
-    // the same name, and clicking that one hits a node already replaced.
-    await screen.findByText(/started on a different address/i);
-    fireEvent.click(screen.getByRole('button', { name: /cancel this payment/i }));
-    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull();
+    await screen.findByText(/on a different address of this wallet/i);
+    expect(screen.queryByRole('button', { name: /cancel this payment/i })).toBeNull();
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).not.toBeNull();
   });
 
   it('does not acknowledge delivery when the key could not be durably stored', async () => {
@@ -426,8 +425,21 @@ describe('the paste step, when a paid order delivered no key', () => {
 
     await waitFor(() => expect(h.applySubscriptionKey).toHaveBeenCalledWith('sk_' + 'a'.repeat(32), { walletWide: true }));
     expect(h.ack).not.toHaveBeenCalled();
-    // The order is still settled from the buyer's side — otherwise every
-    // reopen drops them back on the same paste step.
+    // ...and the order keeps its handle: the paste check accepts any key the
+    // gateway knows (and fails open on lookup errors), so this key may have
+    // nothing to do with the purchase. Dropping the record on it would remove
+    // the last way back to the key actually bought.
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).not.toBeNull();
+  });
+
+  it('lets the buyer dismiss the order once they have dealt with it themselves', async () => {
+    // Keeping the record must not mean nagging forever: dismissing is explicit.
+    h.orderStatus = vi.fn(async () => paid());
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ upgradeMasked: null }));
+    renderDialog();
+
+    await screen.findByPlaceholderText(/sk_/);
+    fireEvent.click(screen.getByRole('button', { name: /dismiss this order/i }));
     expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull();
   });
 });
@@ -466,5 +478,44 @@ describe('an order whose payment window closed but which can still settle', () =
     h.poll = vi.fn(async () => new Promise(() => {}));
     await buy();
     await waitFor(() => expect(h.checkout).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe('failures the buyer must be told about', () => {
+  it('does not report plain success when the purchased key could not be saved', async () => {
+    // The key exists only in this tab's plaintext boot cache; a reload can lose
+    // it. Saying "upgrade complete" and moving on is how it disappears.
+    h.applySubscriptionKey = vi.fn(async () => ({ durable: false }));
+    h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ upgradeMasked: null }));
+    renderDialog();
+
+    expect(await screen.findByText(/could not be saved on this device/i)).toBeTruthy();
+    // The key itself stays on screen to copy, and the order stays recoverable.
+    expect(screen.queryByText('sk_' + 'f'.repeat(32))).not.toBeNull();
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).not.toBeNull();
+  });
+
+  it('does not start a second order when the first could not be persisted', async () => {
+    // Storage blocked: the record is in memory only, so the storage read that
+    // guards against duplicates finds nothing.
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    try {
+      h.orderStatus = vi.fn(async () => stillOpen());
+      h.poll = vi.fn(async () => ({ outcome: 'timeout' }));
+      renderDialog();
+      await buy();
+
+      await screen.findByText(/payment window/i);
+      fireEvent.click(screen.getByRole('button', { name: /back to plans/i }));
+      await buy();
+
+      await waitFor(() => expect(h.orderStatus).toHaveBeenCalled());
+      expect(h.checkout).toHaveBeenCalledTimes(1);
+    } finally {
+      setItem.mockRestore();
+    }
   });
 });
