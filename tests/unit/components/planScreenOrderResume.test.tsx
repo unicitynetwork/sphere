@@ -121,7 +121,10 @@ const stillOpen = () => ({ ...paid(), status: 'pending' as const, fulfilled: fal
 function renderDialog() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ui = (children: ReactNode) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-  return render(ui(<PlanScreen isOpen onClose={() => {}} />));
+  const result = render(ui(<PlanScreen isOpen onClose={() => {}} />));
+  // A FRESH element each time: React bails out of re-rendering when handed the
+  // identical element object, so reusing one would not pick up the mock change.
+  return { ...result, refresh: () => result.rerender(ui(<PlanScreen isOpen onClose={() => {}} />)) };
 }
 
 /** Drive the plan grid → email step → "Continue to payment". */
@@ -250,6 +253,21 @@ describe('resuming a stored order (#501)', () => {
 
     expect(await screen.findByText(/started on a different address/i)).toBeTruthy();
     expect(h.applySubscriptionKey).not.toHaveBeenCalled();
+  });
+
+  it('retries settlement once the buying address is active again', async () => {
+    // The screen asks the buyer to switch back, so switching back has to be
+    // enough — without this they would have to close and reopen the dialog.
+    h.activePubkey = OTHER_PUBKEY;
+    h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ walletWide: false, addressPubkey: ROOT_PUBKEY, upgradeMasked: null }));
+    const { refresh } = renderDialog();
+    await screen.findByText(/started on a different address/i);
+
+    h.activePubkey = ROOT_PUBKEY;
+    refresh();
+
+    await waitFor(() => expect(h.applySubscriptionKey).toHaveBeenCalled());
   });
 
   it('leaves a way out of an order the active address cannot adopt', async () => {

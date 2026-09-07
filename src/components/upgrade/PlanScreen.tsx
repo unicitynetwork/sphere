@@ -680,10 +680,13 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
 
   /**
    * An order this wallet started and never saw settle is picked up on open —
-   * the whole point of recording it. Runs once per order: StrictMode invokes
-   * effects twice in dev, and a second run would race a status read against
-   * itself and re-claim the lease.
+   * the whole point of recording it. Attempts are keyed by (order, active
+   * address), which does two things: StrictMode's double-invoke does not race a
+   * status read against itself, and an order refused because the wrong address
+   * was active retries the moment the buyer does what the screen asked and
+   * switches back.
    */
+  const activePubkey = sphere?.identity?.chainPubkey ?? null;
   const resumedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isOpen) {
@@ -695,13 +698,14 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     if (rootPubkey === null) return;
     const record = readPendingOrder(network, rootPubkey);
     if (!record) return;
-    if (resumedRef.current === record.orderId) return;
-    resumedRef.current = record.orderId;
+    const attempt = `${record.orderId}:${activePubkey ?? ''}`;
+    if (resumedRef.current === attempt) return;
+    resumedRef.current = attempt;
     void resumeOrder(record);
     // resumeOrder closes over state setters and the wallet; re-running this on
     // every render would restart the read it just started.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, network, rootPubkey]);
+  }, [isOpen, network, rootPubkey, activePubkey]);
 
   /** Post-purchase exit: into the wallet during onboarding, else close. */
   const finishSuccess = onboarding ? onboarding.onContinue : handleClose;
