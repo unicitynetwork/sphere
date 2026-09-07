@@ -154,3 +154,26 @@ export async function resolveActiveKey(sphere: Sphere, network: string): Promise
     return { key: null, source: 'needs-own', undecided: false };
   }
 }
+
+/**
+ * Write a key to the encrypted vault, reporting whether it is DURABLY stored.
+ *
+ * The distinction is load-bearing for a purchased key: the gateway keeps
+ * redelivering a fresh key until the wallet acknowledges receipt, so acking on
+ * a failed vault write ends the only recovery path for a key that exists
+ * nowhere but this tab's plaintext boot cache (sphere#501). Callers ack and
+ * drop the pending-order record only on `true`.
+ */
+export async function persistKeyDurably(
+  sphere: Sphere,
+  network: string,
+  apiKey: string,
+  walletWide: boolean,
+): Promise<boolean> {
+  try {
+    await (walletWide ? saveWalletKey(sphere, network, apiKey) : saveAddressKey(sphere, network, apiKey));
+    return true;
+  } catch {
+    return false;
+  }
+}
