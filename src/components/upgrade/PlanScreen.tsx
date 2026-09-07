@@ -711,6 +711,10 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
       setPaymentUrl(redirectUrl);
       window.open(redirectUrl, '_blank', 'noopener,noreferrer');
       setStep('awaiting');
+      // Creation is done — the guard covers minting an order, NOT watching it.
+      // Held across the watch it would outlive an hour-long poll and lock this
+      // tab out of ever starting another checkout.
+      creatingRef.current = false;
 
       if (SUBSCRIPTION_MOCK) {
         // demoable without a backend — mirror the live gateway's two shapes
@@ -797,6 +801,23 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
    */
   const activePubkey = sphere?.identity?.chainPubkey ?? null;
   const resumedRef = useRef<string | null>(null);
+
+  /**
+   * The in-memory fallback belongs to ONE (network, wallet). A stored record is
+   * scoped by its slot, but `pending` is just component state and would survive
+   * a wallet swap or network change under a mounted dialog — enough for the
+   * duplicate guard to block a legitimate checkout, or for a wallet-wide record
+   * to pass canAdoptFor and file a purchased key into the wrong wallet.
+   */
+  useEffect(() => {
+    // The whole purchase belongs to that context, not just the record: leaving
+    // the screen mid-flow would show the previous wallet's order to the new one.
+    resetPurchase();
+    setPending(null);
+    resumedRef.current = null;
+    // resetPurchase only touches this component's own state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [network, rootPubkey]);
   useEffect(() => {
     if (!isOpen) {
       resumedRef.current = null;

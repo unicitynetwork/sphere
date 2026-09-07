@@ -36,6 +36,7 @@ const UTIL: UtilizationInfo = {
 };
 
 const ROOT_PRIV = '1'.repeat(64);
+const OTHER_PRIV = '2'.repeat(64);
 
 const h = vi.hoisted(() => ({
   checkout: vi.fn(),
@@ -44,7 +45,7 @@ const h = vi.hoisted(() => ({
   ack: vi.fn(),
   poll: vi.fn(),
   walletKey: vi.fn(),
-  rootPubkey: '',
+  rootPriv: '',
   activePubkey: '',
   hasSphere: true,
 }));
@@ -65,7 +66,7 @@ vi.mock('../../../src/sdk/hooks', async (orig) => ({
   ...(await orig<typeof import('../../../src/sdk/hooks')>()),
   useSphereContext: () => ({
     sphere: h.hasSphere
-      ? { deriveAddress: () => ({ privateKey: ROOT_PRIV }), identity: { chainPubkey: h.activePubkey } }
+      ? { deriveAddress: () => ({ privateKey: h.rootPriv }), identity: { chainPubkey: h.activePubkey } }
       : null,
     applySubscriptionKey: h.applySubscriptionKey,
     network: 'mainnet',
@@ -142,7 +143,7 @@ async function buy() {
 beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
-  h.rootPubkey = ROOT_PUBKEY;
+  h.rootPriv = ROOT_PRIV;
   h.activePubkey = ROOT_PUBKEY;
   h.hasSphere = true;
   h.walletKey = vi.fn(async () => 'sk_' + 'c'.repeat(28) + 'cbe1');
@@ -612,5 +613,32 @@ describe('an abandoned order settles without taking the screen (every verdict)',
     expect(h.applySubscriptionKey).not.toHaveBeenCalled();
     expect(screen.queryByText(/different address/i)).toBeNull();
     expect(readSettlableOrders('mainnet', ROOT_PUBKEY)).toHaveLength(1);
+  });
+});
+
+describe('the in-memory fallback is scoped to its wallet', () => {
+  it('does not let one wallet\'s unpersisted order block another\'s checkout', async () => {
+    // Storage blocked, so the order lives only in component state — which
+    // survives a wallet swap under a mounted dialog unless it is cleared.
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    try {
+      h.orderStatus = vi.fn(async () => stillOpen());
+      h.poll = vi.fn(async () => new Promise(() => {}));
+      const { refresh } = renderDialog();
+      await buy();
+      await waitFor(() => expect(h.checkout).toHaveBeenCalledTimes(1));
+
+      // A different wallet is now loaded in the same mounted screen.
+      h.rootPriv = OTHER_PRIV;
+      h.activePubkey = getPublicKey(OTHER_PRIV);
+      refresh();
+      await buy();
+
+      await waitFor(() => expect(h.checkout).toHaveBeenCalledTimes(2));
+    } finally {
+      setItem.mockRestore();
+    }
   });
 });
