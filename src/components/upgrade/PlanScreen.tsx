@@ -581,7 +581,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
    * and act only on a verdict. A late-confirming payment still hands over its
    * key; an order that never landed stays quiet.
    */
-  const settleQuietly = async (record: PendingOrderRecord) => {
+  const settleQuietly = async (record: PendingOrderRecord, superseded: boolean) => {
     if (rootPubkey === null) return;
     try {
       const verdict = settleOrder(await getOrderStatus(record.orderId));
@@ -617,6 +617,17 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
       if (action.kind === 'adopt') {
         // Its own address will settle it; adopting here files the key wrong.
         if (!canAdoptFor(record)) return;
+        // A newer order has taken over since this one was abandoned. Applying
+        // this key would silently swap the wallet onto the older purchase, so
+        // it is offered rather than installed.
+        if (superseded) {
+          showToast(
+            `An earlier order you cancelled has been paid and holds a key for ${record.plan.name}. Open Settings → Subscription to use it instead of your current one.`,
+            'info',
+            8000,
+          );
+          return;
+        }
         if (claimPendingOrder(network, rootPubkey, record.orderId) === 'held') return;
         const { durable } = await applySubscriptionKey(action.apiKey, { walletWide: record.walletWide });
         await queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.subscription.all });
@@ -845,8 +856,13 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     // Serialized: several settling at once would race each other's storage
     // read-modify-writes and toasts.
     void (async () => {
-      for (const stale of readSettlableOrders(network, rootPubkey)) {
-        if (stale.abandonedAt !== undefined) await settleQuietly(stale);
+      const all = readSettlableOrders(network, rootPubkey);
+      for (const stale of all) {
+        if (stale.abandonedAt === undefined) continue;
+        // "Superseded" = some other order for this wallet is newer. Its key, not
+        // this one's, is the purchase the buyer is actually on.
+        const superseded = all.some((other) => other.orderId !== stale.orderId && other.createdAt > stale.createdAt);
+        await settleQuietly(stale, superseded);
       }
     })();
     const record = readPendingOrder(network, rootPubkey);

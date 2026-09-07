@@ -674,3 +674,23 @@ describe('orders that exist server-side before the wallet knows it', () => {
     await waitFor(() => expect(readSettlableOrders('mainnet', ROOT_PUBKEY)).toHaveLength(1));
   });
 });
+
+describe('a late-settling abandoned order never demotes a newer purchase', () => {
+  it('offers the recovered key instead of installing it over the current one', async () => {
+    const old = pendingOrder({ orderId: 'ssc-old', upgradeMasked: null, createdAt: Date.now() - 60_000, abandonedAt: Date.now() - 30_000 });
+    const current = pendingOrder({ orderId: 'ssc-new', upgradeMasked: null, createdAt: Date.now() });
+    savePendingOrder('mainnet', ROOT_PUBKEY, old);
+    savePendingOrder('mainnet', ROOT_PUBKEY, current);
+    h.orderStatus = vi.fn(async (id: string) =>
+      id === 'ssc-old' ? paid({ apiKey: 'sk_' + 'a'.repeat(32) }) : stillOpen(),
+    );
+    h.poll = vi.fn(async () => new Promise(() => {}));
+    renderDialog();
+
+    await waitFor(() => expect(h.orderStatus).toHaveBeenCalledWith('ssc-old'));
+    // The older key is never applied over the order the buyer is actually on.
+    expect(h.applySubscriptionKey).not.toHaveBeenCalled();
+    expect(h.ack).not.toHaveBeenCalled();
+    expect(readSettlableOrders('mainnet', ROOT_PUBKEY).some((r) => r.orderId === 'ssc-old')).toBe(true);
+  });
+});
