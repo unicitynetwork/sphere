@@ -582,12 +582,48 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
    * key; an order that never landed stays quiet.
    */
   const settleQuietly = async (record: PendingOrderRecord) => {
+    if (rootPubkey === null) return;
     try {
       const verdict = settleOrder(await getOrderStatus(record.orderId));
-      if (!verdict) return;
-      setSelectedPlan(record.plan);
-      setUpgradeMasked(record.upgradeMasked);
-      await applyOutcome(resolveCheckoutOutcome(verdict), record, null);
+      if (!verdict) return; // still open — nothing to do until it settles
+      const action = resolveCheckoutOutcome(verdict);
+
+      if (action.kind === 'failed') {
+        clearPendingOrder(network, rootPubkey, record.orderId);
+        return;
+      }
+
+      if (action.kind === 'upgraded') {
+        await refreshSubscriptionThroughCache();
+        const key = await resolveMatchingUpgradeKey(record.upgradeMasked);
+        const planName = action.planName ?? record.plan.name;
+        if (key) rememberPlan(key, planName);
+        clearPendingOrder(network, rootPubkey, record.orderId);
+        showToast(`Upgraded to ${planName}`, 'success', 4000);
+        return;
+      }
+
+      if (action.kind === 'adopt') {
+        // Its own address will settle it; adopting here files the key wrong.
+        if (!canAdoptFor(record)) return;
+        if (claimPendingOrder(network, rootPubkey, record.orderId) === 'held') return;
+        const { durable } = await applySubscriptionKey(action.apiKey, { walletWide: record.walletWide });
+        await queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.subscription.all });
+        if (durable) {
+          void ackOrderKeyDelivery(record.orderId);
+          clearPendingOrder(network, rootPubkey, record.orderId);
+        }
+        showToast(
+          durable ? `Upgraded to ${record.plan.name}` : 'Key applied — save it from Settings → Subscription',
+          'success',
+          5000,
+        );
+        return;
+      }
+
+      // 'claim' (paid, no key delivered) and 'timeout' need the buyer, and this
+      // order is one they walked away from. The record survives to its horizon;
+      // nothing here takes the screen.
     } catch {
       // Transient — the record outlives this attempt and is retried on reopen.
     }
@@ -771,9 +807,13 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     if (rootPubkey === null) return;
     // Abandoned orders are settled in the background — their payment may have
     // landed after the buyer gave up — but they never drive the screen.
-    for (const stale of readSettlableOrders(network, rootPubkey)) {
-      if (stale.abandonedAt !== undefined) void settleQuietly(stale);
-    }
+    // Serialized: several settling at once would race each other's storage
+    // read-modify-writes and toasts.
+    void (async () => {
+      for (const stale of readSettlableOrders(network, rootPubkey)) {
+        if (stale.abandonedAt !== undefined) await settleQuietly(stale);
+      }
+    })();
     const record = readPendingOrder(network, rootPubkey);
     if (!record) return;
     const attempt = `${record.orderId}:${activePubkey ?? ''}`;

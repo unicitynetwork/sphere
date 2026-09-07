@@ -566,3 +566,51 @@ describe('an upgrade whose target key is gone', () => {
     expect(readPendingOrder('mainnet', ROOT_PUBKEY)).not.toBeNull();
   });
 });
+
+describe('an abandoned order settles without taking the screen (every verdict)', () => {
+  const abandoned = (over = {}) => pendingOrder({ upgradeMasked: null, abandonedAt: Date.now(), ...over });
+  const onPlans = () => screen.queryByRole('button', { name: /choose plan|get started|upgrade/i }) !== null;
+
+  it('paid but keyless does NOT reopen the paste step', async () => {
+    h.orderStatus = vi.fn(async () => paid()); // paid, no key, not an upgrade
+    savePendingOrder('mainnet', ROOT_PUBKEY, abandoned());
+    renderDialog();
+
+    await waitFor(() => expect(h.orderStatus).toHaveBeenCalled());
+    expect(screen.queryByPlaceholderText(/sk_/)).toBeNull();
+    expect(onPlans()).toBe(true);
+    expect(readSettlableOrders('mainnet', ROOT_PUBKEY)).toHaveLength(1); // still recoverable
+  });
+
+  it('failed clears the record without an error screen', async () => {
+    h.orderStatus = vi.fn(async () => ({ ...paid(), status: 'failed' as const, fulfilled: false }));
+    savePendingOrder('mainnet', ROOT_PUBKEY, abandoned());
+    renderDialog();
+
+    await waitFor(() => expect(readSettlableOrders('mainnet', ROOT_PUBKEY)).toHaveLength(0));
+    expect(screen.queryByText(/payment was not completed/i)).toBeNull();
+    expect(onPlans()).toBe(true);
+  });
+
+  it('a delivered key is adopted and acked, still without taking the screen', async () => {
+    h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
+    savePendingOrder('mainnet', ROOT_PUBKEY, abandoned());
+    renderDialog();
+
+    await waitFor(() => expect(h.ack).toHaveBeenCalledWith('ssc-1'));
+    expect(onPlans()).toBe(true);
+    expect(readSettlableOrders('mainnet', ROOT_PUBKEY)).toHaveLength(0);
+  });
+
+  it('a key belonging to another address is left for that address', async () => {
+    h.activePubkey = OTHER_PUBKEY;
+    h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
+    savePendingOrder('mainnet', ROOT_PUBKEY, abandoned({ walletWide: false, addressPubkey: ROOT_PUBKEY }));
+    renderDialog();
+
+    await waitFor(() => expect(h.orderStatus).toHaveBeenCalled());
+    expect(h.applySubscriptionKey).not.toHaveBeenCalled();
+    expect(screen.queryByText(/different address/i)).toBeNull();
+    expect(readSettlableOrders('mainnet', ROOT_PUBKEY)).toHaveLength(1);
+  });
+});
