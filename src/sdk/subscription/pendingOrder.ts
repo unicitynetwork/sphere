@@ -72,6 +72,54 @@ function slot(network: string, walletPubkey: string): string {
   return `${SLOT_PREFIX}${network}.${walletPubkey}`;
 }
 
+/**
+ * How many orders one wallet keeps per network. A buyer who abandons an order
+ * and starts over has TWO recoverable orders — the replacement, and the one
+ * whose payment may still confirm — so a single slot cannot hold the promise
+ * that an abandoned order is still settled. Oldest is dropped first.
+ */
+export const MAX_RECORDS = 5;
+
+/** All live records, newest last. Expired ones are dropped as they are read. */
+function readAll(network: string, walletPubkey: string, now: number): PendingOrderRecord[] {
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(slot(network, walletPubkey));
+  } catch {
+    return [];
+  }
+  if (raw === null) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    clearPendingOrder(network, walletPubkey);
+    return [];
+  }
+  // A single object is the pre-list shape: adopt it rather than dropping an
+  // order that is still in flight across the upgrade.
+  const list = Array.isArray(parsed) ? parsed : [parsed];
+  const live = list
+    .map((entry) => validate(entry))
+    .filter((r): r is PendingOrderRecord => r !== null && now - r.createdAt < RECORD_TTL_MS);
+
+  if (live.length !== list.length) writeAll(network, walletPubkey, live);
+  return live;
+}
+
+function writeAll(network: string, walletPubkey: string, records: PendingOrderRecord[]): void {
+  try {
+    if (records.length === 0) {
+      localStorage.removeItem(slot(network, walletPubkey));
+      return;
+    }
+    localStorage.setItem(slot(network, walletPubkey), JSON.stringify(records.slice(-MAX_RECORDS)));
+  } catch {
+    // Storage full or blocked: the flow still works, it just cannot resume.
+  }
+}
+
 function isPlan(v: unknown): v is PlanInfo {
   const p = v as PlanInfo | null;
   return (
@@ -92,13 +140,7 @@ function isPlan(v: unknown): v is PlanInfo {
  * miss that files the key in the wrong vault slot. Anything unrecognised is
  * treated as no record at all.
  */
-function parse(raw: string): PendingOrderRecord | null {
-  let v: unknown;
-  try {
-    v = JSON.parse(raw);
-  } catch {
-    return null;
-  }
+function validate(v: unknown): PendingOrderRecord | null {
   const r = v as PendingOrderRecord | null;
   if (typeof r !== 'object' || r === null) return null;
   if (typeof r.orderId !== 'string' || r.orderId === '') return null;
@@ -113,46 +155,63 @@ function parse(raw: string): PendingOrderRecord | null {
   return r;
 }
 
-export function savePendingOrder(network: string, walletPubkey: string, record: PendingOrderRecord): void {
-  try {
-    localStorage.setItem(slot(network, walletPubkey), JSON.stringify(record));
-  } catch {
-    // Storage full or blocked: the flow still works, it just cannot resume.
-  }
+/** Upsert by orderId, keeping every other live record (see MAX_RECORDS). */
+export function savePendingOrder(
+  network: string,
+  walletPubkey: string,
+  record: PendingOrderRecord,
+  now: number = Date.now(),
+): void {
+  const others = readAll(network, walletPubkey, now).filter((r) => r.orderId !== record.orderId);
+  writeAll(network, walletPubkey, [...others, record]);
 }
 
+/**
+ * The order this wallet is currently buying: the newest one the buyer has not
+ * abandoned. Abandoned orders stay recoverable but must not drive the UI or
+ * block a new purchase — read them with `readSettlableOrders`.
+ */
 export function readPendingOrder(
   network: string,
   walletPubkey: string,
   now: number = Date.now(),
 ): PendingOrderRecord | null {
-  let raw: string | null;
-  try {
-    raw = localStorage.getItem(slot(network, walletPubkey));
-  } catch {
-    return null;
-  }
-  if (raw === null) return null;
-
-  const record = parse(raw);
-  if (record === null) {
-    clearPendingOrder(network, walletPubkey);
-    return null;
-  }
-  if (now - record.createdAt >= RECORD_TTL_MS) {
-    // Past the gateway's own recovery window: nothing can settle it any more.
-    clearPendingOrder(network, walletPubkey);
-    return null;
-  }
-  return record;
+  const live = readAll(network, walletPubkey, now).filter((r) => r.abandonedAt === undefined);
+  return live.length > 0 ? live[live.length - 1] : null;
 }
 
-export function clearPendingOrder(network: string, walletPubkey: string): void {
-  try {
-    localStorage.removeItem(slot(network, walletPubkey));
-  } catch {
-    // nothing to do — a stale record expires on its own at the horizon
+/**
+ * Every order that could still hand over a key, newest first — including the
+ * abandoned ones, whose payments the gateway keeps settling for 24h.
+ */
+export function readSettlableOrders(
+  network: string,
+  walletPubkey: string,
+  now: number = Date.now(),
+): PendingOrderRecord[] {
+  return readAll(network, walletPubkey, now).reverse();
+}
+
+/** Drop one order by id, or every order for this wallet when `orderId` is omitted. */
+export function clearPendingOrder(
+  network: string,
+  walletPubkey: string,
+  orderId?: string,
+  now: number = Date.now(),
+): void {
+  if (orderId === undefined) {
+    try {
+      localStorage.removeItem(slot(network, walletPubkey));
+    } catch {
+      // nothing to do — stale records expire on their own at the horizon
+    }
+    return;
   }
+  writeAll(
+    network,
+    walletPubkey,
+    readAll(network, walletPubkey, now).filter((r) => r.orderId !== orderId),
+  );
 }
 
 /**
@@ -191,9 +250,9 @@ export function claimPendingOrder(
   orderId: string,
   now: number = Date.now(),
 ): OrderClaim {
-  const record = readPendingOrder(network, walletPubkey, now);
-  if (record === null || record.orderId !== orderId) return 'absent';
+  const record = readAll(network, walletPubkey, now).find((r) => r.orderId === orderId);
+  if (record === undefined) return 'absent';
   if (record.claimedAt !== undefined && now - record.claimedAt < CLAIM_LEASE_MS) return 'held';
-  savePendingOrder(network, walletPubkey, { ...record, claimedAt: now });
+  savePendingOrder(network, walletPubkey, { ...record, claimedAt: now }, now);
   return 'taken';
 }

@@ -93,7 +93,12 @@ vi.mock('../../../src/sdk/subscription/pollOrder', async (orig) => {
 });
 
 import { PlanScreen } from '@/components/upgrade/PlanScreen';
-import { savePendingOrder, readPendingOrder, type PendingOrderRecord } from '@/sdk/subscription/pendingOrder';
+import {
+  savePendingOrder,
+  readPendingOrder,
+  readSettlableOrders,
+  type PendingOrderRecord,
+} from '@/sdk/subscription/pendingOrder';
 import { getPublicKey } from '@unicitylabs/sphere-sdk';
 
 const ROOT_PUBKEY = getPublicKey(ROOT_PRIV);
@@ -374,7 +379,7 @@ describe('one order at a time (#503)', () => {
     fireEvent.click(await screen.findByRole('button', { name: /cancel this payment/i }));
     // Marked rather than deleted — it cancels nothing server-side — but it
     // stops blocking a fresh purchase.
-    expect(readPendingOrder('mainnet', ROOT_PUBKEY)!.abandonedAt).toBeGreaterThan(0);
+    expect(readSettlableOrders('mainnet', ROOT_PUBKEY)[0].abandonedAt).toBeGreaterThan(0);
     expect(await screen.findByRole('button', { name: /choose plan|get started|upgrade/i })).toBeTruthy();
   });
 });
@@ -442,7 +447,7 @@ describe('the paste step, when a paid order delivered no key', () => {
 
     await screen.findByPlaceholderText(/sk_/);
     fireEvent.click(screen.getByRole('button', { name: /dismiss this order/i }));
-    expect(readPendingOrder('mainnet', ROOT_PUBKEY)!.abandonedAt).toBeGreaterThan(0);
+    expect(readSettlableOrders('mainnet', ROOT_PUBKEY)[0].abandonedAt).toBeGreaterThan(0);
   });
 });
 
@@ -477,7 +482,7 @@ describe('an order whose payment window closed but which can still settle', () =
     fireEvent.click(screen.getByRole('button', { name: /cancel this payment/i }));
     // Marked, NOT deleted: this cancels nothing server-side, and a payment
     // already sent can still confirm.
-    expect(readPendingOrder('mainnet', ROOT_PUBKEY)!.abandonedAt).toBeGreaterThan(0);
+    expect(readSettlableOrders('mainnet', ROOT_PUBKEY)[0].abandonedAt).toBeGreaterThan(0);
 
     h.poll = vi.fn(async () => new Promise(() => {}));
     await buy();

@@ -4,6 +4,7 @@ import {
   readPendingOrder,
   clearPendingOrder,
   claimPendingOrder,
+  readSettlableOrders,
   isWithinPaymentWindow,
   type PendingOrderRecord,
 } from '@/sdk/subscription/pendingOrder';
@@ -123,5 +124,41 @@ describe('claimPendingOrder', () => {
     // A live checkout whose record failed to persist must still be able to
     // settle: 'absent' means no rival, not "refuse".
     expect(claimPendingOrder('mainnet', WALLET, 'ssc-1', 1_000_000)).toBe('absent');
+  });
+});
+
+describe('keeping more than one recoverable order', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('does not lose an abandoned order when its replacement is stored', () => {
+    // The buyer gave up on ssc-1 and bought again. ssc-1's payment can still
+    // confirm for the rest of the day, so its handle must survive.
+    savePendingOrder('mainnet', WALLET, record({ orderId: 'ssc-1', abandonedAt: 1_000_000 }), 1_000_000);
+    savePendingOrder('mainnet', WALLET, record({ orderId: 'ssc-2' }), 1_000_000);
+
+    expect(readPendingOrder('mainnet', WALLET, 1_000_000)!.orderId).toBe('ssc-2');
+    expect(readSettlableOrders('mainnet', WALLET, 1_000_000).map((r) => r.orderId).sort()).toEqual(['ssc-1', 'ssc-2']);
+  });
+
+  it('hides an abandoned order from the active slot without deleting it', () => {
+    savePendingOrder('mainnet', WALLET, record({ abandonedAt: 1_000_000 }), 1_000_000);
+    expect(readPendingOrder('mainnet', WALLET, 1_000_000)).toBeNull();
+    expect(readSettlableOrders('mainnet', WALLET, 1_000_000)).toHaveLength(1);
+  });
+
+  it('clears one order by id, leaving the others', () => {
+    savePendingOrder('mainnet', WALLET, record({ orderId: 'ssc-1', abandonedAt: 1_000_000 }), 1_000_000);
+    savePendingOrder('mainnet', WALLET, record({ orderId: 'ssc-2' }), 1_000_000);
+    clearPendingOrder('mainnet', WALLET, 'ssc-2', 1_000_000);
+    expect(readSettlableOrders('mainnet', WALLET, 1_000_000).map((r) => r.orderId)).toEqual(['ssc-1']);
+  });
+
+  it('reads a record written in the pre-list shape', () => {
+    // An order in flight across the upgrade must not be dropped.
+    localStorage.setItem(
+      Object.keys(localStorage)[0] ?? `sphere_subscription_api_key.pending_order.mainnet.${WALLET}`,
+      JSON.stringify(record()),
+    );
+    expect(readPendingOrder('mainnet', WALLET, 1_000_000)!.orderId).toBe('ssc-1');
   });
 });

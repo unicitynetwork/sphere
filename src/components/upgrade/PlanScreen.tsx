@@ -11,6 +11,7 @@ import { pollOrderStatus, settleOrder, PAYMENT_WINDOW_MS, type OrderPollResult }
 import {
   savePendingOrder,
   readPendingOrder,
+  readSettlableOrders,
   clearPendingOrder,
   claimPendingOrder,
   isWithinPaymentWindow,
@@ -323,7 +324,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     if (record && durable && delivered && rootPubkey !== null) {
       // Fire-and-forget: an unsent ack only leaves the key deliverable.
       void ackOrderKeyDelivery(record.orderId);
-      clearPendingOrder(network, rootPubkey);
+      clearPendingOrder(network, rootPubkey, record.orderId);
       setPending(null);
     }
     // A key that was NOT delivered for this order (a hand-paste) settles
@@ -432,7 +433,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
         if (key) rememberPlan(key, planName);
         setUpgradedMaskedKey(action.maskedKey ?? record?.upgradeMasked ?? (fullUpgradeKey ? maskKey(fullUpgradeKey) : null));
         if (record && rootPubkey !== null) {
-          clearPendingOrder(network, rootPubkey);
+          clearPendingOrder(network, rootPubkey, record.orderId);
           setPending(null);
         }
         setStep('success');
@@ -492,7 +493,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
         return;
       case 'failed':
         if (record && rootPubkey !== null) {
-          clearPendingOrder(network, rootPubkey);
+          clearPendingOrder(network, rootPubkey, record.orderId);
           setPending(null);
         }
         setStep('error');
@@ -768,15 +769,17 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     // No wallet, no slot to look in: a record lives under its buying wallet's
     // own key, so a locked or uninitialised session simply has nothing to read.
     if (rootPubkey === null) return;
+    // Abandoned orders are settled in the background — their payment may have
+    // landed after the buyer gave up — but they never drive the screen.
+    for (const stale of readSettlableOrders(network, rootPubkey)) {
+      if (stale.abandonedAt !== undefined) void settleQuietly(stale);
+    }
     const record = readPendingOrder(network, rootPubkey);
     if (!record) return;
     const attempt = `${record.orderId}:${activePubkey ?? ''}`;
     if (resumedRef.current === attempt) return;
     resumedRef.current = attempt;
-    // An abandoned order is still settled — its payment may have landed after
-    // the buyer gave up — but it must not drag them back onto a waiting screen
-    // they walked away from. Only a paid or failed verdict acts.
-    void (record.abandonedAt === undefined ? resumeOrder(record) : settleQuietly(record));
+    void resumeOrder(record);
     // resumeOrder closes over state setters and the wallet; re-running this on
     // every render would restart the read it just started.
     // eslint-disable-next-line react-hooks/exhaustive-deps
