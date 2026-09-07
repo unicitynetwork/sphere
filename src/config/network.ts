@@ -311,6 +311,27 @@ export function resetActiveNetwork(opts: { reload?: () => void } = {}): void {
   (opts.reload ?? (() => window.location.reload()))();
 }
 
+/**
+ * Finish the network reset that clearAllSphereData() starts.
+ *
+ * Wallet deletion drops the persisted choice on purpose — a deleted wallet
+ * should come back on the deployment default, the way a fresh browser does.
+ * But SPHERE_NETWORK is resolved ONCE at module load and deleteWallet()
+ * deliberately never reloads, so the removal alone left THIS tab running on the
+ * old network with nothing persisted: the next wallet was created there, was
+ * offered its plans and wrote to its token DB, and only the first refresh moved
+ * it to the default. Every OTHER tab meanwhile did reset, because a storage
+ * event does not fire in the tab that caused it — networkSync.ts saw the
+ * removal and reloaded. The reset was never wrong, it just skipped one tab.
+ *
+ * Returns true when it reloads, so the caller can skip work the reload undoes.
+ */
+export function applyClearedNetworkChoice(opts: { reload?: () => void } = {}): boolean {
+  if (SPHERE_NETWORK === DEFAULT_NETWORK) return false;
+  resetActiveNetwork(opts);
+  return true;
+}
+
 export function setActiveNetwork(id: NetworkType, opts: { reload?: () => void } = {}): void {
   if (!isSwitchableNetwork(id)) {
     throw new Error(`Network "${id}" is not available for switching`);

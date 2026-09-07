@@ -60,6 +60,7 @@ import {
 import { getActiveOracleApiKey } from './oracleKey';
 import { SUBSCRIPTION_ENABLED } from '../config/subscription';
 import { allowsSharedAggregatorKey } from '../config/networkCapabilities';
+import { applyClearedNetworkChoice } from '../config/network';
 import { resolveActiveKey, saveWalletKey, saveAddressKey, loadWalletKey } from './subscription/keyVault';
 import { validatePastedKey } from './subscription/keyCheck';
 import { isPaidPlan } from './subscription/usage';
@@ -936,6 +937,15 @@ export function SphereProvider({ children, network }: SphereProviderProps) {
     // The deleted wallet's on-disk password state is gone with it — a fresh
     // onboarding starts with no password until the user (re-)sets one.
     setHasWalletPassword(false);
+
+    // clearAllSphereData() above dropped the persisted network choice on
+    // purpose — a deleted wallet comes back on the deployment default, like a
+    // fresh browser. Finish that reset: SPHERE_NETWORK was resolved at module
+    // load, so without a reload THIS tab would keep running on the old network
+    // while every other tab already went back (storage event → networkSync.ts).
+    // The reload replaces the re-init below, which would otherwise rebuild the
+    // old network's providers and its token DB moments before navigating away.
+    if (applyClearedNetworkChoice()) return;
 
     // Reinitialize with fresh providers (skip loading spinner — onboarding UI is already visible)
     await initialize(0, true);

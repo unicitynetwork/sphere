@@ -443,3 +443,33 @@ describe('setActiveNetwork', () => {
     expect(reload).not.toHaveBeenCalled();
   });
 });
+
+describe('applyClearedNetworkChoice — wallet deletion must land on the default', () => {
+  it('reloads when the deleted wallet was running on a non-default network', async () => {
+    // The state right after clearAllSphereData(): the page still holds the
+    // module-load SPHERE_NETWORK ('mainnet'), the key is already swept.
+    setRuntimeConfig(MAINNET_LIVE);
+    localStorage.setItem('sphere_active_network', 'mainnet');
+    const mod = await loadNetworkModule();
+    expect(mod.SPHERE_NETWORK).toBe('mainnet');
+    localStorage.clear(); // the sweep
+
+    const reload = vi.fn();
+    expect(mod.applyClearedNetworkChoice({ reload })).toBe(true);
+
+    expect(reload).toHaveBeenCalledOnce();
+    expect(localStorage.getItem('sphere_active_network')).toBeNull();
+  });
+
+  it('does nothing when the session already runs on the default', async () => {
+    // The common case — deleting a wallet on testnet2 must not cost a reload,
+    // and deleteWallet()'s own re-init is left to finish the job.
+    setRuntimeConfig(MAINNET_LIVE);
+    const mod = await loadNetworkModule();
+    expect(mod.SPHERE_NETWORK).toBe(mod.DEFAULT_NETWORK);
+
+    const reload = vi.fn();
+    expect(mod.applyClearedNetworkChoice({ reload })).toBe(false);
+    expect(reload).not.toHaveBeenCalled();
+  });
+});
