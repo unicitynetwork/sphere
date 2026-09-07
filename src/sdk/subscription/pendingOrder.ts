@@ -57,6 +57,14 @@ export interface PendingOrderRecord {
   upgradeMasked: string | null;
   /** Set by the tab currently settling this order (see CLAIM_LEASE_MS). */
   claimedAt?: number;
+  /**
+   * The buyer gave up on this order and wants to start over. It stops blocking
+   * a new checkout, but it is NOT deleted: a `pending` order can already be
+   * funded and awaiting confirmation, and nothing here cancels or refunds the
+   * server-side payment. It stays recoverable until the horizon so a late
+   * settlement still hands over its key.
+   */
+  abandonedAt?: number;
 }
 
 /** @param walletPubkey the wallet's index-0 pubkey — its subscription identity. */
@@ -101,6 +109,7 @@ function parse(raw: string): PendingOrderRecord | null {
   if (typeof r.walletWide !== 'boolean') return null;
   if (r.upgradeMasked !== null && typeof r.upgradeMasked !== 'string') return null;
   if (r.claimedAt !== undefined && typeof r.claimedAt !== 'number') return null;
+  if (r.abandonedAt !== undefined && typeof r.abandonedAt !== 'number') return null;
   return r;
 }
 

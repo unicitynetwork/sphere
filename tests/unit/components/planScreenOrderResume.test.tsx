@@ -372,7 +372,9 @@ describe('one order at a time (#503)', () => {
     renderDialog();
 
     fireEvent.click(await screen.findByRole('button', { name: /cancel this payment/i }));
-    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull();
+    // Marked rather than deleted — it cancels nothing server-side — but it
+    // stops blocking a fresh purchase.
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)!.abandonedAt).toBeGreaterThan(0);
     expect(await screen.findByRole('button', { name: /choose plan|get started|upgrade/i })).toBeTruthy();
   });
 });
@@ -440,7 +442,7 @@ describe('the paste step, when a paid order delivered no key', () => {
 
     await screen.findByPlaceholderText(/sk_/);
     fireEvent.click(screen.getByRole('button', { name: /dismiss this order/i }));
-    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull();
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)!.abandonedAt).toBeGreaterThan(0);
   });
 });
 
@@ -473,7 +475,9 @@ describe('an order whose payment window closed but which can still settle', () =
 
     await screen.findByText(/payment window/i);
     fireEvent.click(screen.getByRole('button', { name: /cancel this payment/i }));
-    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull();
+    // Marked, NOT deleted: this cancels nothing server-side, and a payment
+    // already sent can still confirm.
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)!.abandonedAt).toBeGreaterThan(0);
 
     h.poll = vi.fn(async () => new Promise(() => {}));
     await buy();
@@ -517,5 +521,43 @@ describe('failures the buyer must be told about', () => {
     } finally {
       setItem.mockRestore();
     }
+  });
+});
+
+describe('an order the buyer walked away from (#504 review)', () => {
+  it('still hands over the key if that payment lands later', async () => {
+    // "Cancel and start over" cancels nothing server-side. A payment already
+    // sent can confirm minutes later, and its key must not be lost.
+    h.orderStatus = vi.fn(async () => paid({ apiKey: 'sk_' + 'f'.repeat(32) }));
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ upgradeMasked: null, abandonedAt: Date.now() }));
+    renderDialog();
+
+    await waitFor(() => expect(h.applySubscriptionKey).toHaveBeenCalled());
+    expect(h.ack).toHaveBeenCalledWith('ssc-1');
+  });
+
+  it('does not drag the buyer back to a waiting screen it never settles', async () => {
+    h.orderStatus = vi.fn(async () => stillOpen());
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ abandonedAt: Date.now() }));
+    renderDialog();
+
+    await waitFor(() => expect(h.orderStatus).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: /choose plan|get started|upgrade/i })).not.toBeNull();
+    expect(screen.queryByText(/complete the payment/i)).toBeNull();
+  });
+});
+
+describe('an upgrade whose target key is gone', () => {
+  it('does not report success for a plan attached to a key the wallet lost', async () => {
+    // The key was replaced in Settings or another tab while the order was in
+    // flight, so nothing local matches the mask the order upgraded.
+    h.walletKey = vi.fn(async () => 'sk_' + 'd'.repeat(28) + 'dead');
+    h.orderStatus = vi.fn(async () => paid({ upgrade: true, maskedKey: 'sk_...cbe1', planName: 'premium' }));
+    savePendingOrder('mainnet', ROOT_PUBKEY, pendingOrder({ upgradeMasked: 'sk_...cbe1' }));
+    renderDialog();
+
+    expect(await screen.findByText(/no longer uses/i)).toBeTruthy();
+    expect(screen.queryByText(/upgrade complete/i)).toBeNull();
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).not.toBeNull();
   });
 });

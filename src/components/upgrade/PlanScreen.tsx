@@ -415,6 +415,20 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
         // store — re-resolve it locally and use it only if it is still the key
         // the order upgraded (the mask is what the record keeps).
         const key = fullUpgradeKey ?? (record ? await resolveMatchingUpgradeKey(record.upgradeMasked) : null);
+        if (record && record.upgradeMasked !== null && key === null) {
+          // The plan was applied to a key this wallet can no longer produce —
+          // it was replaced in Settings or another tab while the order was in
+          // flight. Reporting success would hide a paid plan sitting on a key
+          // that is gone, so say so and keep the record.
+          setPending(record);
+          setWindowClosed(false);
+          setAwaitingBuyingAddress(true); // no discard control on this screen either
+          setError(
+            `The plan was applied to key ${record.upgradeMasked}, which this wallet no longer uses — it was replaced while the payment was in progress. Paste that key back in Settings → Subscription to use the plan you paid for.`,
+          );
+          setStep('error');
+          return;
+        }
         if (key) rememberPlan(key, planName);
         setUpgradedMaskedKey(action.maskedKey ?? record?.upgradeMasked ?? (fullUpgradeKey ? maskKey(fullUpgradeKey) : null));
         if (record && rootPubkey !== null) {
@@ -561,6 +575,23 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     }
   };
 
+  /**
+   * Settle an abandoned order without claiming the screen: read its status once
+   * and act only on a verdict. A late-confirming payment still hands over its
+   * key; an order that never landed stays quiet.
+   */
+  const settleQuietly = async (record: PendingOrderRecord) => {
+    try {
+      const verdict = settleOrder(await getOrderStatus(record.orderId));
+      if (!verdict) return;
+      setSelectedPlan(record.plan);
+      setUpgradeMasked(record.upgradeMasked);
+      await applyOutcome(resolveCheckoutOutcome(verdict), record, null);
+    } catch {
+      // Transient — the record outlives this attempt and is retried on reopen.
+    }
+  };
+
   const startCheckout = async (opts?: { forceNewKey?: boolean }) => {
     if (!selectedPlan) return;
     // `checkout.isPending` disables the button, but only once the mutation is
@@ -595,7 +626,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     // blocked storage) exists only in memory, and consulting storage alone
     // would mint a second payable order for the same purchase.
     const live = (rootPubkey === null ? null : readPendingOrder(network, rootPubkey)) ?? pending;
-    if (live) {
+    if (live && live.abandonedAt === undefined) {
       await resumeOrder(live);
       return;
     }
@@ -670,7 +701,13 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
    */
   const abandonOrder = () => {
     checkoutAbortRef.current?.abort();
-    if (rootPubkey !== null) clearPendingOrder(network, rootPubkey);
+    if (rootPubkey !== null && pending) {
+      // MARK, don't delete. A pending order may already be funded and waiting
+      // on confirmation, and this cancels nothing server-side — deleting the
+      // record would strand a key the buyer paid for. Marked orders stop
+      // blocking a new checkout and are still settled if they land.
+      savePendingOrder(network, rootPubkey, { ...pending, abandonedAt: Date.now() });
+    }
     setPending(null);
     resetPurchase();
   };
@@ -736,7 +773,10 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     const attempt = `${record.orderId}:${activePubkey ?? ''}`;
     if (resumedRef.current === attempt) return;
     resumedRef.current = attempt;
-    void resumeOrder(record);
+    // An abandoned order is still settled — its payment may have landed after
+    // the buyer gave up — but it must not drag them back onto a waiting screen
+    // they walked away from. Only a paid or failed verdict acts.
+    void (record.abandonedAt === undefined ? resumeOrder(record) : settleQuietly(record));
     // resumeOrder closes over state setters and the wallet; re-running this on
     // every render would restart the read it just started.
     // eslint-disable-next-line react-hooks/exhaustive-deps
