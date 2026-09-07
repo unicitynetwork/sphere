@@ -481,13 +481,13 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
       // Still open. Poll for what is LEFT of the payment window, measured from
       // the order's own creation — reopening at minute 59 must not grant
       // another hour.
-      const remaining = record.createdAt + PAYMENT_WINDOW_MS - Date.now();
-      if (remaining <= 0) {
+      if (!isWithinPaymentWindow(record)) {
         setWindowClosed(true);
         setStep('error');
         setError(null);
         return;
       }
+      const remaining = record.createdAt + PAYMENT_WINDOW_MS - Date.now();
       verdict = await pollOrderStatus(() => getOrderStatus(record.orderId), {
         signal: abort.signal,
         timeoutMs: remaining,
@@ -547,9 +547,15 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     // One order at a time (#503). The gateway mints a fresh Paymento request on
     // every checkout call and dedupes nothing, so a second one here is a second
     // payable link for the same purchase — pay both and the buyer is charged
-    // twice for one 30-day window. Continue the live one instead.
+    // twice for one 30-day window. Continue the stored one instead.
+    //
+    // ANY stored order blocks, not just one inside its payment window: past the
+    // window the order is not dead, only unpayable, and a payment sent near
+    // expiry can still confirm for the rest of the day. Replacing it here would
+    // discard the handle to a key that is about to exist. The way out is
+    // deliberate — "cancel this payment and start over" — never implicit.
     const live = rootPubkey === null ? null : readPendingOrder(network, rootPubkey);
-    if (live && isWithinPaymentWindow(live)) {
+    if (live) {
       await resumeOrder(live);
       return;
     }
@@ -932,6 +938,18 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
                     </Button>
                   )}
                 </div>
+                {pending && (
+                  // A stored order blocks a new purchase until it settles, so
+                  // giving up on it has to be possible from here, not only from
+                  // the waiting screen.
+                  <button
+                    type="button"
+                    className="text-sm text-neutral-500 underline dark:text-white/45"
+                    onClick={abandonOrder}
+                  >
+                    Cancel this payment and start over
+                  </button>
+                )}
               </div>
             )}
           </motion.div>

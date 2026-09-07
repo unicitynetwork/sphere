@@ -369,3 +369,40 @@ describe('the paste step, when a paid order delivered no key', () => {
     expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull();
   });
 });
+
+describe('an order whose payment window closed but which can still settle', () => {
+  const expired = () => pendingOrder({ orderId: 'ssc-old', createdAt: Date.now() - 2 * 60 * 60_000 });
+
+  it('is not silently replaced by a new purchase', async () => {
+    // The gateway keeps settling for 24h, so a payment sent near expiry can
+    // still confirm. Overwriting the handle here loses that key AND charges the
+    // buyer a second time.
+    h.orderStatus = vi.fn(async () => stillOpen());
+    savePendingOrder('mainnet', ROOT_PUBKEY, expired());
+    renderDialog();
+
+    await screen.findByText(/payment window/i);
+    fireEvent.click(screen.getByRole('button', { name: /back to plans/i }));
+    await buy();
+
+    // It goes back to watching the old order rather than starting another.
+    await waitFor(() => expect(h.orderStatus).toHaveBeenCalledTimes(2));
+    expect(h.orderStatus).toHaveBeenLastCalledWith('ssc-old');
+    expect(h.checkout).not.toHaveBeenCalled();
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)!.orderId).toBe('ssc-old');
+  });
+
+  it('can be abandoned deliberately, which frees a new purchase', async () => {
+    h.orderStatus = vi.fn(async () => stillOpen());
+    savePendingOrder('mainnet', ROOT_PUBKEY, expired());
+    renderDialog();
+
+    await screen.findByText(/payment window/i);
+    fireEvent.click(screen.getByRole('button', { name: /cancel this payment/i }));
+    expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull();
+
+    h.poll = vi.fn(async () => new Promise(() => {}));
+    await buy();
+    await waitFor(() => expect(h.checkout).toHaveBeenCalledTimes(1));
+  });
+});
