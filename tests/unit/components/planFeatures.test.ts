@@ -10,6 +10,7 @@ import {
   continueWithPlanLabel,
   planGridList,
   isFreePlanName,
+  hasPaidOffers,
 } from '@/components/subscription/planFeatures';
 import type { PlanInfo } from '@/services/subscriptionApi';
 
@@ -160,5 +161,34 @@ describe('decline labels (sphere#496)', () => {
     // Store off (testnet): there is nothing to decline, so the wizard wording stays.
     expect(continueWithPlanLabel('free', false)).toBe('Enter Wallet');
     expect(continueWithPlanLabel(null, true)).toBe('Enter Wallet');
+  });
+});
+
+describe('hasPaidOffers — is there anything to sell here at all', () => {
+  it('is false where the store is off, whatever the catalogue holds', () => {
+    // testnet2: PAID_PLANS_ENABLED is `flag && chargesRealMoney(network)`.
+    expect(hasPaidOffers([basic], false)).toBe(false);
+  });
+
+  it('is false for a LOADED catalogue with nothing paid in it', () => {
+    expect(hasPaidOffers([], true)).toBe(false);
+    // A zero-priced row that slipped past the store filter is not an offer.
+    expect(hasPaidOffers([{ ...basic, priceCents: 0 }], true)).toBe(false);
+  });
+
+  it('is true once the catalogue carries a paid plan', () => {
+    expect(hasPaidOffers([{ ...basic, priceCents: 0 }, basic], true)).toBe(true);
+  });
+
+  it('fails OPEN while the catalogue has not resolved', () => {
+    // undefined is react-query's `data` before success: loading, disabled or
+    // errored. Hiding a real purchase path because the gateway is slow would be
+    // worse than showing a surface that turns out to be empty.
+    expect(hasPaidOffers(undefined, true)).toBe(true);
+    expect(hasPaidOffers(null, true)).toBe(true);
+  });
+
+  it('lets the flag win over a fail-open unknown catalogue', () => {
+    expect(hasPaidOffers(undefined, false)).toBe(false);
   });
 });

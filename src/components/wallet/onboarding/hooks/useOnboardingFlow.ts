@@ -14,7 +14,7 @@ import { buildWalletBackup } from "./buildWalletBackup";
 import type { DerivedAddressInfo } from "../components/AddressSelectionScreen";
 import type { NametagAvailability } from "../components/NametagScreen";
 import { provisionOrRecoverKey } from "../../../../services/subscriptionApi";
-import { SUBSCRIPTION_ENABLED } from "../../../../config/subscription";
+import { SUBSCRIPTION_ENABLED, PAID_PLANS_ENABLED } from "../../../../config/subscription";
 import { getStoredSubscriptionKey, setStoredSubscriptionKey } from "../../../../config/subscriptionKeyCache";
 import { saveWalletKey } from "../../../../sdk/subscription/keyVault";
 import { isFreePlanName } from "../../../subscription/planFeatures";
@@ -782,11 +782,23 @@ export function useOnboardingFlow(
         setStoredSubscriptionKey(result.apiKey);
         // Durable per-identity copy; non-fatal if it fails (cache still set).
         await saveWalletKey(active, network, result.apiKey).catch(() => {});
-        // A restored wallet whose key is already on a PAID plan has nothing to
-        // decide here — walk it straight into the wallet instead of showing an
-        // upgrade line-up it has already bought past. A fresh wallet is always
-        // provisioned onto free, so this only ever fires on restore.
-        if (!isFreePlanName(result.plan)) {
+        // Nothing to decide, two ways. A restored wallet whose key is already on
+        // a PAID plan has bought past the line-up. And where the store is off —
+        // every test network, since PAID_PLANS_ENABLED is `flag &&
+        // chargesRealMoney(activeNetwork)` — there is no line-up at all: the
+        // screen degenerates to one "Enter Wallet" button over a card nothing
+        // can be done with. Walk both straight into the wallet.
+        //
+        // The FLAG decides, not the catalogue: consulting the store here would
+        // make entering the wallet wait on a gateway round-trip, and the flag
+        // already covers the case this fixes. A store that is on but sells
+        // nothing is caught where its query is running anyway (Settings).
+        //
+        // Note what is NOT skipped: everything above this line still runs. With
+        // subscriptions on, the env aggregator key is not a fallback
+        // (oracleKey.ts), so a wallet that entered without provisioning its own
+        // key could not send at all.
+        if (!PAID_PLANS_ENABLED || !isFreePlanName(result.plan)) {
           finishFinalize();
           return;
         }

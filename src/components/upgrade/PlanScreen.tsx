@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Sparkles, Loader2, AlertTriangle } from 'lucide-react';
+import { NETWORKS } from '@unicitylabs/sphere-sdk';
 import { Button } from '../wallet/ui';
+import { SPHERE_NETWORK } from '../../config/network';
+import { isTestMoney } from '../../config/networkCapabilities';
 import { PlansGrid } from '../subscription/PlansGrid';
 import { CurrentPlanShowcase } from '../subscription/CurrentPlanShowcase';
 import { UpgradeSuccess } from './UpgradeSuccess';
@@ -78,12 +81,57 @@ interface PlanScreenProps {
  * without mounting the full modal (which pulls in usePlans/useUtilization/
  * useCheckout/useSphereContext). 'settings' and undefined render nothing.
  */
+/**
+ * Which network this plan belongs to, on every step and in both modes.
+ *
+ * The same grid sells worthless test tokens and real-money mainnet plans, and
+ * without this the two screens are indistinguishable. It lives in the shared
+ * header rather than the hero because the hero is absent in the dialog while
+ * the store is off — exactly the case where the distinction matters most — and
+ * because the header stays on screen while the buyer is paying.
+ */
+export function PlanNetworkChip() {
+  const label = NETWORKS[SPHERE_NETWORK].name;
+  const testMoney = isTestMoney(SPHERE_NETWORK);
+  return (
+    <span
+      title={
+        testMoney
+          ? `${label} — test network. Nothing here is charged and its tokens hold no real value.`
+          : `${label} — live network. Purchases are charged in real money.`
+      }
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 font-mono text-[11px] tracking-wide ${
+        testMoney
+          ? 'bg-neutral-200/70 text-neutral-600 dark:bg-white/10 dark:text-white/60'
+          : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+      }`}
+    >
+      <span
+        aria-hidden
+        className={`h-1.5 w-1.5 rounded-full ${testMoney ? 'bg-neutral-400 dark:bg-white/40' : 'bg-emerald-500'}`}
+      />
+      {label}
+    </span>
+  );
+}
+
 export function UpgradeReasonBanner({ reason }: { reason?: UpgradeReason }) {
   if (reason === 'quota') {
     return (
       <div className="mx-auto mb-6 flex max-w-xl items-start gap-2 rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-3 text-sm">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
         <span>You've hit your plan's limit. Upgrade for more, or wait for your quota to refill.</span>
+      </div>
+    );
+  }
+
+  if (reason === 'network') {
+    return (
+      <div className="mx-auto mb-6 flex max-w-xl items-start gap-2 rounded-2xl border border-orange-500/20 bg-orange-500/10 p-3 text-sm">
+        <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
+        <span>
+          You've switched networks. Plans are per network — here is what this one offers.
+        </span>
       </div>
     );
   }
@@ -907,6 +955,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
             <div className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-orange-500" />
               <span className="text-lg font-semibold">{PAID_PLANS_ENABLED ? 'Choose your plan' : 'Your plan'}</span>
+              <PlanNetworkChip />
             </div>
             <button
               type="button"
