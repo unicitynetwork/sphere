@@ -249,8 +249,17 @@ export function shouldAnnounceMainnet(opts: {
   active: NetworkType;
   networks: readonly SupportedNetwork[];
   announced: boolean;
+  defaultNetwork: NetworkType;
 }): boolean {
   if (opts.announced) return false;
+  // A deployment whose DEFAULT is mainnet has nobody left to invite: a wallet
+  // with no persisted choice already boots there, so the only way to be on a
+  // test network is to have chosen it deliberately — and inviting someone back
+  // to the network they just left is precisely the nag this function exists to
+  // prevent. Checked against the default rather than the active network because
+  // the question is about the deployment, not this session: the two other exits
+  // below stay for the deployment that still starts on a test network.
+  if (opts.defaultNetwork === 'mainnet') return false;
   if (opts.active === 'mainnet') return false;
   return opts.networks.some((n) => n.id === 'mainnet' && n.available);
 }
@@ -309,6 +318,27 @@ export function resetActiveNetwork(opts: { reload?: () => void } = {}): void {
   }
   broadcastNetworkChange(DEFAULT_NETWORK);
   (opts.reload ?? (() => window.location.reload()))();
+}
+
+/**
+ * Finish the network reset that clearAllSphereData() starts.
+ *
+ * Wallet deletion drops the persisted choice on purpose — a deleted wallet
+ * should come back on the deployment default, the way a fresh browser does.
+ * But SPHERE_NETWORK is resolved ONCE at module load and deleteWallet()
+ * deliberately never reloads, so the removal alone left THIS tab running on the
+ * old network with nothing persisted: the next wallet was created there, was
+ * offered its plans and wrote to its token DB, and only the first refresh moved
+ * it to the default. Every OTHER tab meanwhile did reset, because a storage
+ * event does not fire in the tab that caused it — networkSync.ts saw the
+ * removal and reloaded. The reset was never wrong, it just skipped one tab.
+ *
+ * Returns true when it reloads, so the caller can skip work the reload undoes.
+ */
+export function applyClearedNetworkChoice(opts: { reload?: () => void } = {}): boolean {
+  if (SPHERE_NETWORK === DEFAULT_NETWORK) return false;
+  resetActiveNetwork(opts);
+  return true;
 }
 
 export function setActiveNetwork(id: NetworkType, opts: { reload?: () => void } = {}): void {

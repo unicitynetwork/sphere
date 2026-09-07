@@ -350,7 +350,7 @@ describe('shouldAnnounceMainnet — invite once, never move anyone', () => {
   it('invites a test-network wallet once mainnet is live', async () => {
     const mod = await loadNetworkModule();
     expect(
-      mod.shouldAnnounceMainnet({ active: 'testnet2', networks: LIVE, announced: false }),
+      mod.shouldAnnounceMainnet({ active: 'testnet2', networks: LIVE, announced: false, defaultNetwork: 'testnet2' }),
     ).toBe(true);
   });
 
@@ -358,20 +358,36 @@ describe('shouldAnnounceMainnet — invite once, never move anyone', () => {
     // Never advertise what this deployment cannot actually switch to.
     const mod = await loadNetworkModule();
     expect(
-      mod.shouldAnnounceMainnet({ active: 'testnet2', networks: NOT_LIVE, announced: false }),
+      mod.shouldAnnounceMainnet({ active: 'testnet2', networks: NOT_LIVE, announced: false, defaultNetwork: 'testnet2' }),
+    ).toBe(false);
+  });
+
+  it('stays quiet when mainnet IS the deployment default', async () => {
+    // Nobody is left to invite. A wallet with no persisted choice already boots
+    // on mainnet, so the only way to be on a test network is to have chosen it
+    // deliberately — and inviting someone back to the network they just left is
+    // exactly the nag this function exists to prevent.
+    const mod = await loadNetworkModule();
+    expect(
+      mod.shouldAnnounceMainnet({
+        active: 'testnet2',
+        networks: LIVE,
+        announced: false,
+        defaultNetwork: 'mainnet',
+      }),
     ).toBe(false);
   });
 
   it('never asks a wallet already on mainnet', async () => {
     const mod = await loadNetworkModule();
-    expect(mod.shouldAnnounceMainnet({ active: 'mainnet', networks: LIVE, announced: false })).toBe(
+    expect(mod.shouldAnnounceMainnet({ active: 'mainnet', networks: LIVE, announced: false, defaultNetwork: 'testnet2' })).toBe(
       false,
     );
   });
 
   it('never asks twice — declining is a real answer, not a postponement', async () => {
     const mod = await loadNetworkModule();
-    expect(mod.shouldAnnounceMainnet({ active: 'testnet2', networks: LIVE, announced: true })).toBe(
+    expect(mod.shouldAnnounceMainnet({ active: 'testnet2', networks: LIVE, announced: true, defaultNetwork: 'testnet2' })).toBe(
       false,
     );
   });
@@ -440,6 +456,36 @@ describe('setActiveNetwork', () => {
     const mod = await loadNetworkModule();
     const reload = vi.fn();
     mod.setActiveNetwork(mod.SPHERE_NETWORK, { reload });
+    expect(reload).not.toHaveBeenCalled();
+  });
+});
+
+describe('applyClearedNetworkChoice — wallet deletion must land on the default', () => {
+  it('reloads when the deleted wallet was running on a non-default network', async () => {
+    // The state right after clearAllSphereData(): the page still holds the
+    // module-load SPHERE_NETWORK ('mainnet'), the key is already swept.
+    setRuntimeConfig(MAINNET_LIVE);
+    localStorage.setItem('sphere_active_network', 'mainnet');
+    const mod = await loadNetworkModule();
+    expect(mod.SPHERE_NETWORK).toBe('mainnet');
+    localStorage.clear(); // the sweep
+
+    const reload = vi.fn();
+    expect(mod.applyClearedNetworkChoice({ reload })).toBe(true);
+
+    expect(reload).toHaveBeenCalledOnce();
+    expect(localStorage.getItem('sphere_active_network')).toBeNull();
+  });
+
+  it('does nothing when the session already runs on the default', async () => {
+    // The common case — deleting a wallet on testnet2 must not cost a reload,
+    // and deleteWallet()'s own re-init is left to finish the job.
+    setRuntimeConfig(MAINNET_LIVE);
+    const mod = await loadNetworkModule();
+    expect(mod.SPHERE_NETWORK).toBe(mod.DEFAULT_NETWORK);
+
+    const reload = vi.fn();
+    expect(mod.applyClearedNetworkChoice({ reload })).toBe(false);
     expect(reload).not.toHaveBeenCalled();
   });
 });

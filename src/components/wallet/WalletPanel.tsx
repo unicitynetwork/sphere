@@ -40,6 +40,7 @@ export function WalletPanel({ autoFocusUnlock = false }: { autoFocusUnlock?: boo
       active: SPHERE_NETWORK,
       networks: SUPPORTED_NETWORKS,
       announced: isMainnetAnnounced(),
+      defaultNetwork: DEFAULT_NETWORK,
     }),
   );
 
