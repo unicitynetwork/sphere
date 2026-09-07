@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/sphere/fix-hide-swap-where-mint-disallowed/Union.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <title>Unicity Agent Sphere</title>
+    <!-- Fonts are self-hosted via @unicitylabs/sphere-ui (>= 0.1.35), which now
+         ships the woff2 files instead of a remote @import. These links were also
+         never the whole story: sphere-ui's stylesheet made its own request to
+         Google and, being emitted later, won the cascade. -->
+    <!-- Pre-React boot work: SPA path restore and the theme class. In a file, not
+         inline, so script-src can be 'self' — a CSP cannot tell our inline script
+         from an injected one. Classic script: runs before the module bundle. -->
+    <script src="/sphere/fix-hide-swap-where-mint-disallowed/boot.js"></script>
+    <!-- Runtime-swappable public config for build-once/promote-many Docker
+         images (window.__SPHERE_RUNTIME_CONFIG__). Classic script: executes
+         before the module bundle below. Rewritten at container start by
+         deploy/runtime-config.sh; dev/Pages ship the empty default. -->
+    <script src="/sphere/fix-hide-swap-where-mint-disallowed/runtime-config.js"></script>
+    <script type="module" crossorigin src="/sphere/fix-hide-swap-where-mint-disallowed/assets/index-BYUT4BMM.js"></script>
+    <link rel="stylesheet" crossorigin href="/sphere/fix-hide-swap-where-mint-disallowed/assets/index-cEcz3hNZ.css">
+  </head>
+  <body style="margin: 0;">
+    <div id="root"></div>
+  </body>
+</html>
