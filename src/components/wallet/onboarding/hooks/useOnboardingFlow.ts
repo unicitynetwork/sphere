@@ -13,14 +13,37 @@ import { createWalletThenRegister } from "./createWalletThenRegister";
 import { buildWalletBackup } from "./buildWalletBackup";
 import type { DerivedAddressInfo } from "../components/AddressSelectionScreen";
 import type { NametagAvailability } from "../components/NametagScreen";
-import { provisionOrRecoverKey } from "../../../../services/subscriptionApi";
+import { provisionOrRecoverKey, getStorePlans } from "../../../../services/subscriptionApi";
 import { SUBSCRIPTION_ENABLED, PAID_PLANS_ENABLED } from "../../../../config/subscription";
 import { getStoredSubscriptionKey, setStoredSubscriptionKey } from "../../../../config/subscriptionKeyCache";
 import { saveWalletKey } from "../../../../sdk/subscription/keyVault";
-import { isFreePlanName } from "../../../subscription/planFeatures";
+import { isFreePlanName, hasPaidOffers } from "../../../subscription/planFeatures";
 
 /** Cap onboarding's subscription provisioning; on expiry we use the env key. */
 const PROVISION_TIMEOUT_MS = 8000;
+
+/**
+ * Cap the catalogue read that decides whether the plan step has anything to
+ * offer. Much shorter than provisioning: nothing depends on the answer except
+ * whether to show one screen, and entering the wallet must not wait on the
+ * store. On expiry we show the step — the same fail-open hasPaidOffers applies
+ * to an unresolved catalogue everywhere else.
+ */
+const CATALOGUE_TIMEOUT_MS = 2500;
+
+/** Whether this network's gateway has anything to sell, as far as we can tell in time. */
+async function catalogueHasOffers(): Promise<boolean> {
+  if (!PAID_PLANS_ENABLED) return false;
+  try {
+    const plans = await Promise.race([
+      getStorePlans(),
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), CATALOGUE_TIMEOUT_MS)),
+    ]);
+    return hasPaidOffers(plans, PAID_PLANS_ENABLED);
+  } catch {
+    return true; // fail open, exactly as hasPaidOffers does on an unresolved catalogue
+  }
+}
 
 export type OnboardingStep =
   | "start"
@@ -783,22 +806,21 @@ export function useOnboardingFlow(
         // Durable per-identity copy; non-fatal if it fails (cache still set).
         await saveWalletKey(active, network, result.apiKey).catch(() => {});
         // Nothing to decide, two ways. A restored wallet whose key is already on
-        // a PAID plan has bought past the line-up. And where the store is off —
-        // every test network, since PAID_PLANS_ENABLED is `flag &&
-        // chargesRealMoney(activeNetwork)` — there is no line-up at all: the
-        // screen degenerates to one "Enter Wallet" button over a card nothing
-        // can be done with. Walk both straight into the wallet.
+        // a PAID plan has bought past the line-up. And where this network's
+        // gateway sells nothing there is no line-up at all: the screen
+        // degenerates to one "Enter Wallet" button over a card nothing can be
+        // done with. Walk both straight into the wallet.
         //
-        // The FLAG decides, not the catalogue: consulting the store here would
-        // make entering the wallet wait on a gateway round-trip, and the flag
-        // already covers the case this fixes. A store that is on but sells
-        // nothing is caught where its query is running anyway (Settings).
+        // The CATALOGUE decides, not the network: a test network that does price
+        // plans should offer them, and a real one that prices none should not.
+        // The read is capped hard and fails open, so entering the wallet never
+        // waits on the store for longer than a blink.
         //
         // Note what is NOT skipped: everything above this line still runs. With
         // subscriptions on, the env aggregator key is not a fallback
         // (oracleKey.ts), so a wallet that entered without provisioning its own
         // key could not send at all.
-        if (!PAID_PLANS_ENABLED || !isFreePlanName(result.plan)) {
+        if (!isFreePlanName(result.plan) || !(await catalogueHasOffers())) {
           finishFinalize();
           return;
         }

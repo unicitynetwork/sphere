@@ -3,15 +3,15 @@
  * row; when they wrap, the trailing row stays centered (no orphaned card
  * hugging the left). Cards reveal in an orchestrated left-to-right stagger.
  *
- * While paid plans aren't purchasable (testnet, PAID_PLANS_ENABLED off), the
- * concrete paid tiers are hidden behind a single "Paid plans — Coming on
- * Mainnet" placeholder (tiers/prices aren't finalized yet).
+ * While paid plans aren't purchasable — the operator's store flag is off, or
+ * this network's gateway prices nothing — the concrete paid tiers are hidden
+ * behind a single "Paid plans" placeholder. The caller decides that: the grid
+ * renders the answer rather than recomputing it, so every surface agrees.
  */
 import { motion, useReducedMotion, type Variants } from 'framer-motion';
 import { PlanCard } from './PlanCard';
 import { PaidPlansComingSoonCard } from './PaidPlansComingSoonCard';
 import { isPopularPlan, isFreePlan } from './planFeatures';
-import { PAID_PLANS_ENABLED } from '../../config/subscription';
 import type { PlanInfo } from '../../services/subscriptionApi';
 
 interface PlansGridProps {
@@ -26,9 +26,11 @@ interface PlansGridProps {
   loadingPlanId?: number | null;
   /** Disable all CTAs (e.g. while another checkout is pending). */
   disabled?: boolean;
+  /** Whether anything here can actually be bought — see hasPaidOffers. */
+  canBuy: boolean;
 }
 
-export function PlansGrid({ plans, currentPlanName, onSelect, renewableCurrent, loadingPlanId, disabled }: PlansGridProps) {
+export function PlansGrid({ plans, currentPlanName, onSelect, renewableCurrent, loadingPlanId, disabled, canBuy }: PlansGridProps) {
   const reduce = useReducedMotion();
 
   const container: Variants = {
@@ -63,7 +65,7 @@ export function PlansGrid({ plans, currentPlanName, onSelect, renewableCurrent, 
         />
       ))}
 
-      {PAID_PLANS_ENABLED
+      {canBuy
         ? paidPlans.map((plan) => (
             <PlanCard
               key={plan.planId}

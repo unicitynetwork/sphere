@@ -18,6 +18,8 @@ const VALID_MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
 const ctx = vi.hoisted(() => ({
+  paidPlansEnabled: false,
+  storePlans: [] as unknown[],
   importWallet: vi.fn(async () => ({
     getAllTrackedAddresses: () => [],
     identity: { nametag: null },
@@ -34,16 +36,19 @@ const ctx = vi.hoisted(() => ({
 vi.mock('../../../src/config/subscription', async (orig) => ({
   ...(await orig<typeof import('../../../src/config/subscription')>()),
   SUBSCRIPTION_ENABLED: true,
-  PAID_PLANS_ENABLED: false,
+  get PAID_PLANS_ENABLED() {
+    return ctx.paidPlansEnabled;
+  },
 }));
 
 vi.mock('../../../src/services/subscriptionApi', async (orig) => ({
   ...(await orig<typeof import('../../../src/services/subscriptionApi')>()),
   provisionOrRecoverKey: () => ctx.provision(),
+  getStorePlans: async () => ctx.storePlans,
 }));
 
 vi.mock('../../../src/sdk/hooks/subscription', () => ({
-  usePlans: () => ({ data: [], isLoading: false, isError: false }),
+  usePlans: () => ({ data: ctx.storePlans, isLoading: false, isError: false }),
   useUtilization: () => ({ data: null, isLoading: false, isError: false }),
   useCheckout: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
@@ -87,6 +92,8 @@ async function restoreWallet() {
 }
 
 beforeEach(() => {
+  ctx.paidPlansEnabled = false;
+  ctx.storePlans = [];
   ctx.importWallet.mockClear();
   ctx.finalizeWallet.mockClear();
   ctx.setWalletPassword.mockClear();
@@ -104,7 +111,37 @@ describe('onboarding skips the plan step where nothing is purchasable', () => {
     expect(screen.queryByText(/your plan is ready/i)).toBeNull();
   });
 
+  it('skips the step when the store is ON but this gateway prices nothing', async () => {
+    // The network is no longer the question — the catalogue is. A deployment
+    // may run the store flag on for both networks, and the test gateway simply
+    // sells nothing.
+    ctx.paidPlansEnabled = true;
+    ctx.storePlans = [];
+    ctx.provision.mockResolvedValue({ apiKey: `sk_${'e'.repeat(32)}`, plan: 'free', created: true });
+
+    await restoreWallet();
+
+    await waitFor(() => expect(ctx.finalizeWallet).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/your plan is ready/i)).toBeNull();
+  });
+
+  it('shows the step on a TEST network when that gateway does sell plans', async () => {
+    // The reversal of #497 item 2, stated as behaviour: a priced test gateway
+    // gets a line-up, with the network named on it.
+    ctx.paidPlansEnabled = true;
+    ctx.storePlans = [
+      { planId: 2, name: 'basic', requestsPerMinute: 300, requestsPerDay: 50000, priceCents: 500, fiatCurrency: 'USD' },
+    ];
+    ctx.provision.mockResolvedValue({ apiKey: `sk_${'f'.repeat(32)}`, plan: 'free', created: true });
+
+    await restoreWallet();
+
+    await waitFor(() => expect(screen.queryByText(/your plan is ready/i)).not.toBeNull());
+    expect(ctx.finalizeWallet).not.toHaveBeenCalled();
+  });
+
   it('still provisions the key it skipped the screen for', async () => {
+
     // The screen is what goes, not the provisioning. With subscriptions on, the
     // env aggregator key is NOT a fallback (oracleKey.ts), so a wallet that
     // enters without its own key cannot send at all.
