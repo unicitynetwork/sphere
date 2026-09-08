@@ -100,27 +100,21 @@ export function PlanNetworkChip() {
           ? `${label} — test network. Nothing here is charged and its tokens hold no real value.`
           : `${label} — live network. Purchases are charged in real money.`
       }
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 font-mono text-[11px] tracking-wide ${
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-wider ${
         testMoney
-          ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-          : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+          ? 'border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400'
+          : 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
       }`}
     >
       <span
         aria-hidden
-        className={`h-1.5 w-1.5 rounded-full ${testMoney ? 'bg-amber-500' : 'bg-emerald-500'}`}
+        className={`h-2 w-2 rounded-full ${testMoney ? 'bg-amber-500' : 'bg-emerald-500'}`}
       />
       {label}
     </span>
   );
 }
 
-/**
- * Banner shown above the plans grid, keyed off why the upgrade modal was
- * opened. Extracted from UpgradeModal's render body so it can be unit-tested
- * without mounting the full modal (which pulls in usePlans/useUtilization/
- * useCheckout/useSphereContext). 'settings' and undefined render nothing.
- */
 /**
  * Says out loud which network a purchase here belongs to, when that is the
  * thing most likely to be misread.
@@ -136,16 +130,25 @@ export function TestMoneyPurchaseNotice() {
   if (!isTestMoney(SPHERE_NETWORK)) return null;
   const label = NETWORKS[SPHERE_NETWORK].name;
   return (
-    <div className="mx-auto mb-6 flex max-w-xl items-start gap-2 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm">
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-      <span>
-        These plans are for <strong>{label}</strong>. A key bought here works only on {label}, whose tokens hold no
-        real value — switch to a live network first if that is not what you want.
-      </span>
+    <div className="mx-auto mb-6 flex max-w-2xl items-start gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/15 p-4">
+      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+      <div>
+        <div className="font-semibold text-amber-600 dark:text-amber-400">These plans are for {label}</div>
+        <p className="mt-0.5 text-sm text-neutral-600 dark:text-white/60">
+          A key bought here works only on {label}, whose tokens hold no real value. Switch to a live network first if
+          that is not what you want.
+        </p>
+      </div>
     </div>
   );
 }
 
+/**
+ * Banner shown above the plans grid, keyed off why the upgrade modal was
+ * opened. Extracted from UpgradeModal's render body so it can be unit-tested
+ * without mounting the full modal (which pulls in usePlans/useUtilization/
+ * useCheckout/useSphereContext). 'settings' and undefined render nothing.
+ */
 export function UpgradeReasonBanner({ reason }: { reason?: UpgradeReason }) {
 
   if (reason === 'quota') {
@@ -216,8 +219,21 @@ function PlansHero({
     return (
       <div className="mb-8 text-center">
         <h2 className="text-2xl font-bold sm:text-3xl">Unlock more commitments</h2>
+        {/* The network belongs in the sentence that introduces the prices, not
+            only in a corner chip: this is the line the eye lands on before it
+            reads a number. */}
         <p className="mt-1.5 text-sm text-neutral-500 dark:text-white/45">
-          Pick the plan that fits how much you transact.
+          Plans for{' '}
+          <span
+            className={
+              isTestMoney(SPHERE_NETWORK)
+                ? 'font-semibold text-amber-600 dark:text-amber-400'
+                : 'font-semibold text-emerald-600 dark:text-emerald-400'
+            }
+          >
+            {NETWORKS[SPHERE_NETWORK].name}
+          </span>{' '}
+          — pick the one that fits how much you transact.
         </p>
       </div>
     );
