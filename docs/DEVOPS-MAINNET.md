@@ -63,7 +63,7 @@ One URL per deployment cannot serve two networks.
 |---|---|---|
 | `WALLET_API_URL_TESTNET2` · `WALLET_API_URL_MAINNET` · `MAINNET_ROLLOUT_ENABLED` | **ECS task definition / `docker -e`** | Read at container start into `window.__SPHERE_RUNTIME_CONFIG__`. No Dockerfile ARG, no rebuild. |
 | `SPHERE_API_URL` · `WALLET_API_URL` · `REQUIRE_WALLET_API` · `DEV_PORTAL_URL` · `AGGREGATOR_API_KEY` | ECS task definition / `docker -e` | Existing contract, unchanged (sed-substituted into the built JS). |
-| `SUBSCRIPTION_ENABLED` · `PAID_PLANS_ENABLED` | ECS task definition / `docker -e` | Existing runtime flags. |
+| `SUBSCRIPTION_ENABLED` · `PAID_PLANS_ENABLED_TESTNET` · `PAID_PLANS_ENABLED_MAINNET` | ECS task definition / `docker -e` | Runtime flags. The paid-plans pair replaces the deployment-wide `PAID_PLANS_ENABLED`, which is still honoured for mainnet while `_MAINNET` is unset. |
 
 **Why the new ones do not use the `__RUNTIME_*__` placeholder mechanism:** they
 decide whether a network is *offered*, and an availability decision is a branch.
@@ -87,7 +87,8 @@ same mechanism the subscription flags already use.
 | `REQUIRE_WALLET_API` | as today | as today |
 | `SUBSCRIPTION_ENABLED` | `true` | **`true` — required, see below** |
 | `AGGREGATOR_API_KEY` | non-secret testnet2 key | **leave UNSET** — see below |
-| `PAID_PLANS_ENABLED` | not `true` | **`true`** |
+| `PAID_PLANS_ENABLED_MAINNET` | not `true` | **`true`** |
+| `PAID_PLANS_ENABLED_TESTNET` | `false` | `false` — production never sells where the tokens are worthless |
 | `DEV_PORTAL_URL` | unchanged | unchanged |
 
 ### `SUBSCRIPTION_ENABLED=true` is mandatory on mainnet
