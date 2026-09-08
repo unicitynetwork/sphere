@@ -4,6 +4,8 @@ import { getPublicKey } from '@unicitylabs/sphere-sdk';
 import { ModalHeader, EmptyState } from '../../ui';
 import { WalletScreen } from '../../ui/WalletScreen';
 import { useSphereContext } from '../../../../sdk/hooks/core/useSphere';
+import { useUtilization } from '../../../../sdk/hooks/subscription';
+import { isFreePlanName } from '../../../subscription/planFeatures';
 import {
   readOrderHistory,
   type OrderHistoryEntry,
@@ -46,6 +48,12 @@ function formatDate(ms: number): string {
 
 export function BillingHistoryModal({ isOpen, onClose }: BillingHistoryModalProps) {
   const { sphere, network } = useSphereContext();
+  const util = useUtilization();
+  // A key can arrive without its receipts: pasted from another wallet, or a
+  // wallet restored in a different browser. Knowing the plan is what stops the
+  // empty state from denying a purchase that really happened.
+  const currentPlan = util.data?.plan?.name ?? null;
+  const onPaidPlan = currentPlan !== null && !isFreePlanName(currentPlan);
 
   // The journal is scoped per (network, wallet), so it needs the wallet's
   // subscription identity — its index-0 key, the same one the gateway binds.
@@ -85,11 +93,19 @@ export function BillingHistoryModal({ isOpen, onClose }: BillingHistoryModalProp
         )}
 
         {entries.length === 0 && openOrders.length === 0 ? (
-          <EmptyState
-            icon={Receipt}
-            title="Nothing bought yet"
-            description="Purchases you make on this network will be listed here."
-          />
+          onPaidPlan ? (
+            <EmptyState
+              icon={Receipt}
+              title={`On the ${currentPlan} plan, not bought in this browser`}
+              description="Receipts stay in the browser the purchase was made in, so this one has none. Paymento emailed a receipt when it was paid."
+            />
+          ) : (
+            <EmptyState
+              icon={Receipt}
+              title="Nothing bought yet"
+              description="Purchases you make on this network will be listed here."
+            />
+          )
         ) : (
           entries.map((entry) => {
             const outcome = OUTCOME[entry.outcome];
