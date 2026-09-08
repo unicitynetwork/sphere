@@ -1,5 +1,7 @@
 import { NETWORKS } from '@unicitylabs/sphere-sdk';
 import { SPHERE_NETWORK } from './network';
+import { requiresSalesOptIn } from './networkCapabilities';
+import type { NetworkType } from '@unicitylabs/sphere-sdk';
 import { SUBSCRIPTION_ENABLED, runtimeSetting as setting } from './runtimeConfig';
 
 /**
@@ -50,22 +52,47 @@ export const SUBSCRIPTION_MOCK =
   import.meta.env.VITE_SUBSCRIPTION_MOCK === 'true';
 
 /**
- * The operator's kill switch for the store. NOT the whole answer to "can this
- * user buy something" — that is the CATALOGUE's job: every purchase surface
- * requires a loaded catalogue with at least one paid plan (see hasPaidOffers),
- * so a gateway that prices nothing sells nothing, whatever this flag says.
+ * Whether this deployment sells paid plans while the wallet is on `network`.
  *
- * It used to AND chargesRealMoney(SPHERE_NETWORK) as well (#497 item 2), so a
- * test network could never show a purchase. That has been deliberately
- * reversed: the store is per-network already — SUBSCRIPTION_API_URL derives
- * from the active network's aggregatorUrl — so an unpriced test gateway hides
- * the surfaces by itself, and where a test network DOES sell keys, refusing to
- * show them was wrong. The protection moved from hiding the store to naming the
- * network: PlanNetworkChip and the test-money notice on the plans step make the
+ *            | test money | real money
+ *   Staging  |   sells    |   sells
+ *   Prod     |   hides    |   sells
+ *
+ * Two questions, two flags, split by the KIND of money rather than by network
+ * id. Charging real money for a key that only works where tokens are worthless
+ * is the mistake worth a separate switch (#497 item 2), and only the deployment
+ * knows whether it is the one allowed to do that: SUBSCRIPTION_API_URL derives
+ * from NETWORKS[network].aggregatorUrl, so a prod build and a staging build on
+ * the same test network talk to the SAME gateway and see the same plans.
+ *
+ * Keyed on requiresSalesOptIn() — its own allowlist, not a network id and not a
+ * `testnet*` name match. Nothing has to be renamed the day a testnet3 appears,
+ * no policy is guessed from a string, and the day a REAL-money network needs the
+ * same opt-in (a second mainnet, a soft launch) it joins that set instead of
+ * forcing the store off everywhere.
+ *
+ * And this is only half the answer. Every purchase surface ALSO requires a
+ * loaded catalogue holding at least one paid plan (hasPaidOffers), so a gateway
+ * that prices nothing sells nothing whatever these flags say — a real network
+ * with an empty catalogue used to render an upgrade path to nothing.
+ *
+ * Where a test network DOES sell, the protection is not concealment but naming:
+ * PlanNetworkChip, the hero subtitle and TestMoneyPurchaseNotice make the
  * network unmistakable at the moment of purchase.
  */
-export const PAID_PLANS_ENABLED =
-  setting(
-    'PAID_PLANS_ENABLED',
-    import.meta.env.VITE_PAID_PLANS_ENABLED as string | undefined,
-  ) === 'true';
+export function paidPlansEnabledFor(network: NetworkType): boolean {
+  if (requiresSalesOptIn(network)) {
+    return (
+      setting(
+        'PAID_PLANS_ON_TEST_NETWORKS',
+        import.meta.env.VITE_PAID_PLANS_ON_TEST_NETWORKS as string | undefined,
+      ) === 'true'
+    );
+  }
+  return (
+    setting('PAID_PLANS_ENABLED', import.meta.env.VITE_PAID_PLANS_ENABLED as string | undefined) === 'true'
+  );
+}
+
+/** Whether PAID plans may be offered in THIS session. See paidPlansEnabledFor. */
+export const PAID_PLANS_ENABLED = paidPlansEnabledFor(SPHERE_NETWORK);
