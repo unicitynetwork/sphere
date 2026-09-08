@@ -37,6 +37,11 @@ export function NetworkSwitchPlanOffer({
   const util = useUtilization();
   // Only ask the store when this load could actually act on the answer.
   const plans = usePlans(armedRef.current);
+  // Derived here rather than inside the effect so the dependency list can name
+  // exactly what it reads: "still in flight" is the only input that matters, and
+  // the query objects themselves change identity on every refetch.
+  const utilPending = util.data === undefined && !util.isError;
+  const plansPending = plans.data === undefined && !plans.isError;
 
   useEffect(() => {
     if (!armedRef.current) return;
@@ -67,8 +72,7 @@ export function NetworkSwitchPlanOffer({
     // armed. The key is per network: until the new network's own key is live,
     // the plan on screen still belongs to the network the user just left.
     if (subscriptionKeyStatus === 'provisioning') return;
-    const pending = (q: { data: unknown; isError: boolean }) => q.data === undefined && !q.isError;
-    if (subscriptionKeyStatus === 'ready' && (pending(util) || pending(plans))) return;
+    if (subscriptionKeyStatus === 'ready' && (utilPending || plansPending)) return;
 
     // From here this boot HAS an answer, and it gets exactly one. Disarming at
     // the DECISION rather than at the fire is what binds the offer to the load
@@ -92,10 +96,10 @@ export function NetworkSwitchPlanOffer({
     walletExists,
     isLocked,
     isLoading,
+    utilPending,
+    plansPending,
     util.data,
-    util.isError,
     plans.data,
-    plans.isError,
     openUpgrade,
   ]);
 
