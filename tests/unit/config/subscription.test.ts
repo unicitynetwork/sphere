@@ -45,9 +45,8 @@ describe('runtime config global (window.__SPHERE_RUNTIME_CONFIG__)', () => {
   });
 
   it('runtime flag values win over build-time env', async () => {
-    // On a real-value network, so the paid-plans flag's effect is observable:
-    // PAID_PLANS_ENABLED now ANDs chargesRealMoney(SPHERE_NETWORK), and the
-    // suite's default network is a test one. Precedence is what this pins.
+    // Precedence is what this pins: the runtime config must win over the
+    // build-time env for both flags.
     vi.stubEnv('VITE_SUBSCRIPTION_ENABLED', 'false');
     vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'false');
     (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = {
@@ -63,20 +62,24 @@ describe('runtime config global (window.__SPHERE_RUNTIME_CONFIG__)', () => {
     expect(cfg.PAID_PLANS_ENABLED).toBe(true);
   });
 
-  it('refuses paid plans on a TEST network however the flag is set (#497 item 2)', async () => {
-    // The store is per-network (SUBSCRIPTION_API_URL derives from the active
-    // network's aggregatorUrl) but the flag was deployment-wide, and one
-    // deployment may serve both. Without this a user who switched to a test
-    // network could pay REAL money for a key belonging to it.
+  it('does not consult the network — the catalogue decides that (reverses #497 item 2)', async () => {
+    // #497 item 2 ANDed chargesRealMoney(SPHERE_NETWORK) into this flag so a
+    // user who switched to a test network could not pay real money for a key
+    // belonging to it. That guard now lives in the DATA instead: the store is
+    // per-network (SUBSCRIPTION_API_URL derives from the active network's
+    // aggregatorUrl), so a test gateway with no priced plan sells nothing and
+    // every purchase surface hides itself on an empty catalogue. The cost of
+    // the move is explicit: pricing a plan on a test gateway now makes the
+    // wallet sell it.
     vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'true');
     (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { PAID_PLANS_ENABLED: 'true' };
     vi.resetModules();
     const cfg = await import('@/config/subscription');
-    expect(cfg.PAID_PLANS_ENABLED).toBe(false);
+    // Default suite network is testnet2, and the flag no longer cares.
+    expect(cfg.PAID_PLANS_ENABLED).toBe(true);
   });
 
-  it('is an AND, not a replacement — a real-value network still needs the flag', async () => {
-    // The network term must not silently turn paid plans ON for mainnet.
+  it('still needs the operator flag — it is the kill switch, not the catalogue', async () => {
     vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'false');
     (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { ...MAINNET_LIVE };
     vi.resetModules();

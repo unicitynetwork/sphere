@@ -1,5 +1,4 @@
 import { NETWORKS } from '@unicitylabs/sphere-sdk';
-import { chargesRealMoney } from './networkCapabilities';
 import { SPHERE_NETWORK } from './network';
 import { SUBSCRIPTION_ENABLED, runtimeSetting as setting } from './runtimeConfig';
 
@@ -51,17 +50,22 @@ export const SUBSCRIPTION_MOCK =
   import.meta.env.VITE_SUBSCRIPTION_MOCK === 'true';
 
 /**
- * Whether PAID plans can be purchased. Paid plans otherwise render as "Coming on
- * Mainnet" (visible but not selectable); only the free plan is usable.
+ * The operator's kill switch for the store. NOT the whole answer to "can this
+ * user buy something" — that is the CATALOGUE's job: every purchase surface
+ * requires a loaded catalogue with at least one paid plan (see hasPaidOffers),
+ * so a gateway that prices nothing sells nothing, whatever this flag says.
  *
- * Gated on the ACTIVE network as well as the deployment flag (#497 item 2). The
- * flag alone was deployment-wide while the gateway it buys from is per-network,
- * and one deployment may serve both — so a user who switched to a test network
- * could still pay real money for a key that belongs to it. The network term is
- * an AND, not a replacement: an operator must still opt in.
+ * It used to AND chargesRealMoney(SPHERE_NETWORK) as well (#497 item 2), so a
+ * test network could never show a purchase. That has been deliberately
+ * reversed: the store is per-network already — SUBSCRIPTION_API_URL derives
+ * from the active network's aggregatorUrl — so an unpriced test gateway hides
+ * the surfaces by itself, and where a test network DOES sell keys, refusing to
+ * show them was wrong. The protection moved from hiding the store to naming the
+ * network: PlanNetworkChip and the test-money notice on the plans step make the
+ * network unmistakable at the moment of purchase.
  */
 export const PAID_PLANS_ENABLED =
   setting(
     'PAID_PLANS_ENABLED',
     import.meta.env.VITE_PAID_PLANS_ENABLED as string | undefined,
-  ) === 'true' && chargesRealMoney(SPHERE_NETWORK);
+  ) === 'true';
