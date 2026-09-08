@@ -52,7 +52,7 @@
 #                          allowlist in the app, so a future testnet needs no
 #                          new variable here.
 #                            staging:    _TESTNET=true   _MAINNET=true
-#                            production: _TESTNET unset  _MAINNET=true
+#                            production: _TESTNET=false  _MAINNET=true
 #   PAID_PLANS_ENABLED     legacy, deployment-wide. Still honoured for MAINNET
 #                          when _MAINNET is unset, so the build can ship before
 #                          the env is renamed. Never covers test networks.
