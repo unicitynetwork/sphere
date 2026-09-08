@@ -54,27 +54,29 @@ export const SUBSCRIPTION_MOCK =
 /**
  * Whether this deployment sells paid plans while the wallet is on `network`.
  *
- *            | test money | real money
- *   Staging  |   sells    |   sells
- *   Prod     |   hides    |   sells
+ *              | testnet | mainnet
+ *   staging    |  sells  |  sells
+ *   production |  hides  |  sells
  *
- * Two questions, two flags, split by the KIND of money rather than by network
- * id. Charging real money for a key that only works where tokens are worthless
- * is the mistake worth a separate switch (#497 item 2), and only the deployment
- * knows whether it is the one allowed to do that: SUBSCRIPTION_API_URL derives
- * from NETWORKS[network].aggregatorUrl, so a prod build and a staging build on
- * the same test network talk to the SAME gateway and see the same plans.
+ * One flag per kind of network, because only the deployment can answer this:
+ * SUBSCRIPTION_API_URL derives from NETWORKS[network].aggregatorUrl, so a prod
+ * build and a staging build on the same test network talk to the SAME gateway
+ * and see the same plans. Neither the catalogue nor the network id can tell the
+ * two deployments apart.
  *
- * Keyed on requiresSalesOptIn() — its own allowlist, not a network id and not a
- * `testnet*` name match. Nothing has to be renamed the day a testnet3 appears,
- * no policy is guessed from a string, and the day a REAL-money network needs the
- * same opt-in (a second mainnet, a soft launch) it joins that set instead of
- * forcing the store off everywhere.
+ * Which flag a network answers to is requiresSalesOptIn() — its own allowlist in
+ * networkCapabilities.ts, so a future testnet needs no new variable, no policy
+ * is guessed from a name, and a real-money network whose store is not open yet
+ * can join it without being called play money.
+ *
+ * PAID_PLANS_ENABLED_MAINNET falls back to the legacy deployment-wide
+ * PAID_PLANS_ENABLED, so shipping this code before renaming the env cannot turn
+ * mainnet sales off. There is deliberately NO such fallback for test networks:
+ * an unconfigured deployment must not start selling worthless keys.
  *
  * And this is only half the answer. Every purchase surface ALSO requires a
  * loaded catalogue holding at least one paid plan (hasPaidOffers), so a gateway
- * that prices nothing sells nothing whatever these flags say — a real network
- * with an empty catalogue used to render an upgrade path to nothing.
+ * that prices nothing sells nothing whatever these flags say.
  *
  * Where a test network DOES sell, the protection is not concealment but naming:
  * PlanNetworkChip, the hero subtitle and TestMoneyPurchaseNotice make the
@@ -84,11 +86,18 @@ export function paidPlansEnabledFor(network: NetworkType): boolean {
   if (requiresSalesOptIn(network)) {
     return (
       setting(
-        'PAID_PLANS_ON_TEST_NETWORKS',
-        import.meta.env.VITE_PAID_PLANS_ON_TEST_NETWORKS as string | undefined,
+        'PAID_PLANS_ENABLED_TESTNET',
+        import.meta.env.VITE_PAID_PLANS_ENABLED_TESTNET as string | undefined,
       ) === 'true'
     );
   }
+
+  const mainnet = setting(
+    'PAID_PLANS_ENABLED_MAINNET',
+    import.meta.env.VITE_PAID_PLANS_ENABLED_MAINNET as string | undefined,
+  );
+  if (mainnet !== undefined && mainnet !== '') return mainnet === 'true';
+
   return (
     setting('PAID_PLANS_ENABLED', import.meta.env.VITE_PAID_PLANS_ENABLED as string | undefined) === 'true'
   );

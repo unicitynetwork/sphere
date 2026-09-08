@@ -46,16 +46,16 @@
 #                          IGNORED when subscriptions are on (per-wallet keys)
 #   SUBSCRIPTION_ENABLED   per-wallet SGW subscription keys — the app checks
 #                          for EXACTLY 'true'; anything else leaves it off
-#   PAID_PLANS_ENABLED     paid-plan purchases where the money is REAL (EXACTLY
-#                          'true'). Says nothing about test networks.
-#   PAID_PLANS_ON_TEST_NETWORKS
-#                          also sell where the money is PLAY money (EXACTLY
-#                          'true'). Staging sets it to rehearse a purchase;
-#                          production leaves it unset. Keyed on the kind of money
-#                          rather than a network id, so a future testnet needs no
-#                          new variable. Matrix:
-#                            staging: testnet sells, mainnet sells
-#                            prod:    testnet hides, mainnet sells
+#   PAID_PLANS_ENABLED_TESTNET / _MAINNET
+#                          sell paid plans on that kind of network (EXACTLY
+#                          'true'). Which network answers to which is an
+#                          allowlist in the app, so a future testnet needs no
+#                          new variable here.
+#                            staging:    _TESTNET=true   _MAINNET=true
+#                            production: _TESTNET unset  _MAINNET=true
+#   PAID_PLANS_ENABLED     legacy, deployment-wide. Still honoured for MAINNET
+#                          when _MAINNET is unset, so the build can ship before
+#                          the env is renamed. Never covers test networks.
 #
 # The SGW base URL is NOT part of this contract: the SGW is the aggregator
 # gateway, so the app derives it from the SDK's per-network config (see
@@ -174,7 +174,7 @@ fi
 # so catch near-miss spellings ('TRUE', '1', 'yes') an operator would expect
 # to work — for BOTH flags; PAID_PLANS_ENABLED's flip is the one-shot mainnet
 # switch where a silent no-op costs the most.
-for flag in SUBSCRIPTION_ENABLED PAID_PLANS_ENABLED PAID_PLANS_ON_TEST_NETWORKS MAINNET_ROLLOUT_ENABLED; do
+for flag in SUBSCRIPTION_ENABLED PAID_PLANS_ENABLED PAID_PLANS_ENABLED_TESTNET PAID_PLANS_ENABLED_MAINNET MAINNET_ROLLOUT_ENABLED; do
   eval "fv=\${$flag-}"
   case "$fv" in
     '' | true | false | 0) ;;
@@ -228,7 +228,7 @@ add __RUNTIME_AGGREGATOR_API_KEY__ "${AGGREGATOR_API_KEY-}"
 nl='
 '
 cr=$(printf '\r')
-for v in SUBSCRIPTION_ENABLED PAID_PLANS_ENABLED PAID_PLANS_ON_TEST_NETWORKS MAINNET_ROLLOUT_ENABLED \
+for v in SUBSCRIPTION_ENABLED PAID_PLANS_ENABLED PAID_PLANS_ENABLED_TESTNET PAID_PLANS_ENABLED_MAINNET MAINNET_ROLLOUT_ENABLED \
          WALLET_API_URL_TESTNET2 WALLET_API_URL_MAINNET \
          REQUIRE_WALLET_API DEFAULT_NETWORK; do
   eval "val=\${$v-}"
@@ -245,7 +245,8 @@ cat > "$WEBROOT/runtime-config.js" <<EOF
 window.__SPHERE_RUNTIME_CONFIG__ = {
   "SUBSCRIPTION_ENABLED": "$(json_escape "${SUBSCRIPTION_ENABLED-}")",
   "PAID_PLANS_ENABLED": "$(json_escape "${PAID_PLANS_ENABLED-}")",
-  "PAID_PLANS_ON_TEST_NETWORKS": "$(json_escape "${PAID_PLANS_ON_TEST_NETWORKS-}")",
+  "PAID_PLANS_ENABLED_TESTNET": "$(json_escape "${PAID_PLANS_ENABLED_TESTNET-}")",
+  "PAID_PLANS_ENABLED_MAINNET": "$(json_escape "${PAID_PLANS_ENABLED_MAINNET-}")",
   "MAINNET_ROLLOUT_ENABLED": "$(json_escape "${MAINNET_ROLLOUT_ENABLED-}")",
   "WALLET_API_URL_TESTNET2": "$(json_escape "${WALLET_API_URL_TESTNET2-}")",
   "WALLET_API_URL_MAINNET": "$(json_escape "${WALLET_API_URL_MAINNET-}")",

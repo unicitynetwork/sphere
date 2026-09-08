@@ -33,23 +33,27 @@ export interface SphereRuntimeConfig {
   SUBSCRIPTION_ENABLED?: string;
   PAID_PLANS_ENABLED?: string;
   /**
-   * Lets THIS deployment sell paid plans while the wallet is on a network whose
-   * money is play money. Off unless exactly 'true', which is production: a test
-   * network's tokens are worthless, so charging real money for a key that only
-   * works there is a mistake a live deployment must not make. Staging sets it,
-   * because rehearsing a purchase is what staging is for.
+   * Whether this deployment sells paid plans, per KIND of network:
    *
-   * Named for the POLICY, not for a network: the repo's `_TESTNET2` suffix
-   * already means "the value for that network id", and this is not one — there
-   * is no `_MAINNET` sibling. Which networks it governs is
-   * requiresSalesOptIn() in networkCapabilities.ts, its own allowlist, so a
-   * future testnet needs no new variable and a real-money network can join it
-   * without redefining what "test money" means.
+   *              | testnet | mainnet
+   *   staging    |  sells  |  sells
+   *   production |  hides  |  sells
    *
-   * Real-money networks are not covered here — they keep answering to the
-   * deployment-wide PAID_PLANS_ENABLED above, so no existing deployment changes.
+   * Both read exactly 'true'. _TESTNET is the one production leaves unset: a
+   * test network's tokens are worthless, so charging real money for a key that
+   * only works there is a mistake a live deployment must not make, while
+   * staging has to be able to rehearse exactly that purchase.
+   *
+   * Which network answers to which flag is requiresSalesOptIn() in
+   * networkCapabilities.ts — an allowlist, so a future testnet needs no new
+   * variable and no policy is guessed from a network's name.
+   *
+   * The legacy deployment-wide PAID_PLANS_ENABLED above still answers for
+   * real-money networks when _MAINNET is unset, so the code can ship before the
+   * env is renamed.
    */
-  PAID_PLANS_ON_TEST_NETWORKS?: string;
+  PAID_PLANS_ENABLED_TESTNET?: string;
+  PAID_PLANS_ENABLED_MAINNET?: string;
 
   /** Per-network wallet-api backend bases; absent/empty = not served here. */
   WALLET_API_URL_TESTNET2?: string;

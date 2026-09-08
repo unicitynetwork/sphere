@@ -93,13 +93,43 @@ describe('runtime config global (window.__SPHERE_RUNTIME_CONFIG__)', () => {
   });
 
   it('staging sells on a test network, because it opted in', async () => {
-    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { PAID_PLANS_ON_TEST_NETWORKS: 'true' };
+    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { PAID_PLANS_ENABLED_TESTNET: 'true' };
     vi.resetModules();
     const cfg = await import('@/config/subscription');
     expect(cfg.PAID_PLANS_ENABLED).toBe(true);
   });
 
+  it('mainnet answers to its own flag when it is set', async () => {
+    vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'true');
+    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = {
+      ...MAINNET_LIVE,
+      PAID_PLANS_ENABLED: 'true',
+      PAID_PLANS_ENABLED_MAINNET: 'false',
+    };
+    vi.resetModules();
+    expect((await import('@/config/subscription')).PAID_PLANS_ENABLED).toBe(false);
+  });
+
+  it('falls back to the legacy flag for mainnet, so the code can ship before the env', async () => {
+    // Renaming a live deployment's env is a separate step from deploying the
+    // build; getting that order wrong must not switch mainnet sales off.
+    vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'true');
+    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { ...MAINNET_LIVE, PAID_PLANS_ENABLED: 'true' };
+    vi.resetModules();
+    expect((await import('@/config/subscription')).PAID_PLANS_ENABLED).toBe(true);
+  });
+
+  it('gives test networks NO such fallback', async () => {
+    // An unconfigured deployment must not start selling keys that only work
+    // where tokens are worthless.
+    vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'true');
+    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { PAID_PLANS_ENABLED: 'true' };
+    vi.resetModules();
+    expect((await import('@/config/subscription')).PAID_PLANS_ENABLED).toBe(false);
+  });
+
   it('the two flags do not stand in for each other', async () => {
+
     // The deployment-wide flag must not open a test network...
     vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'true');
     (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { PAID_PLANS_ENABLED: 'true' };
@@ -111,7 +141,7 @@ describe('runtime config global (window.__SPHERE_RUNTIME_CONFIG__)', () => {
     (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = {
       ...MAINNET_LIVE,
       PAID_PLANS_ENABLED: 'false',
-      PAID_PLANS_ON_TEST_NETWORKS: 'true',
+      PAID_PLANS_ENABLED_TESTNET: 'true',
     };
     vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'false');
     vi.resetModules();
@@ -119,7 +149,7 @@ describe('runtime config global (window.__SPHERE_RUNTIME_CONFIG__)', () => {
   });
 
   it('reads exactly "true", like every other flag here', async () => {
-    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { PAID_PLANS_ON_TEST_NETWORKS: 'TRUE' };
+    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { PAID_PLANS_ENABLED_TESTNET: 'TRUE' };
     vi.resetModules();
     const cfg = await import('@/config/subscription');
     expect(cfg.PAID_PLANS_ENABLED).toBe(false);
