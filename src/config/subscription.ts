@@ -1,6 +1,7 @@
 import { NETWORKS } from '@unicitylabs/sphere-sdk';
-import { chargesRealMoney } from './networkCapabilities';
 import { SPHERE_NETWORK } from './network';
+import { requiresSalesOptIn } from './networkCapabilities';
+import type { NetworkType } from '@unicitylabs/sphere-sdk';
 import { SUBSCRIPTION_ENABLED, runtimeSetting as setting } from './runtimeConfig';
 
 /**
@@ -51,17 +52,56 @@ export const SUBSCRIPTION_MOCK =
   import.meta.env.VITE_SUBSCRIPTION_MOCK === 'true';
 
 /**
- * Whether PAID plans can be purchased. Paid plans otherwise render as "Coming on
- * Mainnet" (visible but not selectable); only the free plan is usable.
+ * Whether this deployment sells paid plans while the wallet is on `network`.
  *
- * Gated on the ACTIVE network as well as the deployment flag (#497 item 2). The
- * flag alone was deployment-wide while the gateway it buys from is per-network,
- * and one deployment may serve both — so a user who switched to a test network
- * could still pay real money for a key that belongs to it. The network term is
- * an AND, not a replacement: an operator must still opt in.
+ *              | testnet | mainnet
+ *   staging    |  sells  |  sells
+ *   production |  hides  |  sells
+ *
+ * One flag per kind of network, because only the deployment can answer this:
+ * SUBSCRIPTION_API_URL derives from NETWORKS[network].aggregatorUrl, so a prod
+ * build and a staging build on the same test network talk to the SAME gateway
+ * and see the same plans. Neither the catalogue nor the network id can tell the
+ * two deployments apart.
+ *
+ * Which flag a network answers to is requiresSalesOptIn() — its own allowlist in
+ * networkCapabilities.ts, so a future testnet needs no new variable, no policy
+ * is guessed from a name, and a real-money network whose store is not open yet
+ * can join it without being called play money.
+ *
+ * PAID_PLANS_ENABLED_MAINNET falls back to the legacy deployment-wide
+ * PAID_PLANS_ENABLED, so shipping this code before renaming the env cannot turn
+ * mainnet sales off. There is deliberately NO such fallback for test networks:
+ * an unconfigured deployment must not start selling worthless keys.
+ *
+ * And this is only half the answer. Every purchase surface ALSO requires a
+ * loaded catalogue holding at least one paid plan (hasPaidOffers), so a gateway
+ * that prices nothing sells nothing whatever these flags say.
+ *
+ * Where a test network DOES sell, the protection is not concealment but naming:
+ * PlanNetworkChip, the hero subtitle and TestMoneyPurchaseNotice make the
+ * network unmistakable at the moment of purchase.
  */
-export const PAID_PLANS_ENABLED =
-  setting(
-    'PAID_PLANS_ENABLED',
-    import.meta.env.VITE_PAID_PLANS_ENABLED as string | undefined,
-  ) === 'true' && chargesRealMoney(SPHERE_NETWORK);
+export function paidPlansEnabledFor(network: NetworkType): boolean {
+  if (requiresSalesOptIn(network)) {
+    return (
+      setting(
+        'PAID_PLANS_ENABLED_TESTNET',
+        import.meta.env.VITE_PAID_PLANS_ENABLED_TESTNET as string | undefined,
+      ) === 'true'
+    );
+  }
+
+  const mainnet = setting(
+    'PAID_PLANS_ENABLED_MAINNET',
+    import.meta.env.VITE_PAID_PLANS_ENABLED_MAINNET as string | undefined,
+  );
+  if (mainnet !== undefined && mainnet !== '') return mainnet === 'true';
+
+  return (
+    setting('PAID_PLANS_ENABLED', import.meta.env.VITE_PAID_PLANS_ENABLED as string | undefined) === 'true'
+  );
+}
+
+/** Whether PAID plans may be offered in THIS session. See paidPlansEnabledFor. */
+export const PAID_PLANS_ENABLED = paidPlansEnabledFor(SPHERE_NETWORK);

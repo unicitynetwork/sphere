@@ -5,6 +5,8 @@ import {
   MINT_UNAVAILABLE_MESSAGE,
   isTestMoney,
   testMoneyMatchesSelfMint,
+  requiresSalesOptIn,
+  salesOptInMatchesTestMoney,
 } from '../../../src/config/networkCapabilities';
 
 describe('canSelfMint — fail-closed allowlist', () => {
@@ -74,7 +76,27 @@ describe('isTestMoney — the badge colour, not the minting gate', () => {
     expect(isTestMoney('some-future-network')).toBe(false);
   });
 
+  it('needs an explicit sales opt-in on exactly the test networks, and fails closed', () => {
+    expect(requiresSalesOptIn('testnet2')).toBe(true);
+    expect(requiresSalesOptIn('testnet')).toBe(true);
+    expect(requiresSalesOptIn('mainnet')).toBe(false);
+    // An unknown network is real-value until someone says otherwise, so it does
+    // NOT get the test-network opt-in — it answers to the ordinary store flag.
+    expect(requiresSalesOptIn('some-future-network')).toBe(false);
+  });
+
+  it('agrees with isTestMoney today — so a divergence has to be written down', () => {
+    // A third separate QUESTION over a third set: a real-value network can exist
+    // whose store is not open yet, and it must be able to require the opt-in
+    // without being called play money. This pins that nobody split them by
+    // accident; the day they legitimately differ, edit this test.
+    for (const n of ['testnet2', 'testnet', 'mainnet', '', 'some-future-network']) {
+      expect(salesOptInMatchesTestMoney(n)).toBe(true);
+    }
+  });
+
   it('agrees with canSelfMint today — so a divergence has to be written down', () => {
+
     // They are separate QUESTIONS over separate sets: a test network could have
     // minting switched off and would still hold play money. This pins that nobody
     // has split them by accident; the day they legitimately differ, edit this test.

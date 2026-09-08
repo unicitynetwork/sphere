@@ -45,9 +45,8 @@ describe('runtime config global (window.__SPHERE_RUNTIME_CONFIG__)', () => {
   });
 
   it('runtime flag values win over build-time env', async () => {
-    // On a real-value network, so the paid-plans flag's effect is observable:
-    // PAID_PLANS_ENABLED now ANDs chargesRealMoney(SPHERE_NETWORK), and the
-    // suite's default network is a test one. Precedence is what this pins.
+    // Precedence is what this pins: the runtime config must win over the
+    // build-time env for both flags.
     vi.stubEnv('VITE_SUBSCRIPTION_ENABLED', 'false');
     vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'false');
     (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = {
@@ -63,25 +62,105 @@ describe('runtime config global (window.__SPHERE_RUNTIME_CONFIG__)', () => {
     expect(cfg.PAID_PLANS_ENABLED).toBe(true);
   });
 
-  it('refuses paid plans on a TEST network however the flag is set (#497 item 2)', async () => {
-    // The store is per-network (SUBSCRIPTION_API_URL derives from the active
-    // network's aggregatorUrl) but the flag was deployment-wide, and one
-    // deployment may serve both. Without this a user who switched to a test
-    // network could pay REAL money for a key belonging to it.
+  /**
+   * The deployment matrix this flag exists to express, split by the KIND of
+   * money rather than by network id:
+   *
+   *            | test money | real money
+   *   Staging  |   sells    |   sells
+   *   Prod     |   hides    |   sells
+   *
+   * The catalogue cannot express it: SUBSCRIPTION_API_URL derives from
+   * NETWORKS[network].aggregatorUrl, so a prod build and a staging build on the
+   * same test network talk to the SAME gateway and see the same plans. Only the
+   * deployment knows which of the two it is.
+   */
+  it('prod hides paid plans where the money is play money', async () => {
+    // Prod says only the deployment-wide flag, which speaks for real money.
     vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'true');
     (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { PAID_PLANS_ENABLED: 'true' };
+    vi.resetModules();
+    const cfg = await import('@/config/subscription');
+    expect(cfg.PAID_PLANS_ENABLED).toBe(false); // suite network is testnet2
+  });
+
+  it('prod sells on mainnet, saying nothing new', async () => {
+    vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'true');
+    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { ...MAINNET_LIVE, PAID_PLANS_ENABLED: 'true' };
+    vi.resetModules();
+    const cfg = await import('@/config/subscription');
+    expect(cfg.PAID_PLANS_ENABLED).toBe(true);
+  });
+
+  it('staging sells on a test network, because it opted in', async () => {
+    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { PAID_PLANS_ENABLED_TESTNET: 'true' };
+    vi.resetModules();
+    const cfg = await import('@/config/subscription');
+    expect(cfg.PAID_PLANS_ENABLED).toBe(true);
+  });
+
+  it('mainnet answers to its own flag when it is set', async () => {
+    vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'true');
+    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = {
+      ...MAINNET_LIVE,
+      PAID_PLANS_ENABLED: 'true',
+      PAID_PLANS_ENABLED_MAINNET: 'false',
+    };
+    vi.resetModules();
+    expect((await import('@/config/subscription')).PAID_PLANS_ENABLED).toBe(false);
+  });
+
+  it('falls back to the legacy flag for mainnet, so the code can ship before the env', async () => {
+    // Renaming a live deployment's env is a separate step from deploying the
+    // build; getting that order wrong must not switch mainnet sales off.
+    vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'true');
+    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { ...MAINNET_LIVE, PAID_PLANS_ENABLED: 'true' };
+    vi.resetModules();
+    expect((await import('@/config/subscription')).PAID_PLANS_ENABLED).toBe(true);
+  });
+
+  it('gives test networks NO such fallback', async () => {
+    // An unconfigured deployment must not start selling keys that only work
+    // where tokens are worthless.
+    vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'true');
+    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { PAID_PLANS_ENABLED: 'true' };
+    vi.resetModules();
+    expect((await import('@/config/subscription')).PAID_PLANS_ENABLED).toBe(false);
+  });
+
+  it('the two flags do not stand in for each other', async () => {
+
+    // The deployment-wide flag must not open a test network...
+    vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'true');
+    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { PAID_PLANS_ENABLED: 'true' };
+    vi.resetModules();
+    expect((await import('@/config/subscription')).PAID_PLANS_ENABLED).toBe(false);
+
+    // ...and the test-money opt-in must not open mainnet.
+    vi.resetModules();
+    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = {
+      ...MAINNET_LIVE,
+      PAID_PLANS_ENABLED: 'false',
+      PAID_PLANS_ENABLED_TESTNET: 'true',
+    };
+    vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'false');
+    vi.resetModules();
+    expect((await import('@/config/subscription')).PAID_PLANS_ENABLED).toBe(false);
+  });
+
+  it('reads exactly "true", like every other flag here', async () => {
+    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { PAID_PLANS_ENABLED_TESTNET: 'TRUE' };
     vi.resetModules();
     const cfg = await import('@/config/subscription');
     expect(cfg.PAID_PLANS_ENABLED).toBe(false);
   });
 
-  it('is an AND, not a replacement — a real-value network still needs the flag', async () => {
-    // The network term must not silently turn paid plans ON for mainnet.
-    vi.stubEnv('VITE_PAID_PLANS_ENABLED', 'false');
-    (window as RuntimeWindow).__SPHERE_RUNTIME_CONFIG__ = { ...MAINNET_LIVE };
-    vi.resetModules();
-    const cfg = await import('@/config/subscription');
-    expect(cfg.PAID_PLANS_ENABLED).toBe(false);
+  it('asks its own question about which networks need the opt-in', async () => {
+    // Not isTestMoney borrowed: a real-money network whose store is not open yet
+    // must be able to join that set without redefining "test money".
+    const caps = await import('@/config/networkCapabilities');
+    expect(caps.requiresSalesOptIn('testnet2')).toBe(true);
+    expect(caps.requiresSalesOptIn('mainnet')).toBe(false);
   });
 
   it('empty runtime values (unset container env) fall back to build-time env', async () => {

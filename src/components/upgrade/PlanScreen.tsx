@@ -32,6 +32,7 @@ import {
   keepPlanLabel,
   continueWithPlanLabel,
   planGridList,
+  hasPaidOffers,
 } from '../subscription/planFeatures';
 import { EnterApiKeyRow } from '../subscription/EnterApiKeyRow';
 import { getStoredSubscriptionKey } from '../../config/subscriptionKeyCache';
@@ -99,18 +100,46 @@ export function PlanNetworkChip() {
           ? `${label} — test network. Nothing here is charged and its tokens hold no real value.`
           : `${label} — live network. Purchases are charged in real money.`
       }
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 font-mono text-[11px] tracking-wide ${
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-wider ${
         testMoney
-          ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-          : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+          ? 'border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400'
+          : 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
       }`}
     >
       <span
         aria-hidden
-        className={`h-1.5 w-1.5 rounded-full ${testMoney ? 'bg-amber-500' : 'bg-emerald-500'}`}
+        className={`h-2 w-2 rounded-full ${testMoney ? 'bg-amber-500' : 'bg-emerald-500'}`}
       />
       {label}
     </span>
+  );
+}
+
+/**
+ * Says out loud which network a purchase here belongs to, when that is the
+ * thing most likely to be misread.
+ *
+ * This carries weight the header chip cannot. The wallet used to refuse to show
+ * a store on a test network at all (#497 item 2); now the catalogue decides
+ * that, so a test network CAN sell keys — and the only thing standing between a
+ * buyer and a real charge for a test-network key is knowing which network they
+ * are on. So on test money it is a notice, not a chip: full width, above the
+ * grid, in the same amber the wallet uses everywhere for "not real money".
+ */
+export function TestMoneyPurchaseNotice() {
+  if (!isTestMoney(SPHERE_NETWORK)) return null;
+  const label = NETWORKS[SPHERE_NETWORK].name;
+  return (
+    <div className="mx-auto mb-6 flex max-w-2xl items-start gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/15 p-4">
+      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+      <div>
+        <div className="font-semibold text-amber-600 dark:text-amber-400">These plans are for {label}</div>
+        <p className="mt-0.5 text-sm text-neutral-600 dark:text-white/60">
+          A key bought here works only on {label}, whose tokens hold no real value. Switch to a live network first if
+          that is not what you want.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -121,6 +150,7 @@ export function PlanNetworkChip() {
  * useCheckout/useSphereContext). 'settings' and undefined render nothing.
  */
 export function UpgradeReasonBanner({ reason }: { reason?: UpgradeReason }) {
+
   if (reason === 'quota') {
     return (
       <div className="mx-auto mb-6 flex max-w-xl items-start gap-2 rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-3 text-sm">
@@ -175,14 +205,35 @@ function KeepPlanButton({ planName, onClick }: { planName: string | null; onClic
  * the dialog sells the upgrade. With paid plans off the dialog has nothing to
  * pitch, so it keeps its bare header bar.
  */
-function PlansHero({ onboarding, currentName }: { onboarding?: PlanScreenOnboarding; currentName: string | null }) {
+function PlansHero({
+  onboarding,
+  currentName,
+  canBuy,
+}: {
+  onboarding?: PlanScreenOnboarding;
+  currentName: string | null;
+  canBuy: boolean;
+}) {
   if (!onboarding) {
-    if (!PAID_PLANS_ENABLED) return null;
+    if (!canBuy) return null;
     return (
       <div className="mb-8 text-center">
         <h2 className="text-2xl font-bold sm:text-3xl">Unlock more commitments</h2>
+        {/* The network belongs in the sentence that introduces the prices, not
+            only in a corner chip: this is the line the eye lands on before it
+            reads a number. */}
         <p className="mt-1.5 text-sm text-neutral-500 dark:text-white/45">
-          Pick the plan that fits how much you transact.
+          Plans for{' '}
+          <span
+            className={
+              isTestMoney(SPHERE_NETWORK)
+                ? 'font-semibold text-amber-600 dark:text-amber-400'
+                : 'font-semibold text-emerald-600 dark:text-emerald-400'
+            }
+          >
+            {NETWORKS[SPHERE_NETWORK].name}
+          </span>{' '}
+          — pick the one that fits how much you transact.
         </p>
       </div>
     );
@@ -198,7 +249,7 @@ function PlansHero({ onboarding, currentName }: { onboarding?: PlanScreenOnboard
       <p className="mt-1.5 text-sm text-neutral-500 dark:text-white/45">
         {!currentName
           ? 'Your subscription is active.'
-          : PAID_PLANS_ENABLED
+          : canBuy
             ? `You're on the ${currentName} plan — upgrade now, or any time from Settings.`
             : `You're all set on the ${currentName} plan.`}
       </p>
@@ -215,13 +266,15 @@ function PlansFooter({
   onboarding,
   currentName,
   onDecline,
+  canBuy,
 }: {
   onboarding?: PlanScreenOnboarding;
   currentName: string | null;
   onDecline: () => void;
+  canBuy: boolean;
 }) {
   if (!onboarding) {
-    if (!PAID_PLANS_ENABLED) return null;
+    if (!canBuy) return null;
     return (
       <div className="mx-auto mt-10 w-full max-w-xs">
         <KeepPlanButton planName={currentName} onClick={onDecline} />
@@ -232,7 +285,7 @@ function PlansFooter({
   return (
     <div className="mx-auto mt-10 w-full max-w-xs">
       <Button variant="primary" fullWidth loading={onboarding.isBusy} onClick={onboarding.onContinue}>
-        {continueWithPlanLabel(currentName, PAID_PLANS_ENABLED)}
+        {continueWithPlanLabel(currentName, canBuy)}
       </Button>
       <EnterApiKeyRow
         tone="quiet"
@@ -339,6 +392,12 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
 
   // plans step: grid gets [synthetic current card, ...store plans]
   const freePlan = useMemo(() => (util.data ? syntheticCurrentPlan(util.data) : null), [util.data]);
+  // The catalogue decides whether anything can be bought here — not the
+  // network. A gateway that prices nothing sells nothing, and one that prices
+  // something sells it wherever the wallet is; the network is made unmistakable
+  // instead of used as a veto (see config/subscription.ts).
+  const canBuy = hasPaidOffers(plans.data, PAID_PLANS_ENABLED);
+
   const gridPlans = useMemo(() => planGridList(freePlan, plans.data ?? []), [plans.data, freePlan]);
 
   const subscriptionStatus = util.data?.status ?? null;
@@ -346,7 +405,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
   const renewableCurrent = subscriptionStatus !== null && subscriptionStatus !== 'active';
 
   const handleSelect = (plan: PlanInfo) => {
-    if (!isPlanSelectable(plan, { currentPlanName, subscriptionStatus, paidPlansEnabled: PAID_PLANS_ENABLED })) return;
+    if (!isPlanSelectable(plan, { currentPlanName, subscriptionStatus, paidPlansEnabled: canBuy })) return;
     setSelectedPlan(plan);
     setStep('email');
   };
@@ -959,7 +1018,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
           <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-4 sm:px-8">
             <div className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-orange-500" />
-              <span className="text-lg font-semibold">{PAID_PLANS_ENABLED ? 'Choose your plan' : 'Your plan'}</span>
+              <span className="text-lg font-semibold">{canBuy ? 'Choose your plan' : 'Your plan'}</span>
               <PlanNetworkChip />
             </div>
             <button
@@ -979,9 +1038,9 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
             exit={{ opacity: 0, y: 12, scale: 0.98 }}
             transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
           >
-            {step === 'plans' && !PAID_PLANS_ENABLED && (
+            {step === 'plans' && !canBuy && (
               <>
-                <PlansHero onboarding={onboarding} currentName={currentName} />
+                <PlansHero onboarding={onboarding} currentName={currentName} canBuy={canBuy} />
                 <UpgradeReasonBanner reason={reason} />
                 {util.isLoading ? (
                   <div className="py-20 text-center text-neutral-400">
@@ -990,13 +1049,15 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
                 ) : (
                   <CurrentPlanShowcase util={util.data ?? null} />
                 )}
-                <PlansFooter onboarding={onboarding} currentName={currentName} onDecline={decline} />
+                <PlansFooter onboarding={onboarding} currentName={currentName} onDecline={decline} canBuy={canBuy} />
               </>
             )}
 
-            {step === 'plans' && PAID_PLANS_ENABLED && (
+            {step === 'plans' && canBuy && (
               <>
-                <PlansHero onboarding={onboarding} currentName={currentName} />
+                <PlansHero onboarding={onboarding} currentName={currentName} canBuy={canBuy} />
+
+                <TestMoneyPurchaseNotice />
 
                 <UpgradeReasonBanner reason={reason} />
 
@@ -1012,6 +1073,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
                 )}
                 {!plans.isLoading && !plans.isError && (
                   <PlansGrid
+                    canBuy={canBuy}
                     plans={gridPlans}
                     currentPlanName={currentName}
                     renewableCurrent={renewableCurrent}
@@ -1019,7 +1081,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
                   />
                 )}
 
-                <PlansFooter onboarding={onboarding} currentName={currentName} onDecline={decline} />
+                <PlansFooter onboarding={onboarding} currentName={currentName} onDecline={decline} canBuy={canBuy} />
               </>
             )}
 

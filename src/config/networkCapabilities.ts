@@ -66,6 +66,33 @@ export function chargesRealMoney(network: string): boolean {
   return !isTestMoney(network);
 }
 
+/**
+ * Fail-closed allowlist: true when selling a paid plan here needs the
+ * DEPLOYMENT to say so explicitly, rather than being covered by the ordinary
+ * store flag.
+ *
+ * A THIRD question, and a third set, even though it coincides with isTestMoney
+ * today — the same reason that one is separate from canSelfMint. "Is this play
+ * money" and "may we sell here" are different sentences: a real-value network
+ * can exist whose store is not open yet (a second mainnet, a soft launch), and
+ * borrowing isTestMoney for this would leave no way to say so except switching
+ * the store off everywhere at once.
+ *
+ * What the opt-in guards is the expensive mistake: charging real money for a
+ * key that only works where tokens are worthless. Staging opts in because
+ * rehearsing a purchase is what staging is for; production never does.
+ */
+const SALES_OPT_IN_NETWORKS: ReadonlySet<string> = new Set(['testnet2', 'testnet']);
+
+export function requiresSalesOptIn(network: string): boolean {
+  return SALES_OPT_IN_NETWORKS.has(network);
+}
+
+/** The two allowlists agree today; exported so a test can pin it. */
+export function salesOptInMatchesTestMoney(network: string): boolean {
+  return requiresSalesOptIn(network) === isTestMoney(network);
+}
+
 /** The two allowlists agree today; exported so a test can pin it. */
 export function testMoneyMatchesSelfMint(network: string): boolean {
   return isTestMoney(network) === canSelfMint(network);

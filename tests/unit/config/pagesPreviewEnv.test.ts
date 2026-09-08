@@ -41,10 +41,13 @@ describe('the Pages preview build can actually reach mainnet', () => {
     expect(envValue('VITE_MAINNET_ROLLOUT_ENABLED')).toBe('true');
   });
 
-  it('offers paid plans, as live staging does', () => {
-    // Still ANDed with chargesRealMoney, so this only shows plans once the
-    // user deliberately switches to mainnet.
-    expect(envValue('VITE_PAID_PLANS_ENABLED')).toBe('true');
+  it('offers paid plans on BOTH kinds of network, as staging does', () => {
+    // A preview exists to test the purchase path, and the testnet flag is what
+    // makes one testable at all: on testnet2 the money is play money, so a
+    // "purchase" there costs nothing real. Dropping either of these silently
+    // turns a preview into a screen with nothing to click.
+    expect(envValue('VITE_PAID_PLANS_ENABLED_TESTNET')).toBe('true');
+    expect(envValue('VITE_PAID_PLANS_ENABLED_MAINNET')).toBe('true');
   });
 
   it('still serves testnet2, so the preview is not mainnet-only', () => {

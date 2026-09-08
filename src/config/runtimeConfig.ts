@@ -32,6 +32,29 @@
 export interface SphereRuntimeConfig {
   SUBSCRIPTION_ENABLED?: string;
   PAID_PLANS_ENABLED?: string;
+  /**
+   * Whether this deployment sells paid plans, per KIND of network:
+   *
+   *              | testnet | mainnet
+   *   staging    |  sells  |  sells
+   *   production |  hides  |  sells
+   *
+   * Both read exactly 'true'. _TESTNET is the one production leaves unset: a
+   * test network's tokens are worthless, so charging real money for a key that
+   * only works there is a mistake a live deployment must not make, while
+   * staging has to be able to rehearse exactly that purchase.
+   *
+   * Which network answers to which flag is requiresSalesOptIn() in
+   * networkCapabilities.ts — an allowlist, so a future testnet needs no new
+   * variable and no policy is guessed from a network's name.
+   *
+   * The legacy deployment-wide PAID_PLANS_ENABLED above still answers for
+   * real-money networks when _MAINNET is unset, so the code can ship before the
+   * env is renamed.
+   */
+  PAID_PLANS_ENABLED_TESTNET?: string;
+  PAID_PLANS_ENABLED_MAINNET?: string;
+
   /** Per-network wallet-api backend bases; absent/empty = not served here. */
   WALLET_API_URL_TESTNET2?: string;
   WALLET_API_URL_MAINNET?: string;
