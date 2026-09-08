@@ -39,8 +39,8 @@ describe('TestMoneyPurchaseNotice', () => {
   it('names the network on test money, because a key bought here is worth nothing elsewhere', () => {
     // The suite's network is testnet2.
     render(<TestMoneyPurchaseNotice />);
-    expect(screen.getByText(/these plans are for/i)).toBeDefined();
-    expect(screen.getByText('Testnet')).toBeDefined();
+    expect(screen.getByText(/these plans are for testnet/i)).toBeDefined();
+    expect(screen.getByText(/works only on Testnet/i)).toBeDefined();
     expect(screen.getByText(/no real value/i)).toBeDefined();
   });
 });
