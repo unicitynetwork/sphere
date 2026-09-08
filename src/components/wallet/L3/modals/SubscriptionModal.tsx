@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { CreditCard, Sparkles, Zap, Timer, KeyRound, Eye, EyeOff, Copy, Check, Loader2 } from 'lucide-react';
+import { CreditCard, Sparkles, Zap, Timer, KeyRound, Eye, EyeOff, Copy, Check, Loader2, Receipt } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { WalletScreen } from '../../ui/WalletScreen';
-import { ModalHeader, Button, EmptyState, AlertMessage } from '../../ui';
+import { ModalHeader, Button, EmptyState, AlertMessage, MenuButton } from '../../ui';
+import { BillingHistoryModal } from './BillingHistoryModal';
 import { usePlans, useUtilization } from '../../../../sdk/hooks/subscription';
 import { PAID_PLANS_ENABLED } from '../../../../config/subscription';
 import { hasPaidOffers } from '../../../subscription/planFeatures';
@@ -42,6 +43,10 @@ export function SubscriptionModal({ isOpen, onClose, onUpgrade }: SubscriptionMo
     !!onUpgrade && (hasPaidOffers(plans.data, PAID_PLANS_ENABLED) || hasStoredOrders(network));
   const queryClient = useQueryClient();
   const [activating, setActivating] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  // The row doubles as the notice for an order that never finished: this is the
+  // first place someone who paid and closed the tab comes looking.
+  const unfinished = hasStoredOrders(network);
   const [activateError, setActivateError] = useState<string | null>(null);
 
   // Wallets created before the subscription feature never ran the onboarding
@@ -65,6 +70,7 @@ export function SubscriptionModal({ isOpen, onClose, onUpgrade }: SubscriptionMo
   };
 
   return (
+    <>
     <WalletScreen isOpen={isOpen} onClose={onClose}>
       <ModalHeader variant="screen" title="Subscription" icon={CreditCard} iconVariant="gradient" onClose={onClose} />
 
@@ -158,6 +164,14 @@ export function SubscriptionModal({ isOpen, onClose, onUpgrade }: SubscriptionMo
 
         {apiKey && <ApiKeyRow apiKey={apiKey} />}
 
+        <MenuButton
+          icon={Receipt}
+          color="neutral"
+          label="Purchase history"
+          subtitle={unfinished ? 'A payment is unfinished' : undefined}
+          onClick={() => setIsHistoryOpen(true)}
+        />
+
         <EnterApiKeyRow
           label="Use a different key"
           note="Keys are transferable — you can use a key someone shared with you. Applied on your main address it becomes the wallet-wide key; on another address it applies to that address only."
@@ -175,6 +189,8 @@ export function SubscriptionModal({ isOpen, onClose, onUpgrade }: SubscriptionMo
         </div>
       )}
     </WalletScreen>
+    <BillingHistoryModal isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} />
+    </>
   );
 }
 

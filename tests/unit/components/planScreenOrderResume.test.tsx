@@ -100,6 +100,7 @@ import {
   readSettlableOrders,
   type PendingOrderRecord,
 } from '@/sdk/subscription/pendingOrder';
+import { readOrderHistory } from '@/sdk/subscription/orderHistory';
 import { getPublicKey } from '@unicitylabs/sphere-sdk';
 
 const ROOT_PUBKEY = getPublicKey(ROOT_PRIV);
@@ -233,6 +234,8 @@ describe('resuming a stored order (#501)', () => {
     expect(h.orderStatus).toHaveBeenCalledWith('ssc-1');
     expect(screen.queryByPlaceholderText(/sk_/)).toBeNull();
     expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull(); // settled, so the handle goes
+    // sphere#509: the handle goes, the receipt stays.
+    expect(readOrderHistory('mainnet', ROOT_PUBKEY)).toMatchObject([{ orderId: 'ssc-1', outcome: 'upgraded' }]);
   });
 
   it('clears a failed order instead of leaving it to be resumed forever', async () => {
@@ -241,6 +244,8 @@ describe('resuming a stored order (#501)', () => {
     renderDialog();
 
     await waitFor(() => expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull());
+    // A failed payment is still something the buyer should be able to look up.
+    expect(readOrderHistory('mainnet', ROOT_PUBKEY)).toMatchObject([{ orderId: 'ssc-1', outcome: 'failed' }]);
   });
 
   it('keeps waiting — and re-offers the payment link — while the order is still open', async () => {
@@ -337,6 +342,7 @@ describe('resuming a stored order (#501)', () => {
 
     await waitFor(() => expect(h.ack).toHaveBeenCalledWith('ssc-1'));
     expect(readPendingOrder('mainnet', ROOT_PUBKEY)).toBeNull();
+    expect(readOrderHistory('mainnet', ROOT_PUBKEY)).toMatchObject([{ orderId: 'ssc-1', outcome: 'paid' }]);
   });
 
   it('leaves a delivered key to the tab already adopting it', async () => {

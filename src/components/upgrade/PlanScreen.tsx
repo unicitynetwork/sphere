@@ -15,11 +15,11 @@ import {
   savePendingOrder,
   readPendingOrder,
   readSettlableOrders,
-  clearPendingOrder,
   claimPendingOrder,
   isWithinPaymentWindow,
   type PendingOrderRecord,
 } from '../../sdk/subscription/pendingOrder';
+import { archiveOrder } from '../../sdk/subscription/orderHistory';
 import { resolveCheckoutOutcome, type CheckoutOutcomeAction } from '../../sdk/subscription/checkoutOutcome';
 import { validatePastedKey } from '../../sdk/subscription/keyCheck';
 import { loadWalletKey } from '../../sdk/subscription/keyVault';
@@ -377,7 +377,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
     if (record && durable && delivered && rootPubkey !== null) {
       // Fire-and-forget: an unsent ack only leaves the key deliverable.
       void ackOrderKeyDelivery(record.orderId);
-      clearPendingOrder(network, rootPubkey, record.orderId);
+      archiveOrder(network, rootPubkey, record, 'paid');
       setPending(null);
     }
     // A key that was NOT delivered for this order (a hand-paste) settles
@@ -486,7 +486,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
         if (key) rememberPlan(key, planName);
         setUpgradedMaskedKey(action.maskedKey ?? record?.upgradeMasked ?? (fullUpgradeKey ? maskKey(fullUpgradeKey) : null));
         if (record && rootPubkey !== null) {
-          clearPendingOrder(network, rootPubkey, record.orderId);
+          archiveOrder(network, rootPubkey, record, 'upgraded');
           setPending(null);
         }
         setStep('success');
@@ -546,7 +546,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
         return;
       case 'failed':
         if (record && rootPubkey !== null) {
-          clearPendingOrder(network, rootPubkey, record.orderId);
+          archiveOrder(network, rootPubkey, record, 'failed');
           setPending(null);
         }
         setStep('error');
@@ -642,7 +642,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
       const action = resolveCheckoutOutcome(verdict);
 
       if (action.kind === 'failed') {
-        clearPendingOrder(network, rootPubkey, record.orderId);
+        archiveOrder(network, rootPubkey, record, 'failed');
         return;
       }
 
@@ -662,7 +662,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
           return;
         }
         if (key) rememberPlan(key, planName);
-        clearPendingOrder(network, rootPubkey, record.orderId);
+        archiveOrder(network, rootPubkey, record, 'upgraded');
         showToast(`Upgraded to ${planName}`, 'success', 4000);
         return;
       }
@@ -686,7 +686,7 @@ export function PlanScreen({ isOpen, reason, onboarding, onClose }: PlanScreenPr
         await queryClient.invalidateQueries({ queryKey: SPHERE_KEYS.subscription.all });
         if (durable) {
           void ackOrderKeyDelivery(record.orderId);
-          clearPendingOrder(network, rootPubkey, record.orderId);
+          archiveOrder(network, rootPubkey, record, 'paid');
         }
         showToast(
           durable ? `Upgraded to ${record.plan.name}` : 'Key applied — save it from Settings → Subscription',
