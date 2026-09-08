@@ -18,6 +18,7 @@ async function loadNetworkModule() {
 beforeEach(() => {
   setRuntimeConfig({});
   localStorage.clear();
+  sessionStorage.clear();
   // Isolate from the developer's local .env, which sets a wallet-api URL.
   vi.stubEnv('VITE_REQUIRE_WALLET_API', '');
   vi.stubEnv('VITE_WALLET_API_URL', '');
@@ -31,6 +32,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   setRuntimeConfig({});
   localStorage.clear();
+  sessionStorage.clear();
 });
 
 /**
@@ -487,5 +489,47 @@ describe('applyClearedNetworkChoice — wallet deletion must land on the default
     const reload = vi.fn();
     expect(mod.applyClearedNetworkChoice({ reload })).toBe(false);
     expect(reload).not.toHaveBeenCalled();
+  });
+});
+
+describe('NETWORK_SWITCHED_TO — the offer belongs to the load after a deliberate switch', () => {
+  it('records the target of a deliberate switch', async () => {
+    setRuntimeConfig(MAINNET_LIVE);
+    const mod = await loadNetworkModule();
+    mod.setActiveNetwork('mainnet', { reload: vi.fn() });
+    expect(sessionStorage.getItem('sphere_network_switched_to')).toBe('mainnet');
+  });
+
+  it('is null on a plain load', async () => {
+    const mod = await loadNetworkModule();
+    expect(mod.NETWORK_SWITCHED_TO).toBeNull();
+  });
+
+  it('reports the switch once and consumes the marker', async () => {
+    // Read-and-remove at module load is what makes the offer immune to a
+    // StrictMode double mount, a remount, and every later plain reload.
+    sessionStorage.setItem('sphere_network_switched_to', 'testnet2');
+    const mod = await loadNetworkModule();
+    expect(mod.NETWORK_SWITCHED_TO).toBe('testnet2');
+    expect(sessionStorage.getItem('sphere_network_switched_to')).toBeNull();
+  });
+
+  it('ignores a marker naming a network this session did not end up on', async () => {
+    // The switch was refused or downgraded between the click and the boot —
+    // offering that network's plans would be advertising a place we are not in.
+    sessionStorage.setItem('sphere_network_switched_to', 'mainnet');
+    const mod = await loadNetworkModule();
+    expect(mod.SPHERE_NETWORK).toBe('testnet2');
+    expect(mod.NETWORK_SWITCHED_TO).toBeNull();
+    expect(sessionStorage.getItem('sphere_network_switched_to')).toBeNull();
+  });
+
+  it('is not written by the recovery reset', async () => {
+    // resetActiveNetwork is the way out of a broken network, not a choice to
+    // shop in a new one.
+    localStorage.setItem('sphere_active_network', 'mainnet');
+    const mod = await loadNetworkModule();
+    mod.resetActiveNetwork({ reload: vi.fn() });
+    expect(sessionStorage.getItem('sphere_network_switched_to')).toBeNull();
   });
 });

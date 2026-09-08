@@ -1,14 +1,13 @@
 /**
- * sphere#496: restoring a wallet re-provisions (get-or-creates) its gateway
- * key, so the plan it comes back on decides what onboarding does next.
+ * sphere#511: onboarding must not show a plan step where nothing can be bought.
  *
- *  - already on a PAID plan → nothing to decide, walk straight into the wallet;
- *  - on the FREE plan → show the plan line-up, as onboarding does for a fresh
- *    wallet.
+ * On a network whose store is off — every test network, since PAID_PLANS_ENABLED
+ * is `flag && chargesRealMoney(activeNetwork)` — the line-up degenerates to a
+ * single "Enter Wallet" button over a card the user cannot act on. Skip it.
  *
- * Drives the real restore-from-mnemonic flow (the harness mirrors
- * importPassword.test.tsx) with subscriptions ON and the gateway call mocked,
- * because this branch lives in doFinalizeWallet.
+ * Drives the real restore flow because the decision lives in doFinalizeWallet,
+ * on the same line for a created and a restored wallet: a fresh wallet is always
+ * provisioned onto free, so both reach this branch identically.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -31,10 +30,11 @@ const ctx = vi.hoisted(() => ({
   provision: vi.fn(),
 }));
 
+// The one difference from restorePlanStep.test.tsx: the store is OFF.
 vi.mock('../../../src/config/subscription', async (orig) => ({
   ...(await orig<typeof import('../../../src/config/subscription')>()),
   SUBSCRIPTION_ENABLED: true,
-  PAID_PLANS_ENABLED: true,
+  PAID_PLANS_ENABLED: false,
 }));
 
 vi.mock('../../../src/services/subscriptionApi', async (orig) => ({
@@ -42,8 +42,6 @@ vi.mock('../../../src/services/subscriptionApi', async (orig) => ({
   provisionOrRecoverKey: () => ctx.provision(),
 }));
 
-// The plan screen's own data comes from the gateway; stub it so this test is
-// about the branch, not about the line-up.
 vi.mock('../../../src/sdk/hooks/subscription', () => ({
   usePlans: () => ({ data: [], isLoading: false, isError: false }),
   useUtilization: () => ({ data: null, isLoading: false, isError: false }),
@@ -73,7 +71,6 @@ function Wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
 }
 
-/** Restore-from-mnemonic through nametag-skip and the optional password step. */
 async function restoreWallet() {
   render(<CreateWalletFlow initialStep="restore" />, { wrapper: Wrapper });
 
@@ -96,9 +93,9 @@ beforeEach(() => {
   ctx.provision.mockReset();
 });
 
-describe('restore lands on the plan step only when the recovered plan is free', () => {
-  it('walks a restored PAID wallet straight into the wallet', async () => {
-    ctx.provision.mockResolvedValue({ apiKey: `sk_${'a'.repeat(32)}`, plan: 'premium', created: false });
+describe('onboarding skips the plan step where nothing is purchasable', () => {
+  it('walks a FREE wallet straight in when the store is off', async () => {
+    ctx.provision.mockResolvedValue({ apiKey: `sk_${'c'.repeat(32)}`, plan: 'free', created: false });
 
     await restoreWallet();
 
@@ -107,15 +104,15 @@ describe('restore lands on the plan step only when the recovered plan is free', 
     expect(screen.queryByText(/your plan is ready/i)).toBeNull();
   });
 
-  it('shows the plan line-up for a restored FREE wallet', async () => {
-    ctx.provision.mockResolvedValue({ apiKey: `sk_${'b'.repeat(32)}`, plan: 'free', created: false });
+  it('still provisions the key it skipped the screen for', async () => {
+    // The screen is what goes, not the provisioning. With subscriptions on, the
+    // env aggregator key is NOT a fallback (oracleKey.ts), so a wallet that
+    // enters without its own key cannot send at all.
+    ctx.provision.mockResolvedValue({ apiKey: `sk_${'d'.repeat(32)}`, plan: 'free', created: true });
 
     await restoreWallet();
 
-    await waitFor(() => expect(screen.queryByText(/subscription restored/i)).not.toBeNull());
-    // sphere#511: the screen must always say which network the plan is for.
-    expect(screen.getByText('Testnet')).toBeDefined();
-    // Still on the step — the wallet is finalized by its continue button.
-    expect(ctx.finalizeWallet).not.toHaveBeenCalled();
+    await waitFor(() => expect(ctx.finalizeWallet).toHaveBeenCalledTimes(1));
+    expect(ctx.provision).toHaveBeenCalledTimes(1);
   });
 });

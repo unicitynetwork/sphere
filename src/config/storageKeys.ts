@@ -110,6 +110,10 @@ export function getOrCreateWalletApiDeviceId(): string {
   return deviceId;
 }
 
+// The network-switch marker lives in sessionStorage (src/config/network.ts,
+// NETWORK_SWITCH_MARKER) and is deliberately NOT listed here: this file's sweep
+// walks localStorage only, and that marker must die with the tab anyway.
+
 // The subscription boot cache is scoped per network and therefore lives in
 // src/config/subscriptionKeyCache.ts — this module is the leaf that
 // src/config/network.ts imports, so it cannot know the active network.

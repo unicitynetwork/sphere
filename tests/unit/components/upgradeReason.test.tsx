@@ -17,6 +17,14 @@ describe('UpgradeReasonBanner', () => {
     expect(screen.queryByText(/hit your plan's limit/i)).toBeNull();
   });
 
+  it('explains a switch-triggered open with the network banner', () => {
+    // The one reason the app raises by itself without the user asking, so it
+    // has to say why the screen appeared.
+    render(<UpgradeReasonBanner reason="network" />);
+    expect(screen.queryByText(/switched networks/i)).not.toBeNull();
+    expect(screen.queryByText(/plans are per network/i)).not.toBeNull();
+  });
+
   it('renders no banner for reason "settings"', () => {
     const { container } = render(<UpgradeReasonBanner reason="settings" />);
     expect(container.firstChild).toBeNull();

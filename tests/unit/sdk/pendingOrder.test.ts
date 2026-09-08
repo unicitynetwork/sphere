@@ -5,6 +5,7 @@ import {
   clearPendingOrder,
   claimPendingOrder,
   readSettlableOrders,
+  hasStoredOrders,
   isWithinPaymentWindow,
   type PendingOrderRecord,
 } from '@/sdk/subscription/pendingOrder';
@@ -160,5 +161,31 @@ describe('keeping more than one recoverable order', () => {
       JSON.stringify(record()),
     );
     expect(readPendingOrder('mainnet', WALLET, 1_000_000)!.orderId).toBe('ssc-1');
+  });
+});
+
+describe('hasStoredOrders — is there still a door to keep open', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('is false with nothing stored', () => {
+    expect(hasStoredOrders('mainnet')).toBe(false);
+  });
+
+  it('sees an order without being told whose wallet it is', () => {
+    // The caller that needs this — Settings, deciding whether to keep the way
+    // back to a paid order open — has the network but not the wallet pubkey.
+    savePendingOrder('mainnet', WALLET, record(), 1_000_000);
+    expect(hasStoredOrders('mainnet')).toBe(true);
+  });
+
+  it('does not answer for another network', () => {
+    savePendingOrder('mainnet', WALLET, record(), 1_000_000);
+    expect(hasStoredOrders('testnet2')).toBe(false);
+  });
+
+  it('goes quiet again once the order is cleared', () => {
+    savePendingOrder('mainnet', WALLET, record(), 1_000_000);
+    clearPendingOrder('mainnet', WALLET);
+    expect(hasStoredOrders('mainnet')).toBe(false);
   });
 });

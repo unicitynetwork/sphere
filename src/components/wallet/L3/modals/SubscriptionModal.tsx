@@ -3,7 +3,10 @@ import { CreditCard, Sparkles, Zap, Timer, KeyRound, Eye, EyeOff, Copy, Check, L
 import { useQueryClient } from '@tanstack/react-query';
 import { WalletScreen } from '../../ui/WalletScreen';
 import { ModalHeader, Button, EmptyState, AlertMessage } from '../../ui';
-import { useUtilization } from '../../../../sdk/hooks/subscription';
+import { usePlans, useUtilization } from '../../../../sdk/hooks/subscription';
+import { PAID_PLANS_ENABLED } from '../../../../config/subscription';
+import { hasPaidOffers } from '../../../subscription/planFeatures';
+import { hasStoredOrders } from '../../../../sdk/subscription/pendingOrder';
 import { usagePercent, formatExpiry, msUntil, formatCountdown } from '../../../../sdk/subscription/usage';
 import { getStoredSubscriptionKey } from '../../../../config/subscriptionKeyCache';
 import { useSphereContext } from '../../../../sdk/hooks/core/useSphere';
@@ -20,10 +23,23 @@ interface SubscriptionModalProps {
 
 export function SubscriptionModal({ isOpen, onClose, onUpgrade }: SubscriptionModalProps) {
   const util = useUtilization();
+  // Only fetched while this screen is open, matching PlanScreen's own call, and
+  // keyed the same so the two share one cached catalogue.
+  const plans = usePlans(isOpen);
   const data = util.data;
   const plan = data?.plan ?? null;
   const apiKey = getStoredSubscriptionKey();
-  const { sphere, applySubscriptionKey } = useSphereContext();
+  const { sphere, network, applySubscriptionKey } = useSphereContext();
+  // Whether an upgrade is a thing that can happen here at all. Passing
+  // `plans.data` UNCHANGED is deliberate: undefined means the catalogue has not
+  // resolved, and hasPaidOffers fails open on it (see its doc).
+  //
+  // The plan screen is not only a shop: it is the only place a paid order whose
+  // key was never delivered can be resumed from. So an unfinished order keeps
+  // the way in open even where there is nothing left to sell — an operator
+  // pausing sales overnight must not strand a purchase already paid for.
+  const canUpgrade =
+    !!onUpgrade && (hasPaidOffers(plans.data, PAID_PLANS_ENABLED) || hasStoredOrders(network));
   const queryClient = useQueryClient();
   const [activating, setActivating] = useState(false);
   const [activateError, setActivateError] = useState<string | null>(null);
@@ -80,12 +96,26 @@ export function SubscriptionModal({ isOpen, onClose, onUpgrade }: SubscriptionMo
 
         {data?.status === 'expired' && (
           <AlertMessage variant="warning">
-            Your plan expired {formatExpiry(data.activeUntil)}. Renew to keep higher limits.
+            Your plan expired {formatExpiry(data.activeUntil)}.{' '}
+            {/* Never tell someone to renew where the button below is hidden:
+                renewal is re-buying the same store card, so with no catalogue
+                there is nothing to click and the sentence is a dead promise. */}
+            {canUpgrade ? 'Renew to keep higher limits.' : "You're on free-tier limits until it can be renewed."}
           </AlertMessage>
         )}
 
         {data?.status === 'inactive' && !util.isLoading && (
-          <EmptyState icon={Sparkles} title="No active plan" description="Get a plan to raise your commitment limits." />
+          <EmptyState
+            icon={Sparkles}
+            title="No active plan"
+            // Never point at a button that is not on screen.
+            description={
+              canUpgrade
+                ? 'Get a plan to raise your commitment limits.'
+                : 'No plans are on sale on this network right now.'
+            }
+          />
+
         )}
 
         {plan && (
@@ -134,11 +164,16 @@ export function SubscriptionModal({ isOpen, onClose, onUpgrade }: SubscriptionMo
         />
       </div>
 
-      <div className="px-5 pb-6">
-        <Button variant="primary" fullWidth icon={Sparkles} onClick={onUpgrade} disabled={!onUpgrade}>
-          {data?.status === 'expired' ? 'Renew plan' : 'Upgrade plan'}
-        </Button>
-      </div>
+      {/* The whole footer goes, not just the button: an empty padded strip
+          under the content reads as a broken layout, not as a deliberate
+          absence. */}
+      {canUpgrade && (
+        <div className="px-5 pb-6">
+          <Button variant="primary" fullWidth icon={Sparkles} onClick={onUpgrade}>
+            {data?.status === 'expired' ? 'Renew plan' : 'Upgrade plan'}
+          </Button>
+        </div>
+      )}
     </WalletScreen>
   );
 }

@@ -215,6 +215,40 @@ export const NETWORK_DOWNGRADED_FROM: string | null = (() => {
   return stored !== null && stored !== SPHERE_NETWORK ? stored : null;
 })();
 
+/**
+ * Marks the reload that a DELIBERATE network switch performs, so the load which
+ * follows it can offer that network's plans once.
+ *
+ * sessionStorage, not localStorage, and deliberately not in STORAGE_KEYS: the
+ * marker's life is exactly one reload in one tab. localStorage would also fire
+ * in every neighbouring tab (networkSync reloads them on the same switch) and
+ * would survive a crash to pop a full-screen offer on an unrelated load days
+ * later. It keeps the `sphere_` prefix as house style, but clearAllSphereData()
+ * only walks localStorage — see the note there.
+ */
+const NETWORK_SWITCH_MARKER = 'sphere_network_switched_to';
+
+/**
+ * The network this session was deliberately switched TO, or null on any other
+ * load. Read once at module load and consumed on read.
+ *
+ * Consuming here rather than in a component is what makes it immune to
+ * StrictMode's double mount, to remounts, and to every later plain reload: by
+ * the time any UI asks, the marker is already gone. The equality check discards
+ * a switch that did not survive the boot — if the target stopped being
+ * switchable in between, this session runs somewhere else and offering that
+ * network's plans would advertise a place the wallet is not in.
+ */
+export const NETWORK_SWITCHED_TO: NetworkType | null = (() => {
+  try {
+    const raw = sessionStorage.getItem(NETWORK_SWITCH_MARKER);
+    sessionStorage.removeItem(NETWORK_SWITCH_MARKER);
+    return raw !== null && raw === SPHERE_NETWORK ? SPHERE_NETWORK : null;
+  } catch {
+    return null; // storage blocked — no offer, which is the quiet default
+  }
+})();
+
 /** BroadcastChannel name used to tell other tabs the active network changed. */
 export const NETWORK_BROADCAST_CHANNEL = 'sphere-network';
 
@@ -348,6 +382,16 @@ export function setActiveNetwork(id: NetworkType, opts: { reload?: () => void } 
   if (id === SPHERE_NETWORK) return; // already active — nothing to do
 
   localStorage.setItem(STORAGE_KEYS.ACTIVE_NETWORK, id);
+  // Written HERE rather than in the switcher UI so it covers every deliberate
+  // caller (the network modal, the mainnet invitation) and structurally excludes
+  // the involuntary reloads: resetActiveNetwork() and applyClearedNetworkChoice()
+  // do not pass through this function, and the no-op and throw above both return
+  // before it.
+  try {
+    sessionStorage.setItem(NETWORK_SWITCH_MARKER, id);
+  } catch {
+    // Storage blocked — the switch still happens, only the offer is lost.
+  }
   broadcastNetworkChange(id);
   (opts.reload ?? (() => window.location.reload()))();
 }

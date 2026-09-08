@@ -118,6 +118,31 @@ export function isPlanSelectable(
 }
 
 /**
+ * Whether this network has anything to sell right now: the store is on AND its
+ * catalogue actually carries a paid plan.
+ *
+ * `plans` is react-query's `data` verbatim, and the undefined/`[]` distinction
+ * is the whole point. `undefined` means the catalogue has NOT resolved —
+ * loading, query disabled, or errored — and that FAILS OPEN, because hiding a
+ * real purchase path because the gateway is slow is worse than briefly showing
+ * a surface that turns out to be empty. Only a LOADED catalogue with no paid
+ * plan is false. Never pass `plans.data ?? []`: that collapses the two states
+ * and turns the fail-open into a fail-closed.
+ *
+ * The price test is not redundant with the gateway's own filter. `findPurchasable()`
+ * excludes the free tier BY NAME, so a zero-priced row under another name would
+ * reach the client; an offer is defined here by its price, as everywhere else.
+ */
+export function hasPaidOffers(
+  plans: PlanInfo[] | undefined | null,
+  paidPlansEnabled: boolean,
+): boolean {
+  if (!paidPlansEnabled) return false;
+  if (!plans) return true;
+  return plans.some((plan) => !isFreePlan(plan));
+}
+
+/**
  * The store list excludes the free plan, so the user's current (free) plan card
  * is synthesized from utilization data. planId -1 is never a store id.
  */
